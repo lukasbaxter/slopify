@@ -51,6 +51,10 @@ describe('streaming', () => {
     const part = await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: 'bytes=0-99' } });
     expect(part.statusCode).toBe(206); expect(part.headers['content-length']).toBe('100'); expect(part.headers['content-range']).toMatch(/^bytes 0-99\//);
     expect((await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: 'bytes=999999999-' } })).statusCode).toBe(416);
+    // BluOS seeks with bytes=N-SIZE (one past the end): clamped, not refused
+    const size = Number(full.headers['content-length']);
+    const blu = await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: `bytes=${size - 50}-${size}` } });
+    expect(blu.statusCode).toBe(206); expect(blu.headers['content-range']).toBe(`bytes ${size - 50}-${size - 1}/${size}`);
   });
   it('transcodes to HLS, once, and serves segments', async () => {
     const id = (await get('/api/albums?limit=1')).json().items[0];

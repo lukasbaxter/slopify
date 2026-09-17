@@ -65,7 +65,10 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     if (range) {
       let start = range[1] ? Number(range[1]) : 0, end = range[2] ? Number(range[2]) : st.size - 1;
       if (!range[1] && range[2]) { start = st.size - Number(range[2]); end = st.size - 1; }
-      if (start >= st.size || end >= st.size || start > end) return reply.code(416).header('Content-Range', `bytes */${st.size}`).send();
+      // BluOS asks for bytes=N-SIZE (one past the end) when it seeks; RFC 9110
+      // says to clamp, and a 416 here killed every seek on the Node.
+      end = Math.min(end, st.size - 1);
+      if (start >= st.size || start > end) return reply.code(416).header('Content-Range', `bytes */${st.size}`).send();
       reply.code(206).header('Content-Range', `bytes ${start}-${end}/${st.size}`).header('Content-Length', end - start + 1);
       return reply.send(fs.createReadStream(file, { start, end }));
     }

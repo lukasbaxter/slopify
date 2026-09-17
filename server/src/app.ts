@@ -47,6 +47,12 @@ export async function buildServer(opts: BuildOptions = {}) {
   app.get('/healthz', health);
   app.get('/api/healthz', health);
 
+  // Browsers that installed the previous app at this address still run its
+  // service worker; this one replaces it, unregisters and drops its caches.
+  app.get('/sw.js', async (_req, reply) => reply.type('application/javascript').header('Cache-Control', 'no-store').send(
+    "self.addEventListener('install', () => self.skipWaiting());\nself.addEventListener('activate', async () => { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); await self.registration.unregister(); const cs = await self.clients.matchAll({ type: 'window' }); cs.forEach((c) => c.navigate(c.url)); });\n"));
+  app.get('/manifest.webmanifest', async (_req, reply) => reply.type('application/manifest+json').send({ name: 'Slopify', short_name: 'Slopify', start_url: '/', display: 'standalone', background_color: '#121212', theme_color: '#121212', icons: [] }));
+
   const webDist = path.join(repoRoot, 'web', 'dist');
   if (fs.existsSync(webDist)) {
     await app.register(fastifyStatic, { root: webDist, prefix: '/', index: ['index.html'], wildcard: false });

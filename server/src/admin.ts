@@ -23,8 +23,9 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     if (enriching) return;
     enriching = true;
     try {
-      const a = await artistImagesPass(db, { log: (m) => app.log.warn(m), dataDir }); if (a.found + a.missing) app.log.info(`artist images: ${JSON.stringify(a)}`);
-      const r = await enrichPass(db, { log: (m) => app.log.warn(m) }); if (r.done + r.missing + r.instrumental) app.log.info(`enrich: ${JSON.stringify(r)}`);
+      // Keep going while there is work: a first run over a big library takes hours.
+      for (let i = 0; i < 40; i++) { const a = await artistImagesPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300 }); if (a.found + a.missing) app.log.info(`artist images: ${JSON.stringify(a)}`); if (a.found + a.missing < 300) break; }
+      for (let i = 0; i < 100; i++) { const r = await enrichPass(db, { log: (m) => app.log.warn(m), max: 500 }); if (r.done + r.missing + r.instrumental) app.log.info(`enrich: ${JSON.stringify(r)}`); if (r.done + r.missing + r.instrumental < 500) break; }
     }
     catch (e: any) { app.log.error(`enrich failed: ${e.message}`); }
     finally { enriching = false; }

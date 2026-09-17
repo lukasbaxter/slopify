@@ -53,6 +53,7 @@ export class ServerPlayer {
 
   async execute(cmd: any) {
     const a = cmd?.action;
+    this.d.log(`speaker ${this.device?.name || cmd?.deviceId || '?'}: ${a}${cmd?.trackIds ? ` ${cmd.trackIds.length} tracks @${cmd.index ?? 0}` : ''}${cmd?.pos != null ? ` pos=${cmd.pos}` : ''}${cmd?.level != null ? ` level=${cmd.level}` : ''}`);
     try {
       if (a === 'transfer') await this.transfer(cmd);
       else if (a === 'play') await this.play(cmd);
@@ -70,7 +71,7 @@ export class ServerPlayer {
       else if (a === 'setShuffle') { this.setShuffle(cmd.mode === 'on' ? 'on' : 'off'); }
       else if (a === 'yield') await this.yield();
       else if (a === 'patchLiked' && cmd.itemId) { for (const t of this.queue) if (t.Id === cmd.itemId) t.UserData = { IsFavorite: !!cmd.liked }; this.report(); }
-    } catch (e: any) { this.d.log(`speaker ${this.device?.name || '?'}: ${a}: ${e.message}`); }
+    } catch (e: any) { this.d.log(`speaker ${this.device?.name || '?'}: ${a} FAILED: ${e.message}`); }
   }
 
   // Another client hands its session over: its queue, playhead, and the speaker to use.
@@ -115,7 +116,9 @@ export class ServerPlayer {
       this.duration = t.RunTimeTicks / 10000000;
       this.setPos(startAt, play);
       this.report();
+      const t0 = Date.now();
       await this.transport.play(this.url(`/api/stream/${t.Id}`), this.meta(t), startAt);
+      this.d.log(`speaker ${this.device?.name}: playing ${t.Name} from ${Math.round(startAt)}s after ${Date.now() - t0} ms`);
       if (!play) await this.transport.pause().catch(() => {});
       this.setPos(startAt, play);
       this.logPlay(t.Id);

@@ -157,7 +157,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     const c: Client = { id, uid, name: 'Home speakers', kind: 'server', canPlay: false, net: 'lan', lastSeen: Date.now(), devices: discovery.list(), nowPlaying: null, queue: null, close: () => {}, send: () => {} };
     c.send = (obj: any) => { if (obj?.type === 'command') void c.player?.execute(obj.command); };
     c.player = new ServerPlayer(uid, {
-      db, discovery, publicUrl: opts.publicUrl || '', token: speakerToken(uid), log: (m) => app.log.warn(m),
+      db, discovery, publicUrl: opts.publicUrl || '', token: speakerToken(uid), log: (m) => app.log.info(m),
       report: (np) => handle(c, { type: 'nowplaying', nowPlaying: np }),
       reportQueue: (rows) => handle(c, { type: 'queue', queue: rows }),
       claim: () => handle(c, { type: 'claim' }),

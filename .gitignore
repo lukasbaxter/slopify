@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+fixtures/music/
+.env
+*.log
+.DS_Store
+test-results/
+playwright-report/

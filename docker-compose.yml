@@ -1,0 +1,15 @@
+services:
+  slopify:
+    image: ghcr.io/lukasbaxter/slopify:latest
+    container_name: slopify
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    volumes:
+      - /path/to/music:/music        # read-only is fine unless Soulseek downloads should land here
+      - ./data:/data
+    environment:
+      PUBLIC_URL: https://music.example.com
+      ADMIN_USER: admin
+      ADMIN_PASS: admin              # forced to change on first login
+      # SLSK_USER: ...               # optional: Soulseek
+      # SLSK_PASS: ...

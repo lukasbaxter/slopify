@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { openDb, type DB } from './db.js';
 import { ensureAdmin, registerAuth } from './auth.js';
+import { registerLibrary } from './library.js';
+import { registerStream } from './stream.js';
+import { registerSocial } from './social.js';
+import { registerAdmin } from './admin.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,7 +32,12 @@ export async function buildServer(opts: BuildOptions = {}) {
   await app.register(cors, { origin: true });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute' });
 
+  const musicDir = opts.musicDir ?? config.musicDir;
   registerAuth(app, db);
+  registerLibrary(app, db, dataDir);
+  registerStream(app, db, dataDir);
+  registerSocial(app, db);
+  registerAdmin(app, db, musicDir, dataDir);
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

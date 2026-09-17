@@ -24,6 +24,10 @@ services:
 into `/music` however you like (Lidarr, slskd, rsync); Slopify only reads it
 (and writes covers/lyrics next to files if you let it).
 
+## What works today
+
+See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (originals or HLS transcodes), lyrics (sidecars + LrcLib), likes, playlists, Home from your own plays, several devices sharing one session (mirror, control, hand over), accounts with invites and admin roles. Desktop app, speakers, phone shell and Soulseek are next.
+
 ## Develop
 
 ```

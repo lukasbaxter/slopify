@@ -1,5 +1,5 @@
-# Tag v* -> build the desktop apps (dmg, exe) and attach them to a GitHub
-# Release. Unsigned (no developer accounts): macOS users right-click > Open
+# Tag v* -> build the desktop apps (dmg, exe) and the Android APK and attach
+# them to a GitHub Release. Unsigned (no developer accounts): macOS users right-click > Open
 # once (the dmg is ad-hoc signed so Gatekeeper offers that instead of
 # "damaged"), Windows users click through SmartScreen.
 name: release
@@ -40,8 +40,61 @@ jobs:
           name: desktop-${{ matrix.os }}
           path: ${{ matrix.glob }}
           if-no-files-found: error
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      # ubuntu-latest ships the Android SDK; only the licences need accepting so
+      # Gradle can pull the platform/build-tools Expo asks for.
+      - run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
+      - run: npm ci
+        working-directory: mobile
+      - run: npx expo prebuild --platform android --no-install
+        working-directory: mobile
+        env: { CI: '1' }
+      - name: Signing config
+        working-directory: mobile/android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          echo "$KS_B64" | base64 -d > app/slopify-release.jks
+          # Point the release build at our keystore (Expo's template signs
+          # release with the debug key). Re-opening the android {} block is
+          # additive in the Android Gradle DSL; values come from the environment.
+          cat >> app/build.gradle <<'EOG'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("slopify-release.jks")
+                      storePassword System.getenv("CONDUIT_KS_PASS")
+                      keyAlias "conduit"
+                      keyPassword System.getenv("CONDUIT_KS_PASS")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOG
+      - run: ./gradlew assembleRelease --no-daemon
+        working-directory: mobile/android
+        env:
+          CONDUIT_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+      - run: cp mobile/android/app/build/outputs/apk/release/app-release.apk Slopify-${GITHUB_REF_NAME#v}.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: Slopify-*.apk
+          if-no-files-found: error
   publish:
-    needs: [desktop]
+    needs: [desktop, android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

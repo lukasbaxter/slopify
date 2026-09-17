@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Slopify",
+    "slug": "slopify",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
+    "splash": { "backgroundColor": "#000000", "resizeMode": "contain", "image": "./assets/icon.png" },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.lukasbaxter.slopify" },
+    "android": {
+      "package": "com.lukasbaxter.slopify",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "plugins": ["expo-status-bar"]
+  }
+}

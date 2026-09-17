@@ -48,7 +48,7 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   app.decorate('requireUser', async (req: FastifyRequest, reply: FastifyReply) => { if (!req.user) return reply.code(401).send({ error: 'unauthorized' }); });
   app.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => { if (!req.user) return reply.code(401).send({ error: 'unauthorized' }); if (req.user.role !== 'admin') return reply.code(403).send({ error: 'admin only' }); });
 
-  const Login = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(256), device: z.string().max(80).default('web'), kind: z.enum(['web', 'desktop', 'phone']).default('web') });
+  const Login = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(256), device: z.string().max(80).default('web'), kind: z.enum(['web', 'desktop', 'phone', 'service']).default('web') });
   app.post('/api/auth/login', { config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = Login.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad request', issues: body.error.issues });

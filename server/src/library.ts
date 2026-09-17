@@ -106,9 +106,13 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
         tracks = (db.prepare(`SELECT t.*, a.cover_hash, bm25(tracks_fts, 10, 5, 2) AS rank FROM tracks_fts f JOIN tracks t ON t.rowid = f.rowid JOIN albums a ON a.id = t.album_id WHERE tracks_fts MATCH ? ORDER BY rank LIMIT ?`).all(fq, limit) as TrackRow[]).map(trackOut);
       } catch { tracks = []; }
     }
-    const like = `%${q.replace(/[%_]/g, '')}%`;
-    const albums = (db.prepare('SELECT * FROM albums WHERE name LIKE ? OR artist LIKE ? ORDER BY track_count DESC LIMIT ?').all(like, like, limit) as any[]).map(albumOut);
-    const artists = (db.prepare('SELECT * FROM artists WHERE name LIKE ? ORDER BY track_count DESC LIMIT ?').all(like, limit) as any[]).map(artistOut);
+    // Albums and artists: every word of the query somewhere in name + artist
+    // ("ok computer radiohead" finds the album), the exact name first.
+    const words = q.normalize('NFKC').replace(/[%_]/g, '').split(/\s+/).filter(Boolean).slice(0, 8);
+    const where = (expr: string) => words.map(() => `${expr} LIKE ? COLLATE NOCASE`).join(' AND ');
+    const params = words.map((w) => `%${w}%`);
+    const albums = (db.prepare(`SELECT * FROM albums WHERE ${where("(name || ' ' || artist)")} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(albumOut);
+    const artists = (db.prepare(`SELECT * FROM artists WHERE ${where('name')} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(artistOut);
     return { tracks, albums, artists };
   });
   // Tracks that go with one: same artists first, then the same genres, shuffled.

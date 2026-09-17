@@ -30,6 +30,8 @@ describe('library API', () => {
   it('searches by prefix across tracks, albums and artists', async () => {
     const s = (await get('/api/search?q=harb')).json(); expect(s.tracks.length).toBeGreaterThan(0); expect(s.tracks[0].title.toLowerCase()).toContain('harbour');
     expect((await get('/api/search?q=fixture')).json().artists[0].name).toBe('The Fixture Band');
+    // album + artist words together still find the album
+    const both = (await get('/api/search?q=first%20light%20fixture')).json(); expect(both.albums[0].name).toBe('First Light');
     expect((await get('/api/search?q=')).json().tracks).toEqual([]);
   });
   it('serves lyrics and immutable artwork', async () => {

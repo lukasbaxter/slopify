@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { token as newToken, userId } from './ids.js';
+import { config } from './config.js';
 
 export type User = { id: string; name: string; role: 'admin' | 'user'; must_change_pw: number };
 declare module 'fastify' { interface FastifyRequest { user?: User; tokenId?: string } }
@@ -45,7 +46,7 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   app.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => { if (!req.user) return reply.code(401).send({ error: 'unauthorized' }); if (req.user.role !== 'admin') return reply.code(403).send({ error: 'admin only' }); });
 
   const Login = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(256), device: z.string().max(80).default('web'), kind: z.enum(['web', 'desktop', 'phone']).default('web') });
-  app.post('/api/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/auth/login', { config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = Login.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad request', issues: body.error.issues });
     const u = db.prepare('SELECT id, name, role, must_change_pw, pass_hash FROM users WHERE name = ?').get(body.data.username) as (User & { pass_hash: string }) | undefined;
@@ -102,7 +103,7 @@ export function registerAuth(app: FastifyInstance, db: DB) {
     return { code, expires: Date.now() + INVITE_TTL };
   });
   const Register = z.object({ invite: z.string().min(1), username: z.string().regex(/^[a-z0-9_.-]{2,32}$/i, 'letters, digits, . _ - only'), password: z.string().min(8).max(256) });
-  app.post('/api/auth/register', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/auth/register', { config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = Register.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message || 'bad request' });
     const inv = db.prepare('SELECT v FROM kv WHERE k = ?').get(`invite:${body.data.invite}`) as any;

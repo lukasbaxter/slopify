@@ -4,9 +4,10 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60000,
-  use: { baseURL: 'http://localhost:8080', trace: 'retain-on-failure' },
+  use: { baseURL: 'http://localhost:8080', trace: 'retain-on-failure', launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } },
+  workers: 1, // the flows share one server and one admin account
   webServer: {
-    command: 'MUSIC_DIR=fixtures/music DATA_DIR=/tmp/slopify-e2e-data PORT=8080 npm run build -w web && MUSIC_DIR=fixtures/music DATA_DIR=/tmp/slopify-e2e-data PORT=8080 node server/dist/index.js',
+    command: 'rm -rf /tmp/slopify-e2e-data && npm run build && MUSIC_DIR=fixtures/music DATA_DIR=/tmp/slopify-e2e-data PORT=8080 LOG_LEVEL=warn LOGIN_RATE_MAX=1000 node server/dist/index.js',
     url: 'http://localhost:8080/healthz',
     reuseExistingServer: false,
     timeout: 120000,

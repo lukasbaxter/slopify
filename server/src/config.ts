@@ -13,5 +13,6 @@ export const config = {
   adminUser: env('ADMIN_USER', 'admin'),
   adminPass: env('ADMIN_PASS', 'admin'),
   logLevel: env('LOG_LEVEL', 'info'),
+  loginRateMax: Number(env('LOGIN_RATE_MAX', '10')), // per IP per minute; raised for the E2E suite
 };
 export type Config = typeof config;

@@ -78,23 +78,31 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   const upsertLyrics = db.prepare(`INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET kind=excluded.kind, lines=excluded.lines, source=excluded.source, fetched_at=excluded.fetched_at WHERE lyrics.source = 'sidecar' OR lyrics.source = 'none'`);
   const upsertArt = db.prepare(`INSERT OR IGNORE INTO artwork (hash, kind, src, width, height, created) VALUES (?, ?, ?, ?, ?, ?)`);
 
-  for await (const file of walk(opts.musicDir)) {
+  const all: string[] = [];
+  for await (const file of walk(opts.musicDir)) all.push(file);
+  // Tag reading, audio hashing and cover rendering run CONCURRENT_FILES at a
+  // time (ffmpeg + sharp are the cost: ~0.6 s per new file alone, 27k files
+  // = hours); the database writes stay serial.
+  const CONCURRENT_FILES = Number(process.env.SCAN_CONCURRENCY || 4);
+  let cursor = 0;
+  const worker = async () => { for (;;) { const file = all[cursor++]; if (!file) return; await one(file); } };
+  const one = async (file: string) => {
     files++;
     if (files % 200 === 0) opts.onProgress?.(files);
     seen.add(file);
     let st;
-    try { st = await fs.stat(file); } catch { continue; }
+    try { st = await fs.stat(file); } catch { return; }
     const prev = known.get(file);
     if (prev && prev.mtime === Math.floor(st.mtimeMs) && prev.size === st.size) {
       // Unchanged file: only a new sidecar next to it can matter.
       seenIds.add(prev.id);
       await syncSidecar(db, prev.id, file, upsertLyrics);
-      continue;
+      return;
     }
     let meta;
-    try { meta = await parseFile(file, { duration: true, skipCovers: false }); } catch (e: any) { log(`tags failed ${file}: ${e.message}`); continue; }
+    try { meta = await parseFile(file, { duration: true, skipCovers: false }); } catch (e: any) { log(`tags failed ${file}: ${e.message}`); return; }
     let id: string;
-    try { id = await audioContentId(file); } catch (e: any) { log(`hash failed ${file}: ${e.message}`); continue; }
+    try { id = await audioContentId(file); } catch (e: any) { log(`hash failed ${file}: ${e.message}`); return; }
     const c = meta.common;
     const dir = path.dirname(file);
     const title = (c.title || path.basename(file, path.extname(file))).trim();
@@ -136,7 +144,8 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     seenIds.add(id);
     if (prev) changed++; else added++;
     await syncSidecar(db, id, file, upsertLyrics);
-  }
+  };
+  await Promise.all(Array.from({ length: CONCURRENT_FILES }, worker));
   // Files that are gone (a renamed file is not gone: its id was met under the new path).
   let removed = 0;
   for (const [p, r] of known) if (!seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }

@@ -41,7 +41,7 @@ export function NowPlaying() {
   const s = player.use((x) => x);
   const t = current();
   const [lines, setLines] = useState<{ start: number | null; text: string }[] | null>(null);
-  useEffect(() => { if (!t || !open) return; setLines(null); lyrics(t.id).then((l) => setLines(l?.lines ?? [])); }, [t?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!t || !open) return; setLines(null); lyrics(t.id).then((l) => setLines(l?.lines ?? [])); }, [t?.id, open]);
   useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') app.set({ nowPlayingOpen: false }); }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, []);
   if (!open || !t) return null;
   const active = lines ? lines.reduce((acc, l, i) => (l.start != null && s.positionMs + 250 >= l.start ? i : acc), -1) : -1;

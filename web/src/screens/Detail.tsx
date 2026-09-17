@@ -50,7 +50,7 @@ export function PlaylistPage({ id }: { id: string }) {
   const [d, setD] = useState<(Playlist & { tracks: Track[] }) | null>(null); const [err, setErr] = useState('');
   const me = app.use((s) => s.user?.id);
   const reload = () => playlist(id).then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); reload(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setD(null); reload(); }, [id]);
   if (err) return <p role="alert" className="error">{err}</p>;
   if (!d) return <Skeleton />;
   const rename = async () => { const name = prompt('Rename playlist', d.name); if (name && name !== d.name) { await patch(`/playlists/${d.id}`, { name }); reload(); } };

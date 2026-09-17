@@ -11,7 +11,7 @@ export type LyricLine = { start: number | null; text: string };
 const TOKEN_KEY = 'slopify.token';
 export const auth = {
   get token() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } },
-  set token(t: string) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } },
+  set token(t: string) { try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } },
 };
 
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }

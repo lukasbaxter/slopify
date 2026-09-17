@@ -1,0 +1,278 @@
+/* Phone-only styles for the nowplaying screens. Loaded after app.css, so rules here win
+   over the @media (max-width: 760px) block there. Keep everything inside the
+   same media query. */
+@media (max-width: 760px) {
+  /* ================= Now playing (Spotify iOS) =================
+     390pt phone: chevron / "PLAYING FROM X" / ⋯ row, 327pt art radius 8,
+     title 24/700 + artist 16 #b3b3b3 with the heart at the right, seek 4pt
+     with a 12pt thumb and 11pt times underneath, shuffle 32 / prev 32 /
+     play 64 / next 32 / repeat 32 spread across the width, then the bottom
+     row: devices left, lyrics / visualizer / share / queue right. */
+  .fs { display: flex; flex-direction: column; background: linear-gradient(180deg, var(--np, #535353) 0%, color-mix(in srgb, var(--np, #535353) 55%, #121212) 45%, #121212 100%); }
+  .fs-bg { display: none; }
+  .fs-top { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 0; padding: calc(4px + env(safe-area-inset-top)) 16px 0; height: auto; min-height: 56px; box-sizing: border-box; flex: none; }
+  .fs-chevron { grid-column: 1; grid-row: 1; display: grid; place-items: center; width: 44px; height: 44px; margin: 0; color: #fff; border-radius: 50%; }
+  .fs-chevron svg { width: 24px; height: 24px; }
+  .fs-from { grid-column: 2; grid-row: 1; text-align: center; min-width: 0; padding: 0 4px; }
+  .fs-tabs, .fs-close, .fs-output { display: none; }
+  .fs-from-phone { display: flex; flex-direction: column; align-items: center; line-height: 1.25; min-width: 0; }
+  .fs-from-phone small { font-size: 11px; font-weight: 500; letter-spacing: .08em; color: rgba(255,255,255,.7); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .fs-from-phone b { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .fs-from-phone small.fs-from-artist { text-transform: none; letter-spacing: 0; font-size: 13px; color: #b3b3b3; }
+  .fs-more { grid-column: 3; grid-row: 1; display: grid; place-items: center; width: 44px; height: 44px; margin: 0; color: #fff; border-radius: 50%; }
+  .fs-more:disabled { opacity: .35; }
+
+  /* Art sits 24pt under the header (Spotify); the slack goes below it. */
+  .fs-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: start center; padding: 24px 24px 0; overflow: hidden; }
+  /* The cover sits on the same 24pt gutter as the text below it, flat (no shadow). */
+  .fs-art { width: 100%; max-width: 100%; height: auto; max-height: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: none; object-fit: cover; }
+  .fs-art.ph { width: 100%; background: rgba(255,255,255,.08); }
+  /* Long titles scroll instead of truncating: 30px/s, a 2s hold at each end, fade on the right. */
+  .marquee { overflow: hidden; white-space: nowrap; text-overflow: clip; }
+  .marquee-inner { display: inline-block; will-change: transform; }
+  /* Two mask layers (intersected): a right fade that is always on, and a left
+     fade parked outside the box at rest that slides in once the text moves. */
+  .marquee.overflow {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 20px), linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 20px), linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+    -webkit-mask-size: calc(100% + 20px) 100%, 100% 100%; mask-size: calc(100% + 20px) 100%, 100% 100%;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    -webkit-mask-position: -20px 0, 0 0; mask-position: -20px 0, 0 0;
+    -webkit-mask-composite: source-in; mask-composite: intersect;
+    animation: marquee-mask var(--marquee-dur, 8s) linear infinite alternate;
+  }
+  .marquee.overflow .marquee-inner { animation: marquee var(--marquee-dur, 8s) linear infinite alternate; }
+  @keyframes marquee { 0%, 25% { transform: translateX(0); } 75%, 100% { transform: translateX(var(--marquee-dist, 0)); } }
+  @keyframes marquee-mask { 0%, 25% { -webkit-mask-position: -20px 0, 0 0; mask-position: -20px 0, 0 0; } 28%, 100% { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } }
+
+  /* The bottom block: 24 above the title, 16 to the seek bar, 8 to the
+     transport, 24 to the bottom row, then the home-indicator inset. */
+  .fs-bottom { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 24px 24px calc(16px + env(safe-area-inset-bottom)); flex: none; }
+  .fs-meta { order: 1; display: flex; align-items: center; gap: 12px; min-width: 0; margin: 0 0 16px; }
+  .fs-meta .fs-thumb { display: none; }
+  .fs-meta > div { flex: 1 1 auto; min-width: 0; }
+  .fs-title { font-size: 24px; font-weight: 700; letter-spacing: -.3px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fs-artist, .fs-artist .linkish { font-size: 16px; font-weight: 400; color: #b3b3b3; line-height: 1.3; }
+  .fs-like { flex: none; width: 44px; height: 44px; margin: 0 -10px 0 0; padding: 0; display: grid; place-items: center; color: #fff; }
+  .fs-like svg { width: 24px; height: 24px; }
+  .fs-like.on { color: #fff; }
+
+  /* Seek: a 44pt hit area with the 4pt track drawn through its middle; the
+     12pt thumb grows to 16 under the finger. The block's 16/8 spacing is
+     measured to the TRACK, so the extra hit height is pulled in with margins. */
+  .fs-seek { order: 2; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; gap: 0; margin: -20px 0 8px; font-size: 11px; color: #b3b3b3; }
+  /* touch-action: none, or WebKit turns a slightly diagonal drag into a page
+     pan and the thumb stays put. */
+  .fs-seek input[type="range"] { touch-action: none; -webkit-tap-highlight-color: transparent; grid-column: 1 / -1; grid-row: 1; height: 44px; border-radius: 0; width: 100%; margin: 0 0 -14px; background: linear-gradient(to right, #fff 0%, #fff var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 4px no-repeat; }
+  .fs-seek input[type="range"]:hover, .fs-seek input[type="range"].hovering { background: linear-gradient(to right, #fff 0%, #fff var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 4px no-repeat; }
+  .fs-seek input[type="range"]::-webkit-slider-thumb { opacity: 1; width: 12px; height: 12px; background: #fff; box-shadow: none; transition: transform .12s; }
+  .fs-seek input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.34); }
+  .fs-seek > span { grid-row: 2; line-height: 1; }
+  .fs-seek > span:first-child { grid-column: 1; text-align: left; }
+  .fs-seek > span:last-child { grid-column: 2; text-align: right; }
+
+  .fs-controls { order: 3; display: flex; align-items: center; justify-content: space-between; gap: 0; padding: 0; margin: 0 0 24px; color: #fff; }
+  .fs-controls > button { width: 44px; height: 44px; display: grid; place-items: center; color: #fff; padding: 0; }
+  .fs-controls > button svg { width: 24px; height: 24px; }
+  .fs-controls > button[title="Previous"] svg, .fs-controls > button[title="Next"] svg { width: 32px; height: 32px; }
+  .fs-controls > button:first-child { margin-left: -6px; }
+  .fs-controls > button:last-child { margin-right: -6px; }
+  .fs-controls .ctl-mode { color: #fff; }
+  .fs-controls .ctl-mode.on { color: var(--accent); }
+  .fs-controls .fs-play { width: 64px; height: 64px; border-radius: 50%; background: #fff; color: #000 !important; }
+  .fs-controls .fs-play svg { width: 28px; height: 28px; }
+  .fs-controls .fs-play:hover { transform: none; }
+
+  .fs-phone-row { order: 4; display: flex; align-items: center; gap: 0; margin: 0; padding: 0; color: #fff; }
+  .fs-phone-row > button { flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: #fff; padding: 0; }
+  .fs-phone-row > button:last-child { margin-right: -10px; }
+  .fs-phone-row > button.on { color: var(--accent); }
+  .fs-phone-device { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; margin-left: -10px; }
+  .fs-phone-device .devicebtn { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px; color: #fff; font-size: 12px; font-weight: 600; max-width: 100%; }
+  .fs-phone-device .devicebtn svg { width: 24px; height: 24px; flex: none; }
+  .fs-phone-device .devicebtn-name { display: none; }
+  .fs-phone-device .devicebtn.casting, .fs-phone-device .devicebtn.casting .devicebtn-name { color: var(--accent); }
+  .fs-phone-device .devicebtn.casting .devicebtn-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---- Lyrics page: full bleed over the blurred cover (kept, darkened),
+     24/700 lines, active white, the rest at 50%, 24pt gutters, and a mini
+     transport (title/artist + play) at the bottom like Spotify's. ---- */
+  .fs.fs-tab-lyrics { background: #121212; }
+  .fs.fs-tab-lyrics .fs-bg { display: block; filter: blur(60px) brightness(.32) saturate(1.3); }
+  .fs.fs-tab-lyrics .fs-stage { display: block; padding: 0; }
+  .fs.fs-tab-lyrics .fs-lyrics { width: 100%; height: 100%; padding: 16px 24px calc(48px + env(safe-area-inset-bottom)); box-sizing: border-box; overflow-y: auto; font-size: 24px; line-height: 1.3; mask-image: linear-gradient(transparent, #000 6%, #000 92%, transparent); }
+  .fs.fs-tab-lyrics .lyrics { gap: 22px; padding: 0 0 32px; }
+  /* Sung + active lines white, only the upcoming ones dim; unsynced lyrics all white. */
+  .fs.fs-tab-lyrics .lyric-line, .fs.fs-tab-lyrics .fs-lyrics p { font-size: 24px; font-weight: 700; letter-spacing: -.2px; line-height: 1.3; color: #fff; opacity: 1; text-align: left; }
+  .fs.fs-tab-lyrics .lyrics.synced .lyric-line { color: rgba(255,255,255,.5); }
+  .fs.fs-tab-lyrics .lyrics.synced .lyric-line.sung, .fs.fs-tab-lyrics .lyrics.synced .lyric-line.now, .fs.fs-tab-lyrics .lyric-line.now { color: #fff; }
+  .fs.fs-tab-lyrics .lyric-line.gap { letter-spacing: .1em; }
+  .fs.fs-tab-lyrics .fs-bottom { display: none; }
+  .fs.fs-tab-lyrics .lyric-line:hover { text-decoration: none; }
+  .fs.fs-tab-lyrics .placeholder-note { font-size: 16px; color: #b3b3b3; padding: 8px 0; }
+  .fs.fs-tab-lyrics .lyrics > .qrow-sub { white-space: normal; font-size: 13px; color: #b3b3b3; }
+  .fs.fs-tab-lyrics .lyrics-sync { position: sticky; bottom: calc(16px + env(safe-area-inset-bottom)); align-self: center; background: #fff; color: #000; font-size: 16px; padding: 10px 24px; margin-top: 16px; animation: pill-in .2s ease-out; }
+  @keyframes pill-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---- Visualizer page: the gradient stays, the canvas fills the stage; a
+     cue while paused; the cover shows behind any sheet opened over it. ---- */
+  .fs.fs-tab-viz .fs-stage { padding: 8px 0 0; display: block; position: relative; }
+  .fs-viz-hint { position: absolute; inset: 0; display: grid; place-items: center; font-size: 13px; color: #b3b3b3; pointer-events: none; }
+  .fs-art-behind { display: none; }
+  .fs.fs-tab-viz.sheet .fs-art-behind, .fs.fs-tab-viz:has(.devicemenu) .fs-art-behind { display: block; position: absolute; left: 24px; top: 50%; width: calc(100% - 48px); max-width: none; height: auto; transform: translateY(-50%); }
+  .fs.fs-tab-viz.sheet .viz, .fs.fs-tab-viz:has(.devicemenu) .viz { visibility: hidden; }
+
+  /* ---- Exit motion: pages and sheets slide down for 250ms before they unmount. ---- */
+  .fs.closing, .rightpanel.closing { transform: translateY(100%) !important; transition: transform .25s ease-in !important; animation: none; }
+  .ctxmenu.ctxmenu-fixed.closing { transform: translateY(100%); box-shadow: 0 0 0 100vmax rgba(0,0,0,0), 0 -8px 40px rgba(0,0,0,0); transition: transform .25s ease-in, box-shadow .25s ease-in; animation: none; }
+  .devicemenu.closing { transform: translateY(100%); box-shadow: 0 0 0 100vmax rgba(0,0,0,0), 0 -8px 40px rgba(0,0,0,0); transition: transform .25s ease-in, box-shadow .25s ease-in; }
+  .devicemenu { animation: sheet-in .22s cubic-bezier(.2,.7,.2,1); overscroll-behavior: contain; }
+
+  /* ---- Sheets over the player (visualizer settings): no empty icon column,
+     a green check at the right, the smoothing slider drawn like the seek bar. ---- */
+  .ctxmenu-fixed:not(:has(.ctx-ico > *)) .ctx-ico { display: none; }
+  .ctxmenu-fixed:not(:has(.ctx-ico > *)) .ctxslider { padding-left: 12px; }
+  .ctxmenu-fixed .ctx-check { margin-left: auto; flex: none; color: var(--accent); }
+  .ctxmenu-fixed .ctxslider { padding: 12px 12px 16px; gap: 10px; }
+  .ctxmenu-fixed .ctxslider-head { font-size: 16px; }
+  .ctxmenu-fixed .ctxslider-val { font-size: 13px; color: #a7a7a7; }
+  .ctxmenu-fixed .ctxslider input[type="range"] { height: 24px; border-radius: 0; background: linear-gradient(to right, #fff 0%, #fff var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 4px no-repeat; }
+  .ctxmenu-fixed .ctxslider input[type="range"]::-webkit-slider-thumb { opacity: 1; width: 12px; height: 12px; background: #fff; box-shadow: none; }
+  .ctxmenu-fixed { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+
+  /* ================= Mini player: Spotify's floating card =================
+     56pt tall, 8pt side margins, radius 6, cover-tinted, 40pt art radius 4,
+     title 13/600 + artist 13 at 70% white, device + play at the right, a 2pt
+     progress line inset along the bottom. Tapping the card opens now playing. */
+  /* The card and the tab bar float over the page: the list scrolls under them
+     through a short transparent-to-page gradient instead of stopping dead at
+     the card's top edge. The scroll containers pad their bottoms to match. */
+  .app.mobile .player { position: fixed; left: 0; right: 0; bottom: calc(49px + env(safe-area-inset-bottom)); z-index: 47; min-width: 0; padding: 24px 8px 0; background: linear-gradient(to bottom, transparent, rgba(18,18,18,.92) 24px, #121212); }
+  .app.mobile .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 46; background: #121212; }
+  /* The header row is sized by the header itself (its content plus the notch
+     inset), never a fixed number: on the iPhone the fixed row was shorter than
+     the real navbar, which then overlapped the Library chips. */
+  .app.mobile:not(.mobile-detail) { grid-template-rows: auto minmax(0, 1fr); }
+  .app.mobile.mobile-detail { grid-template-rows: minmax(0, 1fr); }
+  .app.mobile .content, .app.mobile .shell.show-lib .liblist { padding-bottom: calc(24px + 56px + 8px + 49px + env(safe-area-inset-bottom)); }
+  .app.mobile .content { box-sizing: border-box; }
+  .player-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0; height: 56px; box-sizing: border-box; background: color-mix(in srgb, var(--mini, #2a2a2a) 55%, #000); border-radius: 6px; padding: 0 8px; margin: 0 0 8px; position: relative; overflow: hidden; transition: background .3s; }
+  .player-now { display: flex; align-items: center; min-width: 0; gap: 8px; }
+  .player-art { width: 40px; height: 40px; border-radius: 4px; flex: none; }
+  .player-meta { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; }
+  .player-title { font-size: 13px; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; }
+  .player-artist, .player-artist .linkish { font-size: 13px; font-weight: 400; line-height: 1.25; color: rgba(255,255,255,.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .player-now .trackrow-like { display: none; }
+  .player-right { display: flex; align-items: center; min-width: 0; padding: 0; gap: 0; order: 2; margin: 0; }
+  .player-right > *:not(.devicepicker) { display: none; }
+  .player-right .devicebtn { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; color: #fff; }
+  .player-right .devicebtn svg { width: 24px; height: 24px; }
+  .player-right .devicebtn.casting { color: var(--accent); }
+  .player-controls { width: auto; max-width: none; gap: 0; order: 3; }
+  .player-buttons { gap: 0; }
+  .player-buttons .ctl-mode, .player-buttons button[title="Previous"], .player-buttons button[title="Next"] { display: none; }
+  .player-buttons .play { background: none; color: #fff; width: 44px; height: 44px; margin-right: -8px; }
+  .player-buttons .play svg { width: 20px; height: 20px; }
+  /* Touch: the desktop hover state (black glyph, scaled up) sticks after a tap. */
+  .player-buttons .play:hover:not(:disabled), .player-buttons .play:active { color: #fff; transform: none; background: none; }
+  .player-seek { position: absolute; left: 8px; right: 8px; bottom: 0; width: auto; height: 2px; pointer-events: none; display: block; }
+  .player-seek .t { display: none; }
+  .player-seek input[type="range"] { display: block; height: 2px; border-radius: 1px; margin: 0; background: linear-gradient(to right, #fff 0%, #fff var(--pct, 0%), rgba(255,255,255,.25) var(--pct, 0%), rgba(255,255,255,.25) 100%); }
+  .player-seek input[type="range"]:disabled { opacity: 1; }
+  .player-seek input[type="range"]::-webkit-slider-thumb { display: none; }
+
+  /* ================= Queue: a full-screen page =================
+     Chevron close, "Queue" centred, then "Now playing" / "Next in queue" /
+     "Next from: X" sections with 64pt rows (48pt art) and a drag handle at
+     the right like Spotify; "Clear queue" as a text button. */
+  .rightpanel { position: fixed; inset: 0; z-index: 150; background: #121212; }
+  .rightpanel .panel-header { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 0; padding: calc(4px + env(safe-area-inset-top)) 16px 0; height: auto; min-height: 56px; box-sizing: border-box; }
+  .rightpanel .panel-header .icon-btn { width: 44px; height: 44px; display: grid; place-items: center; color: #fff; padding: 0; }
+  .rightpanel .panel-header .icon-btn svg { width: 24px; height: 24px; }
+  .rightpanel .panel-header .title { text-align: center; font-size: 13px; font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rightpanel .panel-header .title small { display: block; font-size: 11px; font-weight: 500; color: rgba(255,255,255,.7); letter-spacing: .08em; text-transform: uppercase; }
+  .rightpanel .tabs { display: none; }
+  .rightpanel .panel-body { padding: 8px 16px calc(24px + env(safe-area-inset-bottom)); gap: 24px; }
+  .rightpanel .panel-body section { gap: 0; }
+  .rightpanel .section-head { margin-bottom: 4px !important; min-height: 32px; }
+  .rightpanel .section-head h2 { font-size: 16px; font-weight: 700; }
+  .rightpanel .section-head .linkish, .rightpanel .section-head button { font-size: 13px; font-weight: 700; color: #fff; padding: 8px 0; }
+  .qrow { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 0; border-radius: 0; background: transparent; }
+  .qrow:hover { background: transparent; }
+  .qrow-art { width: 48px; height: 48px; }
+  .qrow img, .qrow .ph { width: 48px; height: 48px; border-radius: 4px; }
+  .qrow-play { display: none; }
+  .qrow-text { flex: 1 1 auto; min-width: 0; gap: 2px; }
+  .qrow-title { font-size: 16px; line-height: 1.25; }
+  .qrow.active .qrow-title { color: var(--accent); }
+  .qrow-sub, .qrow-sub .rowlink { font-size: 13px; color: #a7a7a7; }
+  .qrow-more { display: none; }
+  .qrow-handle { display: grid; place-items: center; width: 44px; height: 44px; margin: 0 -12px 0 0; color: #a7a7a7; flex: none; touch-action: none; cursor: grab; }
+  .qrow-handle svg { width: 24px; height: 24px; }
+  /* Drag: the lifted row rides with the finger over the list; the rows it passes slide out of its way. */
+  .qrow.lifted { position: relative; z-index: 3; background: #282828; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); margin: 0 -8px; padding: 8px; transition: none; }
+  .qrow.shifting { transition: transform .15s ease-out; }
+  .qrow.dragging { opacity: 1; }
+  .qrow.dropbefore { box-shadow: none; }
+  .rightpanel .panel-body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  /* Pinned transport under the list: shuffle / prev / 48pt play / next / repeat and a 2pt progress line. */
+  .panel-transport { position: relative; flex: none; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 24px env(safe-area-inset-bottom); box-sizing: border-box; background: #121212; border-top: 1px solid rgba(255,255,255,.06); }
+  .panel-transport-row { display: flex; align-items: center; justify-content: space-between; height: 64px; color: #fff; }
+  .panel-transport-row > button { width: 44px; height: 44px; display: grid; place-items: center; color: #fff; padding: 0; }
+  .panel-transport-row > button:first-child { margin-left: -6px; }
+  .panel-transport-row > button:last-child { margin-right: -6px; }
+  .panel-transport-row .ctl-mode.on { color: var(--accent); }
+  .panel-transport-row .panel-play { width: 48px; height: 48px; border-radius: 50%; background: #fff; color: #000; }
+  .panel-progress { position: absolute; left: 0; right: 0; top: -2px; height: 2px; background: rgba(255,255,255,.2); }
+  .panel-progress > span { display: block; height: 100%; background: #fff; }
+  .rightpanel .placeholder-note, .rightpanel .qrow-sub { font-size: 13px; }
+  .qrow-title[role=button]:hover { text-decoration: none; }
+
+  /* ---- Bottom sheets: app.css dims the page with a ::before that belongs to
+     the sheet itself, so a tap on the dimmed page landed INSIDE the menu and
+     never closed it (no Escape on a phone). Dim with a shadow instead. ---- */
+  .ctxmenu.ctxmenu-fixed::before { display: none; }
+  .ctxmenu.ctxmenu-fixed { box-shadow: 0 -8px 40px rgba(0,0,0,.6); }
+  .ctxmenu.ctxmenu-fixed.ctxmenu-sub { box-shadow: 0 -8px 40px rgba(0,0,0,.6); }
+
+  /* ================= "Connect to a device" sheet ================= */
+  .devicemenu { position: fixed !important; left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; width: 100% !important; max-width: none; border-radius: 16px 16px 0 0; padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); max-height: 85vh; overflow-y: auto; background: #282828; box-shadow: 0 -8px 40px rgba(0,0,0,.6); }
+  .devicemenu::before { display: none; }
+  .devicemenu::after { content: ''; display: block; position: absolute; top: 6px; left: 50%; width: 36px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.3); transform: translateX(-50%); }
+  .devicemenu-head { display: block; padding: 12px 0 16px; }
+  .devicemenu-head strong { display: block; font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+  .devicemenu-head span { display: block; font-size: 13px; color: #a7a7a7; margin-top: 2px; }
+  .dm-current { display: flex; align-items: center; gap: 16px; padding: 12px 0 16px; color: var(--accent); border-bottom: 1px solid rgba(255,255,255,.1); margin-bottom: 8px; }
+  .dm-current svg { width: 32px; height: 32px; flex: none; }
+  .dm-current-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .dm-current-label { font-size: 13px; font-weight: 700; color: #fff; }
+  .dm-current-name { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dm-current-sub { font-size: 13px; color: #a7a7a7; }
+  .dm-others { font-size: 16px; font-weight: 700; color: #fff; padding: 12px 0 4px; }
+  .devicegroup-label { display: none; }
+  .deviceitem { gap: 16px; padding: 10px 0; min-height: 56px; border-radius: 0; color: #fff; }
+  .deviceitem:hover { background: transparent; }
+  .deviceitem svg { width: 24px; height: 24px; color: #fff; }
+  .deviceitem-name { font-size: 16px; color: #fff; }
+  .deviceitem-model { font-size: 13px; color: #a7a7a7; }
+  .deviceitem-dot { display: none; }
+  .devicemenu-empty, .dm-note { color: #a7a7a7; font-size: 13px; line-height: 1.4; padding: 12px 0 0; margin: 0; }
+
+  /* iOS 18 installed web app (App.jsx measures --ios-shim and sets
+     html.ios-shim when the layout viewport is a status bar shorter than the
+     screen). WebKit treats the strip below that viewport like the area under
+     a Safari toolbar: page content is painted there, viewport-fixed layers
+     are clipped at its top edge (the tab bar icons were cut in half). So the
+     page is made screen-height and body gets a transform, which makes body
+     the containing block of every position:fixed layer (tab bar, mini
+     player, sheets, now playing, drawer): they anchor to the real bottom edge
+     and are painted as page content. Inner lists keep their overscroll to
+     themselves so the page, when it is taller than its viewport, never moves
+     (App.jsx also pins it to 0). The height is the screen's own pixel count,
+     not 100% + gap: WebKit may grow the viewport to the full screen once the
+     page is taller than the short one. Without the class none of this
+     applies. */
+  html.ios-shim { height: var(--ios-screen-h, 100%); overscroll-behavior: none; }
+  html.ios-shim body { transform: translate(0); overscroll-behavior: none; }
+  html.ios-shim body * { overscroll-behavior-y: contain; }
+}

@@ -1,0 +1,194 @@
+/* Phone-only styles for the home-search screens. Loaded after app.css, so rules here win
+   over the @media (max-width: 760px) block there. Keep everything inside the
+   same media query. Reference: Spotify iOS home (S01) and search. */
+@media (max-width: 760px) {
+  /* Installed web app: the page ground is the app colour (the body used to be
+     #000). The strip iOS leaves under a short standalone viewport is covered
+     by the --ios-shim rules in mobile-nowplaying.css, not painted over. */
+  html, body, #root { background: #121212; }
+  .app.mobile .tabbar { position: fixed; }
+  /* Phone: no text selection or long-press callouts on the chrome; typing
+     fields keep normal selection. */
+  .app.mobile, .app.mobile * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .app.mobile input, .app.mobile textarea, .app.mobile [contenteditable] { -webkit-user-select: text; user-select: text; }
+
+  /* ---- Header: 32pt avatar at the left, 24/700 title beside it, nothing else. ---- */
+  .navbar { gap: 12px; padding-left: 16px; padding-right: 16px; }
+  .navbar .appmenuwrap { display: none; }
+  .navbar-right { padding-right: 0; }
+  .avatar { box-shadow: none; }
+
+  /* The All / Music / Artists chips stay visible while the Albums / Artists
+     lists scroll, like the desktop home (a see-all page is a detail page on
+     the phone, so its bar already leaves room for the back chevron). */
+  .content:has(> .contentbar > .pills) .contentbar { position: sticky; top: 0; z-index: 9; background: var(--bg-base); }
+  .content:has(> .contentbar > .pills) .contentbar .pills { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .content:has(> .contentbar > .pills) .contentbar .pills::-webkit-scrollbar { display: none; }
+  .content:has(> .contentbar > .pills) .contentbar .pill { flex: none; }
+  /* No "find in playlist / album" field on the phone (owner's call). */
+  .within { display: none; }
+
+  /* Back chevron: it sits in the fixed .mobile-topbar, which already pads
+     for the safe area. mobile-library.css re-adds top/left on the (relative)
+     button, which on a real phone pushes it 70pt down the page. */
+  .mobile-topbar .mobile-back { top: 0; left: 0; justify-self: start; margin-left: 16px; }
+  /* Spotify draws the dark disc only over artist photos; colour pages get a bare chevron. */
+  .app.mobile:not(:has(.hero.artist)) .mobile-topbar .mobile-back { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  /* Genre / chart pages: no 220pt hero box around three lines of text. */
+  .browse-hero { min-height: 0; padding-bottom: 8px; }
+  .content:has(> .browse-hero) .pad > section:first-child > .shelf-head { margin-top: 4px; }
+
+  .ctxmenu-head-ico .ctxmenu-head-liked { width: 56px; height: 56px; border-radius: 4px; }
+
+  /* Page transitions: transform only (compositor), 200ms, ease-out. The old
+     opacity dip made pushed pages flash; the black dots pane is gone on the
+     phone (see Library.jsx). Sheets slide up in the same time. */
+  .app.mobile-detail .content { animation: page-in .2s cubic-bezier(.2,.7,.2,1); will-change: transform; }
+  @keyframes page-in { from { transform: translateX(100%); } to { transform: none; } }
+  .ctxmenu-fixed:not(.ctxmenu-sub), .devicemenu { animation-duration: .2s; will-change: transform; }
+  .skeleton-row i { animation-duration: 1.4s; }
+  .sk-title { display: block; width: 60%; height: 22px; border-radius: 6px; background: #3a3a3a; margin: 12px 0 8px; animation: sk-shimmer 1.4s ease-in-out infinite; }
+
+  /* Library tab: the chip row scrolls sideways (overflow: auto), which makes
+     it a flex item allowed to shrink to nothing; with a real-sized list the
+     column squeezed it to a 20pt sliver under "Your Library". Never shrink
+     the header rows, only the list scrolls. */
+  .libpanel > .libchips, .libpanel > .libsort, .libpanel > .libsearch { flex: none; }
+
+  /* ---- Home ----
+     Spotify's home has no greeting: the top row is the avatar plus the
+     All / Music / Artists chips, over a soft tint that fades into the page
+     across the first ~250pt. The avatar lives in the app header, so on the
+     home tab the header collapses to nothing and the avatar floats over the
+     sticky chip row, which reads as one row. */
+  .app.mobile.tab-home { grid-template-rows: 0 minmax(0, 1fr); }
+  /* z-index above the floating mini player (47) and tab bar (46): the account
+     drawer lives inside this navbar and must cover them. */
+  .app.mobile.tab-home .navbar { height: 0; min-height: 0; padding: 0; overflow: visible; position: relative; z-index: 60; }
+  .app.mobile.tab-home .navbar-right { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 16px; margin: 0; }
+  .app.mobile.tab-home .mobile-title { display: none; }
+  .app.tab-home .content { background: linear-gradient(180deg, #2a2a2a 0, #121212 250px) no-repeat, var(--bg-base); background-attachment: local; }
+  .app.tab-home .content .contentbar { position: sticky; top: 0; z-index: 9; padding: calc(8px + env(safe-area-inset-top)) 16px 8px 56px; background: transparent; transition: background .2s; }
+  .app.tab-home .content .contentbar.stuck { background: var(--bg-base); }
+  .app.tab-home .content .contentbar .pills { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .app.tab-home .content .contentbar .pills::-webkit-scrollbar { display: none; }
+  .app.tab-home .content .contentbar .pill { flex: none; }
+  .pill { min-block-size: 32px; padding: 0 16px; font-size: 14px; font-weight: 500; background: #2a2a2a; color: #fff; display: inline-flex; align-items: center; }
+  .pill.on { background: var(--accent); color: #000; }
+  .pad.home { padding: 16px 16px 24px; }
+  .home .greeting { display: none; }
+
+  /* Shortcut grid: 2 x 4, 56pt tiles, #2a2a2a, radius 4, art flush left, 13/700 two-line titles. */
+  .shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 24px; }
+  .shortcut { height: 56px; border-radius: 4px; background: #2a2a2a; gap: 0; }
+  .shortcut-art { width: 56px; height: 56px; border-radius: 4px 0 0 4px; }
+  .shortcut-title { font-size: 13px; font-weight: 700; line-height: 1.25; padding: 0 8px 0 10px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .shortcut .shortcut-play { display: none; }
+
+  /* Sections: 24/700 title, no "Show all", 150pt cards scrolling edge to edge
+     with a 16pt leading gutter and 16pt gaps, 24pt between sections. */
+  .homeshelf { margin: 0 0 24px; }
+  .home .shelf-head { margin: 0 0 12px; align-items: center; }
+  .home .shelf-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -.3px; line-height: 1.2; }
+  .home .shelf-head button { display: none; }
+  .home .shelf { grid-auto-columns: 150px; gap: 16px; margin: 0 -16px; padding: 0 16px 0; min-height: 0; scroll-snap-type: none; scrollbar-width: none; scroll-padding-left: 16px; }
+  .home .shelf::-webkit-scrollbar { display: none; }
+  .home .shelf::after { content: ''; width: 1px; }
+  .card { padding: 0; gap: 0; border-radius: 0; }
+  .card-art img, .card-art .ph { border-radius: 2px; box-shadow: none; }
+  .card.round .card-art img, .card.round .card-art .ph { border-radius: 50%; }
+  /* Scoped to the home / see-all pages so they beat the unscoped .card-title
+     rule in mobile-library.css, which loads later. */
+  .app.tab-home .content .card-title, .app.tab-detail .content:has(> .contentbar > .pills) .card-title { font-size: 14px; font-weight: 700; line-height: 1.3; margin-top: 8px; -webkit-line-clamp: 1; text-align: left; }
+  .app.tab-home .content .card-sub, .app.tab-detail .content:has(> .contentbar > .pills) .card-sub { font-size: 13px; color: #a7a7a7; line-height: 1.3; margin-top: 2px; text-align: left; }
+  /* Covers fade in once loaded instead of popping. */
+  /* Only images that opt in (FadeImg adds .fade) start hidden; plain <img>
+     cards elsewhere (artist grids, profile, browse) must stay visible. */
+  img.fade { opacity: 0; transition: opacity .15s ease-out; }
+  img.fade.loaded { opacity: 1; }
+  .card .card-play { display: none; }
+  .mixband { font-size: 14px; padding: 6px 10px; border-radius: 0 0 2px 2px; }
+
+  /* Search in focus mode: the "Search" title row folds away so the field sits
+     at the top (Spotify), leaving the screen to the field, chips and results. */
+  .app.mobile.tab-search:has(.search-cancel) { grid-template-rows: 0 minmax(0, 1fr); }
+  .app.mobile.tab-search:has(.search-cancel) .navbar { height: 0; min-height: 0; padding: 0; overflow: hidden; }
+  .app.mobile.tab-search:has(.search-cancel) .navbar > * { display: none; }
+
+  /* ---- Search: empty state ----
+     "Search" title beside the avatar; white 44pt bar (radius 4, black
+     magnifier) that stays put while results scroll; the type chips share the
+     sticky block. */
+  .content:has(> .contentbar > .search) .contentbar { position: sticky; top: 0; z-index: 9; flex-wrap: wrap; gap: 8px 12px; padding: 4px 16px 8px; background: var(--bg-base); }
+  .app.tab-search .content:has(> .contentbar > .search-cancel) .contentbar { padding-top: calc(8px + env(safe-area-inset-top)); }
+  .search-cancel { flex: none; font-size: 16px; font-weight: 400; color: #fff; padding: 0 0 0 4px; height: 44px; animation: cancel-in .2s ease-out; }
+  @keyframes cancel-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+  .app.tab-search .content:has(> .contentbar > .search-cancel) .search { flex: 1 1 0; }
+  .search { font-family: inherit; flex: 1 1 100%; max-width: none; height: 44px; border-radius: 4px; background-color: #fff; color: #000; font-size: 16px; font-weight: 500; padding: 0 16px 0 48px; }
+  .search::placeholder { color: #121212; opacity: .85; font-weight: 500; }
+  .contentbar .searchtypes { flex: 1 1 100%; display: flex; flex-wrap: nowrap; gap: 8px; padding: 0; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+  .contentbar .searchtypes::-webkit-scrollbar { display: none; }
+  .contentbar .searchtypes { scroll-padding-inline: 16px; }
+  .contentbar .searchtypes .pill { flex: none; }
+  .content:has(> .contentbar > .search) .pad { padding: 4px 16px 24px; }
+  .content:has(> .contentbar > .search) section > .shelf-head { margin: 20px 0 12px; }
+  .content:has(> .contentbar > .search) section:first-child > .shelf-head { margin-top: 8px; }
+  .content:has(> .contentbar > .search) .shelf-head h2 { font-size: 18px; font-weight: 700; letter-spacing: -.2px; }
+  .content:has(> .contentbar > .search) .shelf-head h2:hover { text-decoration: none; cursor: default; }
+
+  /* Browse tiles: two across, ~100pt, 15/700 title top-left, cover rotated 25° peeking bottom-right. */
+  .tilegrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 12px; }
+  .tile { aspect-ratio: auto; height: 100px; border-radius: 4px; padding: 12px; }
+  .tile span { font-size: 15px; font-weight: 700; max-width: 58%; line-height: 1.2; }
+  .tile img, .tile .tile-liked { width: 56%; right: -18%; bottom: -18%; border-radius: 4px; }
+
+  /* Recent searches: rows (48pt art, round for artists) with an x at the right,
+     then Spotify's outlined "Clear recent searches" pill. */
+  .srow { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 0; cursor: pointer; }
+  .srow-art { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; flex: none; background: #2a2a2a; }
+  .srow.round .srow-art { border-radius: 50%; }
+  .srow-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .srow-name { font-size: 16px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+  .srow-sub { font-size: 13px; color: #a7a7a7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+  .srow-x { flex: none; width: 44px; height: 44px; margin-right: -12px; display: grid; place-items: center; color: #a7a7a7; }
+  .clear-recents { display: flex; margin: 16px auto 0; background: transparent; border: 1px solid #727272; color: #fff; font-size: 14px; font-weight: 700; padding: 0 16px; min-block-size: 32px; }
+
+  /* Nothing for a query (or a filter): Spotify's centred message. */
+  .search-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 96px 24px 0; }
+  .search-empty b { font-size: 16px; font-weight: 700; color: #fff; }
+  .search-empty span { font-size: 13px; color: #a7a7a7; }
+
+  /* "Everywhere" results: the Request pill sits at the right of the row;
+     releases the library lacks are dimmed like the artist page's. */
+  .gsearch .shelf-head { margin: 12px 0 4px; }
+  .gsearch .shelf-head .settings-hint { font-size: 13px; color: #a7a7a7; }
+  .gsearch .srow .card-request { position: static; transform: none; box-shadow: none; flex: none; font-size: 12px; padding: 6px 12px; margin-left: 4px; }
+  .gsearch .srow.missing .srow-art { filter: grayscale(.4) brightness(.7); }
+  .gsearch .srow.missing .srow-name { color: #b3b3b3; }
+  .gsearch-note { padding: 24px 0; text-align: center; }
+
+  /* ---- Search results: a plain list. Song rows are TrackRows (48pt art,
+     title 16, "Song • Artist" 13 grey, ⋯ at the right); the rest are the
+     same 64pt rows with round art for artists. No Top result card. ---- */
+  .searchlist { margin: 4px 0 0; }
+  .searchlist .trackrow, .searchlist .trackrow:not(:has(.trackrow-art)) { padding: 8px 0; min-height: 64px; gap: 12px; align-items: center; cursor: pointer; }
+  .searchlist .trackrow-art { flex: 0 0 48px; width: 48px; height: 48px; border-radius: 4px; background: #2a2a2a; }
+  .searchlist .trackrow-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .searchlist .trackrow-name > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 16px; line-height: 1.3; }
+  .searchlist .trackrow-name > small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: #a7a7a7; line-height: 1.3; }
+  .searchlist .trackrow-name > small span, .searchlist .trackrow-name > small .rowlink { font-size: 13px; color: #a7a7a7; }
+  .searchlist .trackrow-name > small:not(.lyric-snippet)::before { content: 'Song • '; }
+  .searchlist .trackrow-name > small:empty::before { content: 'Song'; }
+  .searchlist .trackrow-name > small.lyric-snippet { white-space: normal; }
+  .searchlist .trackrow-more { width: 44px; height: 44px; margin-right: -12px; color: #a7a7a7; display: grid; place-items: center; }
+  .searchlist .trackrow-menu { flex: none; }
+  /* The first row is the engine's top result: still a plain row (the desktop
+     card styles for .topresult are undone here). */
+  .searchlist .topresult { background: transparent; border-radius: 0; padding: 0; gap: 12px; flex-direction: row; box-shadow: none; min-height: 0; transition: none; }
+  .searchlist .srow.topresult { padding: 8px 0; }
+  .searchlist .topresult img { width: 48px; height: 48px; box-shadow: none; border-radius: 4px; }
+  .searchlist .srow.round.topresult img { border-radius: 50%; }
+  .searchlist .topresult:hover { background: transparent; }
+  .searchlist .topresult h3 { display: none; }
+  .searchlist .srow-song.topresult { display: block; }
+}

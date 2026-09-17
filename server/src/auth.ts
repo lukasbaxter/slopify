@@ -27,11 +27,16 @@ export function userByToken(db: DB, tok: string): User | undefined {
   return row;
 }
 
+// Bearer, Jellyfin's MediaBrowser Token="..." / X-Emby-Token, or ?token= /
+// ?api_key= for media URLs.
 export function tokenFromRequest(req: FastifyRequest): string | null {
-  const h = req.headers.authorization;
-  if (h?.startsWith('Bearer ')) return h.slice(7);
-  const q = (req.query as any)?.token;
-  return typeof q === 'string' && q ? q : null;
+  const h = String(req.headers.authorization || '');
+  if (h.startsWith('Bearer ')) return h.slice(7);
+  const mb = /Token="([^"]+)"/.exec(h); if (mb) return mb[1];
+  const emby = req.headers['x-emby-token']; if (typeof emby === 'string' && emby) return emby;
+  const q = (req.query as any) || {};
+  for (const k of ['token', 'api_key', 'ApiKey']) if (typeof q[k] === 'string' && q[k]) return q[k];
+  return null;
 }
 
 export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, mustChangePassword: !!u.must_change_pw });

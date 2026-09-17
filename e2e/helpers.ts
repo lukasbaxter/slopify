@@ -1,22 +1,18 @@
 import { expect, type Page } from '@playwright/test';
 export const PW = 'e2e password 123';
-async function fill(page: Page, pw: string) {
-  await page.goto('/');
-  await page.getByLabel('Username').fill('admin'); await page.getByLabel('Password').fill(pw);
-  await page.getByRole('button', { name: 'Log in' }).click();
-}
-// admin starts as admin/admin and must change it once; whichever test gets
-// there first does it, the rest log in with the new password.
+// The Conduit UI's login form: server, username, password inputs and a
+// .primary button. The admin's first password change happens through the
+// API (the Conduit UI has no forced-change screen), whichever test is first.
 export async function login(page: Page) {
-  await fill(page, PW);
-  if (await page.getByRole('heading', { name: 'Home' }).waitFor({ timeout: 4000 }).then(() => true, () => false)) return;
-  await fill(page, 'admin');
-  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
-  await page.getByLabel('New password', { exact: true }).fill(PW); await page.getByLabel('Repeat it', { exact: true }).fill(PW);
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
+  const r = await page.request.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });
+  if (r.ok()) { const tok = (await r.json()).token; await page.request.post('/api/auth/password', { headers: { authorization: `Bearer ${tok}` }, data: { password: PW } }); }
+  await page.goto('/');
+  const inputs = page.locator('.login input');
+  await expect(inputs).toHaveCount(2); // web build: no server field
+  await inputs.nth(0).fill('admin'); await inputs.nth(1).fill(PW);
+  await page.locator('.login .primary').click();
+  await expect(page.locator('.tabbar, .sidebar, .shell').first()).toBeVisible({ timeout: 20000 });
 }
 export async function waitForLibrary(page: Page) {
-  await expect(page.getByRole('heading', { name: 'New in your library' })).toBeVisible({ timeout: 30000 });
-  await expect.poll(async () => page.locator('.shelf-row .card').count(), { timeout: 30000 }).toBeGreaterThan(0);
+  await expect.poll(async () => page.locator('.card, .shortcut').count(), { timeout: 30000 }).toBeGreaterThan(0);
 }

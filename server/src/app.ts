@@ -16,6 +16,9 @@ import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
 import { registerSession } from './session.js';
+import { registerJellyfinFacade } from './jf.js';
+import { registerRelay } from './relay.js';
+import { registerRelayHttp } from './relay-http.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,23 +45,21 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerSocial(app, db);
   registerAdmin(app, db, musicDir, dataDir);
   registerSession(app, db);
+  // The Conduit app's world: Jellyfin-shaped API under /jf, its relay under /relay.
+  registerJellyfinFacade(app, db, dataDir, (app as any).requireUser);
+  registerRelay(app, db);
+  registerRelayHttp(app, db, (app as any).requireUser);
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);
   app.get('/api/healthz', health);
-
-  // Browsers that installed the previous app at this address still run its
-  // service worker; this one replaces it, unregisters and drops its caches.
-  app.get('/sw.js', async (_req, reply) => reply.type('application/javascript').header('Cache-Control', 'no-store').send(
-    "self.addEventListener('install', () => self.skipWaiting());\nself.addEventListener('activate', async () => { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); await self.registration.unregister(); const cs = await self.clients.matchAll({ type: 'window' }); cs.forEach((c) => c.navigate(c.url)); });\n"));
-  app.get('/manifest.webmanifest', async (_req, reply) => reply.type('application/manifest+json').send({ name: 'Slopify', short_name: 'Slopify', start_url: '/', display: 'standalone', background_color: '#121212', theme_color: '#121212', icons: [] }));
 
   const webDist = path.join(repoRoot, 'web', 'dist');
   if (fs.existsSync(webDist)) {
     await app.register(fastifyStatic, { root: webDist, prefix: '/', index: ['index.html'], wildcard: false });
     // SPA: any non-API, non-file path gets index.html
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not found' });
+      if (/^\/(api|jf|relay)\//.test(req.url)) return reply.code(404).send({ error: 'not found' });
       return reply.type('text/html').send(fs.readFileSync(path.join(webDist, 'index.html')));
     });
   }

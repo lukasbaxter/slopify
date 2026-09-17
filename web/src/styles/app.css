@@ -1,0 +1,1509 @@
+/* Tokens taken from Spotify's shipped Encore stylesheet rather than guessed.
+   Notably: the accent is #1ED760 (hover #3BE477, press #1ABC54), and #1DB954
+   appears ONLY on the seek-bar fill and the liked heart. #1FDF64 -- which a lot
+   of clones use -- occurs zero times in their CSS. */
+:root {
+  --black: #000;
+  --bg-base: #121212;          /* main panel, sidebar interior */
+  --bg-highlight: #1f1f1f;
+  --bg-elevated: #1f1f1f;      /* NPV / queue section cards */
+  --bg-elevated-hi: #2a2a2a;   /* menus, tooltips */
+  --card: #181818;
+  --card-hover: #282828;
+  --tint: #ffffff1a;           /* secondary button bg */
+  --tint-hi: #ffffff24;        /* row hover */
+  --tint-press: #ffffff36;
+  --fg: #fff;
+  --fg-dim: #b3b3b3;
+  --fg-chrome: #a9a9a9;
+  --accent: #1ed760;
+  --accent-hover: #3be477;
+  --accent-press: #1abc54;
+  --seek-accent: #1db954;
+  --danger: #f3727f;
+
+  --r-panel: 8px;
+  --r-art: 4px;
+  --r-row: 6px;
+  --gap: 8px;
+
+  --ease: cubic-bezier(.3, 0, 0, 1);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--black);
+  color: var(--fg);
+  font: 400 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  min-width: 800px;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
+input, textarea, select { font-family: inherit; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb { background: #4d4d4d; border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #7a7a7a; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Encore type scale */
+.t-title-lg { font-size: 48px; font-weight: 700; letter-spacing: -2px; }
+.t-title-md { font-size: 32px; font-weight: 700; letter-spacing: -1px; }
+.t-title-sm { font-size: 24px; font-weight: 700; }
+.t-body     { font-size: 16px; font-weight: 400; }
+.t-body-b   { font-size: 16px; font-weight: 700; }
+.t-small    { font-size: 14px; font-weight: 400; }
+.t-small-b  { font-size: 14px; font-weight: 700; }
+.t-marginal { font-size: 12px; font-weight: 400; }
+
+/* ---------- shell ---------- */
+
+.app {
+  display: grid;
+  grid-template-rows: 56px minmax(0, 1fr) auto;
+  height: 100%;
+  background: var(--black);
+  gap: var(--gap);
+  padding: 0 var(--gap) var(--gap);
+}
+
+.navbar {
+  display: flex; align-items: center;
+  height: 56px; padding-left: 8px; -webkit-app-region: drag;
+}
+/* macOS desktop: leave room for the traffic lights. */
+.desktop-mac .navbar { padding-left: 78px; }
+.navbar button, .navbar input { -webkit-app-region: no-drag; }
+.brand { display: none; }
+.appmenuwrap { position: relative; display: flex; align-items: center; }
+.appmenu-btn { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: #fff; }
+.appmenu-btn svg { display: block; }
+.appmenu-btn:hover { background: var(--tint); }
+.avatarmenu.appmenu { left: 0; right: auto; }
+.navbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; padding-right: 8px; }
+
+/* The resizer occupies the gap column between rail and content, so the gap
+   itself is the drag target exactly as in Spotify. */
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-w, 280px) var(--gap) minmax(416px, 1fr);
+  gap: 0; min-height: 0;
+}
+.shell.with-panel { grid-template-columns: var(--rail-w, 280px) var(--gap) minmax(416px, 1fr) var(--gap) var(--panel-w, 340px); }
+.shell.resizing { user-select: none; cursor: col-resize; }
+.shell.resizing * { pointer-events: none; }
+.shell.resizing .rail-resizer { pointer-events: auto; }
+
+.rail-resizer {
+  width: var(--gap); cursor: col-resize; position: relative; touch-action: none;
+}
+.panel-spacer { width: var(--gap); cursor: col-resize; }
+.rail-resizer::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+  background: var(--fg); opacity: 0; transition: opacity .15s ease-out; transform: translateX(-50%);
+}
+.rail-resizer:hover::after, .shell.resizing .rail-resizer::after { opacity: 1; }
+
+/* Collapsed rail: icons only, centred; text and the library header hide. */
+.shell.rail-collapsed .navitem span,
+.shell.rail-collapsed .libhead,
+.shell.rail-collapsed .libitem-text,
+.shell.rail-collapsed .newplaylist-input { display: none; }
+.shell.rail-collapsed .navitem { justify-content: center; padding: 11px 0; }
+.shell.rail-collapsed .libitem { justify-content: center; padding: 8px 0; }
+.shell.rail-collapsed .liblist { padding: 8px 4px; }
+
+.sidebar, .content, .rightpanel {
+  background: var(--bg-base); border-radius: var(--r-panel); min-height: 0;
+}
+.sidebar { display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.content { overflow-y: auto; position: relative; }
+.rightpanel { display: flex; flex-direction: column; overflow: hidden; position: relative; }
+/* Lyrics mode: the cover, blurred and darkened, behind the panel (same recipe as .fs-bg). */
+.panel-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(60px) brightness(.35) saturate(1.2); transform: scale(1.1); pointer-events: none; }
+.rightpanel.with-bg > :not(.panel-bg) { position: relative; }
+.rightpanel.with-bg .tabs { border-bottom-color: rgba(255,255,255,.15); }
+
+/* ---------- left rail ---------- */
+
+.nav { padding: 8px; }
+.navitem {
+  display: flex; align-items: center; gap: 16px; width: 100%;
+  padding: 11px 12px; border-radius: var(--r-row); color: var(--fg-dim);
+  font-size: 16px; font-weight: 700;
+}
+.navitem:hover, .navitem.on { color: var(--fg); }
+
+.libpanel { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; border-top: 1px solid #2e2c2c; }
+.libhead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 16px 10px; color: var(--fg-dim); font-size: 16px; font-weight: 700;
+}
+.liblist { overflow-y: auto; padding: 0 8px 8px; }
+.libitem {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 8px; border-radius: var(--r-row); text-align: left;
+}
+.libitem:hover { background: var(--tint-hi); }
+.libitem img, .libitem .ph, .libitem .liked-art {
+  width: 48px; height: 48px; aspect-ratio: 1; border-radius: var(--r-art); object-fit: cover;
+  background: var(--card-hover); flex: none;
+}
+.libitem.round img, .libitem.round .ph { border-radius: 50%; }
+.libitem-text { min-width: 0; display: flex; flex-direction: column; }
+.libitem-name { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.libitem-sub { color: var(--fg-dim); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.libpin { color: var(--accent); flex: none; }
+
+/* ---------- content ---------- */
+
+.contentbar {
+  position: sticky; top: 0; z-index: 8;
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 24px; background: var(--bg-base);
+}
+.search {
+  flex: 1; max-width: 364px; background: var(--card-hover); color: var(--fg);
+  border: 1px solid transparent; border-radius: 9999px; padding: 12px 16px;
+  font-size: 14px;
+}
+.search::placeholder { color: var(--fg-dim); }
+.search:focus { outline: none; border-color: var(--fg); }
+
+.pills { display: flex; gap: 8px; }
+.pill {
+  background: var(--tint); border-radius: 9999px; padding: 6px 14px;
+  font-size: 14px; font-weight: 500; min-block-size: 32px;
+}
+.pill:hover { background: var(--tint-hi); }
+.pill.on { background: var(--fg); color: #000; }
+
+.pad { padding: 8px 24px 32px; }
+
+.shelf-head { display: flex; align-items: baseline; justify-content: space-between; margin: 20px 0 16px; }
+.shelf-head h2 { font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -.4px; }
+.shelf-head h2:hover { text-decoration: underline; cursor: pointer; }
+.shelf-head button { color: var(--fg-dim); font-size: 14px; font-weight: 700; }
+.shelf-head button:hover { text-decoration: underline; color: var(--fg); }
+
+.grid { display: grid; gap: 4px; grid-template-columns: repeat(auto-fill, 190px); }
+.shelf { display: grid; gap: 4px; grid-auto-flow: column; grid-auto-columns: 190px; overflow-x: auto; overflow-y: hidden; min-height: 290px; scroll-snap-type: x proximity; padding-bottom: 6px; scrollbar-width: thin; scrollbar-color: #4d4d4d transparent; }
+.shelf > * { scroll-snap-align: start; }
+.shelf::-webkit-scrollbar { height: 8px; }
+
+/* Spotify's current cards: no tile behind them, just the art with a soft hover. */
+.card {
+  background: transparent; padding: 12px; border-radius: var(--r-panel);
+  text-align: left; display: flex; flex-direction: column; gap: 8px;
+  transition: background-color .3s; isolation: isolate; position: relative;
+}
+.card:hover { background: var(--tint); }
+.card-art { position: relative; aspect-ratio: 1; width: 100%; }
+.card-art img, .card-art .ph {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  border-radius: var(--r-art); background: var(--card-hover);
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.card.round .card-art img, .card.round .card-art .ph { border-radius: 50%; }
+.card-play {
+  position: absolute; bottom: 8px; inset-inline-end: 8px; z-index: 2;
+  width: 48px; height: 48px; border-radius: 500px;
+  background: var(--accent); color: #000; display: grid; place-items: center;
+  opacity: 0; transform: translateY(8px);
+  box-shadow: 0 8px 8px rgba(0,0,0,.3);
+  transition: transform .3s, opacity .3s, background-color .15s;
+}
+.card:hover .card-play, .card:focus-within .card-play { opacity: 1; transform: translateY(0); }
+.card-play:hover { background: var(--accent-hover); }
+.card-title { font-size: 16px; font-weight: 400; line-height: 1.4; }
+.card-title, .card-sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-sub { color: var(--fg-dim); font-size: 14px; }
+
+/* ---------- entity header (album / artist / playlist) ---------- */
+
+/* The header colour is set on .content (inline, per item) so the header AND
+   the band below it share it. Never redefine --hero on .hero itself: a local
+   value beats the inherited one and the header goes grey. */
+.content { --hero: #3d3c3c; }
+.hero {
+  display: flex; gap: 24px; align-items: flex-end; padding: 32px 24px 24px;
+  /* Spotify: flat extracted colour with a light-to-dark wash over it... */
+  background: linear-gradient(rgba(0,0,0,.18) 0, rgba(0,0,0,.5) 100%), var(--hero);
+}
+/* ...then the same colour keeps going for 232px behind the action bar and
+   the top of the list, fading into the page (main-actionBarBackground). */
+.actions { position: relative; isolation: isolate; z-index: 0; }
+/* The band is a positioned box; static text after it would paint underneath. */
+.actions ~ .pad, .actions ~ .tracklist { position: relative; z-index: 1; }
+.actions.slim { padding: 8px 24px; min-height: 0; }
+.actions::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 168px; z-index: -1;
+  background: linear-gradient(rgba(0,0,0,.62) 0, var(--bg-base) 100%), var(--hero, #3d3c3c);
+}
+.hero-cover { position: relative; padding: 0; flex: none; border-radius: var(--r-art); }
+.hero-cover:disabled { cursor: default; }
+.hero-cover img { display: block; }
+.hero-cover-edit { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg); font-size: 16px; font-weight: 700; background: rgba(0,0,0,.6); border-radius: var(--r-art); opacity: 0; transition: opacity .15s; }
+.hero-cover.editable:hover .hero-cover-edit { opacity: 1; }
+.hero-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.hero-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; margin-right: 4px; }
+.rowlink.strong { color: var(--fg); font-weight: 700; font-size: 14px; }
+.rowlink.strong:hover { text-decoration: underline; }
+.iconbtn { width: 40px; height: 40px; display: grid; place-items: center; color: var(--fg-dim); border-radius: 50%; }
+.iconbtn:hover { color: var(--fg); transform: scale(1.04); }
+.iconbtn.on { color: var(--accent); }
+.iconbtn.on::after { content: ''; display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin-top: -4px; }
+
+/* Column header above the rows: same grid as .trackrow, rule underneath. */
+.trackhead {
+  display: grid; grid-template-columns: 36px minmax(0, 4fr) minmax(0, 3fr) 32px 5ch 32px; gap: 12px; align-items: center;
+  padding: 0 16px; height: 36px; margin-bottom: 16px; color: var(--fg-dim); font-size: 14px;
+  border-bottom: 1px solid rgba(255,255,255,.1); position: sticky; top: 0; background: transparent; z-index: 2;
+}
+.trackhead.stuck { background: var(--bg-base); }
+.trackhead.with-art { grid-template-columns: 36px auto minmax(0, 4fr) minmax(0, 3fr) 32px 5ch 32px; }
+.trackhead .th-n { text-align: center; font-size: 16px; }
+.trackhead .th-dur { display: grid; place-items: end; padding-right: 2px; }
+
+/* Header arrows (Spotify's < > next to the brand). */
+.navarrows { display: flex; gap: 6px; margin-left: 6px; align-items: center; }
+.navarrow { width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,.7); color: var(--fg); display: grid; place-items: center; }
+.navarrow svg { display: block; }
+.navarrow:disabled { color: var(--fg-dim); opacity: .5; }
+.navarrow:not(:disabled):hover { background: rgba(0,0,0,.9); }
+
+/* Edit details dialog (playlist). */
+.editdetails { width: min(524px, calc(100vw - 32px)); }
+.editdetails-body { display: grid; grid-template-columns: 180px 1fr; gap: 16px; align-items: start; }
+.editdetails-cover { position: relative; width: 180px; height: 180px; border-radius: var(--r-art); overflow: hidden; background: #282828; cursor: pointer; display: block; box-shadow: 0 0 40px rgba(0,0,0,.55); }
+.editdetails-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.editdetails-cover span { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.7); color: var(--fg); font-weight: 700; opacity: 0; transition: opacity .15s; }
+.editdetails-cover:hover span { opacity: 1; }
+@media (max-width: 600px) { .editdetails-body { grid-template-columns: 1fr; } }
+.hero.artist { align-items: flex-end; min-height: 340px; }
+/* Spotify's artist header: the photo full-bleed behind the name, darkened
+   towards the bottom so the 96px title reads; no round thumbnail. */
+.hero.artist.with-banner {
+  min-height: min(50vh, 500px); padding-bottom: 24px;
+  background: linear-gradient(180deg, rgba(0,0,0,.05) 0%, rgba(0,0,0,.15) 50%, rgba(0,0,0,.75) 100%), var(--banner) center 25% / cover no-repeat;
+}
+.hero.artist.with-banner h1, .hero.artist.with-banner .verified, .hero.artist.with-banner .hero-meta { text-shadow: 0 2px 12px rgba(0,0,0,.5); }
+.hero.artist.with-banner .hero-meta { color: var(--fg); font-size: 16px; }
+.hero .hero-cover img, .hero > img, .hero .liked-art {
+  width: 232px; height: 232px; aspect-ratio: 1; flex: none;
+  border-radius: var(--r-art); object-fit: cover; box-shadow: 0 0 40px rgba(0,0,0,.55);
+}
+.hero.artist .hero-cover, .hero.artist .hero-cover img { border-radius: 50%; width: 192px; height: 192px; }
+.hero .kind { font-size: 14px; font-weight: 700; }
+/* Spotify's classic ladder: 96 -> 72 -> 48 -> 32, weight 800 */
+.hero h1 { margin: 8px 0 16px; font-weight: 800; line-height: 1.05; letter-spacing: -2px; overflow-wrap: anywhere; }
+.hero p { margin: 0; color: #ffffffb3; font-size: 14px; }
+.hero p b { color: var(--fg); }
+.verified { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
+.verified svg { color: #4cb3ff; }
+
+.actions { display: flex; align-items: center; gap: 24px; padding: 24px; }
+/* Artist page: Popular sits a little closer under Play / Follow. */
+.hero.artist ~ .actions { padding-bottom: 12px; }
+.hero.artist ~ .pad > section:first-child .shelf-head { margin-top: 8px; }
+.bigplay {
+  width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: #000;
+  display: grid; place-items: center; transition: transform .15s var(--ease), background-color .15s;
+}
+.bigplay:hover { transform: scale(1.04); background: var(--accent-hover); }
+.bigplay:active { transform: scale(1); background: var(--accent-press); }
+.btn-secondary {
+  border: 1px solid #7a7a7a; border-radius: 9999px; padding: 8px 16px;
+  color: var(--fg); font-size: 14px; font-weight: 700; min-block-size: 32px;
+  transition: transform .15s var(--ease);
+}
+.btn-secondary:hover { transform: scale(1.04); border-color: var(--fg); }
+.icon-btn { color: var(--fg-dim); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; position: relative; }
+.icon-btn:hover { color: var(--fg); }
+.icon-btn.on { color: var(--accent); }
+.player-right .icon-btn.on::after {
+  content: ""; position: absolute; left: 50%; bottom: 1px; width: 4px; height: 4px;
+  border-radius: 50%; background: var(--accent); transform: translateX(-50%);
+}
+
+/* ---------- track rows ---------- */
+/* Narrow content pane (a shrunk window, or the queue/lyrics panel open): the
+   album column goes so title and artist keep their room. */
+.content { container-type: inline-size; }
+@container (max-width: 720px) {
+  .trackrow, .trackhead { grid-template-columns: 36px minmax(0, 1fr) 32px 5ch 32px; }
+  .trackrow:has(.trackrow-art), .trackhead.with-art { grid-template-columns: 36px auto minmax(0, 1fr) 32px 5ch 32px; }
+  .trackrow-album, .trackhead > span:nth-last-child(4) { display: none; }
+}
+/* Spotify's row: [index|play] [art?] [title/artist] [album] [heart] [duration] [...]
+   The index swaps to a play glyph on hover; heart and ... only appear on hover
+   unless the track is liked. */
+
+.tracklist { padding: 0 16px 16px; }
+.trackrow {
+  display: grid; grid-template-columns: 36px auto minmax(0, 4fr) minmax(0, 3fr) 32px 5ch 32px;
+  gap: 12px; align-items: center;
+  width: 100%; padding: 6px 16px; border-radius: var(--r-art); color: var(--fg-dim);
+  min-height: 56px; position: relative; box-sizing: border-box;
+}
+.trackrow:hover { background: var(--tint-hi); }
+.trackrow.active .trackrow-name > span { color: var(--accent); }
+.trackrow.dragging { opacity: .4; }
+.trackrow.dropbefore { box-shadow: inset 0 2px 0 var(--accent); }
+
+.trackrow-n { color: var(--fg-dim); font-size: 16px; font-variant-numeric: tabular-nums; width: 36px; height: 36px; position: relative; padding: 0; }
+/* Number and hover glyph occupy the SAME box, each centred; only one is visible. */
+.trackrow-idx, .trackrow-playglyph { position: absolute; inset: 0; display: grid; place-items: center; }
+.trackrow-playglyph { color: var(--fg); opacity: 0; }
+.trackrow:hover .trackrow-idx { opacity: 0; }
+.trackrow:hover .trackrow-playglyph { opacity: 1; }
+.trackrow.active .trackrow-idx { color: var(--accent); }
+
+.trackrow-art { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: var(--card-hover); flex: 0 0 40px; }
+.trackrow:not(:has(.trackrow-art)) { grid-template-columns: 36px minmax(0, 4fr) minmax(0, 3fr) 32px 5ch 32px; }
+
+.trackrow-name { display: flex; flex-direction: column; min-width: 0; }
+.trackrow-name span { color: var(--fg); font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trackrow-name small { font-size: 12px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.trackrow-name small .rowlink { color: var(--fg-dim); }
+.trackrow-name small .rowlink:hover { color: var(--fg); }
+.trackrow-album { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trackrow-album:hover { color: var(--fg); text-decoration: underline; cursor: pointer; }
+.trackrow-dur { font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
+
+.trackrow-like, .trackrow-more {
+  width: 32px; height: 32px; display: grid; place-items: center; color: var(--fg-dim);
+  opacity: 0; border-radius: 50%;
+}
+.trackrow:hover .trackrow-like, .trackrow:hover .trackrow-more, .trackrow-like.on { opacity: 1; }
+.trackrow-like:hover, .trackrow-more:hover { color: var(--fg); }
+.trackrow-menu { position: relative; }
+
+.ctxmenu {
+  position: absolute; right: 0; top: 100%; z-index: 60; min-width: 220px; max-height: 320px; overflow-y: auto;
+  background: var(--bg-elevated-hi); border-radius: var(--r-art); padding: 4px;
+  box-shadow: 0 16px 24px rgba(0,0,0,.3), 0 6px 8px rgba(0,0,0,.2);
+}
+/* Portal version: fixed on screen, kept inside the viewport by ContextMenu. */
+.ctxmenu-fixed { position: fixed; right: auto; top: auto; z-index: 120; min-width: 240px; max-width: 320px; max-height: min(70vh, 560px); }
+.ctxmenu-sub { min-width: 200px; }
+.ctxmenu button { display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 2px; font-size: 14px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctxmenu button:hover, .ctxmenu button.open { background: var(--tint-hi); }
+.ctxmenu button.danger { color: var(--danger); }
+.ctxmenu button:disabled { opacity: .4; }
+.ctxmenu .ctxitem { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 8px; }
+.ctxmenu .ctx-ico { width: 16px; height: 16px; display: grid; place-items: center; color: var(--fg-dim); flex: 0 0 16px; }
+.ctxmenu .ctxitem:hover .ctx-ico { color: var(--fg); }
+.ctxmenu .ctx-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.ctxmenu .ctx-chev { color: var(--fg-dim); flex: 0 0 14px; }
+.ctxmenu-label { padding: 8px 12px 4px; font-size: 12px; color: var(--fg-dim); font-weight: 700; }
+.ctxslider { padding: 8px 12px 10px 40px; display: flex; flex-direction: column; gap: 6px; }
+.ctxslider-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.ctxslider-val { color: var(--fg-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ctxslider input[type="range"] { width: 100%; }
+
+.ctxmenu-head { display: none; }
+.ctxmenu-scrim { display: none; }
+.ctxmenu-sep { height: 1px; background: #3d3c3c; margin: 4px 0; }
+
+/* Liked Songs: Spotify's purple-to-blue gradient tile with a white heart. */
+.liked-art, .libitem .liked-art, .hero .liked-art {
+  background: linear-gradient(135deg, #450af5, #c4efd9) !important; display: grid; place-items: center; color: #fff;
+}
+.liked-art svg { width: var(--heart, 45%); height: var(--heart, 45%); }
+.libitem .liked-art { width: 48px; height: 48px; border-radius: 4px; flex: none; }
+.tile .tile-liked { position: absolute; right: -8%; bottom: -12%; width: 55%; aspect-ratio: 1; border-radius: 6px; transform: rotate(25deg); box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+
+/* Search type chips */
+.searchtypes { display: flex; gap: 8px; padding: 0 24px 8px; flex-wrap: wrap; }
+.topresult {
+  background: var(--card); border-radius: var(--r-panel); padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  min-height: 232px; transition: background .3s; position: relative; cursor: pointer;
+}
+.topresult:hover { background: var(--card-hover); }
+.topresult img { width: 92px; height: 92px; border-radius: var(--r-art); object-fit: cover; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.topresult.round img { border-radius: 50%; }
+.topresult h3 { margin: 0; font-size: 32px; font-weight: 700; letter-spacing: -1px; line-height: 1.1; }
+.topresult .kind { font-size: 14px; color: var(--fg-dim); }
+.topresult .kind b { color: var(--fg); background: var(--tint); padding: 4px 10px; border-radius: 9999px; font-size: 12px; margin-left: 8px; }
+.topresult .card-play { bottom: 20px; }
+.topresult:hover .card-play { opacity: 1; transform: none; }
+.searchgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 24px; align-items: start; }
+@media (max-width: 1100px) { .searchgrid { grid-template-columns: 1fr; } }
+
+.newplaylist-input {
+  background: var(--card-hover); border: 1px solid transparent; color: var(--fg); border-radius: var(--r-art);
+  padding: 8px 10px; font-size: 14px; width: 100%;
+}
+.newplaylist-input:focus { outline: none; border-color: var(--fg); }
+
+.banner { padding: 12px 16px; border-radius: var(--r-panel); background: var(--bg-elevated); color: var(--fg-dim); margin: 16px 24px; font-size: 14px; }
+.banner.error { background: #2a1618; color: var(--danger); }
+/* Loading placeholders for a track list (header shows at once, rows shimmer). */
+.skeleton-rows { padding: 4px 16px; }
+.skeleton-row { display: flex; align-items: center; gap: 12px; min-height: 56px; }
+.skeleton-row > span { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.sk-art { width: 40px; height: 40px; border-radius: 4px; background: #2a2a2a; flex: none; }
+.sk-line { display: block; height: 12px; border-radius: 6px; background: #2a2a2a; }
+.sk-line.w1 { width: 55%; } .sk-line.w2 { width: 35%; height: 10px; }
+.skeleton-row i { animation: sk-shimmer 1.2s ease-in-out infinite; }
+@keyframes sk-shimmer { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (max-width: 760px) { .skeleton-row { min-height: 64px; } .sk-art { width: 48px; height: 48px; } }
+.placeholder-note { color: var(--fg-dim); font-size: 14px; padding: 16px 0; margin: 8px 0; }
+
+/* ---------- right panel (Now Playing / Queue / Lyrics) ---------- */
+
+.panel-header {
+  display: flex; align-items: center; gap: 8px; height: 64px; padding: 8px 16px; flex: none;
+}
+.panel-header .title { font-size: 16px; font-weight: 700; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+
+.npv-art { width: 100%; aspect-ratio: 1; border-radius: var(--r-panel); object-fit: cover; background: var(--card-hover); }
+.npv-track { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.npv-title { font-size: 24px; font-weight: 700; line-height: 1.2; }
+.npv-artist { color: var(--fg-dim); font-size: 16px; }
+.npv-artist:hover { color: var(--fg); text-decoration: underline; cursor: pointer; }
+
+.section {
+  background: var(--bg-elevated); border-radius: var(--r-panel); padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-head h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.section-head button { color: var(--fg-dim); font-size: 14px; font-weight: 700; }
+.section-head button:hover { color: var(--fg); text-decoration: underline; }
+
+.qrow {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 8px; border-radius: var(--r-row); text-align: left; flex: none;
+}
+.panel-body section { display: flex; flex-direction: column; gap: 2px; }
+.qrow:hover { background: var(--tint-hi); }
+.qrow { position: relative; }
+.qrow-art { position: relative; padding: 0; flex: none; width: 40px; height: 40px; }
+.qrow-play { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border-radius: 4px; opacity: 0; transition: opacity .12s; }
+.qrow:hover .qrow-play { opacity: 1; }
+.qrow-more { margin-left: auto; color: var(--fg-dim); opacity: 0; width: 28px; height: 28px; display: grid; place-items: center; flex: none; }
+.qrow:hover .qrow-more { opacity: 1; }
+.qrow-more:hover { color: var(--fg); }
+.qrow.dropbefore { box-shadow: inset 0 2px 0 var(--accent); }
+.qrow.dragging { opacity: .4; }
+.qrow-title[role=button]:hover { text-decoration: underline; cursor: pointer; }
+.section-head .linkish { color: var(--fg-dim); font-size: 13px; font-weight: 700; }
+.section-head .linkish:hover { color: var(--fg); text-decoration: underline; }
+.qrow img, .qrow .ph { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: var(--card-hover); flex: none; }
+.qrow-text { min-width: 0; display: flex; flex-direction: column; }
+.qrow-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow.active .qrow-title { color: var(--accent); }
+.qrow-sub { color: var(--fg-dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tabs { display: flex; gap: 16px; padding: 0 16px 12px; flex: none; border-bottom: 1px solid #2e2c2c; margin-bottom: 4px; }
+.tabs button { color: var(--fg-dim); font-size: 16px; font-weight: 700; padding: 4px 0; }
+.tabs button.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
+
+/* Lyrics: active line full colour, sung lines dimmed to 50%, upcoming full opacity */
+.lyrics { display: flex; flex-direction: column; gap: .6em; padding: 8px 0 40px; align-items: flex-start; }
+.lyric-line {
+  font-size: 24px; font-weight: 700; line-height: 1.3; text-align: left;
+  color: var(--lyrics-inactive, var(--fg-dim)); cursor: pointer;
+  transition: color .1s ease-out, opacity .1s ease-out; background: none; border: 0; padding: 0;
+}
+.lyric-line.sung { opacity: .5; }
+/* Shown once the reader has scrolled away from the song: white pill, black text, pinned to the pane's bottom. */
+.lyrics-sync { position: sticky; bottom: 16px; align-self: center; background: #e6e6e6; color: #000; border-radius: 500px; padding: 8px 20px; font-size: 14px; font-weight: 700; margin-top: 8px; }
+.lyrics-sync:hover { background: #fff; }
+.fs-lyrics .lyrics-sync { font-size: 15px; padding: 10px 24px; }
+.lyric-line.now { color: var(--lyrics-active, var(--fg)); opacity: 1; }
+.lyric-line:hover { color: var(--lyrics-active, var(--fg)); opacity: 1; text-decoration: underline; }
+
+/* ---------- player bar ---------- */
+
+.player { background: var(--black); padding: 8px 0 0; min-width: 620px; }
+.player-error { background: #2a1618; color: var(--danger); padding: 8px 16px; font-size: 14px; cursor: pointer; border-radius: var(--r-art); margin-bottom: 8px; }
+.player-row { display: grid; grid-template-columns: 30% minmax(0, 40%) 30%; align-items: center; height: 72px; gap: 16px; }
+
+.player-now { display: flex; align-items: center; gap: 14px; min-width: 180px; }
+.player-art { width: 56px; height: 56px; border-radius: var(--r-art); object-fit: cover; background: var(--card-hover); }
+.player-art.clickable { cursor: pointer; }
+.player-art.clickable:hover { opacity: .82; }
+.player-meta { min-width: 0; }
+.player-title, .player-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-title { font-size: 14px; font-weight: 400; }
+.player-artist { color: var(--fg-dim); font-size: 12px; }
+.linkish { padding: 0; color: var(--fg-dim); font-size: 12px; text-align: left; }
+.linkish:hover { color: var(--fg); text-decoration: underline; }
+
+.player-controls { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-self: center; width: 100%; max-width: 722px; }
+.player-buttons { display: flex; gap: 16px; align-items: center; }
+.player-buttons button { color: #ffffffb3; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; }
+.player-buttons button:hover:not(:disabled) { color: var(--fg); }
+.player-buttons button:disabled { opacity: .3; cursor: default; }
+.player-buttons .play { background: var(--fg); color: #000; width: 32px; height: 32px; transition: transform .15s var(--ease); padding: 0; }
+.player-buttons .play svg { display: block; }
+.player-buttons .play:hover:not(:disabled) { transform: scale(1.06); color: #000; }
+/* Shuffle + repeat: dimmer than transport, green + underline dot when active. */
+.player-buttons .ctl-mode { position: relative; width: 28px; height: 28px; color: #ffffff80; }
+.player-buttons .ctl-mode:hover { color: var(--fg); }
+.player-buttons .ctl-mode.on { color: var(--accent, #1db954); }
+.player-buttons .ctl-mode.on::after {
+  content: ''; position: absolute; bottom: 1px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent, #1db954);
+}
+.player-buttons .ctl-spark { position: absolute; top: -2px; right: -1px; font-size: 8px; line-height: 1; }
+.player-buttons .ctl-badge {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 8px; font-weight: 700; color: var(--accent, #1ed760); pointer-events: none;
+}
+
+.player-seek { display: flex; align-items: center; gap: 8px; width: 100%; }
+.player-seek .t { color: var(--fg-dim); font-size: 11px; font-variant-numeric: tabular-nums; width: 50px; }
+.player-seek .t:last-child { text-align: right; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--fg) 0%, var(--fg) var(--pct,0%), #ffffff4d var(--pct,0%), #ffffff4d 100%);
+}
+input[type="range"]:hover { background: linear-gradient(to right, var(--seek-accent) 0%, var(--seek-accent) var(--pct,0%), #ffffff4d var(--pct,0%), #ffffff4d 100%); }
+/* Seek bars: while hovering, a white line runs from the playhead to the cursor. */
+.player-seek input[type="range"].hovering, .fs-seek input[type="range"].hovering {
+  background: linear-gradient(to right,
+    #fff 0%, #fff min(var(--pct, 0%), var(--hov, 0%)),
+    rgba(255,255,255,.85) min(var(--pct, 0%), var(--hov, 0%)), rgba(255,255,255,.85) max(var(--pct, 0%), var(--hov, 0%)),
+    #ffffff4d max(var(--pct, 0%), var(--hov, 0%)), #ffffff4d 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--fg); box-shadow: 0 2px 4px rgba(0,0,0,.5); opacity: 0; transition: opacity .15s;
+}
+input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
+input[type="range"]:disabled { opacity: .4; }
+
+/* Spotify order: lyrics, queue, devices, volume, miniplayer, fullscreen */
+.player-right { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 180px; padding-right: 8px; }
+.player-right .icon-btn, .player-right .devicebtn { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; color: #ffffffb3; }
+.player-right .icon-btn:hover, .player-right .devicebtn:hover { color: var(--fg); }
+/* Lit (lyrics / queue panel open): green, above the footer's dim override. */
+.player-right .icon-btn.on, .player-right .icon-btn.on:hover { color: var(--accent); }
+.player-volume { display: flex; align-items: center; gap: 4px; color: #ffffffb3; width: 128px; }
+.player-volume .vol-ico { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; color: inherit; }
+.player-volume input { width: 93px; }
+.player-volume:hover { color: var(--fg); }
+
+/* ---------- device picker ---------- */
+
+.devicepicker { position: relative; }
+.devicebtn { display: flex; align-items: center; gap: 6px; color: #ffffffb3; padding: 6px; border-radius: var(--r-art); }
+.devicebtn:hover { color: var(--fg); }
+.devicebtn.casting { color: var(--accent); }
+.devicebtn-name { display: none; }
+
+.devicemenu {
+  position: absolute; bottom: calc(100% + 12px); right: 0; width: 340px; max-height: 60vh; overflow-y: auto;
+  background: var(--bg-elevated-hi); border-radius: var(--r-panel); padding: 16px; z-index: 50;
+  box-shadow: 0 18px 44px rgba(0,0,0,.7);
+}
+.devicemenu-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 14px; }
+.devicemenu-head strong { font-size: 16px; font-weight: 700; }
+.devicemenu-head span { color: var(--fg-dim); font-size: 12px; }
+.devicemenu-empty { color: var(--fg-dim); font-size: 14px; padding: 8px 4px; margin: 0; }
+.devicegroup + .devicegroup { margin-top: 12px; }
+.devicegroup-label { color: var(--fg-dim); font-size: 12px; padding: 8px 4px 4px; font-weight: 700; }
+.deviceitem { display: flex; align-items: center; gap: 12px; width: 100%; border-radius: var(--r-art); padding: 10px 8px; text-align: left; color: var(--fg-dim); }
+.deviceitem:hover { background: var(--tint-hi); color: var(--fg); }
+.deviceitem.active { color: var(--accent); }
+.deviceitem-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.deviceitem-name { color: var(--fg); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.deviceitem.active .deviceitem-name { color: var(--accent); }
+.deviceitem-model { font-size: 12px; }
+.deviceitem-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+
+.linkbtn { color: var(--fg-dim); padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 700; }
+.linkbtn:hover { color: var(--fg); background: var(--tint); }
+
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; overflow: hidden; display: grid; place-items: center;
+  background: #509bf5; color: #000; font-size: 14px; font-weight: 700; padding: 0; position: relative;
+  box-shadow: 0 0 0 4px #1f1f1f;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar:hover { transform: scale(1.04); }
+.avatarwrap { position: relative; }
+.avatarmenu {
+  position: absolute; right: 0; top: calc(100% + 8px); min-width: 196px; z-index: 60;
+  background: var(--bg-elevated-hi); border-radius: var(--r-art); padding: 4px;
+  box-shadow: 0 16px 24px rgba(0,0,0,.3), 0 6px 8px rgba(0,0,0,.2);
+}
+.avatarmenu .who { padding: 10px 12px 6px; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.avatarmenu .who-avatar { display: none; }
+.avatarmenu .who-text { display: flex; flex-direction: column; }
+.avatarmenu .who-text small { display: none; }
+.avatarmenu .menu-ico { display: none; }
+.avatarmenu .phone-only { display: none; }
+@media (max-width: 760px) { .avatarmenu .phone-only { display: inline; } }
+.avatarmenu .sub { padding: 0 12px 8px; font-size: 12px; color: var(--fg-dim); }
+.avatarmenu button { display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 2px; font-size: 14px; color: var(--fg); }
+.avatarmenu button:hover { background: var(--tint-hi); }
+.detailbar {
+  position: sticky; top: 0; z-index: 8; display: flex; align-items: center; gap: 8px;
+  height: 64px; padding: 0 16px; background: linear-gradient(var(--bg-base), rgba(18,18,18,.86));
+  backdrop-filter: blur(12px);
+}
+.back {
+  color: var(--fg); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0,0,0,.7);
+}
+.back:hover { background: rgba(0,0,0,.9); }
+
+/* ---------- login ---------- */
+
+.login, .boot { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--fg-dim); }
+.login form { width: min(420px, 90vw); background: var(--bg-base); border-radius: 14px; padding: 32px; display: flex; flex-direction: column; gap: 14px; }
+.login h1 { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px; }
+.login-sub { margin: 0 0 6px; color: var(--fg-dim); font-size: 14px; }
+.login-hint { margin: 2px 0 0; font-size: 12px; color: var(--fg-dim); }
+.login label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 700; color: var(--fg-dim); }
+.login input { background: var(--card-hover); border: 1px solid transparent; color: var(--fg); border-radius: var(--r-art); padding: 12px 14px; font-size: 14px; }
+.login input:focus { outline: none; border-color: var(--fg); }
+.primary {
+  background: var(--accent); color: #000; font-weight: 700; border-radius: 9999px;
+  padding: 14px 18px; margin-top: 8px; font-size: 14px; transition: transform .15s var(--ease);
+}
+.primary:hover:not(:disabled) { background: var(--accent-hover); transform: scale(1.02); }
+.primary:disabled { opacity: .3; cursor: not-allowed; }
+
+
+
+/* Spotify-style bottom toast ("Added to Liked Songs") */
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+  background: var(--accent); color: #000; font-size: 14px; font-weight: 500;
+  padding: 12px 16px; border-radius: 8px; z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,.5);
+}
+
+/* ---------- home ---------- */
+
+.home .greeting { font-size: 32px; font-weight: 700; letter-spacing: -1px; margin: 8px 0 20px; }
+
+/* Spotify's shortcut grid: 2 columns, 64px rows, art flush left, white 7%
+   background, play button revealed on hover at the right. */
+.shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 32px; }
+@media (min-width: 1200px) { .shortcuts { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.shortcut {
+  display: flex; align-items: center; gap: 16px; height: 64px; overflow: hidden;
+  background: #ffffff12; border-radius: var(--r-art); cursor: pointer; position: relative;
+  transition: background-color .3s;
+}
+.shortcut:hover { background: #ffffff1f; }
+.shortcut-art { width: 64px; height: 64px; object-fit: cover; flex: none; border-radius: 4px 0 0 4px; background: var(--card-hover); }
+.shortcut-art.ph { background: var(--card-hover); }
+.shortcut-title { font-size: 16px; font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 56px; }
+.shortcut .shortcut-play { position: absolute; right: 8px; top: 50%; bottom: auto; transform: translateY(-50%) translateY(8px); width: 48px; height: 48px; }
+.shortcut:hover .shortcut-play { opacity: 1; transform: translateY(-50%); }
+
+.homeshelf .shelf { min-height: 0; }
+
+/* Daily Mix tiles: photo, then a solid colour band carrying the label. */
+.mixart img { object-position: top; }
+.mixband {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 12px;
+  background: var(--mix, #1e3264); color: #fff; font-size: 15px; font-weight: 700;
+  letter-spacing: -.2px; border-radius: 0 0 var(--r-art) var(--r-art);
+}
+.mixart .ph { background: linear-gradient(160deg, color-mix(in srgb, var(--mix) 55%, #000), var(--mix)); }
+.mixcard .card-play { bottom: 46px; }
+
+/* now-playing bars in the index column */
+.npbars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; width: 14px; }
+.npbars i { display: block; width: 3px; background: var(--accent); animation: npbar .9s ease-in-out infinite; height: 40%; }
+.npbars i:nth-child(2) { animation-delay: .25s; height: 90%; }
+.npbars i:nth-child(3) { animation-delay: .5s; height: 60%; }
+@keyframes npbar { 0%, 100% { transform: scaleY(.4); } 50% { transform: scaleY(1); } }
+.npbars i { transform-origin: bottom; }
+
+/* inline links inside rows (artist names, album) */
+.rowlink { padding: 0; font: inherit; color: inherit; text-align: left; white-space: nowrap; }
+.rowlink:focus-visible { outline: 1px solid var(--fg); outline-offset: 2px; border-radius: 2px; }
+.rowlink:hover { color: var(--fg); text-decoration: underline; }
+
+/* Spotify's "See more" under Popular: small, bold, subdued, left-aligned with the rows. */
+.seemore { color: var(--fg-dim); font-size: 14px; font-weight: 700; padding: 14px 16px; }
+.seemore:hover { color: var(--fg); }
+
+
+
+/* Spotify's green "Playing on <device>" bar, pinned under the player. */
+.playing-elsewhere {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  background: var(--accent); color: #000; font-size: 11px; font-weight: 700;
+  padding: 3px 12px; margin: 0 -8px -8px; /* span full width past the app's side padding */
+}
+
+/* Small centred dialog (playlist name). */
+.modal-back { position: fixed; inset: 0; z-index: 130; background: rgba(0,0,0,.6); display: grid; place-items: center; }
+.modal { background: var(--bg-elevated-hi); border-radius: 8px; padding: 24px; width: min(420px, calc(100vw - 32px)); display: grid; gap: 16px; box-shadow: 0 16px 24px rgba(0,0,0,.3); }
+.modal h3 { margin: 0; font-size: 20px; }
+.modal input { width: 100%; padding: 12px 14px; border-radius: 4px; border: 1px solid #555; background: #1f1f1f; color: var(--fg); font-size: 15px; }
+.modal input:focus { outline: none; border-color: var(--fg); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions .primary { background: var(--fg); color: #000; border-radius: 500px; padding: 10px 24px; font-weight: 700; }
+.modal-actions .primary:disabled { opacity: .4; }
+
+.trackhead.with-art > span:nth-child(2) { width: 40px; }
+
+/* A playlist you own: clicking the title opens Edit details, like the cover. */
+.hero-title-edit { display: block; padding: 0; text-align: left; color: inherit; max-width: 100%; cursor: pointer; }
+.hero-title-edit h1 { margin: 8px 0 16px; }
+
+/* Profile page (Spotify: round avatar, "Profile", name, playlist count). */
+.hero.profile { min-height: 340px; align-items: center; }
+.profile-avatar { width: 232px; height: 232px; border-radius: 50%; overflow: hidden; background: #282828; display: grid; place-items: center; box-shadow: 0 0 48px rgba(0,0,0,.6); }
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.profile-initial { font-size: 96px; font-weight: 800; color: var(--fg); width: 100%; height: 100%; place-items: center; }
+.shelf-sub { margin: -12px 0 12px; color: var(--fg-dim); font-size: 14px; }
+.avatarmenu .who { font-weight: 700; }
+
+.trackrow-art.link { cursor: pointer; }
+.trackrow-art.link:hover { filter: brightness(1.15); }
+
+/* ---------- settings ---------- */
+.settings { max-width: 760px; }
+.settings-section { margin: 28px 0; }
+.settings-section h2 { font-size: 20px; font-weight: 700; margin: 0 0 14px; }
+.settings-row { display: flex; align-items: center; gap: 20px; }
+.settings-avatar { position: relative; width: 128px; height: 128px; border-radius: 50%; overflow: hidden; background: #282828; cursor: pointer; display: block; box-shadow: 0 0 32px rgba(0,0,0,.5); flex: none; }
+.settings-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.settings-avatar span { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.65); color: #fff; font-weight: 700; font-size: 14px; opacity: 0; transition: opacity .15s; }
+.settings-avatar:hover span { opacity: 1; }
+.settings-name { font-size: 24px; font-weight: 700; }
+.settings-hint { color: var(--fg-dim); font-size: 14px; margin-top: 6px; }
+.settings-field label { display: block; font-weight: 700; margin-bottom: 8px; }
+.settings-field select { background: var(--bg-elevated-hi); color: var(--fg); border: 1px solid transparent; border-radius: 4px; padding: 10px 12px; font-size: 14px; min-width: 280px; }
+.theme-presets { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.theme-preset { display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; border-radius: 500px; background: var(--tint); color: var(--fg); font-weight: 700; font-size: 14px; border: 2px solid transparent; }
+.theme-preset:hover { background: var(--tint-hi); }
+.theme-preset.on { border-color: var(--accent); }
+.theme-swatch { display: inline-flex; width: 48px; height: 24px; border-radius: 12px; overflow: hidden; background: var(--p-bg); }
+.theme-swatch i { flex: 1; }
+.theme-swatch i:nth-child(1) { background: var(--p-bg); }
+.theme-swatch i:nth-child(2) { background: var(--p-surface); }
+.theme-swatch i:nth-child(3) { background: var(--p-accent); }
+.theme-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.theme-color { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 8px; background: var(--card); cursor: pointer; }
+.theme-color:hover { background: var(--card-hover); }
+.theme-color input[type=color] { width: 40px; height: 40px; border: none; border-radius: 50%; padding: 0; background: none; cursor: pointer; }
+.theme-color input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+.theme-color input[type=color]::-webkit-color-swatch { border: 2px solid var(--tint-hi); border-radius: 50%; }
+.theme-color-body { flex: 1; display: grid; }
+.theme-color-body b { font-size: 15px; }
+.theme-color-body small { color: var(--fg-dim); font-size: 13px; }
+.theme-color code { color: var(--fg-dim); font-size: 12px; }
+
+/* ---------- search ---------- */
+.trackrow.hi, .topresult.hi { background: var(--tint-hi); outline: 1px solid var(--tint-press); }
+.lyric-snippet { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); font-size: 12px; line-height: 16px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lyric-snippet > :not(.lyric-tag) { overflow: hidden; text-overflow: ellipsis; }
+.lyric-snippet mark { background: none; color: var(--fg); font-weight: 500; }
+.lyric-tag { flex: none; display: inline-block; font-size: 10px; line-height: 15px; font-weight: 600; letter-spacing: 0; text-transform: none; background: var(--tint); color: var(--fg-dim) !important; border-radius: 3px; padding: 0 6px; }
+
+.within { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--fg-dim); background: transparent; border-radius: 4px; padding: 6px 8px; }
+.within:hover, .within:focus-within { background: var(--tint); color: var(--fg); }
+.within input { background: transparent; border: none; color: var(--fg); font-size: 14px; width: 0; transition: width .2s; padding: 2px 0; }
+.within:hover input, .within:focus-within input, .within input:not(:placeholder-shown) { width: 180px; }
+.within input:focus { outline: none; }
+.within button { color: var(--fg-dim); font-size: 18px; line-height: 1; padding: 0 2px; }
+.lyric-snippet.playable { cursor: pointer; }
+.lyric-snippet.playable:hover mark, .lyric-snippet.playable:hover { color: var(--accent); }
+.pills.chips { margin-bottom: 12px; }
+.pills.recents { flex-wrap: wrap; }
+/* Recent searches: the items opened or played from a search, as cards with a
+   remove x in the corner (Spotify's desktop layout). */
+.recentcard { position: relative; }
+.recent-x { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--fg-dim); background: rgba(0,0,0,.55); opacity: 0; transition: opacity .15s; z-index: 2; }
+.recentcard:hover .recent-x, .recent-x:focus-visible { opacity: 1; }
+.recent-x:hover { color: var(--fg); background: rgba(0,0,0,.8); }
+.placeholder-note code { background: var(--tint); padding: 1px 5px; border-radius: 3px; color: var(--fg); font-size: 12px; }
+
+/* Browse tiles (Spotify's "Browse all"): colour block, name top-left, cover
+   tilted out of the bottom-right corner. */
+.tilegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px; }
+.tile { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--tile, #3d3c3c); text-align: left; padding: 16px; color: #fff; isolation: isolate; }
+.tile span { position: relative; z-index: 1; font-size: 24px; font-weight: 700; letter-spacing: -.3px; max-width: 70%; display: block; line-height: 1.15; }
+.tile img { position: absolute; right: -8%; bottom: -12%; width: 55%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; transform: rotate(25deg); box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.tile .tile-heart { position: absolute; right: 8%; bottom: 8%; color: #fff; transform: rotate(25deg); opacity: .9; }
+.tile:hover { filter: brightness(1.08); }
+.browse-hero { min-height: 220px; }
+
+.settings-input { background: var(--bg-elevated-hi); color: var(--fg); border: 1px solid transparent; border-radius: 4px; padding: 10px 12px; font-size: 14px; min-width: 320px; }
+.settings-input:focus { outline: none; border-color: var(--fg-dim); }
+.settings-hint a { color: var(--fg); text-decoration: underline; }
+
+.libitem.dropbefore { box-shadow: inset 0 2px 0 var(--accent); }
+.libitem.dragging { opacity: .4; }
+.iconbtn.on svg { color: var(--seek-accent); }
+
+.npv-artist-link { color: var(--fg-dim); font-size: 16px; padding: 0; }
+.npv-artist-link:hover { color: var(--fg); text-decoration: underline; }
+
+.settings-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.settings-actions .primary { background: var(--fg); color: #000; border-radius: 500px; padding: 10px 24px; font-weight: 700; }
+.settings-actions .primary:disabled { opacity: .4; }
+
+/* Releases the library does not have: dimmed cover with a Request button. */
+.card.missing .card-art img, .card.missing .card-art .ph { filter: grayscale(.6) brightness(.55); }
+.card.missing .card-title { color: var(--fg-dim); }
+.card-request { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--fg); color: #000; font-weight: 700; font-size: 13px; border-radius: 500px; padding: 8px 14px; box-shadow: 0 8px 16px rgba(0,0,0,.4); white-space: nowrap; }
+.card-request:hover { transform: translate(-50%, -50%) scale(1.04); }
+.card-request.busy { background: var(--tint-press); color: var(--fg); }
+.card-request:disabled { cursor: default; }
+
+/* Spotify's route transition: black pane, three bouncing dots. */
+.loading-screen { display: grid; place-items: center; background: var(--black, #000); }
+.dots { display: flex; gap: 6px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-dim); animation: dotbounce 1.2s infinite ease-in-out; }
+.dots i:nth-child(2) { animation-delay: .16s; }
+.dots i:nth-child(3) { animation-delay: .32s; }
+@keyframes dotbounce { 0%, 80%, 100% { transform: scale(.6); opacity: .5; } 40% { transform: scale(1); opacity: 1; } }
+.settings-actions button { height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
+
+/* Anything that reacts to a click says so. */
+button:not(:disabled), [role=button], a, .card, .tile, .shortcut, .libitem, .trackrow-art.link, .pill, .hero-title-edit, .topresult, .mixcard, .qrow-title[role=button], label.settings-avatar, label.editdetails-cover, .hero-cover.editable, .lyric-snippet.playable { cursor: pointer; }
+button:disabled { cursor: default; }
+
+/* ---------- full-screen player ---------- */
+.fs { position: fixed; inset: 0; z-index: 200; background: #000; color: #fff; display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+.fs-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(60px) brightness(.35) saturate(1.2); transform: scale(1.1); }
+/* Behind the spectrum: same blur, a touch darker so the bars and their floor reflection stay crisp. */
+.fs-bg.dim { filter: blur(60px) brightness(.22) saturate(1.2); }
+.fs > *:not(.fs-bg) { position: relative; }
+.fs-top { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px; padding: 0 32px; height: 76px; box-sizing: border-box; }
+.fs-from { grid-column: 1; }
+/* Right side: three flat icon tabs, a vertical rule, then the minimize button. */
+.fs-tabs { display: flex; align-items: center; gap: 2px; height: 36px; }
+.fs-tab { display: flex; align-items: center; }
+.fs-tab > button:first-child { width: 36px; height: 36px; display: grid; place-items: center; color: #ffffffb3; border-radius: 50%; }
+.fs-tab > button:first-child:hover, .fs-tab.on > button:first-child { color: #fff; }
+.fs-tab > button:first-child svg { display: block; }
+.fs-divider { width: 1px; height: 20px; background: rgba(255,255,255,.28); margin: 0 10px 0 8px; }
+.fs-chevron, .fs-from-phone, .fs-phone-row, .mobile-back, .mobile-title, .libchips, .libsort, .login-mark { display: none; }
+.fs-close { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: #ffffffb3; }
+.fs-close:hover { color: #fff; }
+.fs-stage { display: grid; place-items: center; min-height: 0; padding: 0 32px; }
+.fs-art { max-height: 100%; max-width: min(56vh, 90vw); aspect-ratio: 1; object-fit: cover; border-radius: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.fs-art.ph { width: 56vh; background: #222; }
+.fs-lyrics { width: min(900px, 100%); height: 100%; overflow-y: auto; font-size: 28px; line-height: 1.35; font-weight: 700; padding: 24px 0; mask-image: linear-gradient(transparent, #000 10%, #000 90%, transparent); }
+.fs-lyrics { scrollbar-width: none; }
+.fs-lyrics::-webkit-scrollbar { display: none; }
+.fs-lyrics .lyric-line, .fs-lyrics p { font-size: 28px; }
+.fs-bottom { display: grid; grid-template-columns: 1fr auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 20px 24px; padding: 28px 48px 48px; }
+.fs-meta { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.fs-thumb { width: 64px; height: 64px; border-radius: 6px; object-fit: cover; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.fs-title { font-size: 28px; font-weight: 800; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-artist { font-size: 16px; color: #ffffffb3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-artist .linkish { color: #ffffffb3; font-size: 16px; }
+.fs-artist .linkish:hover { color: #fff; text-decoration: underline; }
+.fs-like { color: #ffffffb3; padding: 8px; }
+.fs-like:hover, .fs-like.on { color: #fff; }
+.fs-seek { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 12px; font-size: 13px; color: #ffffffb3; font-variant-numeric: tabular-nums; }
+.fs-seek input { flex: 1; }
+.fs-meta { grid-column: 1; grid-row: 2; }
+.fs-controls { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 24px; color: #ffffffb3; }
+.fs-output { grid-column: 3; grid-row: 2; justify-self: end; display: flex; align-items: center; gap: 14px; min-width: 0; color: #ffffffb3; }
+.fs-output .devicebtn { padding: 4px 6px 4px 0; font-size: 13px; gap: 6px; max-width: 260px; color: #ffffffb3; }
+.fs-output .devicebtn.with-name.casting .devicebtn-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-output .devicebtn:hover, .fs-output .devicebtn:hover .devicebtn-name { color: #fff; }
+.fs-output .devicebtn.casting, .fs-output .devicebtn.casting .devicebtn-name { color: var(--accent); }
+.fs-output .devicebtn.casting:hover, .fs-output .devicebtn.casting:hover .devicebtn-name { color: var(--accent-hover); }
+.fs-output .devicemenu { right: 0; left: auto; }
+.fs-volume { display: flex; align-items: center; gap: 6px; }
+.fs-volume button { width: 28px; height: 28px; display: grid; place-items: center; color: inherit; }
+.fs-volume button:hover { color: #fff; }
+.fs-volume input { width: 110px; }
+.fs-controls button:hover { color: #fff; }
+.fs-controls .ctl-mode.on { color: var(--accent); }
+.fs-play { width: 56px; height: 56px; border-radius: 50%; background: #fff; color: #000 !important; display: grid; place-items: center; }
+.fs-play:hover { transform: scale(1.05); }
+.viz { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: transparent; cursor: default; }
+/* Both surfaces are absolutely positioned so their pixel size can never feed
+   back into the box size (a canvas that sized its own container crept down
+   the screen until WebGL gave up and went black). */
+.viz-stage { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* The whole visualizer box sits a little lower on the screen. */
+.viz { margin-top: 7vh; height: calc(100% - 7vh); }
+.viz-stage canvas { width: 100% !important; height: 100% !important; display: block; }
+.viz-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 40px; color: #ffffffb3; font-size: 16px; }
+
+/* Speaker timing calibration (tap along) over the visualizer. */
+.cal { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: #00000066; backdrop-filter: blur(6px); cursor: pointer; user-select: none; -webkit-user-select: none; z-index: 3; }
+.cal-card { width: min(520px, 100%); background: #181818; border-radius: 12px; padding: 28px 28px 24px; box-shadow: 0 16px 48px #0009; text-align: center; color: #fff; }
+.cal-title { font-size: 22px; font-weight: 700; margin-bottom: 12px; }
+.cal-step { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #b3b3b3; margin-bottom: 14px; }
+.cal-text { font-size: 15px; line-height: 1.45; color: #fff; margin: 0 0 12px; }
+.cal-text.muted { color: #b3b3b3; font-size: 14px; }
+.cal-text.warn { color: #f5b942; }
+.cal-steps { text-align: left; margin: 0 0 14px; padding-left: 22px; font-size: 15px; line-height: 1.5; color: #e6e6e6; }
+.cal-steps li + li { margin-top: 6px; }
+.cal-pad { width: 200px; height: 200px; margin: 6px auto 16px; border-radius: 50%; display: grid; place-items: center; padding: 24px; font-size: 16px; font-weight: 700; line-height: 1.3; background: #ffffff1a; border: 2px solid #ffffff40; transition: none; }
+.cal-pad.a, .cal-pad.b { animation: cal-hit .28s ease-out; }
+.cal-pad.wait { color: #b3b3b3; border-style: dashed; }
+@keyframes cal-hit { 0% { background: var(--accent); border-color: var(--accent); color: #000; transform: scale(1.06); } 100% { background: #ffffff1a; border-color: #ffffff40; color: #fff; transform: scale(1); } }
+.cal-bar { height: 4px; border-radius: 2px; background: #ffffff33; overflow: hidden; margin: 0 24px 12px; }
+.cal-bar > div { height: 100%; background: var(--accent); transition: width .1s linear; }
+.cal-big { font-size: 44px; font-weight: 800; letter-spacing: -.02em; margin: 8px 0 10px; font-variant-numeric: tabular-nums; }
+.cal-btns { display: flex; justify-content: center; gap: 10px; margin-top: 8px; cursor: default; }
+.cal-btn { background: #e6e6e6; color: #000; border-radius: 500px; padding: 10px 24px; font-size: 14px; font-weight: 700; }
+.cal-btn:hover { background: #fff; }
+.cal-btn:disabled { opacity: .4; cursor: default; }
+.cal-btn.ghost { background: transparent; color: #fff; border: 1px solid #ffffff59; }
+.cal-btn.ghost:hover { background: transparent; border-color: #fff; }
+
+
+.disco-filters { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 16px; align-items: center; }
+.disco-filters .pills + .pills { padding-left: 20px; border-left: 1px solid var(--tint-press); }
+
+/* Context menus are portaled to <body>; they must clear the full-screen layer (200). */
+.ctxmenu-fixed { z-index: 300; }
+
+/* Electron: the top bar is a window-drag region, and drag regions swallow
+   clicks from anything overlapping them -- including overlays rendered on
+   top. Everything that can sit up there opts out. */
+.fs, .fs *, .ctxmenu, .ctxmenu *, .modal-back, .modal-back *, .loading-screen { -webkit-app-region: no-drag; }
+/* The top strip of the now-playing view still drags the window (buttons excepted). */
+.fs-top { -webkit-app-region: drag; }
+.fs-top button, .fs-top .ctxmenu, .fs-top .ctxmenu * { -webkit-app-region: no-drag; }
+
+/* Playlist "Recommended" (Spotify: heading + subline, plain rows without a
+   number, an outlined Add pill on the right, Refresh underneath). */
+.reco { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--tint); }
+.reco-head { padding: 0 16px 12px; }
+.reco-head h2 { margin: 0; font-size: 24px; font-weight: 700; }
+.reco-head p { margin: 4px 0 0; color: var(--fg-dim); font-size: 14px; }
+.reco-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.reco-row .trackrow-like, .reco-row .trackrow-dur { display: none; }
+.reco-add { padding: 6px 16px; border-radius: 500px; border: 1px solid var(--fg-dim); color: var(--fg); font-weight: 700; font-size: 14px; margin-right: 16px; background: transparent; }
+.reco-add:hover { border-color: var(--fg); transform: scale(1.04); }
+.reco-refresh { color: var(--fg-dim); font-size: 14px; font-weight: 700; padding: 14px 16px; }
+.reco-refresh:hover { color: var(--fg); }
+
+/* Playlist "Recommended" (Spotify: heading + subline, plain rows without a
+   number, an outlined Add pill on the right, Refresh underneath). */
+.reco { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--tint); }
+.reco-head { padding: 0 16px 12px; }
+.reco-head h2 { margin: 0; font-size: 24px; font-weight: 700; }
+.reco-head p { margin: 4px 0 0; color: var(--fg-dim); font-size: 14px; }
+.reco-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.reco-row .trackrow-like, .reco-row .trackrow-dur { display: none; }
+.reco-add { padding: 6px 16px; border-radius: 500px; border: 1px solid var(--fg-dim); color: var(--fg); font-weight: 700; font-size: 14px; margin-right: 16px; background: transparent; }
+.reco-add:hover { border-color: var(--fg); transform: scale(1.04); }
+.reco-refresh { color: var(--fg-dim); font-size: 14px; font-weight: 700; padding: 14px 16px; }
+.reco-refresh:hover { color: var(--fg); }
+
+/* ---------- listening history (stats.fm) ---------- */
+.history-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.history-head h1 { margin: 4px 0 8px; font-size: 40px; font-weight: 800; letter-spacing: -1px; }
+.history-head .kind { font-size: 14px; color: var(--fg-dim); }
+.history-head .hero-meta { margin: 0; }
+.history section { margin-bottom: 32px; }
+.history-connect { background: var(--bg-elevated); border-radius: var(--r-panel); padding: 20px; max-width: 560px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.history-connect p { margin: 0; color: var(--fg-dim); }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 32px; }
+.stat-tile { background: var(--bg-elevated); border-radius: var(--r-panel); padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.stat-tile b { font-size: 28px; font-weight: 800; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+.stat-tile span { color: var(--fg-dim); font-size: 13px; }
+.hlist { display: flex; flex-direction: column; }
+.hrow { display: grid; grid-template-columns: 24px 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 6px 8px; border-radius: var(--r-art); min-height: 52px; }
+.hrow:hover { background: var(--tint-hi); }
+.hrow.norank { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.hrow-n { color: var(--fg-dim); font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; }
+.hrow-art { position: relative; width: 40px; height: 40px; padding: 0; flex: none; }
+.hrow-art img, .hrow-art .ph { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: var(--card-hover); display: block; }
+.hrow-art:disabled { cursor: default; }
+.hrow-play { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border-radius: 4px; opacity: 0; transition: opacity .12s; }
+.hrow.playable:hover .hrow-play { opacity: 1; }
+.hrow-text { min-width: 0; display: flex; flex-direction: column; }
+.hrow-title { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow.active .hrow-title { color: var(--accent); }
+.hrow-text small { color: var(--fg-dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow-count { color: var(--fg-dim); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; }
+.hsrc { font-size: 11px; padding: 2px 8px; border-radius: 500px; background: var(--tint); color: var(--fg-dim); }
+.card-rank { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; font-weight: 700; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; }
+.history .card-art { position: relative; }
+.history-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+.genre-bars { display: flex; flex-direction: column; gap: 8px; }
+.genre-bar { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 14px; }
+.genre-bar span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.genre-bar i { display: block; height: 10px; border-radius: 4px; background: var(--accent); min-width: 4px; }
+.genre-bar b { color: var(--fg-dim); font-weight: 400; font-size: 13px; font-variant-numeric: tabular-nums; }
+.hbars { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; height: 120px; align-items: end; padding-bottom: 18px; position: relative; }
+.hbar { position: relative; height: 100%; display: flex; align-items: flex-end; }
+.hbar i { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; opacity: .85; }
+.hbar:hover i { opacity: 1; }
+.hbar span { position: absolute; top: 100%; left: 0; margin-top: 4px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
+
+/* ================= phone layout (<= 760px) =================
+   Spotify iOS, from measured App Store / newsroom shots (see HANDOFF.md
+   "phone pass"): flat #121212 pages, 32pt avatar + 32pt chips up top (active
+   chip green with black text), 56pt shortcut tiles (#1e1e1e, art flush left,
+   13pt bold), 158pt shelf cards with square art, a 44pt WHITE search bar
+   (radius 4, black magnifier), Library rows with 64pt art on an 83pt pitch,
+   the mini player as a 56pt card tinted with the cover colour (8pt margins,
+   radius 6, 40pt art, devices + play at right, 2pt progress line along its
+   bottom), a 3-tab bar with 10pt labels under a transparent -> #121212
+   gradient, and detail pages with 250pt centred art, a 40pt green play at
+   the right of the action row, 48pt track art on a 64pt pitch, no numbers. */
+.tabbar { display: none; }
+@media (max-width: 760px) {
+  body { min-width: 0; }
+  .app { grid-template-rows: 48px minmax(0, 1fr) auto auto; gap: 0; padding: 0; background: var(--bg-base); }
+  .app.mobile-detail { grid-template-rows: minmax(0, 1fr) auto auto; }
+  .app.mobile-detail .navbar { display: none; }
+  .navbar { height: 48px; padding: 0 16px; gap: 8px; background: var(--bg-base); }
+  .brand, .navarrows { display: none; }
+  .navbar-right { margin-left: 0; order: -1; }
+  .avatar { width: 32px; height: 32px; font-size: 13px; }
+  .mobile-title { display: block; font-size: 24px; font-weight: 700; letter-spacing: -.3px; }
+  /* Account menu = Spotify's left drawer: profile header, then icon rows. */
+  .avatarmenu:not(.appmenu) { position: fixed; top: 0; bottom: 0; left: 0; right: auto; width: min(82vw, 340px); border-radius: 0; padding: calc(24px + env(safe-area-inset-top)) 0 calc(24px + env(safe-area-inset-bottom)); background: #121212; box-shadow: 0 0 60px rgba(0,0,0,.7); animation: drawer-in .25s cubic-bezier(.2,.7,.2,1); z-index: 200; overflow-y: auto; display: flex; flex-direction: column; }
+  .avatarmenu:not(.appmenu)::before { content: ''; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: -1; animation: fade-in .25s; }
+  @keyframes drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .avatarmenu .who { padding: 8px 20px 20px; gap: 12px; margin-bottom: 8px; }
+  .avatarmenu .desktop-only { display: none; }
+  .avatarmenu .who-avatar { width: 48px; height: 48px; font-size: 20px; }
+  .avatarmenu .who-text b { font-size: 20px; }
+  .avatarmenu button:last-child { margin-top: auto; }
+  .avatarmenu .who-avatar { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: #535353; color: #fff; font-size: 22px; font-weight: 700; overflow: hidden; flex: none; }
+  .avatarmenu .who-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .avatarmenu .who-text b { font-size: 20px; font-weight: 700; }
+  .avatarmenu .who-text small { display: block; font-size: 13px; color: #a7a7a7; font-weight: 400; margin-top: 2px; }
+  .avatarmenu .sub { display: none; }
+  .avatarmenu button { display: flex; align-items: center; gap: 16px; padding: 14px 20px; font-size: 16px; border-radius: 0; }
+  .avatarmenu .menu-ico { display: block; color: #fff; flex: none; }
+  .avatarmenu.appmenu { display: none; }
+  .appmenuwrap { display: none; }
+  /* Detail header: floating back chevron that turns into a solid title bar
+     (tinted with the page's hero colour) as the hero scrolls out. */
+  .mobile-topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 40; display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; height: calc(56px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); pointer-events: none; }
+  .mobile-topbar::before { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--topbar-bg, #121212) 55%, #121212); opacity: var(--topbar, 0); }
+  .mobile-topbar-title { position: relative; text-align: center; font-size: 16px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: clamp(0, calc(var(--topbar, 0) * 2 - 1), 1); }
+  .mobile-back { display: grid; position: relative; justify-self: center; pointer-events: auto; width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,.5); color: #fff; place-items: center; backdrop-filter: blur(6px); transition: background .15s; }
+  .mobile-topbar[style*="--topbar: 1"] .mobile-back { background: transparent; }
+  /* Pushed pages slide in from the right like a native navigation stack. */
+  .app.mobile-detail .content { animation: page-in .22s cubic-bezier(.2,.7,.2,1); }
+  @keyframes page-in { from { transform: translateX(24px); opacity: .4; } to { transform: none; opacity: 1; } }
+  .shell { grid-template-columns: minmax(0, 1fr) !important; }
+  .shell .sidebar, .shell .rail-resizer, .shell .panel-spacer { display: none; }
+  .shell.show-lib .sidebar { display: grid; }
+  .shell.show-lib .content { display: none; }
+  .sidebar, .content, .rightpanel { border-radius: 0; }
+  .rightpanel { position: fixed; inset: 0; z-index: 150; }
+  .shell.with-panel .content { display: none; }
+
+  /* Bottom tabs: 49pt + safe area, 24pt glyphs, 10pt labels, white / #a7a7a7. */
+  .tabbar { display: grid; grid-template-columns: repeat(3, 1fr); background: linear-gradient(transparent, var(--bg-base) 22%); padding: 6px 0 calc(4px + env(safe-area-inset-bottom)); order: 3; height: calc(49px + env(safe-area-inset-bottom)); align-items: start; }
+  .tabbar button { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #a7a7a7; font-size: 10px; font-weight: 500; padding: 2px 0; }
+  .tabbar button svg { width: 24px; height: 24px; }
+  .tabbar button.on { color: #fff; }
+
+  /* Mini player card. */
+  .player { min-width: 0; padding: 0 8px; order: 2; background: transparent; }
+  .player-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 0; height: 56px; background: color-mix(in srgb, var(--mini, #2a2a2a) 55%, #000); border-radius: 6px; padding: 0 16px 0 8px; margin: 0 0 8px; position: relative; overflow: hidden; }
+  .player-now { min-width: 0; gap: 10px; }
+  .player-art { width: 40px; height: 40px; border-radius: 4px; }
+  .player-title { font-size: 13px; font-weight: 600; }
+  .player-artist, .player-artist .linkish { font-size: 13px; color: rgba(255,255,255,.7); }
+  .player-now .trackrow-like { display: none; }
+  .player-right { display: flex; min-width: 0; padding: 0; gap: 0; order: 2; margin-right: 2px; }
+  .player-right > *:not(.devicepicker) { display: none; }
+  .player-right .devicebtn { color: #fff; }
+  .player-right .devicebtn.casting { color: var(--accent); }
+  .player-controls { width: auto; max-width: none; gap: 0; order: 3; }
+  .player-buttons { gap: 0; }
+  .player-buttons .ctl-mode, .player-buttons button[title="Previous"], .player-buttons button[title="Next"] { display: none; }
+  .player-buttons .play { background: none; color: #fff; width: 32px; height: 32px; }
+  .player-buttons .play svg { width: 22px; height: 22px; }
+  .player-seek { position: absolute; left: 8px; right: 8px; bottom: 0; width: auto; height: 2px; pointer-events: none; }
+  .player-seek .t { display: none; }
+  .player-seek input[type="range"] { height: 2px; border-radius: 0; background: linear-gradient(to right, #fff 0%, #fff var(--pct,0%), rgba(255,255,255,.2) var(--pct,0%), rgba(255,255,255,.2) 100%); }
+  .player-seek input[type="range"]::-webkit-slider-thumb { display: none; }
+  .playing-elsewhere { display: none; } /* the mini player carries the device line instead */
+  .player-elsewhere { display: flex; align-items: center; gap: 6px; color: var(--accent) !important; font-size: 12px; font-weight: 600; }
+  .player-elsewhere svg { width: 13px; height: 13px; }
+
+  /* Home: chips (active = green/black), 56pt shortcut tiles, 158pt cards. */
+  .pad { padding: 8px 16px 24px; }
+  .contentbar { padding: 8px 16px; }
+  .pill { min-block-size: 32px; padding: 0 16px; font-size: 13px; background: var(--bg-elevated-hi); }
+  .pill.on { background: var(--accent); color: #000; }
+  .shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .shortcut { height: 56px; border-radius: 4px; background: #1e1e1e; }
+  .shortcut-art { width: 56px; height: 56px; border-radius: 4px 0 0 4px; }
+  .shortcut-title { font-size: 13px; padding: 0 8px 0 12px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.25; }
+  .shortcut .shortcut-play { display: none; }
+  .shelf-head h2, section > .shelf-head h2 { font-size: 24px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .shelf { grid-auto-columns: 158px; gap: 16px; min-height: 0; scroll-snap-type: none; padding: 0 0 6px; }
+  .card { padding: 0; }
+  .card-art img, .card-art .ph { border-radius: 1px; box-shadow: none; }
+  .card.round .card-art img { border-radius: 50%; }
+  .card-title { font-size: 14px; font-weight: 700; margin-top: 4px; }
+  .card-sub { font-size: 13px; }
+  .card .card-play { display: none; }
+
+  /* Search: white 44pt bar, radius 4, black magnifier; Browse tiles ~100pt. */
+  .search { height: 44px; border-radius: 4px; background: #fff; color: #000; border: 0; padding-left: 48px; font-size: 16px; font-weight: 500;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M10.533 1.279c-5.18 0-9.407 4.14-9.407 9.279s4.226 9.279 9.407 9.279c2.234 0 4.29-.77 5.907-2.058l4.353 4.353a1 1 0 1 0 1.414-1.414l-4.344-4.344a9.157 9.157 0 0 0 2.077-5.816c0-5.14-4.226-9.28-9.407-9.28zm-7.407 9.279c0-4.006 3.302-7.28 7.407-7.28s7.407 3.274 7.407 7.28-3.302 7.279-7.407 7.279-7.407-3.273-7.407-7.28z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-size: 24px; background-position: 12px center; }
+  .search::placeholder { color: #121212; opacity: .85; }
+  .search:focus { border: 0; outline: none; }
+  .searchgrid { grid-template-columns: 1fr; }
+  .topresult h3 { font-size: 24px; }
+  .tile { aspect-ratio: auto; height: 100px; border-radius: 4px; padding: 12px; }
+  .tile span { font-size: 14px; }
+
+  /* Library page (the sidebar shown full width): 64pt art, 83pt pitch. */
+  .shell.show-lib .sidebar .nav { display: none; }
+  .libhead { display: none; }
+  .liblist { padding: 0 16px; }
+  .libitem { padding: 8px 0; gap: 16px; border-radius: 0; }
+  .libitem img, .libitem .ph, .libitem .liked-art { width: 64px; height: 64px; border-radius: 3px; }
+  .libitem-name { font-size: 16px; font-weight: 400; }
+  .libitem-sub { font-size: 13px; }
+
+  /* Detail pages: 250pt centred art, 24pt title, action row with a 40pt green play at the right. */
+  .hero { flex-direction: column; align-items: flex-start; gap: 12px; padding: calc(56px + env(safe-area-inset-top)) 16px 8px; }
+  .hero .hero-cover img, .hero > img, .hero .liked-art { width: 250px; height: 250px; align-self: center; border-radius: 4px; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+  .hero .hero-cover, .hero .liked-art { align-self: center; }
+  .hero h1 { font-size: 24px !important; letter-spacing: -.3px; margin: 8px 0 4px; }
+  .hero .kind { display: none; }
+  .hero p, .hero .hero-meta { font-size: 13px; }
+  .hero.artist { padding: 0; min-height: 300px; justify-content: flex-end; }
+  .hero.artist .hero-cover { display: none; }
+  .hero.artist > div { padding: 0 16px 12px; }
+  .hero.artist h1 { font-size: 40px !important; letter-spacing: -1px; }
+  .hero.artist.with-banner { min-height: 300px; background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(18,18,18,.95) 100%), var(--banner) center 25% / cover no-repeat; }
+  .actions { padding: 8px 16px 12px; gap: 12px; }
+  .actions .bigplay { order: 9; margin-left: auto; width: 40px; height: 40px; }
+  .actions .bigplay svg { width: 18px; height: 18px; }
+  .actions .iconbtn { width: 32px; height: 32px; }
+  .actions .btn-secondary { min-block-size: 32px; padding: 0 12px; font-size: 13px; }
+  /* Flex, not the desktop grid: its column template kept winning here and
+     squeezed titles into a third of the row. */
+  .trackrow, .trackrow:not(:has(.trackrow-art)) { display: flex; gap: 12px; padding: 8px 16px; min-height: 64px; }
+  .trackrow-name { flex: 1 1 auto; min-width: 0; }
+  .trackrow-menu, .trackrow-more { flex: none; }
+  .trackrow-art { width: 48px; height: 48px; border-radius: 4px; }
+  .trackrow-name span { font-size: 16px; }
+  .trackrow-name small { font-size: 13px; color: #a7a7a7; }
+  .trackrow-n, .trackrow-album, .trackrow-like, .trackrow-dur { display: none; }
+  .trackrow-more { opacity: 1; }
+  .trackhead { display: none !important; }
+  .reco-add { margin-right: 8px; }
+
+  /* Now playing: gradient of the cover colour, chevron / "PLAYING FROM" / dots, 327pt art radius 8, 64pt play. */
+  .fs { background: linear-gradient(180deg, var(--np, #333) 0%, color-mix(in srgb, var(--np, #333) 70%, #000) 60%, #121212 100%); }
+  .fs-bg { display: none; }
+  .fs-top { grid-template-columns: auto 1fr auto; padding: calc(8px + env(safe-area-inset-top)) 24px 0; height: auto; gap: 12px; align-items: center; }
+  .fs-chevron { display: grid; place-items: center; width: 32px; height: 32px; color: #fff; margin-left: -6px; }
+  .fs-from { text-align: center; min-width: 0; }
+  .fs-from-desktop, .fs-tabs { display: none; }
+  .fs-from-phone { display: flex; flex-direction: column; align-items: center; line-height: 1.2; min-width: 0; }
+  .fs-from-phone small { font-size: 11px; letter-spacing: .08em; color: rgba(255,255,255,.7); text-transform: uppercase; }
+  .fs-from-phone b { font-size: 13px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+  .fs-close { width: 32px; height: 32px; background: none; margin-right: -6px; }
+  .fs-stage { padding: 16px 24px; }
+  .fs-art { max-width: 100%; width: 100%; border-radius: 8px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
+  .fs-lyrics { width: 100%; }
+  .fs-bottom { grid-template-columns: 1fr; gap: 12px; padding: 8px 24px calc(24px + env(safe-area-inset-bottom)); }
+  .fs-meta { gap: 12px; }
+  .fs-meta .fs-thumb { display: none; }
+  .fs-title { font-size: 24px; font-weight: 700; }
+  .fs-artist, .fs-artist .linkish { font-size: 16px; color: #b3b3b3; }
+  .fs-like { margin-left: auto; }
+  .fs-seek { grid-column: 1; grid-row: auto; font-size: 11px; }
+  .fs-meta, .fs-controls { grid-column: 1; grid-row: auto; }
+  .fs-output { display: none; }
+  .fs-controls { grid-column: 1; grid-row: auto; justify-content: space-between; gap: 0; padding: 4px 8px; }
+  .fs-controls .fs-play { width: 64px; height: 64px; }
+  .fs-controls .fs-play svg { width: 28px; height: 28px; }
+  .fs-phone-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; padding: 4px 0 0; color: #b3b3b3; }
+  .fs-phone-row button { color: #b3b3b3; padding: 8px; }
+  .fs-phone-row button.on { color: var(--accent); }
+
+  /* ---- Safe areas (the Expo shell draws full-bleed; viewport-fit=cover). ---- */
+  .app { grid-template-rows: calc(48px + env(safe-area-inset-top)) minmax(0, 1fr) auto auto; }
+  .navbar { height: auto; min-height: 48px; padding-top: env(safe-area-inset-top); }
+  .app.mobile-detail .content > .pad:first-child, .app.mobile-detail .content > .contentbar:first-child, .app.mobile-detail .sf-hero { padding-top: calc(56px + env(safe-area-inset-top)); }
+  .app.mobile-detail .settings { padding-top: calc(56px + env(safe-area-inset-top)); }
+  .rightpanel .panel-header { padding-top: calc(8px + env(safe-area-inset-top)); height: auto; }
+  .contentbar, .detailbar, .disco-filters { position: static; }
+  .trackhead { position: static; }
+
+  /* ---- Login: Spotify's black page, wordmark, white fields, green pill. ---- */
+  .login { align-items: flex-start; padding-top: calc(80px + env(safe-area-inset-top)); background: #000; }
+  .login form { width: 100%; background: transparent; padding: 0 24px; gap: 16px; }
+  .login-mark { display: grid; place-items: center; color: #fff; margin-bottom: 8px; }
+  .login h1 { text-align: center; font-size: 28px; letter-spacing: -.5px; }
+  .login-sub { text-align: center; font-size: 15px; color: #a7a7a7; margin-bottom: 16px; }
+  .login label { font-size: 14px; color: #fff; gap: 8px; }
+  .login input { background: #121212; border: 1px solid #727272; border-radius: 4px; padding: 14px; font-size: 16px; color: #fff; }
+  .login input:focus { border-color: #fff; }
+  .login .primary { background: var(--accent); color: #000; border-radius: 500px; min-height: 48px; font-size: 16px; font-weight: 700; margin-top: 8px; }
+  .login .primary:disabled { opacity: .3; background: var(--accent); color: #000; }
+  .login h1 { color: #fff; }
+  .login input, .login button { font-family: inherit; }
+  .login input:focus { outline: none; }
+  /* iOS keeps :hover after a tap; on touch these tints must not stick. */
+  @media (hover: none) {
+    .ctxitem:hover, .avatarmenu button:hover, .srow:hover, .navarrow:hover, .icon-btn:hover, .iconbtn:hover, .setting-row:hover, .libitem:hover, .card:hover, .trackrow:hover, .shortcut:hover, .setting-item:hover, .theme-row:hover { background: transparent; }
+    .pill:hover:not(.on) { background: var(--bg-elevated-hi); }
+    .rowlink:hover, .linkish:hover { text-decoration: none; }
+    .card:hover .card-play, .shortcut:hover .shortcut-play, .trackrow:hover .trackrow-playglyph { opacity: 0; }
+    .trackrow:hover .trackrow-idx { opacity: 1; }
+  }
+
+  /* ---- Touch: app feel. No tap flash, no callouts, no text selection on UI,
+     no rubber-banding of the shell, and a press tint instead of hover. ---- */
+  * { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+  .app, .app button, .app .trackrow, .app .card, .app .libitem { -webkit-user-select: none; user-select: none; }
+  .app input, .app textarea, .lyric-line { -webkit-user-select: text; user-select: text; }
+  html, body, .app { overscroll-behavior: none; }
+  .content { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+  .trackrow:active, .libitem:active, .shortcut:active, .qrow:active, .hrow:active, .ctxitem:active { background: rgba(255,255,255,.08); }
+  .card:active .card-art img, .tile:active, .shortcut:active .shortcut-art { filter: brightness(.8); }
+  .tabbar button:active, .icon-btn:active, .iconbtn:active, .fs-controls button:active { opacity: .6; }
+  *:focus-visible { outline: none; }
+  ::-webkit-scrollbar { display: none; }
+  * { scrollbar-width: none; }
+  /* ---- Touch: no sticky hover tints, affordances always visible. ---- */
+  .trackrow:hover, .card:hover, .libitem:hover, .shortcut:hover, .qrow:hover, .hrow:hover { background: transparent; }
+  .trackrow.active { background: transparent; }
+  .trackrow-idx { opacity: 1; }
+  .trackrow-playglyph { display: none; }
+
+  /* ---- Search: Browse tiles two across, ~100pt, title 14 bold. ---- */
+  .tilegrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tile { aspect-ratio: auto; height: 100px; border-radius: 4px; padding: 12px; }
+  .tile span { font-size: 15px; max-width: 75%; }
+  .tile img, .tile .tile-liked { width: 60%; right: -14%; bottom: -14%; }
+
+  /* ---- Artist page: quieter Request pills, filters not sticky. ---- */
+  .card-request { font-size: 12px; padding: 6px 12px; }
+
+  /* ---- Library tab: chips + sort row like Spotify's. ---- */
+  .libchips { display: flex; gap: 8px; padding: 8px 16px 4px; overflow-x: auto; scrollbar-width: none; }
+  .libchips::-webkit-scrollbar { display: none; }
+  .libchips .pill { flex: none; }
+  .libchips .pill.x { width: 32px; padding: 0; display: grid; place-items: center; font-size: 18px; }
+  .libsort { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px 4px; font-size: 13px; font-weight: 600; color: #fff; }
+  .newplaylist-input { width: 100%; }
+
+  /* ---- Bottom sheets: context menus and the device picker slide up from the bottom. ---- */
+  .ctxmenu-fixed { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; width: 100%; max-width: none; min-width: 0; border-radius: 16px 16px 0 0; padding: 12px 8px calc(28px + env(safe-area-inset-bottom)); max-height: 80vh; overflow-y: auto; background: #282828; box-shadow: 0 -8px 40px rgba(0,0,0,.6); }
+  .ctxmenu-fixed .ctx-chev { display: none; }
+  .ctxmenu-fixed .ctxmenu-sep { margin: 4px 0; border-color: rgba(255,255,255,.08); }
+  .ctxmenu-scrim { display: block; position: fixed; inset: 0; z-index: 299; background: rgba(0,0,0,.6); animation: fade-in .2s; }
+  .ctxmenu-fixed::after { content: ''; display: block; position: absolute; top: 6px; left: 50%; width: 36px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.25); transform: translateX(-50%); }
+  .ctxmenu-fixed button, .ctxmenu-fixed .ctxitem { padding: 14px 12px; font-size: 16px; }
+  .ctxmenu-fixed:not(.ctxmenu-sub) { animation: sheet-in .22s cubic-bezier(.2,.7,.2,1); }
+  @keyframes sheet-in { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .ctxmenu-head { display: flex; align-items: center; gap: 12px; padding: 14px 12px 12px; border-bottom: 1px solid rgba(255,255,255,.1); margin-bottom: 6px; }
+  .ctxmenu-head img { width: 56px; height: 56px; border-radius: 4px; object-fit: cover; background: #333; flex: none; }
+  .ctxmenu-head img.round { border-radius: 50%; }
+  .ctxmenu-head-ico { width: 56px; height: 56px; display: grid; place-items: center; color: #fff; flex: none; }
+  .ctxmenu-head-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ctxmenu-head-text b { font-size: 16px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ctxmenu-head-text small { font-size: 13px; color: #a7a7a7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* A submenu is a second sheet over the first, tall enough to read as a page. */
+  .ctxmenu-sub { position: fixed !important; z-index: 301; min-height: 45vh; }
+  .devicemenu { position: fixed !important; left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; width: 100% !important; max-width: none; border-radius: 16px 16px 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); max-height: 80vh; overflow-y: auto; box-shadow: 0 -8px 40px rgba(0,0,0,.6); }
+  .devicemenu { z-index: 300; }
+
+  /* Now playing and the queue rise from the bottom like Spotify's sheets. */
+  .fs, .rightpanel { animation: rise-in .3s cubic-bezier(.2,.7,.2,1); }
+  @keyframes rise-in { from { transform: translateY(100%); } to { transform: none; } }
+  /* ---- Now playing: lyrics scroll inside the stage. ---- */
+  .fs-stage { overflow: hidden; }
+  .fs-stage:has(.fs-lyrics) { display: block; }
+  .fs-lyrics { height: 100%; overflow-y: auto; box-sizing: border-box; }
+  .fs-lyrics .lyric-line { font-size: 24px; }
+}
+
+/* ================= History = stats.fm's user page =================
+   Tokens straight from their Tailwind build: background #111111, foreground
+   #181818, primary #1ed760, grey text #a3a3a3 (p/span default, weight 500),
+   text-grey #727272. Container max-w-md/3xl/7xl with 16/24/32px gutters.
+   Headings: h1 30/36 (800 here), h2 24/30, h3 20/24, h4 18, all 700. */
+.sf { background: #111111; color: #fff; font-size: 14px; font-weight: 500; }
+@media (min-width: 768px) { .sf { font-size: 16px; } }
+.sf h1, .sf h2, .sf h3, .sf h4 { margin: 0; color: #fff; font-weight: 700; line-height: 1.25; }
+.sf h1 { font-size: 30px; font-weight: 800; }
+.sf h2 { font-size: 24px; }
+.sf h3 { font-size: 20px; }
+.sf h4 { font-size: 18px; }
+@media (min-width: 768px) { .sf h1 { font-size: 36px; } .sf h2 { font-size: 30px; } .sf h3 { font-size: 24px; } }
+.sf p, .sf span { font-weight: 500; color: #a3a3a3; }
+.sf p { margin: 8px 0; }
+.sf .sf-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.sf .sf-clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sf-container { margin: 0 auto; max-width: 448px; padding: 0 16px; }
+@media (min-width: 640px) { .sf-container { max-width: 768px; padding: 0 24px; } }
+@media (min-width: 1024px) { .sf-container { max-width: 1280px; padding: 0 32px; } }
+.sf-grey { color: #727272; }
+
+/* Hero band */
+.sf-hero { background: #181818; padding-top: 40px; }
+.sf-profile { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 40px 0 40px; }
+@media (min-width: 768px) { .sf-profile { flex-direction: row; padding-top: 56px; } }
+.sf-avatar-ring { position: relative; border-radius: 50%; border: 2px solid #111111; flex: none; }
+.sf-avatar { position: relative; flex: none; border-radius: 50%; overflow: hidden; background: #181818; display: grid; place-items: center; }
+.sf-avatar img { width: 100%; height: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 50%; display: block; background: #181818; }
+.sf-avatar p { margin: 0; color: #a3a3a3; font-size: 48px; }
+.sf-profile-text { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
+@media (min-width: 768px) { .sf-profile-text { align-items: flex-start; } .sf-profile-text h1, .sf-handle { text-align: left; } }
+.sf-name-row { display: flex; }
+.sf-handle { font-size: 18px; text-align: center; }
+.sf-friends { margin-top: 8px; display: flex; align-items: center; }
+.sf-dot-wrap { margin: 0 8px; display: inline-flex; }
+.sf-dot { display: block; width: 4px; height: 4px; background: #a3a3a3; }
+.sf-textbtn { color: #1ed760; font-weight: 700; padding: 0; background: transparent; }
+.sf-textbtn:hover { opacity: .8; }
+
+/* Stats row: range listbox (right on md) + text-only stat cards, 2 -> 4 columns, gap 24. */
+.sf-body { margin-top: 32px; padding-bottom: 48px; }
+.sf-stats-row { display: flex; flex-direction: column; justify-content: space-between; gap: 20px; }
+@media (min-width: 768px) { .sf-stats-row { flex-direction: row-reverse; } }
+.sf-listbox-wrap { z-index: 50; display: flex; justify-content: center; }
+.sf-listbox { position: relative; margin-top: 4px; width: 288px; }
+.sf-listbox-btn { position: relative; width: 100%; cursor: default; border-radius: 8px; background: #181818; padding: 8px 40px 8px 12px; text-align: left; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1); color: #fff; font-size: 16px; font-weight: 500; }
+@media (min-width: 640px) { .sf-listbox-btn { font-size: 14px; } }
+.sf-listbox-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px #1ed760; }
+.sf-listbox-chev { pointer-events: none; position: absolute; top: 0; bottom: 0; right: 0; display: flex; align-items: center; padding-right: 8px; }
+.sf-listbox-chev svg { width: 20px; height: 20px; color: #727272; }
+.sf-listbox-opts { position: absolute; margin: 4px 0 0; padding: 4px 0; max-height: 240px; width: 100%; overflow: auto; border-radius: 6px; background: #181818; font-size: 14px; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1), 0 0 0 1px rgba(0,0,0,.05); list-style: none; z-index: 60; }
+.sf-listbox-opt { position: relative; cursor: default; user-select: none; padding: 8px 16px 8px 40px; color: #a3a3a3; }
+.sf-listbox-opt:hover { background: rgba(17,17,17,.5); }
+.sf-listbox-opt.selected .sf-truncate { color: #fff; }
+.sf-listbox-check { position: absolute; top: 0; bottom: 0; left: 0; display: flex; align-items: center; padding-left: 12px; color: #1ed760; }
+.sf-listbox-check svg { width: 20px; height: 20px; }
+.sf-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 0; padding: 0; list-style: none; flex: 1; }
+@media (min-width: 768px) { .sf-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.sf-stats h3 { text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-stat-label { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 18px; }
+.sf-gate { position: relative; flex: 1; }
+.sf-blur { filter: blur(4px); }
+.sf-gate-msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; }
+.sf-gate-msg p { margin: 0; color: #727272; }
+
+/* Sections: sticky header, round toolbar buttons. */
+.sf-section-head { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; background: #111111; padding: 40px 0 12px; }
+.sf-section-titles { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sf-section-desc { margin: 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-toolbar { display: flex; flex-shrink: 0; gap: 4px; }
+.sf-toolbtn { border-radius: 9999px; background: #181818; padding: 8px; transition: all .15s; display: grid; place-items: center; }
+.sf-toolbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px #737373; }
+.sf-toolbtn:active { transform: scale(.95); }
+.sf-toolbtn svg { width: 24px; height: 24px; color: #727272; display: block; }
+.sf-toolbtn .on svg { color: #fff; }
+.sf-toolbtn:disabled { cursor: default; }
+.sf-empty { display: grid; width: 100%; place-items: center; padding: 16px 0; }
+.sf-empty p { margin: 0; color: #727272; }
+.sf-empty-icon { gap: 8px; }
+.sf-empty-icon svg { width: 48px; height: 48px; color: #727272; }
+
+/* Genre chips */
+.sf-chips { display: flex; gap: 8px; overflow-x: auto; margin: 0; padding: 0 0 12px; list-style: none; scrollbar-width: thin; scrollbar-color: rgba(115,115,115,.7) #181818; }
+.sf-chip { width: max-content; white-space: nowrap; border-radius: 9999px; background: #181818; padding: 8px 16px; font-weight: 500; color: #fff; }
+.sf-chip a { color: #fff; }
+
+/* Carousel: viewport overflow hidden, single-row w-max grid moved with translateX. */
+.sf-carousel { overflow: hidden; }
+.sf-carousel-row { display: grid; width: max-content; grid-auto-flow: column; grid-template-rows: repeat(1, minmax(0, 1fr)); justify-content: flex-start; gap: 16px; margin: 0; padding: 0; list-style: none; background: #111111; transition: transform .3s ease-in-out; }
+.sf-carousel-grid { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 16px; margin: 0; padding: 0; list-style: none; }
+@media (hover: none) { .sf-carousel { overflow-x: auto; scrollbar-width: none; } .sf-carousel::-webkit-scrollbar { display: none; } .sf-carousel-row { transform: none !important; } }
+.sf-square { aspect-ratio: 1; width: 100%; overflow: hidden; background: #181818; }
+.sf-square img { width: 100%; height: 100%; object-fit: cover; display: block; background: #181818; }
+.sf-ph { width: 100%; height: 100%; background: #181818; }
+.sf-track-card { display: flex; width: 160px; flex-direction: column; transition: transform .3s ease-in-out; }
+.sf-track-card:active, .sf-artist-card:active, .sf-album-card:active { transform: scale(.95); }
+.sf-track-card a, .sf-artist-card, .sf-album-card { color: inherit; text-decoration: none; cursor: pointer; }
+.sf-track-card h4 { margin-top: 8px; }
+.sf-track-card > p { margin: 0; }
+.sf-track-card:hover .sf-square { opacity: .9; }
+.sf-artist-link:hover { color: #fff; }
+.sf-artist-card { display: flex; width: 160px; flex-direction: column; align-items: center; transition: transform .3s ease-in-out; }
+.sf-artist-text { margin-top: 8px; text-align: center; }
+.sf-artist-text p { margin: 0; }
+.sf-tight { line-height: 1.25; }
+.sf-album-card { display: block; width: 160px; transition: transform .3s ease-in-out; }
+.sf-album-text { margin-top: 8px; }
+.sf-album-text p { margin: 0; }
+
+/* Listening clocks */
+.sf-clocks { display: flex; width: 100%; flex-direction: column; gap: 8px; }
+@media (min-width: 768px) { .sf-clocks { flex-direction: row; } }
+.sf-clock-box { flex: 1; align-content: center; text-align: center; }
+.sf-clock { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 auto; }
+.sf-clock-wedge { fill: #1ed760; stroke: #111111; stroke-width: 2; }
+.sf-clock-spoke { stroke: rgba(255,255,255,.12); stroke-width: 1; }
+
+/* Recent streams */
+.sf-day { position: sticky; top: 92px; z-index: 29; background: #111111; padding: 8px 0; margin: 0; }
+@media (min-width: 768px) { .sf-day { top: 98px; } }
+.sf-stream { display: block; color: inherit; text-decoration: none; cursor: pointer; }
+.sf-stream-row { display: flex; justify-content: space-between; }
+.sf-stream-main { display: flex; width: 83.333%; align-items: center; gap: 12px; }
+.sf-stream-img { width: 48px; height: 48px; flex: none; overflow: hidden; background: #181818; }
+.sf-stream-img img { width: 48px; height: 48px; object-fit: cover; display: block; }
+.sf-stream-text { width: 75%; overflow: hidden; line-height: 1.25; }
+.sf-stream-text p { margin: 0; }
+.sf-stream-time { margin: 0; text-align: right; white-space: nowrap; }
+.sf-stream hr { margin: 8px 0; border: 0; border-top: 1px solid #181818; }
+.sf-showall { display: inline-block; margin: 12px 0; font-weight: 700; text-transform: uppercase; color: #727272; cursor: pointer; transition: color .15s; }
+.sf-showall:hover { color: #fff; }
+.sf-spinner-wrap { display: grid; place-items: center; padding: 16px; min-height: 40px; }
+.sf-spinner { width: 24px; height: 24px; border-radius: 50%; border: 3px solid #181818; border-top-color: #1ed760; animation: sfspin .8s linear infinite; }
+@keyframes sfspin { to { transform: rotate(360deg); } }
+.sf-streams { list-style: none; margin: 0; padding: 0; }
+.sf-stream-skel { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.sf-skel-img { width: 48px; height: 48px; border-radius: 8px; background: #181818; animation: sfpulse 2s cubic-bezier(.4,0,.6,1) infinite; flex: none; }
+.sf-skel-text { display: block; height: 16px; border-radius: 9999px; background: #181818; animation: sfpulse 2s cubic-bezier(.4,0,.6,1) infinite; }
+.sf-skel-row { display: flex; height: 36px; align-items: center; margin-bottom: 4px; }
+.sf-right { margin-left: auto; }
+@keyframes sfpulse { 50% { opacity: .5; } }
+
+/* stats.fm app extras: delta badges, per-day cards + line charts, segmented control */
+.sf-delta { display: inline-block; margin-left: 8px; font-size: 12px; font-weight: 700; vertical-align: middle; padding: 1px 6px; border-radius: 6px; background: #181818; }
+.sf-delta.up { color: #1ed760; }
+.sf-delta.down { color: #f87171; }
+.sf-delta.zero { color: #a3a3a3; }
+.sf-avg-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.sf-avg-card { background: #181818; border-radius: 12px; padding: 14px 16px; }
+.sf-avg-card h3 { color: #1ed760; font-size: 20px; }
+.sf-avg-card span { color: #fff; font-size: 13px; }
+.sf-charts { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 1024px) { .sf-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sf-chart { position: relative; background: #181818; border-radius: 12px; padding: 12px 12px 8px; }
+.sf-chart-head { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 4px; }
+.sf-chart-svg { width: 100%; height: auto; display: block; cursor: crosshair; }
+.sf-chart-grid { stroke: rgba(255,255,255,.06); stroke-width: 1; }
+.sf-chart-tick { fill: #727272; font-size: 11px; font-weight: 500; }
+.sf-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sf-line.streams { stroke: #1ed760; }
+.sf-line.minutes { stroke: #1ed760; opacity: .45; }
+.sf-crosshair { stroke: rgba(255,255,255,.35); stroke-width: 1; stroke-dasharray: 3 3; }
+.sf-dot-streams { fill: #1ed760; stroke: #181818; stroke-width: 2; }
+.sf-dot-minutes { fill: #1ed760; opacity: .6; stroke: #181818; stroke-width: 2; }
+.sf-tip { position: absolute; top: 40px; transform: translateX(-50%); background: #111111; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; pointer-events: none; white-space: nowrap; font-size: 12px; z-index: 5; }
+.sf-tip b { color: #fff; font-size: 12px; }
+.sf-legend { display: flex; gap: 16px; justify-content: center; padding: 6px 0 2px; font-size: 12px; }
+.sf-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sf-legend i { width: 8px; height: 8px; border-radius: 50%; background: #1ed760; display: inline-block; }
+.sf-legend i.minutes { opacity: .45; }
+.sf-clock-hour { fill: #727272; font-size: 12px; font-weight: 500; }

@@ -278,6 +278,8 @@ export function usePlayer(jf) {
   // the desktop included: the server drives them, so it needs no LAN reach.
   const lanDevices = (roster.lanDevices || [])
     .filter((d) => !remote || String(d.viaClient || '').startsWith('server:'))
+    // A speaker this desktop can see itself is driven from here, not listed twice.
+    .filter((d) => !remote || !localDevicesRef.current.some((x) => x.id === d.id))
     .filter((d, i, arr) => arr.findIndex((x) => x.id === d.id) === i)
     .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : 'Chromecast', viaClient: d.viaClient }));
 

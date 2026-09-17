@@ -1,0 +1,54 @@
+# Tag v* -> build the desktop apps (dmg, exe) and attach them to a GitHub
+# Release. Unsigned (no developer accounts): macOS users right-click > Open
+# once (the dmg is ad-hoc signed so Gatekeeper offers that instead of
+# "damaged"), Windows users click through SmartScreen.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+            glob: 'desktop/release/*.dmg'
+          - os: windows-latest
+            script: dist:win
+            glob: 'desktop/release/*.exe'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build -w web
+      - run: npm ci
+        working-directory: desktop
+      # --publish never: electron-builder otherwise tries to upload to GitHub itself on a tag.
+      - run: npm run ${{ matrix.script }} -- --publish never
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: ${{ matrix.glob }}
+          if-no-files-found: error
+  publish:
+    needs: [desktop]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - run: ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

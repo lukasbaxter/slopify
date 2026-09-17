@@ -437,7 +437,7 @@ export default function App() {
     const relay = new SessionLink({
       baseUrl: jf.baseUrl,
       token: jf.token,
-      name: (typeof window !== 'undefined' && window.conduit?.deviceName) || (window.conduit ? 'Conduit Desktop' : 'This Browser'),
+      name: (typeof window !== 'undefined' && window.conduit?.deviceName) || (window.conduit ? 'Slopify Desktop' : 'This Browser'),
       kind: window.conduit ? 'desktop' : 'web',
       canPlay: true,
       onRoster: (r) => playerRef.current.applyRoster(r),

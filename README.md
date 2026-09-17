@@ -10,12 +10,13 @@ them). Successor to Conduit, rebuilt on what that taught (see `docs/PLAN.md`).
 services:
   slopify:
     image: ghcr.io/lukasbaxter/slopify:latest
-    ports: ["8080:8080"]
+    network_mode: host   # so it can find Chromecast / BluOS speakers; PORT picks the port
     volumes:
       - /path/to/music:/music
       - ./data:/data
     environment:
-      PUBLIC_URL: https://music.example.com
+      PORT: "8080"
+      PUBLIC_URL: http://192.168.1.10:8080   # what speakers fetch audio from (LAN address)
       ADMIN_USER: admin
       ADMIN_PASS: admin   # you are asked to change it on first login
 ```
@@ -26,7 +27,7 @@ into `/music` however you like (Lidarr, slskd, rsync); Slopify only reads it
 
 ## What works today
 
-See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (originals or HLS transcodes), lyrics (sidecars + LrcLib), likes, playlists, Home from your own plays, several devices sharing one session (mirror, control, hand over), accounts with invites and admin roles. Desktop app, speakers, phone shell and Soulseek are next.
+See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (originals or HLS transcodes), lyrics (sidecars + LrcLib), artist pictures, likes, playlists, Home and history from your own plays, several devices sharing one session (mirror, control, hand over), Chromecast and BluOS speakers at home driven by the server so any phone or browser can pick them, accounts with invites and admin roles. Desktop app, phone shell and Soulseek are next.
 
 ## Develop
 

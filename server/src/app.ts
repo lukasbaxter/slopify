@@ -8,16 +8,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
+import { openDb, type DB } from './db.js';
+import { ensureAdmin, registerAuth } from './auth.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
 // server/dist/app.js or server/src/app.ts -> repo root
 export const repoRoot = path.resolve(here, '..', '..');
 
-export async function buildServer() {
+export type BuildOptions = { dataDir?: string; musicDir?: string; db?: DB };
+
+export async function buildServer(opts: BuildOptions = {}) {
   const app = Fastify({ logger: { level: config.logLevel } });
+  const dataDir = opts.dataDir ?? config.dataDir;
+  const db = opts.db ?? openDb(dataDir);
+  await ensureAdmin(db, config.adminUser, config.adminPass);
+  app.decorate('db', db);
+  app.addHook('onClose', async () => { if (!opts.db) db.close(); });
   await app.register(cors, { origin: true });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute' });
+
+  registerAuth(app, db);
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

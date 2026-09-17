@@ -11,10 +11,11 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   const runScan = async () => {
     if (current) return current;
     current = { started: Date.now(), files: 0 };
+    // The scan is "current" only while it walks the files; the enrichment it
+    // kicks off afterwards can run for hours and must not block the next scan.
     scanLibrary(db, { musicDir, dataDir, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
-      .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); return runEnrich(); })
-      .catch((e) => app.log.error(`scan failed: ${e.message}`))
-      .finally(() => { current = null; });
+      .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; void runEnrich(); })
+      .catch((e) => { app.log.error(`scan failed: ${e.message}`); current = null; });
     return current;
   };
   // Lyrics/identity for whatever the scan left unresolved; also on a timer for retries.

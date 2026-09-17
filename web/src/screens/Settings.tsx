@@ -39,6 +39,8 @@ export function Admin() {
       <section><h2>Library</h2>
         {status && <p className="muted">{status.scanning ? `Scanning… ${status.scanning.files} files` : status.scans[0] ? `Last scan: ${status.scans[0].files} files, +${status.scans[0].added} / ~${status.scans[0].changed} / -${status.scans[0].removed}` : 'Never scanned'} · {status.missingLyrics} songs without lyrics</p>}
         <button className="primary" onClick={() => post('/admin/scan').then(load)} disabled={!!status?.scanning}>Scan now</button>
+        <button className="secondary" onClick={() => post('/admin/enrich').then(load)} disabled={!!status?.enriching} style={{ marginLeft: 8 }}>{status?.enriching ? 'Fetching lyrics…' : 'Fetch missing lyrics'}</button>
+        {status?.enrich?.missing?.length > 0 && <details><summary className="muted">{status.enrich.missing.length} without lyrics (retried daily, then weekly)</summary><ul className="plain">{status.enrich.missing.map((m: any) => <li key={m.id}><span>{m.artist} · {m.title}</span><span className="muted small">{m.lyrics_tries} tries</span></li>)}</ul></details>}
       </section>
       <section><h2>Users</h2>
         <ul className="plain">{users.map((u) => <li key={u.id}><span>{u.name} · {u.role}</span>{u.id !== me.id && <span className="actions"><button className="secondary small" onClick={() => post(`/users/${u.id}/role`, { role: u.role === 'admin' ? 'user' : 'admin' }).then(load)}>{u.role === 'admin' ? 'Make user' : 'Make admin'}</button><button className="secondary small" onClick={() => confirm(`Delete ${u.name}?`) && del(`/users/${u.id}`).then(load)}>Delete</button></span>}</li>)}</ul>

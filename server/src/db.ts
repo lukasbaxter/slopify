@@ -63,6 +63,15 @@ const MIGRATIONS: string[] = [
   CREATE TABLE scans (id INTEGER PRIMARY KEY AUTOINCREMENT, started INTEGER NOT NULL, finished INTEGER, files INTEGER NOT NULL DEFAULT 0, added INTEGER NOT NULL DEFAULT 0, changed INTEGER NOT NULL DEFAULT 0, removed INTEGER NOT NULL DEFAULT 0, error TEXT);
   CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
   `,
+  `
+  CREATE TABLE enrich (
+    track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    lyrics_state TEXT NOT NULL DEFAULT 'pending', lyrics_tries INTEGER NOT NULL DEFAULT 0, lyrics_next INTEGER NOT NULL DEFAULT 0,
+    identity_tries INTEGER NOT NULL DEFAULT 0, identity_next INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX enrich_lyrics ON enrich(lyrics_state, lyrics_next);
+  CREATE TABLE ext_cache (k TEXT PRIMARY KEY, json TEXT NOT NULL, at INTEGER NOT NULL);
+  `,
 ];
 
 export type DB = Database.Database;

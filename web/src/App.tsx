@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { auth, get, type User } from './api/client';
 import { app, navigate } from './state/app';
 import { loadLikes } from './state/likes';
+import { connect } from './state/session';
 import { Login, ChangePassword } from './screens/Login';
 import { Home } from './screens/Home';
 import { Search } from './screens/Search';
@@ -11,6 +12,8 @@ import { Settings, Admin } from './screens/Settings';
 import { PlayerBar, NowPlaying } from './components/Player';
 import './styles.css';
 
+function deviceName() { const ua = navigator.userAgent; return /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android phone' : /Macintosh/.test(ua) ? 'Mac browser' : /Windows/.test(ua) ? 'Windows browser' : 'Browser'; }
+
 const TABS: { view: 'home' | 'search' | 'library'; label: string; icon: string }[] = [{ view: 'home', label: 'Home', icon: '⌂' }, { view: 'search', label: 'Search', icon: '⌕' }, { view: 'library', label: 'Library', icon: '≡' }];
 
 export function App() {
@@ -19,7 +22,7 @@ export function App() {
     if (!auth.token) { app.set({ ready: true }); return; }
     get<User>('/auth/me').then((u) => app.set({ user: u, ready: true })).catch(() => { auth.token = ''; app.set({ ready: true }); });
   }, []);
-  useEffect(() => { if (user) loadLikes().catch(() => {}); }, [user]);
+  useEffect(() => { if (user) { loadLikes().catch(() => {}); connect(deviceName(), window.matchMedia('(max-width: 760px)').matches ? 'phone' : 'web'); } }, [user]);
   if (!ready) return <main className="center"><p className="muted">Loading…</p></main>;
   if (!user) return <Login />;
   if (user.mustChangePassword) return <main className="center"><ChangePassword forced /></main>;

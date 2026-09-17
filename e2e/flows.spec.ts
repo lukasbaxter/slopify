@@ -1,34 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// One admin account, one server, run in order: first login forces the
-// password change, everything after uses the new password.
-const PW = 'e2e password 123';
-async function login(page: Page, pw = PW) {
-  await page.goto('/');
-  await page.getByLabel('Username').fill('admin');
-  await page.getByLabel('Password').fill(pw);
-  await page.getByRole('button', { name: 'Log in' }).click();
-}
-// The admin starts as admin/admin and is forced to change it once; every
-// project in the run shares the server, so whichever test gets there first
-// does the change and the rest log in with the new password.
-async function ensureLoggedIn(page: Page) {
-  await login(page);
-  if (await page.getByRole('heading', { name: 'Home' }).waitFor({ timeout: 4000 }).then(() => true, () => false)) return 'existing';
-  await login(page, 'admin');
-  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
-  await page.getByLabel('New password', { exact: true }).fill(PW);
-  await page.getByLabel('Repeat it', { exact: true }).fill(PW);
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
-  return 'changed';
-}
-async function waitForLibrary(page: Page) {
-  // the boot scan takes a second on the fixture library
-  await expect.poll(async () => (await page.request.get('/api/healthz')).ok()).toBe(true);
-  await expect(page.getByRole('heading', { name: 'New in your library' })).toBeVisible({ timeout: 30000 });
-  await expect.poll(async () => page.locator('.shelf-row .card').count(), { timeout: 30000 }).toBeGreaterThan(0);
-}
+import { login as ensureLoggedIn, waitForLibrary, PW } from './helpers';
+const login = (page: Page, pw = PW) => (pw === PW ? ensureLoggedIn(page) : rawLogin(page, pw));
+async function rawLogin(page: Page, pw: string) { await page.goto('/'); await page.getByLabel('Username').fill('admin'); await page.getByLabel('Password').fill(pw); await page.getByRole('button', { name: 'Log in' }).click(); }
 
 test.describe.configure({ mode: 'serial' });
 

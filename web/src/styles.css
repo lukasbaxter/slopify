@@ -48,3 +48,9 @@ h1 { font-size: 28px; font-weight: 800; margin: 0 0 16px; } h2 { font-size: 20px
   .hero { flex-direction: column; align-items: flex-start; } .hero-art { width: 180px; align-self: center; } .hero-text h1 { font-size: 28px; }
   .row { grid-template-columns: auto minmax(0, 1fr) auto; } .row-n, .row-time { display: none; } .grid { grid-template-columns: repeat(2, 1fr); } .shelf-row > * { flex-basis: 140px; }
 }
+
+.playing-on { position: absolute; top: -22px; left: 0; right: 0; text-align: center; font-size: 12px; font-weight: 700; color: #000; background: var(--accent); padding: 2px 0; }
+.player.mirror { border-top-color: var(--accent); }
+.devices { position: relative; } .devicemenu { position: absolute; bottom: 44px; right: 0; background: var(--surface2); border-radius: 8px; padding: 8px; min-width: 220px; box-shadow: 0 8px 40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 4px; z-index: 20; }
+.devitem { text-align: left; padding: 8px 10px; border-radius: 6px; } .devitem:hover { background: #333; } .devitem.on { color: var(--accent); } .small { font-size: 12px; }
+@media (max-width: 760px) { .player-right { display: flex; } .player-right .like { display: none; } .playing-on { top: -20px; border-radius: 6px 6px 0 0; } }

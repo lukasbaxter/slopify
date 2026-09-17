@@ -4,14 +4,14 @@ import { del, fmtTime, patch, type Album, type Artist, type Playlist, type Track
 import { app, navigate } from '../state/app';
 import { likes } from '../state/likes';
 import { AlbumCard, Cover, Shelf, Skeleton, TrackRow } from '../components/ui';
-import { playQueue } from '../state/player';
+import { actions } from '../state/session';
 
-function Hero({ cover, kind, title, sub, tracks, contextId, round = false, actions }: { cover: string | null; kind: string; title: string; sub: string; tracks: Track[]; contextId: string; round?: boolean; actions?: React.ReactNode }) {
+function Hero({ cover, kind, title, sub, tracks, contextId, round = false, extra }: { cover: string | null; kind: string; title: string; sub: string; tracks: Track[]; contextId: string; round?: boolean; extra?: React.ReactNode }) {
   return (
     <header className="hero">
       <Cover hash={cover} size={320} round={round} className="hero-art" />
       <div className="hero-text"><span className="kind">{kind}</span><h1>{title}</h1><p>{sub}</p>
-        <div className="hero-actions"><button className="primary" onClick={() => tracks.length && playQueue(tracks, 0, contextId)} disabled={!tracks.length} aria-label={`Play ${title}`}>▶ Play</button>{actions}</div>
+        <div className="hero-actions"><button className="primary" onClick={() => tracks.length && actions.playQueue(tracks, 0, contextId)} disabled={!tracks.length} aria-label={`Play ${title}`}>▶ Play</button>{extra}</div>
       </div>
     </header>
   );
@@ -25,7 +25,7 @@ export function AlbumPage({ id }: { id: string }) {
   const total = d.tracks.reduce((a, t) => a + t.durationMs, 0);
   return (
     <div className="page">
-      <Hero cover={d.cover} kind="Album" title={d.name} sub={`${d.artist}${d.year ? ` · ${d.year}` : ''} · ${d.tracks.length} songs, ${fmtTime(total)}`} tracks={d.tracks} contextId={`album:${d.id}`} actions={<button className="secondary" onClick={() => navigate({ view: 'artist', id: d.artistId })}>Artist</button>} />
+      <Hero cover={d.cover} kind="Album" title={d.name} sub={`${d.artist}${d.year ? ` · ${d.year}` : ''} · ${d.tracks.length} songs, ${fmtTime(total)}`} tracks={d.tracks} contextId={`album:${d.id}`} extra={<button className="secondary" onClick={() => navigate({ view: 'artist', id: d.artistId })}>Artist</button>} />
       <section>{d.tracks.map((t, i) => <TrackRow key={t.id} t={t} i={i} all={d.tracks} contextId={`album:${d.id}`} showArt={false} />)}</section>
     </div>
   );
@@ -57,7 +57,7 @@ export function PlaylistPage({ id }: { id: string }) {
   const remove = async () => { if (confirm(`Delete “${d.name}”?`)) { await del(`/playlists/${d.id}`); navigate({ view: 'library' }); } };
   return (
     <div className="page">
-      <Hero cover={d.cover} kind="Playlist" title={d.name} sub={`${d.tracks.length} songs`} tracks={d.tracks} contextId={`playlist:${d.id}`} actions={d.userId === me ? <><button className="secondary" onClick={rename}>Rename</button><button className="secondary" onClick={remove}>Delete</button></> : null} />
+      <Hero cover={d.cover} kind="Playlist" title={d.name} sub={`${d.tracks.length} songs`} tracks={d.tracks} contextId={`playlist:${d.id}`} extra={d.userId === me ? <><button className="secondary" onClick={rename}>Rename</button><button className="secondary" onClick={remove}>Delete</button></> : null} />
       <section>{d.tracks.map((t, i) => <TrackRow key={`${t.id}-${i}`} t={t} i={i} all={d.tracks} contextId={`playlist:${d.id}`} />)}{!d.tracks.length && <p className="muted">Empty. Add songs from any album or search.</p>}</section>
     </div>
   );

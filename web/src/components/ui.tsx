@@ -1,6 +1,7 @@
 import { artUrl, fmtTime, type Album, type Artist, type Track } from '../api/client';
 import { navigate } from '../state/app';
-import { player, playQueue, toggle, current } from '../state/player';
+import { player, current } from '../state/player';
+import { actions, mirroring, session } from '../state/session';
 import { toggleLike, useLiked } from '../state/likes';
 
 export const Cover = ({ hash, size = 160, className = '', round = false }: { hash: string | null | undefined; size?: 64 | 160 | 320 | 640; className?: string; round?: boolean }) => (
@@ -30,11 +31,14 @@ export function Shelf({ title, children }: { title: string; children: React.Reac
 }
 
 export function TrackRow({ t, i, all, contextId, showArt = true }: { t: Track; i: number; all: Track[]; contextId?: string; showArt?: boolean }) {
-  const cur = player.use(() => current()?.id);
-  const state = player.use((s) => s.state);
+  const localCur = player.use(() => current()?.id);
+  const localState = player.use((s) => s.state);
+  const mirror = session.use((s) => (s.session?.active && s.session.active !== s.clientId ? s.session : null));
   const liked = useLiked(t.id);
-  const active = cur === t.id;
-  const play = () => (active ? toggle() : playQueue(all, i, contextId ?? null));
+  const active = mirror ? mirror.trackId === t.id : localCur === t.id;
+  const state = mirror ? (mirror.playing ? 'playing' : 'paused') : localState;
+  const play = () => (active ? actions.toggle() : actions.playQueue(all, i, contextId ?? null));
+  void mirroring;
   return (
     <div className={`row ${active ? 'active' : ''}`} role="button" tabIndex={0} onClick={play} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); play(); } }} aria-label={`${active && state === 'playing' ? 'Pause' : 'Play'} ${t.title}`} data-testid="track-row">
       <span className="row-n">{active && state === 'playing' ? '▮▮' : i + 1}</span>

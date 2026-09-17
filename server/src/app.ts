@@ -14,6 +14,8 @@ import { registerLibrary } from './library.js';
 import { registerStream } from './stream.js';
 import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
+import websocket from '@fastify/websocket';
+import { registerSession } from './session.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   app.addHook('onClose', async () => { if (!opts.db) db.close(); });
   await app.register(cors, { origin: true });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute' });
+  await app.register(websocket);
 
   const musicDir = opts.musicDir ?? config.musicDir;
   registerAuth(app, db);
@@ -38,6 +41,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerStream(app, db, dataDir);
   registerSocial(app, db);
   registerAdmin(app, db, musicDir, dataDir);
+  registerSession(app, db);
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

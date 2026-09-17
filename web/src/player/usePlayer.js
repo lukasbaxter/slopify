@@ -50,15 +50,8 @@ function slimTrack(t) {
 }
 
 // Fetch full items for a list of ids, in order, in URL-safe batches.
-async function fetchByIds(jf, ids, fields) {
-  const byId = new Map();
-  for (let i = 0; i < ids.length; i += 150) {
-    const chunk = ids.slice(i, i + 150);
-    const q = new URLSearchParams({ Ids: chunk.join(','), userId: jf.userId, Fields: fields });
-    const data = await jf._fetch(`/Items?${q}`);
-    for (const t of data.Items || []) byId.set(t.Id, t);
-  }
-  return ids.map((id) => byId.get(id)).filter(Boolean);
+async function fetchByIds(jf, ids) {
+  return jf.itemsByIds(ids);
 }
 
 // Fisher-Yates, non-mutating.
@@ -281,7 +274,10 @@ export function usePlayer(jf) {
   // browser (which cannot discover or drive them itself). Picking one asks
   // that client (viaClient) to play the session on it. The desktop already
   // lists its own speakers, so this is browser-only.
-  const lanDevices = remote ? [] : (roster.lanDevices || [])
+  // The server's own speakers (viaClient 'server:…') are offered everywhere,
+  // the desktop included: the server drives them, so it needs no LAN reach.
+  const lanDevices = (roster.lanDevices || [])
+    .filter((d) => !remote || String(d.viaClient || '').startsWith('server:'))
     .filter((d, i, arr) => arr.findIndex((x) => x.id === d.id) === i)
     .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : 'Chromecast', viaClient: d.viaClient }));
 
@@ -541,11 +537,9 @@ export function usePlayer(jf) {
     const giveUp = () => skipTo(orRestart ? 0 : queueRef.current.length);
     if (!cur || !jf) return giveUp();
     try {
-      const q = new URLSearchParams({ userId: jf.userId, Limit: '25', Fields: 'ArtistItems,AlbumArtists,UserData' });
-      const data = await jf._fetch(`/Items/${cur.Id}/InstantMix?${q}`);
       const have = new Set(queueRef.current.map((t) => t.Id));
       // Never a track the user excluded from their taste profile.
-      const fresh = (data.Items || []).filter((t) => t.UserData?.Likes !== false);
+      const fresh = await jf.instantMix(cur.Id, 25);
       let pick = fresh.filter((t) => !have.has(t.Id));
       if (!pick.length) pick = fresh.filter((t) => t.Id !== cur.Id);
       if (!pick.length) return giveUp();
@@ -1360,9 +1354,9 @@ export function usePlayer(jf) {
   const relayTargetId = activePlayer?.id || null;
 
   // Either the mirrored active session, our own queue item, or an adopted speaker.
-  // A mirrored track's art is resolved by ID through THIS client's own Jellyfin
+  // A mirrored track's art is resolved by ID through THIS client's own server
   // base URL + token. The active player's ready-made artUrl is only a fallback:
-  // it is built for ITS origin (the browser's same-origin /jf proxy, or the
+  // it is built for ITS origin (the browser's own origin, or the
   // desktop's LAN address) and does not load from the other runtime -- that
   // was the missing cover on the desktop while a web player was the master.
   const nowPlaying = activePlayer
@@ -1559,7 +1553,6 @@ export function usePlayer(jf) {
   // Broadcast what we're playing so the roster shows it on other clients. The
   // song AND the playhead go together, so a controller never shows a different
   // track from the position it displays.
-  const npBaseUrl = jf?.baseUrl || '';
   useEffect(() => {
     const r = relayRef.current;
     if (!r) return;
@@ -1571,7 +1564,7 @@ export function usePlayer(jf) {
       title: current.Name,
       artist: current.Artists?.join(', ') || current.AlbumArtist || '',
       album: current.Album || null,
-      artUrl: `${npBaseUrl}/Items/${current.AlbumId || current.Id}/Images/Primary?maxHeight=128`,
+      artUrl: jf ? jf.imageUrl(current.AlbumId || current.Id, { maxHeight: 128 }) : null,
       albumId: current.AlbumId || null,
       artistId: current.ArtistItems?.[0]?.Id || current.AlbumArtists?.[0]?.Id || null,
       artists: (current.ArtistItems?.length ? current.ArtistItems : current.AlbumArtists || []).map((a) => ({ Id: a.Id, Name: a.Name })),
@@ -1624,10 +1617,24 @@ export function usePlayer(jf) {
   const msLocal = !relayTarget && device?.kind === 'local' && !!current;
   const msRemote = !msLocal && !!nowPlaying;
   const msRefs = useRef({}); msRefs.current = { toggle, next, previous, seek };
+  // Lock screen / headset buttons: previous and next TRACK, never 10-second
+  // skips (with seekbackward/seekforward set, iOS replaces the track buttons
+  // with skips and greys them out).
+  const msActions = () => {
+    const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
+    if (!ms) return;
+    const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* action unsupported */ } };
+    on('play', () => msRefs.current.toggle());
+    on('pause', () => msRefs.current.toggle());
+    on('previoustrack', () => msRefs.current.previous());
+    on('nexttrack', () => msRefs.current.next());
+    on('seekto', (d) => { if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });
+    on('seekbackward', null); on('seekforward', null);
+  };
   useEffect(() => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     if (!ms) return undefined;
-    if (!msLocal && !msRemote) { try { ms.metadata = null; ms.playbackState = 'none'; } catch { /* unsupported */ } return undefined; }
+    if ((!msLocal && !msRemote) || !nowPlaying) { try { ms.metadata = null; ms.playbackState = 'none'; } catch { /* unsupported */ } return undefined; }
     const artwork = [];
     if (jf && nowPlaying.artId) for (const px of [256, 512, 1024]) artwork.push({ src: jf.imageUrl(nowPlaying.artId, { maxHeight: px }), sizes: `${px}x${px}`, type: 'image/jpeg' });
     else if (nowPlaying.artUrl) artwork.push({ src: nowPlaying.artUrl, sizes: '512x512', type: 'image/jpeg' });
@@ -1640,16 +1647,8 @@ export function usePlayer(jf) {
         artwork,
       });
     } catch { /* MediaMetadata unsupported */ }
-    const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* action unsupported */ } };
-    on('play', () => msRefs.current.toggle());
-    on('pause', () => msRefs.current.toggle());
-    on('previoustrack', () => msRefs.current.previous());
-    on('nexttrack', () => msRefs.current.next());
-    on('seekto', (d) => { if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });
-    // No seekbackward/seekforward: with those set, iOS replaces the previous /
-    // next buttons on the lock screen with 15-second skips and greys them out.
-    on('seekbackward', null); on('seekforward', null);
-    return () => { for (const a of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto']) on(a, null); };
+    msActions();
+    return () => { for (const a of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto']) { try { ms.setActionHandler(a, null); } catch { /* unsupported */ } } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowPlaying?.itemId, nowPlaying?.title, nowPlaying?.artId, msLocal, msRemote, jf]);
   useEffect(() => {
@@ -1659,6 +1658,10 @@ export function usePlayer(jf) {
     keepAlive(msRemote && shownPlaying, shownPosition);
     if (!ms || (!msLocal && !msRemote)) return;
     try { ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
+    // iOS reads the action handlers when the media starts or stops: set
+    // before the keep-alive element played, they were sometimes ignored and
+    // the lock screen showed 10-second skips instead of previous / next.
+    msActions();
     if (shownDuration > 0 && typeof ms.setPositionState === 'function') {
       try { ms.setPositionState({ duration: shownDuration, playbackRate: 1, position: Math.min(Math.max(0, shownPosition || 0), shownDuration) }); } catch { /* invalid state */ }
     }

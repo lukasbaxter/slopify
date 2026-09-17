@@ -17,6 +17,8 @@
     "@fastify/websocket": "^11.0.0",
     "argon2": "^0.41.0",
     "better-sqlite3": "^11.0.0",
+    "bonjour-service": "^1.4.4",
+    "castv2-client": "^1.2.0",
     "fastify": "^5.0.0",
     "music-metadata": "^10.0.0",
     "sharp": "^0.33.0",

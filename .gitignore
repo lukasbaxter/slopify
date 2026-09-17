@@ -7,3 +7,4 @@ fixtures/music/
 .DS_Store
 test-results/
 playwright-report/
+test/.probe/

@@ -27,7 +27,7 @@ export function usePlayingFrom(player, jf) {
     if (ctx === 'radar') { set({ kind: 'PLAYING FROM PLAYLIST', name: 'Release Radar' }); return undefined; }
     if (id.startsWith('browse:')) {
       // Genre tiles are cached by the search page; the id is the tile's.
-      let tiles = null; try { tiles = JSON.parse(localStorage.getItem('conduit.browse') || 'null'); } catch {}
+      let tiles = null; try { tiles = JSON.parse(localStorage.getItem('slopify.browse') || 'null'); } catch {}
       const tile = Array.isArray(tiles) ? tiles.find((t) => t.id === id.slice(7)) : null;
       set({ kind: 'PLAYING FROM GENRE', name: tile?.name || 'Genre' });
       return undefined;

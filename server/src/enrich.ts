@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { DB } from './db.js';
 import { parseLrc, isSynced, type LyricLine } from './lyrics.js';
+import { storeArtwork } from './artwork.js';
 
 const run = promisify(execFile);
 const UA = 'slopify/0.1 (https://github.com/lukasbaxter/slopify)';
@@ -59,7 +60,7 @@ export function storeLyricsFromRecord(db: DB, trackId: string, rec: LrclibRecord
   return kind;
 }
 
-export type EnrichOptions = { fetcher?: Fetcher; log?: (m: string) => void; max?: number; acoustidKey?: string };
+export type EnrichOptions = { fetcher?: Fetcher; log?: (m: string) => void; max?: number; acoustidKey?: string; dataDir?: string; bytes?: (url: string) => Promise<Buffer | null> };
 
 // One pass: every track without resolved lyrics whose retry time has come.
 export async function enrichPass(db: DB, opts: EnrichOptions = {}): Promise<{ done: number; missing: number; instrumental: number }> {
@@ -81,6 +82,39 @@ export async function enrichPass(db: DB, opts: EnrichOptions = {}): Promise<{ do
     if (kind) { db.prepare(`UPDATE enrich SET lyrics_state = 'done', updated = ? WHERE track_id = ?`).run(Date.now(), row.track_id); if (kind === 'instrumental') stats.instrumental++; else stats.done++; }
     else { const tries = row.lyrics_tries + 1; const next = Date.now() + (tries <= 7 ? DAY : 7 * DAY); db.prepare(`UPDATE enrich SET lyrics_state = 'missing', lyrics_tries = ?, lyrics_next = ?, updated = ? WHERE track_id = ?`).run(tries, next, Date.now(), row.track_id); stats.missing++; }
     await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 250)); // be polite to LrcLib
+  }
+  return stats;
+}
+
+const normName = (s: string) => s.normalize('NFKC').replace(/[\uFEFF\u200B]/g, '').replace(/[\u2010-\u2015\u2212]/g, '-').replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
+
+// Artist pictures (portrait + wide banner): Deezer's artist search, exact
+// name match only, the 1000 px picture stored like a cover. Tried a few
+// times over increasing gaps; artists Deezer does not know stay blank.
+export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promise<{ found: number; missing: number }> {
+  const fetcher: Fetcher = opts.fetcher ?? ((url) => fetch(url, { headers: { 'User-Agent': UA } }));
+  const bytes = opts.bytes ?? (async (url: string) => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; });
+  const log = opts.log ?? (() => {});
+  const dataDir = opts.dataDir; if (!dataDir) return { found: 0, missing: 0 };
+  const due = db.prepare('SELECT id, name, image_tries FROM artists WHERE image_hash IS NULL AND image_tries < 4 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 300) as any[];
+  const stats = { found: 0, missing: 0 };
+  for (const a of due) {
+    let url: string | null = null;
+    try {
+      const list = await cached(db, `deezer:artist:${normName(a.name)}`, 30 * DAY, async () => {
+        const r = await fetcher(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=10`);
+        return r.status === 200 ? ((await r.json()).data || []).map((d: any) => ({ name: d.name, picture: d.picture_xl || d.picture_big || null })) : [];
+      }) as { name: string; picture: string | null }[];
+      const hit = list.find((d) => normName(d.name) === normName(a.name) && d.picture && !/artist\/\/?\d*x\d*/.test(d.picture) && !/\/artist\/(1000x1000|500x500)-/.test(d.picture));
+      url = hit?.picture ?? null;
+    } catch (e: any) { log(`deezer ${a.name}: ${e.message}`); }
+    let stored = false;
+    if (url) {
+      try { const buf = await bytes(url); if (buf && buf.length > 2000) { const { hash } = await storeArtwork(dataDir, buf, { banner: true }); db.prepare('UPDATE artists SET image_hash = ? WHERE id = ?').run(hash, a.id); stored = true; } }
+      catch (e: any) { log(`artist image ${a.name}: ${e.message}`); }
+    }
+    if (stored) stats.found++; else { db.prepare('UPDATE artists SET image_tries = image_tries + 1 WHERE id = ?').run(a.id); stats.missing++; }
+    await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 120));
   }
   return stats;
 }

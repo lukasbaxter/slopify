@@ -6,6 +6,6 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   base: './',
   plugins: [react()],
-  server: { port: 5180, proxy: { '/jf': { target: 'http://localhost:8080' }, '/relay': { target: 'ws://localhost:8080', ws: true }, '/api': { target: 'http://localhost:8080' } } },
+  server: { port: 5180, proxy: { '/api': { target: 'http://localhost:8080', ws: true } } },
   build: { outDir: 'dist', rollupOptions: { output: { manualChunks: { vendor: ['react', 'react-dom'] } } } },
 });

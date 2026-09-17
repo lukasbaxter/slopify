@@ -24,11 +24,11 @@ test('the Conduit UI logs in, shows the library, plays a song, likes it', async 
   } else {
     await row.locator('.trackrow-like').click();
   }
-  await expect.poll(async () => (await (await page.request.get('/relay/likes', { headers: { 'X-Emby-Token': await page.evaluate(() => JSON.parse(localStorage.getItem('conduit.session') || '{}').token || '') } })).json()).at, { timeout: 5000 }).not.toEqual({});
+  await expect.poll(async () => (await (await page.request.get('/api/likes', { headers: { Authorization: `Bearer ${await page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token || '')}` } })).json()).at, { timeout: 5000 }).not.toEqual({});
   expect(errors.filter((e) => !/ResizeObserver/.test(e))).toEqual([]);
 });
 
-test('search (façade fallback), lyrics in now playing, phone tab bar', async ({ page, isMobile }) => {
+test('search, lyrics in now playing, phone tab bar', async ({ page, isMobile }) => {
   await login(page); await waitForLibrary(page);
   // Search: the sidebar/tab bar entry, then the search box
   await page.locator(isMobile ? '.tabbar button' : '.sidebar .navitem', { hasText: 'Search' }).first().click();

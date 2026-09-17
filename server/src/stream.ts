@@ -73,6 +73,50 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     return reply.send(fs.createReadStream(file));
   });
 
+  // One progressive transcode, started at `startAt` seconds: what a browser
+  // without HLS plays at a reduced quality (it seeks by asking for a new
+  // stream), and what the visualizer decodes on a device that is mirroring.
+  app.get('/api/stream/:id/mp3', auth, async (req, reply) => {
+    const id = (req.params as any).id as string;
+    const file = trackFile(id);
+    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const q = req.query as any;
+    const kbps = Math.min(320, Math.max(64, Math.round((Number(q.bitrate) || 320000) / 1000)));
+    const startAt = Math.max(0, Number(q.startAt) || 0);
+    const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', ...(startAt ? ['-ss', String(startAt)] : []), '-i', file, '-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-ac', '2', '-f', 'mp3', '-id3v2_version', '0', '-write_xing', '0', 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
+    reply.header('Cache-Control', 'no-store').header('Accept-Ranges', 'none').type('audio/mpeg');
+    return reply.send(ff.stdout);
+  });
+
+  // Save to disk: the original file with its real name, or a transcode.
+  const DL: Record<string, { args: string[]; mime: string; ext: string }> = {
+    flac: { args: ['-c:a', 'flac'], mime: 'audio/flac', ext: 'flac' },
+    mp3: { args: ['-c:a', 'libmp3lame', '-b:a', '320k'], mime: 'audio/mpeg', ext: 'mp3' },
+    aac: { args: ['-c:a', 'aac', '-b:a', '256k', '-f', 'adts'], mime: 'audio/aac', ext: 'aac' },
+    ogg: { args: ['-c:a', 'libvorbis', '-b:a', '320k', '-f', 'ogg'], mime: 'audio/ogg', ext: 'ogg' },
+  };
+  app.get('/api/download/:id', auth, async (req, reply) => {
+    const id = (req.params as any).id as string;
+    const t = db.prepare('SELECT path, title, artist FROM tracks WHERE id = ?').get(id) as any;
+    if (!t || !fs.existsSync(t.path)) return reply.code(404).send({ error: 'no such track' });
+    const q = req.query as any;
+    const safe = (x: string) => String(x || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const base = safe(q.name) || safe(`${t.artist} - ${t.title}`);
+    const fmt = String(q.fmt || 'original');
+    const disposition = (name: string) => `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+    if (fmt === 'original' || !DL[fmt]) {
+      const ext = path.extname(t.path).toLowerCase();
+      reply.header('Content-Disposition', disposition(`${base}${ext}`)).header('Content-Length', fs.statSync(t.path).size).type(MIME[ext] || 'application/octet-stream');
+      return reply.send(fs.createReadStream(t.path));
+    }
+    const d = DL[fmt];
+    const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', '-i', t.path, '-map', '0:a:0', '-vn', ...d.args, ...(d.args.includes('-f') ? [] : ['-f', d.ext]), 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
+    reply.header('Content-Disposition', disposition(`${base}.${d.ext}`)).type(d.mime);
+    return reply.send(ff.stdout);
+  });
+
   app.get('/api/stream/:id/hls/:profile/index.m3u8', auth, async (req, reply) => {
     const { id, profile } = req.params as any;
     if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });

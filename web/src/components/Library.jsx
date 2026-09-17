@@ -7,6 +7,7 @@ import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals } from '../api/pre
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
 import Home from './Home.jsx';
 import History from './History.jsx';
+import { AdminSettings } from './AdminSettings.jsx';
 import FittedTitle from './FittedTitle.jsx';
 import VirtualList from './VirtualList.jsx';
 
@@ -177,7 +178,7 @@ export default function Library({
   onLike, onAddTo, onNewPlaylist, onRemoveFromPlaylist, onReorder, onOpenPlaylist, onOpenLiked, likedCount,
   onOpenArtistById, onOpenAlbumById, onExclude, onDownload,
   seeAll, setSeeAll, onEditPlaylist, onDeletePlaylist, me, onView, onOpenProfile,
-  prefs, onUpdatePrefs, onUploadAvatar, avatarV, onFollowAlbum, onOpenSettings,
+  prefs, onUpdatePrefs, onUploadAvatar, avatarV, onFollowAlbum, onOpenSettings, notify,
 }) {
   const [results, setResults] = useState(null);
   const phone = usePhone();
@@ -202,10 +203,10 @@ export default function Library({
   // string entries are ignored and drop out on the next write.
   const recents = (Array.isArray(prefs?.recentSearches) ? prefs.recentSearches : []).filter((x) => x && typeof x === 'object' && x.id);
   // Browse tiles (genre buckets) for the empty search page.
-  const [tiles, setTiles] = useState(() => { try { return JSON.parse(localStorage.getItem('conduit.browse') || 'null'); } catch { return null; } });
+  const [tiles, setTiles] = useState(() => { try { return JSON.parse(localStorage.getItem('slopify.browse') || 'null'); } catch { return null; } });
   useEffect(() => {
     if (!jf) return;
-    relayBrowse(jf).then((t) => { setTiles(t); try { localStorage.setItem('conduit.browse', JSON.stringify(t)); } catch {} }).catch(() => {});
+    relayBrowse(jf).then((t) => { setTiles(t); try { localStorage.setItem('slopify.browse', JSON.stringify(t)); } catch {} }).catch(() => {});
   }, [jf]);
   // A Daily Mix as a page: Jellyfin's instant mix seeded from the artist,
   // shown like a playlist (list, play, shuffle) rather than played blind.
@@ -681,6 +682,7 @@ export default function Library({
               <span className="setrow-text"><b>Reset to default</b></span>
             </button>
             <p className="settings-caption">Saved to your account and applied to every Conduit you have open.</p>
+            {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} phone />}
 
             {settingsMenu && (
               <ContextMenu x={settingsMenu.x} y={settingsMenu.y} onClose={() => setSettingsMenu(null)}
@@ -714,7 +716,7 @@ export default function Library({
                 </label>
                 <div>
                   <div className="settings-name">{me?.Name}</div>
-                  <div className="settings-hint">Profile picture is stored on your Jellyfin account and shows on every device.</div>
+                  <div className="settings-hint">Profile picture is stored on your account and shows on every device.</div>
                 </div>
               </div>
             </section>
@@ -782,6 +784,8 @@ export default function Library({
               </div>
               <button className="btn-secondary" style={{ marginTop: 16 }} onClick={() => onUpdatePrefs({ theme: DEFAULT_THEME })} disabled={themeEquals(theme, DEFAULT_THEME)}>Reset to default</button>
             </section>
+
+            {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} />}
           </div>
         </div>
       );

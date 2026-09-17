@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Jellyfin, loadSession, persistSession, clearSession } from './api/jellyfin.js';
+import { Slopify, loadSession, persistSession, clearSession } from './api/slopify.js';
 import { usePlayer } from './player/usePlayer.js';
-import { Relay } from './relay.js';
+import { SessionLink } from './api/session.js';
 import Sidebar from './components/Sidebar.jsx';
 import Library, { LIKED_ID } from './components/Library.jsx';
 import Player, { PlayingElsewhereBar, sessionDeviceOf } from './components/Player.jsx';
@@ -19,8 +19,8 @@ import { offsetsMerge } from './api/offsets.js';
 // LAN, and speakers stream from a URL with a real certificate.
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const DEFAULT_SERVER = IS_DESKTOP
-  ? 'https://music.baxtergroup.io/jf'
-  : `${window.location.origin}/jf`;
+  ? 'https://music.baxtergroup.io'
+  : window.location.origin;
 
 function Login({ onConnected }) {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_SERVER);
@@ -28,13 +28,20 @@ function Login({ onConnected }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // An invite link (/?invite=code) makes this the sign-up form.
+  const invite = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('invite') : null;
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
     try {
-      const jf = await Jellyfin.login(baseUrl.trim(), username, password);
+      if (invite) {
+        const r = await fetch(`${baseUrl.trim().replace(/\/+$/, '')}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invite, username: username.trim(), password }) });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status}`);
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      const jf = await Slopify.login(baseUrl.trim(), username.trim(), password);
       persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId });
       onConnected(jf);
     } catch (e2) {
@@ -67,8 +74,9 @@ function Login({ onConnected }) {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         {err && <div className="banner error" style={{ margin: 0 }}>{err}</div>}
+        {invite && <p className="login-hint">You have been invited. Pick a username and a password (8 characters or more).</p>}
         <button className="primary" disabled={busy || !username}>
-          {busy ? 'Logging in…' : 'Log in'}
+          {busy ? (invite ? 'Creating account…' : 'Logging in…') : invite ? 'Create account' : 'Log in'}
         </button>
         {IS_DESKTOP && (
           <p className="login-hint">
@@ -323,12 +331,7 @@ export default function App() {
   useEffect(() => {
     const saved = loadSession();
     if (saved) {
-      // Sessions from before the switch to the public host still point at the
-      // LAN address; the token is not host-bound, so just move them over.
-      if (IS_DESKTOP && /^http:\/\/192\.168\.1\.85:2101/.test(saved.baseUrl || '')) {
-        saved.baseUrl = DEFAULT_SERVER; persistSession(saved);
-      }
-      const client = new Jellyfin(saved);
+      const client = new Slopify(saved);
       setJf(client);
       // Paint instantly from the last run's data; the fetch below refreshes it.
       const alb = client.persisted('albums'); if (alb) setAlbums(alb);
@@ -431,7 +434,8 @@ export default function App() {
   const playerRef = useRef(player); playerRef.current = player;
   useEffect(() => {
     if (!jf) return undefined;
-    const relay = new Relay({
+    const relay = new SessionLink({
+      baseUrl: jf.baseUrl,
       token: jf.token,
       name: (typeof window !== 'undefined' && window.conduit?.deviceName) || (window.conduit ? 'Conduit Desktop' : 'This Browser'),
       kind: window.conduit ? 'desktop' : 'web',
@@ -1138,6 +1142,7 @@ export default function App() {
           onEditPlaylist={(pl) => { setDetail(null); openPlaylist(pl).then(() => setTimeout(() => window.dispatchEvent(new CustomEvent('conduit:editdetails')), 300)); }}
           onDeletePlaylist={onDeletePlaylist}
           onFollowAlbum={onFollowAlbum}
+          notify={notify}
           onOpenArtist={openArtistById}
           likedCount={likedCount}
           loading={libLoading}
@@ -1190,6 +1195,7 @@ export default function App() {
           onUploadAvatar={onUploadAvatar}
           avatarV={avatarV}
           onFollowAlbum={onFollowAlbum}
+          notify={notify}
         />
         {panel && <div className="panel-spacer rail-resizer" onPointerDown={onPanelDown} title="Drag to resize" role="separator" aria-orientation="vertical" />}
         {panel && (

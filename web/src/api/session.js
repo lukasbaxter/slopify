@@ -1,24 +1,18 @@
-// Client side of the Conduit relay. One instance per running app. It keeps a
-// WebSocket to the relay, publishes this client as a controllable player, and
-// surfaces the user's other clients + network-scoped LAN devices as targets.
+// Client side of the session socket (/api/ws). One instance per running
+// app. It announces this client as a controllable player, and surfaces the
+// user's other clients + the speakers on this network as targets. The server
+// keeps the account's session (what is playing, where, the queue, the clock).
 //
 // Audio never flows through here. This is presence + command routing only.
 
-// Same-origin in the browser (wss via nginx); the desktop app points at the LAN
-// relay directly.
-function defaultUrl() {
-  // Desktop: the public host, same as the web (valid Let's Encrypt cert; LAN
-  // clients hairpin through the router). Overridable for a dev relay.
-  if (typeof window !== 'undefined' && window.conduit) return (localStorage.getItem('conduit.relayUrl') || 'wss://music.baxtergroup.io/relay');
-  if (typeof window !== 'undefined') {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${window.location.host}/relay`;
-  }
-  return 'wss://music.baxtergroup.io/relay';
+// Same-origin in the browser; the desktop app points at the server it logged in to.
+function defaultUrl(baseUrl) {
+  const base = baseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+  return `${base.replace(/^http/, 'ws')}/api/ws`;
 }
 
 function clientId() {
-  const KEY = 'conduit.relayClientId';
+  const KEY = 'slopify.clientId';
   try {
     let id = localStorage.getItem(KEY);
     if (!id) { id = `c_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`; localStorage.setItem(KEY, id); }
@@ -28,8 +22,9 @@ function clientId() {
   }
 }
 
-export class Relay {
-  constructor({ token, name, kind, canPlay = true, onRoster, onCommand, onQueue, onSession, onPrefs, onLike, onOffsets }) {
+export class SessionLink {
+  constructor({ baseUrl, token, name, kind, canPlay = true, onRoster, onCommand, onQueue, onSession, onPrefs, onLike, onOffsets }) {
+    this.baseUrl = baseUrl;
     this.token = token;
     this.name = name;
     this.kind = kind; // 'desktop' | 'web' | 'mobile'
@@ -47,7 +42,7 @@ export class Relay {
     this._backoff = 1000;
     this._pending = { devices: [], nowPlaying: null, queue: null };
     // True while THIS client holds the active-player claim. Survives socket
-    // drops so a reconnect (e.g. after the relay restarts and forgets who was
+    // drops so a reconnect (e.g. after the server restarts and forgets who was
     // active) re-asserts it, restoring the green bar on every other client.
     this._claimed = false;
     this.connect();
@@ -56,7 +51,7 @@ export class Relay {
   connect() {
     if (this.closed) return;
     let ws;
-    try { ws = new WebSocket(defaultUrl()); } catch { this._retry(); return; }
+    try { ws = new WebSocket(defaultUrl(this.baseUrl)); } catch { this._retry(); return; }
     this.ws = ws;
 
     ws.onopen = () => {
@@ -124,7 +119,7 @@ export class Relay {
   // I just started playing here: make the user's other clients yield.
   claim() { this._claimed = true; this._send({ type: 'claim' }); }
   sendPrefs(prefs) { this._send({ type: 'prefs', prefs }); }
-  // A like / unlike; the relay stores the timestamp and tells the other clients.
+  // A like / unlike; the server stores the timestamp and tells the other clients.
   sendLike(itemId, liked) { this._send({ type: 'like', itemId, liked }); }
   // A speaker's measured visualizer offset in seconds (null = forget it).
   sendOffset(id, offset) { this._send({ type: 'offset', id, offset }); }

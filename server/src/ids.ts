@@ -18,7 +18,7 @@ export async function audioContentId(file: string): Promise<string> {
 export const norm = (s: string) => s.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 export const artistId = (name: string) => crypto.createHash('sha1').update(`artist:${norm(name)}`).digest('hex').slice(0, 32);
 export const albumId = (albumArtist: string, album: string) => crypto.createHash('sha1').update(`album:${norm(albumArtist)}|${norm(album)}`).digest('hex').slice(0, 32);
-export const playlistId = () => crypto.randomBytes(16).toString('hex');
+export const playlistId = () => `pl_${crypto.randomBytes(12).toString('hex')}`;
 export const userId = () => crypto.randomBytes(16).toString('hex');
 export const token = () => crypto.randomBytes(32).toString('base64url');
 

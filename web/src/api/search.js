@@ -1,112 +1,69 @@
-// Search goes to the relay's /search (Meilisearch behind it: typo-tolerant,
-// prefix, lyrics, ~20 ms). Results come back as Jellyfin-shaped items so
-// every existing row/card/player path works unchanged. If the relay or the
-// engine is down we fall back to Jellyfin's own search so search never
-// breaks -- it just gets slow and literal again.
+// Search and the search page's helpers, over the server's own API.
+//
+// A search can be scoped with a `filter` (the open album, playlist, artist,
+// Liked Songs, a genre tile): the scope's rows are fetched once through the
+// client and matched here. Results keep the row shape the page renders.
 
-const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
-function relayBase() {
-  if (IS_DESKTOP) return 'https://music.baxtergroup.io/relay';
-  return `${window.location.origin}/relay`;
-}
+const norm = (s) => String(s || '').normalize('NFKC').toLowerCase();
+const words = (q) => norm(q).split(/\s+/).filter(Boolean);
+const rowText = (t) => norm(`${t.Name} ${(t.Artists || []).join(' ')} ${t.Album || ''} ${t.AlbumArtist || ''}`);
+const matches = (t, q) => { const ws = words(q); const text = rowText(t); return ws.every((w) => text.includes(w)); };
 
-function track(t, userId) {
-  return {
-    Id: t.id, Name: t.name, Type: 'Audio',
-    Artists: t.artists || [], ArtistItems: (t.artists || []).map((n, i) => ({ Name: n, Id: (t.artistIds || [])[i] })).filter((a) => a.Id),
-    Album: t.album, AlbumId: t.albumId, AlbumArtist: t.albumArtist, ProductionYear: t.year,
-    RunTimeTicks: t.durationTicks, UserData: { IsFavorite: Array.isArray(t.liked) ? t.liked.includes(userId) : false },
-    _snippet: t.snippet || null, _snippetAt: t.snippetAt ?? null, _plays: t.plays || 0,
-  };
-}
-const album = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicAlbum', AlbumArtist: (a.artists || []).join(', '), AlbumArtists: (a.artists || []).map((n, i) => ({ Name: n, Id: (a.artistIds || [])[i] })), ProductionYear: a.year, ChildCount: a.trackCount, _type: a.type });
-const artist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ImageTags: a.hasImage ? { Primary: '1' } : {}, _aliases: a.aliases || [] });
-const playlist = (p) => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackCount });
-
-function mapTop(top, userId) {
-  if (!top) return null;
-  const m = { Artist: artist, Album: album, Song: (t) => track(t, userId), Playlist: playlist }[top.kind];
-  return m ? { kind: top.kind, item: m(top.item) } : null;
+// The rows a scope filter stands for.
+async function scoped(jf, filter) {
+  const m = /^(\w+)\s*=\s*"([^"]*)"$/.exec(filter || '');
+  if (!m) { if (/^plays\s*>\s*0$/.test(filter || '')) return jf.topTracks({ limit: 100 }); return []; }
+  const [, key, value] = m;
+  if (key === 'artistIds') return (await jf.tracks({ artistId: value, limit: 500 })).items;
+  if (key === 'albumId') return (await jf.tracks({ albumId: value, limit: 500 })).items;
+  if (key === 'playlistIds') return (await jf.playlistTracks(value)).items;
+  if (key === 'liked') return (await jf.favoriteTracks()).items;
+  if (key === 'genre') return jf.genreTracks(value);
+  return [];
 }
 
 export async function search(jf, q, { limit = 10, filter = null, signal } = {}) {
-  const params = new URLSearchParams({ q, limit: String(limit) });
-  if (filter) params.set('filter', filter);
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 2500);
-    signal?.addEventListener('abort', () => ctrl.abort());
-    const res = await fetch(`${relayBase()}/search?${params}`, { headers: { 'X-Emby-Token': jf.token }, signal: ctrl.signal });
-    clearTimeout(t);
-    if (!res.ok) throw new Error(`search ${res.status}`);
-    const r = await res.json();
-    return {
-      engine: 'meili', tookMs: r.tookMs, chips: r.chips || [], scoped: Boolean(r.scoped),
-      top: mapTop(r.top, jf.userId),
-      tracks: (r.tracks || []).map((x) => track(x, jf.userId)),
-      albums: (r.albums || []).map(album),
-      artists: (r.artists || []).map(artist),
-      playlists: (r.playlists || []).map(playlist),
-    };
-  } catch (e) {
-    if (signal?.aborted) throw e;
-    // Fallback: Jellyfin's literal search, with the old client-side Top pick.
-    const r = await jf.search(q, limit);
-    const ql = q.trim().toLowerCase();
-    const top = r.artists[0] && r.artists[0].Name.toLowerCase().startsWith(ql) ? { kind: 'Artist', item: r.artists[0] }
-      : r.albums[0] ? { kind: 'Album', item: r.albums[0] }
-      : r.artists[0] ? { kind: 'Artist', item: r.artists[0] }
-      : r.tracks[0] ? { kind: 'Song', item: r.tracks[0] } : null;
-    return { engine: 'jellyfin', top, chips: [], scoped: false, ...r };
+  const t0 = performance.now();
+  if (filter) {
+    const rows = await scoped(jf, filter);
+    if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const tracks = (q.trim() ? rows.filter((t) => matches(t, q)) : rows).slice(0, limit);
+    return { engine: 'server', tookMs: Math.round(performance.now() - t0), chips: [], scoped: true, top: null, tracks, albums: [], artists: [], playlists: [] };
   }
+  const r = await jf.search(q, limit);
+  if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+  const ql = norm(q.trim());
+  // Top result: an artist whose name starts with the query, else the best album, artist or song.
+  const top = r.artists[0] && norm(r.artists[0].Name).startsWith(ql) ? { kind: 'Artist', item: r.artists[0] }
+    : r.albums[0] && norm(r.albums[0].Name).startsWith(ql) ? { kind: 'Album', item: r.albums[0] }
+    : r.tracks[0] && norm(r.tracks[0].Name).startsWith(ql) ? { kind: 'Song', item: r.tracks[0] }
+    : r.artists[0] ? { kind: 'Artist', item: r.artists[0] }
+    : r.albums[0] ? { kind: 'Album', item: r.albums[0] }
+    : r.tracks[0] ? { kind: 'Song', item: r.tracks[0] } : null;
+  return { engine: 'server', tookMs: Math.round(performance.now() - t0), chips: [], scoped: false, top, ...r };
 }
 
-// Tiles for the empty search page (genre buckets from the index, with a cover).
+// Tiles for the empty search page (genres from the library, with a cover).
 export async function browse(jf) {
-  const res = await fetch(`${relayBase()}/browse`, { headers: { 'X-Emby-Token': jf.token }, signal: AbortSignal.timeout(4000) });
-  if (!res.ok) throw new Error(`browse ${res.status}`);
-  return (await res.json()).tiles || [];
+  const r = await jf._fetch('/api/browse', { timeoutMs: 8000 });
+  return (r.tiles || []).map((t) => ({ ...t, filter: `genre = "${t.name.replace(/"/g, '')}"` }));
 }
 
-async function relayGet(jf, path, params = {}, timeout = 30000, signal = null) {
-  const q = new URLSearchParams(params);
-  const res = await fetch(`${relayBase()}${path}?${q}`, { headers: { 'X-Emby-Token': jf.token }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) });
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
-  return res.json();
-}
-// Everything Spotify knows for a query (albums, EPs, singles), each flagged with
-// the library album it matches or its download-request state.
-export const globalSearch = (jf, q, signal) => relayGet(jf, '/gsearch', { q }, 20000, signal);
-// Every release Spotify lists for an artist, flagged with what the library has.
-export const discography = (jf, artistId, name) => relayGet(jf, '/discography', { artistId, name });
-export const similar = (jf, artistId, name) => relayGet(jf, '/similar', { artistId, name }, 15000);
-// The artist's tracks in popularity order (Deezer top-100 matched to the library), as ids.
-export const popular = (jf, artistId, name) => relayGet(jf, '/popular', { artistId, name }, 15000);
-export const radar = (jf) => relayGet(jf, '/radar', {}, 120000);
-// Lyrics from the relay's RAM copy of every sidecar (relay/lyrics.js); the
-// same shape Jellyfin's endpoint returns. 404 = none there.
-// Liked Songs rows in one call from the relay (likes table joined to the index).
-export const likedFast = (jf) => relayGet(jf, '/liked', {}, 15000);
-// Whole album + artist lists from the index (0.5 s for 3,200 + 4,400) and
-// Home's recently played / most played from the relay's own play log.
-export const libraryFast = (jf) => relayGet(jf, '/library', {}, 20000);
-export const homeFast = (jf) => relayGet(jf, '/home', {}, 20000);
-export const lyricsFast = (jf, itemId) => relayGet(jf, '/lyrics', { id: itemId }, 4000);
-// When each track was liked (relay store). `seed` = old prefs timestamps, sent once.
-export async function likes(jf, seed = null) {
-  const res = await fetch(`${relayBase()}/likes`, seed
-    ? { method: 'POST', headers: { 'X-Emby-Token': jf.token, 'Content-Type': 'application/json' }, body: JSON.stringify(seed), signal: AbortSignal.timeout(10000) }
-    : { headers: { 'X-Emby-Token': jf.token }, signal: AbortSignal.timeout(10000) });
-  if (!res.ok) throw new Error(`likes ${res.status}`);
-  return (await res.json()).at || {};
-}
-// A playlist's tracks in order, from playlist.xml + the search index (fast).
-export const playlistTracks = (jf, id) => relayGet(jf, "/playlist", { id }, 8000);
-// Listening history (ListenBrainz mirrored by the relay): stats for a range, or a page of recent listens.
-export const history = (jf, params) => relayGet(jf, '/history', { tzo: new Date().getTimezoneOffset(), ...params }, 180000);
-export async function requestAlbum(jf, albumId) {
-  const res = await fetch(`${relayBase()}/request`, { method: 'POST', headers: { 'X-Emby-Token': jf.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ album_id: albumId }), signal: AbortSignal.timeout(30000) });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || `request ${res.status}`);
-  return j;
-}
+// Everything the server knows about a release/artist beyond the library
+// (other releases, similar artists, popularity order, requests) is not part
+// of Slopify yet; these answer empty so the pages render what the library has.
+export const globalSearch = async () => ({ results: [], albums: [], artists: [] });
+export const discography = async () => ({ releases: [] });
+export const similar = async () => ({ artists: [] });
+export const popular = async () => ({ ids: [] });
+export const radar = async () => ({ releases: [] });
+export async function requestAlbum() { throw new Error('Requests are not set up on this server yet'); }
+
+// Liked Songs rows in one call (the like store's ids, newest first).
+export const likedFast = (jf) => jf._favoriteTracks();
+// When each track was liked.
+export async function likes(jf) { return (await jf._fetch('/api/likes', { timeoutMs: 15000 })).at || {}; }
+// A playlist's tracks in order.
+export const playlistTracks = (jf, id) => jf._playlistTracks(id);
+// Listening history: stats for a range, or a page of recent listens.
+export const history = (jf, params) => jf._fetch(`/api/history?${new URLSearchParams({ tzo: String(new Date().getTimezoneOffset()), ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) })}`, { timeoutMs: 60000 });

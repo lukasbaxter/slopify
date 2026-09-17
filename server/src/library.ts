@@ -22,7 +22,7 @@ const albumOut = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artist
 const artistOut = (a: any) => ({ id: a.id, name: a.name, trackCount: a.track_count, albumCount: a.album_count, image: a.image_hash });
 
 const TRACK_SELECT = 'SELECT t.*, a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id';
-const page = (q: any) => ({ offset: Math.max(0, Number(q.offset) || 0), limit: Math.min(1000, Math.max(1, Number(q.limit) || 200)) });
+const page = (q: any) => ({ offset: Math.max(0, Number(q.offset) || 0), limit: Math.min(20000, Math.max(1, Number(q.limit) || 200)) });
 
 export function tracksByIds(db: DB, ids: string[]) {
   const out: any[] = [];
@@ -79,6 +79,14 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const tracks = (db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? ORDER BY t.title LIMIT 200`).all(`%"${id}"%`) as TrackRow[]).map(trackOut);
     return { ...artistOut(a), albums, appearsOn, tracks };
   });
+  // Any id -> what it is (album, artist or track), for a page opened by id.
+  app.get('/api/items/:id', auth, async (req, reply) => {
+    const id = (req.params as any).id as string;
+    const al = db.prepare('SELECT * FROM albums WHERE id = ?').get(id) as any; if (al) return { kind: 'album', item: albumOut(al) };
+    const ar = db.prepare('SELECT * FROM artists WHERE id = ?').get(id) as any; if (ar) return { kind: 'artist', item: artistOut(ar) };
+    const t = tracksByIds(db, [id])[0]; if (t) return { kind: 'track', item: t };
+    return reply.code(404).send({ error: 'no such item' });
+  });
   app.get('/api/tracks/:id', auth, async (req, reply) => {
     const t = tracksByIds(db, [(req.params as any).id])[0];
     return t ?? reply.code(404).send({ error: 'no such track' });
@@ -103,6 +111,31 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const artists = (db.prepare('SELECT * FROM artists WHERE name LIKE ? ORDER BY track_count DESC LIMIT ?').all(like, limit) as any[]).map(artistOut);
     return { tracks, albums, artists };
   });
+  // Tracks that go with one: same artists first, then the same genres, shuffled.
+  app.get('/api/tracks/:id/mix', auth, async (req, reply) => {
+    const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get((req.params as any).id) as TrackRow | undefined;
+    if (!t) return reply.code(404).send({ error: 'no such track' });
+    const limit = Math.min(200, Number((req.query as any).limit) || 100);
+    const artistIds = JSON.parse(t.artist_ids) as string[], genres = JSON.parse(t.genres) as string[];
+    const pick = new Map<string, TrackRow>();
+    for (const a of artistIds) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 40`).all(`%"${a}"%`, t.id) as TrackRow[]) pick.set(r.id, r);
+    for (const g of genres) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 60`).all(`%${JSON.stringify(g)}%`, t.id) as TrackRow[]) pick.set(r.id, r);
+    if (pick.size < 20) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.id != ? ORDER BY RANDOM() LIMIT 60`).all(t.id) as TrackRow[]) pick.set(r.id, r);
+    const rows = [...pick.values()]; for (let i = rows.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rows[i], rows[j]] = [rows[j], rows[i]]; }
+    return { items: [trackOut(t), ...rows.slice(0, limit - 1).map(trackOut)] };
+  });
+  // Search page tiles: genres with a cover, most tracks first.
+  app.get('/api/browse', auth, async () => {
+    const rows = db.prepare('SELECT t.genres, a.cover_hash, t.album_id FROM tracks t JOIN albums a ON a.id = t.album_id').all() as any[];
+    const g = new Map<string, { n: number; cover: string | null; albumId: string }>();
+    for (const r of rows) for (const name of JSON.parse(r.genres || '[]') as string[]) { const k = name.trim(); if (!k) continue; const e = g.get(k) || { n: 0, cover: null, albumId: r.album_id }; e.n++; if (!e.cover && r.cover_hash) e.cover = r.cover_hash; g.set(k, e); }
+    return { tiles: [...g.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 40).map(([name, e]) => ({ id: `genre:${name}`, name, count: e.n, coverId: e.albumId, cover: e.cover, kind: 'genre' })) };
+  });
+  app.get('/api/genres/:name/tracks', auth, async (req) => {
+    const name = String((req.params as any).name || '').slice(0, 100);
+    const rows = db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? ORDER BY t.album_artist, t.album, t.disc_no, t.track_no LIMIT 500`).all(`%${JSON.stringify(name)}%`) as TrackRow[];
+    return { items: rows.map(trackOut) };
+  });
   app.get('/api/lyrics/:id', auth, async (req, reply) => {
     const r = db.prepare('SELECT kind, lines, source FROM lyrics WHERE track_id = ?').get((req.params as any).id) as any;
     if (!r) return reply.code(404).send({ error: 'no lyrics' });
@@ -122,5 +155,27 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     return reply.send(fs.createReadStream(p));
   });
   app.get('/api/art/sizes', async () => ({ sizes: SIZES }));
-  void path;
+  // The picture for any id: an album's cover, a track's album cover, an
+  // artist's portrait (or its banner), a playlist's own cover or its first
+  // track's. Served straight from the rendered files; webp when accepted.
+  const coverOf = (id: string, kind: string): string | null => {
+    if (id.startsWith('pl_')) { const p = db.prepare('SELECT cover_hash FROM playlists WHERE id = ?').get(id) as any; if (!p) return null; return p.cover_hash ?? (db.prepare('SELECT a.cover_hash FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id JOIN albums a ON a.id = t.album_id WHERE x.playlist_id = ? AND a.cover_hash IS NOT NULL ORDER BY x.pos LIMIT 1').get(id) as any)?.cover_hash ?? null; }
+    const al = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(id) as any; if (al) return al.cover_hash ?? null;
+    const tr = db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?').get(id) as any; if (tr) return tr.cover_hash ?? null;
+    const ar = db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as any; if (ar) return ar.image_hash ? (kind === 'banner' ? `${ar.image_hash}/banner` : ar.image_hash) : null;
+    return null;
+  };
+  app.get('/api/image/:id', async (req, reply) => {
+    const id = String((req.params as any).id || ''); const q = req.query as any;
+    const kind = q.kind === 'banner' ? 'banner' : 'primary';
+    const hash = coverOf(id, kind);
+    if (!hash) return reply.code(404).send();
+    const webp = /image\/webp/.test(String(req.headers.accept || ''));
+    const size = kind === 'banner' ? 'banner' : String(nearestSize(Number(q.size) || Number(q.maxHeight) || 320));
+    const [h, sub] = hash.split('/');
+    const p = path.join(dataDir, 'art', h, sub ? `${sub}.${webp ? 'webp' : 'jpg'}` : `${size}.${webp ? 'webp' : 'jpg'}`);
+    if (!fs.existsSync(p)) return reply.code(404).send();
+    reply.header('Cache-Control', 'private, max-age=86400').header('Vary', 'Accept').type(webp ? 'image/webp' : 'image/jpeg');
+    return reply.send(fs.createReadStream(p));
+  });
 }

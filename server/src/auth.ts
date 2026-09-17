@@ -32,11 +32,9 @@ export function userByToken(db: DB, tok: string): User | undefined {
 export function tokenFromRequest(req: FastifyRequest): string | null {
   const h = String(req.headers.authorization || '');
   if (h.startsWith('Bearer ')) return h.slice(7);
-  const mb = /Token="([^"]+)"/.exec(h); if (mb) return mb[1];
-  const emby = req.headers['x-emby-token']; if (typeof emby === 'string' && emby) return emby;
+  // <audio>, <img> and speakers cannot send headers: the token rides in the URL.
   const q = (req.query as any) || {};
-  for (const k of ['token', 'api_key', 'ApiKey']) if (typeof q[k] === 'string' && q[k]) return q[k];
-  return null;
+  return typeof q.token === 'string' && q.token ? q.token : null;
 }
 
 export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, mustChangePassword: !!u.must_change_pw });

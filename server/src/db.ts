@@ -72,6 +72,11 @@ const MIGRATIONS: string[] = [
   CREATE INDEX enrich_lyrics ON enrich(lyrics_state, lyrics_next);
   CREATE TABLE ext_cache (k TEXT PRIMARY KEY, json TEXT NOT NULL, at INTEGER NOT NULL);
   `,
+  `
+  CREATE TABLE album_likes (user_id TEXT NOT NULL, album_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, album_id));
+  ALTER TABLE playlists ADD COLUMN cover_hash TEXT;
+  ALTER TABLE artists ADD COLUMN image_tries INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export type DB = Database.Database;

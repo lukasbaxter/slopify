@@ -16,16 +16,13 @@ import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
 import { registerSession } from './session.js';
-import { registerJellyfinFacade } from './jf.js';
-import { registerRelay } from './relay.js';
-import { registerRelayHttp } from './relay-http.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
 // server/dist/app.js or server/src/app.ts -> repo root
 export const repoRoot = path.resolve(here, '..', '..');
 
-export type BuildOptions = { dataDir?: string; musicDir?: string; db?: DB };
+export type BuildOptions = { dataDir?: string; musicDir?: string; db?: DB; speakers?: boolean };
 
 export async function buildServer(opts: BuildOptions = {}) {
   const app = Fastify({ logger: { level: config.logLevel } });
@@ -42,13 +39,9 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAuth(app, db);
   registerLibrary(app, db, dataDir);
   registerStream(app, db, dataDir);
-  registerSocial(app, db);
+  registerSocial(app, db, dataDir);
   registerAdmin(app, db, musicDir, dataDir);
-  registerSession(app, db);
-  // The Conduit app's world: Jellyfin-shaped API under /jf, its relay under /relay.
-  registerJellyfinFacade(app, db, dataDir, (app as any).requireUser);
-  registerRelay(app, db);
-  registerRelayHttp(app, db, (app as any).requireUser);
+  registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);
@@ -59,7 +52,7 @@ export async function buildServer(opts: BuildOptions = {}) {
     await app.register(fastifyStatic, { root: webDist, prefix: '/', index: ['index.html'], wildcard: false });
     // SPA: any non-API, non-file path gets index.html
     app.setNotFoundHandler((req, reply) => {
-      if (/^\/(api|jf|relay)\//.test(req.url)) return reply.code(404).send({ error: 'not found' });
+      if (/^\/api\//.test(req.url)) return reply.code(404).send({ error: 'not found' });
       return reply.type('text/html').send(fs.readFileSync(path.join(webDist, 'index.html')));
     });
   }

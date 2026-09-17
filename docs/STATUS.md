@@ -13,14 +13,16 @@ Built and green (33 unit tests, Playwright on desktop + phone viewports, Docker 
 | 8 | Lyrics for every song: LrcLib by duration, instrumental, missing queue with retries, cached. Artist portraits + banners from Deezer | `server/src/enrich.ts` |
 | 9 | Speakers driven by the server: Chromecast + BluOS found on its network (mDNS + port sweep), one ServerPlayer per account (queue, transport, the speaker's clock, end-of-track advance), offered to every client anywhere. Needs `network_mode: host` | `server/src/speakers/` |
 
+| 10 | Desktop app (`desktop/`, Electron: the web build in a window, Cast + BluOS driven from the machine, server speakers listed too) and phone shell (`mobile/`, Expo WebView with hardware volume buttons); `v*` tags build dmg/exe/apk | `desktop/`, `mobile/`, `.github/workflows/release.yml` |
+| 11 | Import from Conduit/Jellyfin: playlists in order, likes with their dates, listening history (`tools/import-conduit.py`); done for lukasbaxter + henrybaxter 2026-09-17 | `tools/` |
+
 Running for real: `.85:8090` (host network) behind nginx at music.baxtergroup.io, full library scanned (27k tracks), enrichment running.
 
 Not built yet (in order):
 - Identity from audio: fpcalc fingerprints are wired (`enrich.ts`), AcoustID/MusicBrainz lookup + certainty states + preview comparison + review page are not.
 - Metadata/cover fetching (MusicBrainz, Cover Art Archive) and write-back.
-- Desktop app (Electron); speakers at a friend's house (the desktop driving them itself, as Conduit did).
-- Phone shell (Expo) with hardware volume buttons.
+- Native iOS build (the phone shell is Android-only on CI; iOS needs a developer account).
 - slskd inside the image + requests (Explo).
 - Global search / discography / similar / popular / release radar / requests (Explo, Spotify, Deezer): the pages exist, the data sources are not wired.
 - Lighthouse pass, security review, Subsonic API.
-- Import from Jellyfin (users, favourites, play counts, playlists) via the alias table.
+- Import the other Jellyfin accounts (the import tool does one account at a time, on request).

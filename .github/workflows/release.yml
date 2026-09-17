@@ -30,6 +30,11 @@ jobs:
       - run: npm run build -w web
       - run: npm ci
         working-directory: desktop
+      # The app version is the tag (v0.1.1 -> 0.1.1).
+      - if: startsWith(github.ref, 'refs/tags/v')
+        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+        working-directory: desktop
+        shell: bash
       # --publish never: electron-builder otherwise tries to upload to GitHub itself on a tag.
       - run: npm run ${{ matrix.script }} -- --publish never
         working-directory: desktop
@@ -101,7 +106,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
       - run: ls -la out
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: out/*
-          generate_release_notes: true
+      # Uploads one file at a time with retries: GitHub's asset upload API
+      # dropped parallel uploads of these ~100 MB files ("other side closed",
+      # "Error creating asset temp dir") on the first two releases.
+      - env: { GH_TOKEN: ${{ github.token }} }
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes
+          for f in out/*; do
+            for i in 1 2 3 4 5; do gh release upload "$GITHUB_REF_NAME" "$f" -R "$GITHUB_REPOSITORY" --clobber && break || sleep 15; done
+          done
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name'

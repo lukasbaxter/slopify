@@ -41,7 +41,7 @@ describe('ListenBrainz playlists in the app', () => {
 
   it('builds the weekly playlist from the createdfor list, fetching what is missing, and replaces it next time', async () => {
     let downloads = 0; let scans = 0;
-    const fetcher: any = async (url: string, init?: any) => {
+    const fetcher: any = async (url: string) => {
       if (url.includes('/playlists/createdfor')) return { ok: true, json: async () => ({ playlists: [{ playlist: { title: 'Weekly Exploration for lbuser, week of 2026-09-14', identifier: 'https://listenbrainz.org/playlist/abc', date: '2026-09-14T00:00:00Z', extension: { 'https://musicbrainz.org/doc/jspf#playlist': { additional_metadata: { algorithm_metadata: { source_patch: 'weekly-exploration' } } } } } }] }) };
       if (url.endsWith('/playlist/abc')) return { ok: true, json: async () => ({ playlist: { track: [{ title: first.title, creator: first.artist }, { title: second.title, creator: second.artist }, { title: 'Missing Song', creator: 'Nobody Known' }] } }) };
       if (url.endsWith('/api/v0/searches')) return { ok: true, json: async () => ({ id: 's2' }) };

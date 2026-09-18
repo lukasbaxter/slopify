@@ -16,6 +16,7 @@ import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
 import { registerSession } from './session.js';
+import { registerExplore } from './explore.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,6 +43,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerSocial(app, db, dataDir);
   registerAdmin(app, db, musicDir, dataDir);
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
+  registerExplore(app, db, { slskdUrl: config.slskdUrl, slskdKey: config.slskdKey });
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

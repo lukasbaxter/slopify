@@ -14,6 +14,7 @@ Built and green (33 unit tests, Playwright on desktop + phone viewports, Docker 
 | 9 | Speakers driven by the server: Chromecast + BluOS found on its network (mDNS + port sweep), one ServerPlayer per account (queue, transport, the speaker's clock, end-of-track advance), offered to every client anywhere. Needs `network_mode: host` | `server/src/speakers/` |
 
 | 10 | Desktop app (`desktop/`, Electron: the web build in a window, Cast + BluOS driven from the machine, server speakers listed too) and phone shell (`mobile/`, Expo WebView with hardware volume buttons); `v*` tags build dmg/exe/apk | `desktop/`, `mobile/`, `.github/workflows/release.yml` |
+| 12 | ListenBrainz in the app: scrobbling (a play counts after half the track), Weekly Exploration (missing tracks fetched through slskd, then the scan, then the playlist), Weekly Jams, Daily Jams, on a schedule in-process; admin button to run now | `server/src/explore.ts` |
 | 11 | Import from Conduit/Jellyfin: playlists in order, likes with their dates, listening history (`tools/import-conduit.py`); done for lukasbaxter + henrybaxter 2026-09-17 | `tools/` |
 
 Running for real: `.85:8090` (host network) behind nginx at music.baxtergroup.io, full library scanned (27k tracks), enrichment running.

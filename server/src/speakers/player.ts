@@ -14,7 +14,7 @@ const MIME: Record<string, string> = { flac: 'audio/flac', mp3: 'audio/mpeg', aa
 
 export type PlayerDeps = {
   db: DB; discovery: Discovery; publicUrl: string; token: string;
-  report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void;
+  report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void; scrobble?: (trackId: string, at: number) => void;
 };
 
 export class ServerPlayer {
@@ -129,7 +129,7 @@ export class ServerPlayer {
   private logPlay(trackId: string) {
     const db = this.d.db;
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(this.uid) as any;
-    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(this.uid, trackId, Date.now(), this.device?.name || 'speaker');
+    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(this.uid, trackId, Date.now(), this.device?.name || 'speaker'); this.d.scrobble?.(trackId, Date.now()); }
   }
   private async skipTo(i: number) {
     if (!this.queue[i]) return;

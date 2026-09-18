@@ -132,7 +132,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   const sessionMsg = (s: Session) => (s.nowPlaying ? { type: 'session', nowPlaying: { ...s.nowPlaying, playing: s.playing, position: positionNow(s) / 1000 }, queue: s.queueItems || [], at: s.updatedAt } : null);
   const logPlay = (uid: string, trackId: string, client: string) => {
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(uid) as any;
-    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid, trackId, Date.now(), client);
+    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid, trackId, Date.now(), client); (app as any).scrobbleStart?.(uid, trackId, Date.now()); }
   };
   app.decorate('sessionOf', (uid: string) => loadSession(db, uid));
   // Likes changed over HTTP reach the open clients too.
@@ -159,6 +159,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     c.player = new ServerPlayer(uid, {
       db, discovery, publicUrl: opts.publicUrl || '', token: speakerToken(uid), log: (m) => app.log.info(m),
       report: (np) => handle(c, { type: 'nowplaying', nowPlaying: np }),
+      scrobble: (trackId, at) => (app as any).scrobbleStart?.(uid, trackId, at),
       reportQueue: (rows) => handle(c, { type: 'queue', queue: rows }),
       claim: () => handle(c, { type: 'claim' }),
     });

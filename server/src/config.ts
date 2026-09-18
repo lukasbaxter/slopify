@@ -16,5 +16,8 @@ export const config = {
   loginRateMax: Number(env('LOGIN_RATE_MAX', '10')), // per IP per minute; raised for the E2E suite
   // Find and drive Chromecast / BluOS speakers on the server's network (needs host networking in Docker).
   speakers: env('SPEAKERS', '1') !== '0',
+  // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library lacks are fetched through it.
+  slskdUrl: env('SLSKD_URL', '').replace(/\/+$/, ''),
+  slskdKey: env('SLSKD_API_KEY', ''),
 };
 export type Config = typeof config;

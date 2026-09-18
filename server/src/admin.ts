@@ -34,6 +34,7 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   app.decorate('runEnrich', runEnrich);
   app.post('/api/admin/enrich', admin, async () => { void runEnrich(); return { started: true }; });
   app.decorate('runScan', runScan);
+  app.decorate('scanning', () => current);
   app.post('/api/admin/scan', admin, async () => ({ started: true, scan: await runScan() }));
   app.get('/api/admin/status', admin, async () => ({
     scanning: current,
@@ -51,5 +52,6 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     identity: db.prepare('SELECT identity_state AS state, COUNT(*) n FROM tracks GROUP BY identity_state').all(),
     enrich: enrichStatus(db),
     enriching,
+    explore: (app as any).exploreStatus?.() ?? null,
   }));
 }

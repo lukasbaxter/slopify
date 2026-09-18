@@ -736,7 +736,7 @@ export default function Library({
               <h2>Scrobbling &amp; discovery</h2>
               <div className="settings-hint" style={{ marginBottom: 12 }}>
                 Every song you play for at least half its length is sent to <a href="https://listenbrainz.org" target="_blank" rel="noreferrer">ListenBrainz</a> as a listen.
-                That history powers the Weekly Exploration / Daily Jams playlists (Explo) on Home. Get the token from listenbrainz.org → Settings.
+                That history powers the Weekly Exploration / Daily Jams playlists on Home. Get the token from listenbrainz.org → Settings.
               </div>
               {(() => {
                 const cur = prefs?.listenbrainz || {};

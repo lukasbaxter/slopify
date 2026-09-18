@@ -74,6 +74,27 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
         </section>
       )}
 
+      {status?.explore && (
+        <section className="settings-section admin">
+          <h2>Weekly playlists</h2>
+          <div className="settings-hint" style={{ marginBottom: 10 }}>
+            Every Monday each account with a ListenBrainz token (Settings › Scrobbling) gets Weekly Exploration (new music, fetched from Soulseek{status.explore.slskd ? '' : ' — slskd is not configured on this server'}) and Weekly Jams; Daily Jams every morning.
+            {status.explore.users.length ? '' : ' Nobody has a token yet.'}
+          </div>
+          {status.explore.users.length > 0 && (
+            <ul className="admin-list">
+              {status.explore.users.map((u) => (
+                <li key={u.name}><b>{u.name}</b><span>{['weekly-exploration', 'weekly-jams', 'daily-jams'].map((k) => u[k] ? `${k.replace('-', ' ')}: ${u[k].matched}/${u[k].total} (${u[k].date})` : `${k.replace('-', ' ')}: none yet`).join(' · ')}</span></li>
+              ))}
+            </ul>
+          )}
+          <div className="settings-actions">
+            <button type="button" className="primary" disabled={!!busy || status.explore.running} onClick={() => run('build playlists', () => jf._fetch('/api/admin/explore', { method: 'POST', body: JSON.stringify({ kinds: ['weekly-exploration', 'weekly-jams'] }) }), 'Building this week\'s playlists')}>{status.explore.running ? 'Building…' : "Make this week's playlists now"}</button>
+            <button type="button" className="btn-secondary" disabled={!!busy || status.explore.running} onClick={() => run('build playlist', () => jf._fetch('/api/admin/explore', { method: 'POST', body: JSON.stringify({ kinds: ['daily-jams'] }) }), 'Building Daily Jams')}>Daily Jams now</button>
+          </div>
+        </section>
+      )}
+
       <section className="settings-section admin">
         <h2>Accounts</h2>
         {users && (

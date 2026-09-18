@@ -19,6 +19,8 @@ services:
       PUBLIC_URL: http://192.168.1.10:8080   # what speakers fetch audio from (LAN address)
       ADMIN_USER: admin
       ADMIN_PASS: admin   # you are asked to change it on first login
+      SLSKD_URL: http://127.0.0.1:5030      # optional: slskd, for the Weekly Exploration downloads
+      SLSKD_API_KEY: ...
 ```
 
 `docker compose up -d`, open http://host:8080, log in, it scans. Music gets

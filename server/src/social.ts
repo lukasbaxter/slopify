@@ -139,6 +139,7 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string) {
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(uid(req)) as any;
     if (last && last.track_id === b.data.trackId && Math.abs(at - last.at) < 60000) return { ok: true, dup: true };
     db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid(req), b.data.trackId, at, b.data.client ?? null);
+    if (b.data.client !== 'import') (app as any).scrobbleStart?.(uid(req), b.data.trackId, at);
     return { ok: true };
   });
   app.get('/api/home', auth, async (req) => {

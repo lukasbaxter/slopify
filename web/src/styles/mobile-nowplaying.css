@@ -257,6 +257,15 @@
   .deviceitem-model { font-size: 13px; color: #a7a7a7; }
   .deviceitem-dot { display: none; }
   .devicemenu-empty, .dm-note { color: #a7a7a7; font-size: 13px; line-height: 1.4; padding: 12px 0 0; margin: 0; }
+  /* Speaker volume at the foot of the sheet (only while the session is on a
+     speaker): 16pt glyphs either side of a 4pt green bar with a 44pt touch
+     height, like Spotify's Connect slider. */
+  .dm-volume { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.1); color: #fff; }
+  .dm-volume svg { flex: none; }
+  .dm-volume input[type="range"] { touch-action: none; -webkit-tap-highlight-color: transparent; flex: 1 1 auto; height: 44px; border-radius: 0; margin: 0; background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 4px no-repeat; }
+  .dm-volume input[type="range"]:hover { background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 4px no-repeat; }
+  .dm-volume input[type="range"]::-webkit-slider-thumb { opacity: 1; width: 12px; height: 12px; background: var(--accent); box-shadow: none; transition: transform .12s; }
+  .dm-volume input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.34); }
 
   /* iOS 18 installed web app (App.jsx measures --ios-shim and sets
      html.ios-shim when the layout viewport is a status bar shorter than the

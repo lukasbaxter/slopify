@@ -298,7 +298,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         </div>
         {/* Bottom-right: the speaker picker with the device it is on as green text, and the volume. */}
         <div className="fs-output">
-          {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName />}
+          {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} />}
           <div className="fs-volume" title={`Volume ${volume}%`}>
             <button onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? 'Mute' : 'Unmute'}>
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
@@ -317,7 +317,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         {phone && (
           <div className="fs-phone-row">
             <div className="fs-phone-device">
-              {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName />}
+              {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} />}
             </div>
             <button className={tab === 'lyrics' ? 'on' : ''} onClick={() => setTab(tab === 'lyrics' ? 'album' : 'lyrics')} title="Lyrics" aria-label="Lyrics">{G.lyrics}</button>
             <button onClick={() => { close(); onPanel?.('queue'); }} title="Queue" aria-label="Queue">{G.queue}</button>

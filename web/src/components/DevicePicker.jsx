@@ -41,11 +41,43 @@ const ConnectIcon = () => (
   </svg>
 );
 
+// Bottom of the phone sheet while the session is on a speaker: Spotify's green
+// Connect volume slider. The phone's own buttons only move the phone, and a
+// PWA never sees them, so this is the one place a phone can set a speaker's
+// level. The bar follows the finger locally and sends at most one level every
+// 120 ms (plus the final one), so a drag is not a command per pixel.
+function SheetVolume({ volume, onChange }) {
+  const [drag, setDrag] = useState(null);
+  const timer = useRef(null); const pending = useRef(null); const last = useRef(0);
+  const send = (v) => { last.current = Date.now(); pending.current = null; onChange(v); };
+  const move = (v) => {
+    setDrag(v);
+    if (Date.now() - last.current >= 120) { send(v); return; }
+    pending.current = v;
+    if (!timer.current) timer.current = setTimeout(() => { timer.current = null; if (pending.current != null) send(pending.current); }, 120);
+  };
+  const end = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } if (pending.current != null) send(pending.current); setDrag(null); };
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const shown = drag != null ? drag : volume;
+  return (
+    <div className="dm-volume" title={`Volume ${shown}%`}>
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.642 3.642 0 0 1-1.33-4.967 3.639 3.639 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.139 2.139 0 0 0 0 3.7l5.8 3.35V2.8l-5.8 3.35z" /></svg>
+      <input
+        type="range" min="0" max="100" value={shown} aria-label="Speaker volume"
+        onChange={(e) => move(Number(e.target.value))}
+        onPointerUp={end} onPointerCancel={end} onTouchEnd={end} onTouchCancel={end} onKeyUp={end}
+        style={{ '--pct': `${shown}%` }}
+      />
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.642 3.642 0 0 1-1.33-4.967 3.639 3.639 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.139 2.139 0 0 0 0 3.7l5.8 3.35V2.8l-5.8 3.35zm8.683 4.29V5.56a2.75 2.75 0 0 1 0 4.88z" /><path d="M11.5 13.614a5.752 5.752 0 0 0 0-11.228v1.55a4.252 4.252 0 0 1 0 8.127v1.55z" /></svg>
+    </div>
+  );
+}
+
 /**
  * The device selector. Groups discovered players by family so the Bluesound gear
  * and the Cast gear read as distinct things rather than one flat list.
  */
-export default function DevicePicker({ devices, active, onSelect, showName = false }) {
+export default function DevicePicker({ devices, active, onSelect, showName = false, volume = null, onVolume = null }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const phone = usePhone();
@@ -141,6 +173,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
               ? 'Speakers and TVs show up in the Conduit app. In the browser, playback stays on this device.'
               : 'Chromecast and Bluesound players on this network appear here automatically once they are awake.'}
           </p>
+          {active.kind !== 'local' && onVolume && typeof volume === 'number' && <SheetVolume volume={volume} onChange={onVolume} />}
         </div>
       )}
       {open && !phone && (

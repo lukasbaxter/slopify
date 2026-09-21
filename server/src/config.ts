@@ -19,5 +19,8 @@ export const config = {
   // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library lacks are fetched through it.
   slskdUrl: env('SLSKD_URL', '').replace(/\/+$/, ''),
   slskdKey: env('SLSKD_API_KEY', ''),
+  // Music Requests (Spotify lookups + the album download queue) for the artist
+  // page's full discography, "Request" buttons, Release Radar and global search.
+  musicRequestsUrl: env('MUSIC_REQUESTS_URL', '').replace(/\/+$/, ''),
 };
 export type Config = typeof config;

@@ -70,6 +70,8 @@ export class Slopify {
     for (;;) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      // A caller's own signal (a superseded search) aborts too.
+      opts.signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
       try {
         const headers = { Authorization: `Bearer ${this.token || ''}`, ...(opts.headers || {}) };
         if (!raw && opts.body) headers['Content-Type'] = 'application/json';

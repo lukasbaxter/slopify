@@ -49,15 +49,15 @@ export async function browse(jf) {
   return (r.tiles || []).map((t) => ({ ...t, filter: `genre = "${t.name.replace(/"/g, '')}"` }));
 }
 
-// Everything the server knows about a release/artist beyond the library
-// (other releases, similar artists, popularity order, requests) is not part
-// of Slopify yet; these answer empty so the pages render what the library has.
-export const globalSearch = async () => ({ results: [], albums: [], artists: [] });
-export const discography = async () => ({ releases: [] });
-export const similar = async () => ({ artists: [] });
+// Beyond the library (the server asks Music Requests / Deezer and flags what
+// is here): the artist page's full discography with "Request" for the rest,
+// similar artists, the Release Radar and the search page's "Everywhere" shelf.
+export const globalSearch = (jf, q, signal) => jf._fetch(`/api/gsearch?q=${encodeURIComponent(q)}`, { timeoutMs: 20000, signal });
+export const discography = (jf, artistId) => jf._fetch(`/api/discography/${encodeURIComponent(artistId)}`, { timeoutMs: 30000 });
+export const similar = (jf, artistId) => jf._fetch(`/api/similar/${encodeURIComponent(artistId)}`, { timeoutMs: 20000 });
 export const popular = async () => ({ ids: [] });
-export const radar = async () => ({ releases: [] });
-export async function requestAlbum() { throw new Error('Requests are not set up on this server yet'); }
+export const radar = (jf) => jf._fetch('/api/radar', { timeoutMs: 120000 });
+export const requestAlbum = (jf, albumId) => jf._fetch('/api/requests', { method: 'POST', body: JSON.stringify({ album_id: albumId }), timeoutMs: 40000 });
 
 // Liked Songs rows in one call (the like store's ids, newest first).
 export const likedFast = (jf) => jf._favoriteTracks();

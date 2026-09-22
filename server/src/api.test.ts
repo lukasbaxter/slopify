@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { buildServer } from './app.js';
+import WebSocket from 'ws';
 import { scanLibrary } from './scanner.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
@@ -106,5 +107,31 @@ describe('likes, playlists, plays, home, prefs', () => {
     const s = (await send('POST', '/api/admin/scan')).json(); expect(s.started).toBe(true);
     await new Promise((r) => setTimeout(r, 800));
     const st = (await get('/api/admin/status')).json(); expect(st.missingLyrics).toBe(8); expect(st.users).toBe(1);
+  });
+});
+
+describe('session socket', () => {
+  let port = 0;
+  const hello = async (instance: string) => {
+    if (!port) { await app.listen({ host: '127.0.0.1', port: 0 }); port = (app.server.address() as any).port; }
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const got = new Promise<any>((resolve) => ws.on('message', (d: any) => { const m = JSON.parse(String(d)); if (m.type === 'hello-ok') resolve(m); }));
+    let closed = false; ws.on('close', () => { closed = true; });
+    ws.send(JSON.stringify({ type: 'hello', token: tok, clientId: 'c_sharedtabid', instance, kind: 'web' }));
+    return { ws, ok: await got, closed: () => closed };
+  };
+  it('two tabs sharing a stored id both stay connected, each with its own id', async () => {
+    const a = await hello('i_tab_a');
+    const b = await hello('i_tab_b');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(a.ok.clientId).toBe('c_sharedtabid');
+    expect(b.ok.clientId).not.toBe('c_sharedtabid');
+    expect(a.closed()).toBe(false);
+    // the same page reconnecting still replaces its own old socket
+    const a2 = await hello('i_tab_a');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(a2.ok.clientId).toBe('c_sharedtabid'); expect(a.closed()).toBe(true);
+    for (const x of [b, a2]) x.ws.terminate();
   });
 });

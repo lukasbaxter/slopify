@@ -37,6 +37,10 @@ export class SessionLink {
     this.onLike = onLike || (() => {});
     this.onOffsets = onOffsets || (() => {});
     this.id = clientId();
+    // Per page load. Every tab of a browser shares the stored id, so the server
+    // tells a second live tab apart by this and hands it an id of its own
+    // (two tabs on one id replaced each other every second or so, forever).
+    this.instance = `i_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
     this.ws = null;
     this.closed = false;
     this._backoff = 1000;
@@ -56,13 +60,14 @@ export class SessionLink {
 
     ws.onopen = () => {
       this._backoff = 1000;
-      this._send({ type: 'hello', token: this.token, clientId: this.id, name: this.name, kind: this.kind, canPlay: this.canPlay });
+      this._send({ type: 'hello', token: this.token, clientId: this.id, instance: this.instance, name: this.name, kind: this.kind, canPlay: this.canPlay });
       this._ping = setInterval(() => this._send({ type: 'ping' }), 25000);
     };
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
       if (m.type === 'hello-ok') {
         this.connected = true;
+        if (typeof m.clientId === 'string' && m.clientId) this.id = m.clientId;
         if (m.offsets) this.onOffsets(m.offsets);
         // Only now is the server listening to us. Anything sent while it was
         // still verifying the token was dropped -- which is how the desktop's

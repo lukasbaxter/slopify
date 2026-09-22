@@ -26,7 +26,7 @@ export type Session = {
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
-type Client = { id: string; uid: string; name: string; kind: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; player?: ServerPlayer };
+type Client = { id: string; uid: string; name: string; kind: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; player?: ServerPlayer; instance?: string | null; open?: () => boolean };
 
 export const Event = z.object({
   type: z.enum(['play', 'pause', 'toggle', 'seek', 'next', 'previous', 'queue', 'transfer', 'progress', 'stop']),
@@ -268,9 +268,18 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
           const used = new Set(ofUser(who.id).filter((c) => (c.kind === 'web' || c.kind === 'mobile') && c.id !== msg.clientId).map((c) => c.name));
           let n = 1; while (used.has(`Web Player (${n})`)) n += 1; name = `Web Player (${n})`;
         }
-        const id = typeof msg.clientId === 'string' && /^[\w-]{4,64}$/.test(msg.clientId) && !msg.clientId.startsWith('server:') ? msg.clientId : `c_${Math.random().toString(36).slice(2)}`;
-        const prev = clients.get(id); if (prev && prev !== self) { try { prev.close(); } catch { /* gone */ } clients.delete(id); }
-        self = { id, uid: who.id, net, name, kind, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced') };
+        let id = typeof msg.clientId === 'string' && /^[\w-]{4,64}$/.test(msg.clientId) && !msg.clientId.startsWith('server:') ? msg.clientId : `c_${Math.random().toString(36).slice(2)}`;
+        const instance = typeof msg.instance === 'string' ? msg.instance.slice(0, 64) : null;
+        let prev = clients.get(id);
+        // Same stored id from a different, still-connected page (a second tab
+        // of the same browser): that is another player, not a reconnect. It
+        // gets an id of its own instead of replacing the first, which would
+        // reconnect, replace this one back, and so on every second.
+        if (prev && prev !== self && instance && prev.instance && prev.instance !== instance && prev.open?.()) {
+          id = `${id.slice(0, 55)}-${Math.random().toString(36).slice(2, 8)}`; prev = undefined;
+        }
+        if (prev && prev !== self) { try { prev.close(); } catch { /* gone */ } clients.delete(id); }
+        self = { id, uid: who.id, net, name, kind, instance, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced') };
         clients.set(id, self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);

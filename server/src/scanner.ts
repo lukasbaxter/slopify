@@ -171,7 +171,12 @@ export function recount(db: DB) {
   db.exec(`
     UPDATE albums SET track_count = (SELECT COUNT(*) FROM tracks t WHERE t.album_id = albums.id), duration_ms = (SELECT COALESCE(SUM(duration_ms), 0) FROM tracks t WHERE t.album_id = albums.id);
     DELETE FROM albums WHERE track_count = 0;
-    UPDATE artists SET track_count = (SELECT COUNT(*) FROM tracks t WHERE t.artist_ids LIKE '%"' || artists.id || '"%'), album_count = (SELECT COUNT(*) FROM albums a WHERE a.artist_id = artists.id);
+    -- One pass over the credits (a LIKE per artist was artists x tracks: 60 s
+    -- of blocked event loop at 50k tracks, long enough to drop every socket).
+    CREATE TEMP TABLE IF NOT EXISTS artist_counts (id TEXT PRIMARY KEY, n INTEGER NOT NULL);
+    DELETE FROM artist_counts;
+    INSERT INTO artist_counts SELECT j.value, COUNT(DISTINCT t.id) FROM tracks t, json_each(t.artist_ids) j GROUP BY j.value;
+    UPDATE artists SET track_count = COALESCE((SELECT n FROM artist_counts c WHERE c.id = artists.id), 0), album_count = (SELECT COUNT(*) FROM albums a WHERE a.artist_id = artists.id);
     DELETE FROM artists WHERE track_count = 0 AND album_count = 0;
   `);
 }

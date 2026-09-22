@@ -25,6 +25,7 @@ export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitr
 const MIME: Record<string, string> = { '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.aiff': 'audio/aiff', '.aif': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.ape': 'audio/x-ape', '.wv': 'audio/x-wavpack' };
 
 const running = new Map<string, Promise<void>>(); // key -> startable (RUNWAY segments or done)
+const finishing = new Map<string, Promise<void>>(); // key -> ffmpeg exited (what a warm slot waits for)
 const RUNWAY = 4;          // segments in the first playlist answer (16 s > three 4 s target durations)
 const RUNWAY_WAIT = 1500;  // ms cap on waiting for them
 const CACHE_CAP_GB = 60;   // /data/transcodes, oldest-used dirs go first
@@ -51,7 +52,7 @@ async function ensureHls(dataDir: string, id: string, file: string, profile: str
       ff.stderr.on('data', (d) => { err += d; });
       const exit = new Promise<void>((resolve, reject) => { ff.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.slice(0, 300)}`)))); ff.on('error', reject); });
       let finished = false;
-      exit.then(() => { finished = true; return fsp.writeFile(done, '1'); }).catch((e) => { finished = true; log(`hls ${key}: ${e.message}`); }).finally(() => running.delete(key));
+      finishing.set(key, exit.then(() => { finished = true; return fsp.writeFile(done, '1'); }).catch((e) => { finished = true; log(`hls ${key}: ${e.message}`); }).finally(() => { running.delete(key); finishing.delete(key); }));
       const t0 = Date.now();
       let first = 0;
       while (Date.now() - t0 < 30000) {
@@ -84,7 +85,8 @@ function pumpWarm(dataDir: string, trackFile: (id: string) => string | undefined
     const file = trackFile(id);
     if (!file || !fs.existsSync(file) || fs.existsSync(path.join(transcodeDir(dataDir, id, profile), 'done'))) continue;
     warmActive++;
-    ensureHls(dataDir, id, file, profile, log, true).catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
+    // The slot is held until ffmpeg exits, not just until the track is startable.
+    ensureHls(dataDir, id, file, profile, log, true).then(() => finishing.get(`${id}:${profile}`)).catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
       .finally(() => { warmActive--; pumpWarm(dataDir, trackFile, log); });
   }
 }

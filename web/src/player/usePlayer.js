@@ -627,7 +627,9 @@ export function usePlayer(jf) {
       let pick = fresh.filter((t) => !have.has(t.Id));
       if (!pick.length) pick = fresh.filter((t) => t.Id !== cur.Id);
       if (!pick.length) return giveUp();
-      const merged = [...queueRef.current, ...pick];
+      // Smart shuffle mixes the additions; plain continuation keeps the
+      // mix's own order (most similar first).
+      const merged = [...queueRef.current, ...(shuffleRef.current === 'smart' ? shuffled(pick) : pick)];
       setQueue(merged); queueRef.current = merged;
       await skipTo(indexRef.current + 1);
     } catch {
@@ -669,11 +671,11 @@ export function usePlayer(jf) {
   }, [jf, skipTo, restart]);
 
   // Advance the queue. `auto` is true for a track that ended on its own (vs. a
-  // manual skip). At the end of the queue, honour repeat / smart shuffle; a
-  // MANUAL skip must always land on another track: a playlist or album starts
-  // over (reshuffled if shuffle is on), an artist context plays more of the
-  // artist, and a bare queue (a song clicked in search, a radio) continues
-  // with similar songs.
+  // manual skip). The music never stops at the end of the queue: repeat all
+  // starts it over, repeat one replays, and otherwise it continues (Spotify's
+  // Autoplay): an artist context plays more of the artist, anything else gets
+  // similar songs appended (shuffled only under smart shuffle). If nothing
+  // similar can be found, a playlist or album starts over.
   const advance = useCallback(async (auto = false) => {
     const q = queueRef.current;
     const i = indexRef.current;
@@ -682,12 +684,9 @@ export function usePlayer(jf) {
     // Nothing left.
     if (repeatRef.current === 'all') return restart();
     if (repeatRef.current === 'one') return skipTo(i);
-    if (shuffleRef.current === 'smart') return smartNext(!auto);
-    if (auto) return skipTo(q.length); // falls into the stop branch (parks on the last track)
     const ctx = contextRef.current;
     if (ctx && String(ctx).startsWith('artist:')) return moreOfArtist(String(ctx).slice(7));
-    if (ctx) return restart();
-    return smartNext(true);
+    return smartNext(!!ctx);
   }, [skipTo, smartNext, restart, moreOfArtist]);
   useEffect(() => { advanceRef.current = advance; }, [advance]);
 

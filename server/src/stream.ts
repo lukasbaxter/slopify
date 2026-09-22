@@ -129,7 +129,13 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     try { index = await ensureHls(dataDir, id, file, profile, (m) => app.log.warn(m)); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
     const tok = (req.query as any).token ? `?token=${encodeURIComponent((req.query as any).token)}` : '';
-    const body = (await fsp.readFile(index, 'utf8')).replace(/^(s\d+\.ts)$/gm, `$1${tok}`);
+    // While ffmpeg is still writing, the playlist has no ENDLIST and players
+    // treat it as live: iOS starts at the live edge minus three target
+    // durations, so a phone on a slow link (several segments already written
+    // by the time it fetches the playlist) began songs 4-20 s in. EXT-X-START
+    // pins the start to 0; harmless once the playlist is closed.
+    const body = (await fsp.readFile(index, 'utf8')).replace(/^(s\d+\.ts)$/gm, `$1${tok}`)
+      .replace(/^(#EXT-X-VERSION:\d+\n)/m, '$1#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n');
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return body;
   });

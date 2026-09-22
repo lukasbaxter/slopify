@@ -58,6 +58,8 @@ export async function buildServer(opts: BuildOptions = {}) {
     // SPA: any non-API, non-file path gets index.html
     app.setNotFoundHandler((req, reply) => {
       if (/^\/api\//.test(req.url)) return reply.code(404).send({ error: 'not found' });
+      // a missing file (favicon.ico, an old hashed asset) is a 404, not the app: browsers and scrapers took the HTML as the icon
+      if (/\.(ico|png|svg|jpe?g|webp|gif|js|mjs|css|map|json|webmanifest|txt|xml|woff2?)$/i.test(req.url.split('?')[0])) return reply.code(404).send('not found');
       return reply.type('text/html').send(fs.readFileSync(path.join(webDist, 'index.html')));
     });
   }

@@ -350,27 +350,38 @@ export function usePlayer(jf) {
         webAudioRef.current?.ctx.resume?.().catch(() => {});
         const transcoded = jf.transcoded?.();
         const spare = spareRef.current;
-        if (!transcoded && seekSeconds === 0 && spare && spare.dataset.track === track.Id && spare.src && !spare.error) {
+        // Only while the page is visible: with the screen locked iOS may hold
+        // play() on an element that was not already playing, and the promise
+        // then neither resolves nor rejects. The music stopped at a track end,
+        // and the held play() went off when the app was reopened, on top of
+        // whatever was started by then (two songs at once). Hidden, the
+        // element that just ended takes the next src, which iOS always allows.
+        const visible = typeof document === 'undefined' || !document.hidden;
+        if (visible && !transcoded && seekSeconds === 0 && spare && spare.dataset.track === track.Id && spare.src && !spare.error) {
           // The spare already holds this track: swap. The old element is
-          // paused first (two songs at once would be worse than a few ms of
-          // silence), then emptied to become the next spare.
+          // emptied first, so nothing (iOS resuming its "now playing" element
+          // included) can ever start it again next to the spare.
           const old = audioRef.current;
-          old.pause();
+          old.pause(); old.removeAttribute('src'); old.load(); delete old.dataset.track;
           audioRef.current = spare; spareRef.current = old; setActiveEl(spare);
           webAudioRef.current?.setActive?.(spare);
           localBaseRef.current = 0;
           spare.volume = volume / 100;
-          let swapped = false;
-          try { await spare.play(); swapped = true; } catch (e) {
-            if (e?.name === 'AbortError') return; // a newer start took over
-            // Not unlocked (or the buffered stream went bad): swap back and load normally.
+          const outcome = await Promise.race([
+            spare.play().then(() => 'ok', (e) => (e?.name === 'AbortError' ? 'abort' : 'fail')),
+            new Promise((r) => setTimeout(() => r('timeout'), 4000)),
+          ]);
+          if (outcome === 'abort' || (gen != null && startGenRef.current !== gen)) return; // a newer start took over
+          const swapped = outcome === 'ok';
+          if (!swapped) {
+            // Not unlocked, a bad buffered stream, or a play() iOS is holding:
+            // silence the spare for good (a held play() must not fire later),
+            // swap back and load normally.
+            spare.pause(); spare.removeAttribute('src'); spare.load(); delete spare.dataset.track;
             audioRef.current = old; spareRef.current = spare; setActiveEl(old);
             webAudioRef.current?.setActive?.(old);
-            spare.removeAttribute('src'); spare.load(); delete spare.dataset.track;
           }
           if (swapped) {
-            old.removeAttribute('src'); old.load(); delete old.dataset.track;
-            if (gen != null && startGenRef.current !== gen) return;
             loadedRef.current = track.Id;
             const id = track.Id;
             setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
@@ -378,6 +389,9 @@ export function usePlayer(jf) {
           }
         }
         const el = audioRef.current;
+        // Nothing but the active element may hold media now: a loaded spare is
+        // one more thing iOS could start when the app comes back.
+        if (spare && spare !== el && spare.getAttribute('src')) { spare.pause(); spare.removeAttribute('src'); spare.load(); delete spare.dataset.track; }
         // A transcode starts at the wanted moment on the server; the element's
         // clock then runs from 0 and localBaseRef holds the offset.
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
@@ -1303,8 +1317,10 @@ export function usePlayer(jf) {
       jf.prewarm?.(ahead[0]);
       // The spare element opens the next track now (paused): iOS fetches the
       // playlist and buffers ahead, so the skip is a swap, not a load.
+      // Not while hidden: the swap only happens in the foreground, so a
+      // locked phone would download every next track for nothing.
       const spare = spareRef.current;
-      if (spare && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
+      if (spare && !document.hidden && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
         spare.dataset.track = ahead[0];
         spare.src = jf.playbackUrl(ahead[0]);
         try { spare.load(); } catch { /* not unlocked yet */ }

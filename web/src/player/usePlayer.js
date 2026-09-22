@@ -113,15 +113,35 @@ export function usePlayer(jf) {
   const pinnedRef = useRef(false); // user explicitly chose a device
   const adoptedRef = useRef(false);
 
+  // Two elements: the one playing, and a spare that already holds the next
+  // track (src set, load() called, so iOS has fetched its playlist and first
+  // segments while paused). A skip to that track swaps them and plays: no
+  // src teardown, so no gap and no "Not Playing" flash on the lock screen.
+  // Both get unlocked by the first tap (iOS unlocks per element).
   const audioRef = useRef(null);
+  const spareRef = useRef(null);
+  const [activeEl, setActiveEl] = useState(null);
   const localBaseRef = useRef(0); // track time at which the local element's stream starts (transcodes only)
   if (!audioRef.current && typeof Audio !== 'undefined') {
-    audioRef.current = new Audio();
-    // The visualizer taps this element through a MediaElementSource, which is
-    // silent for cross-origin media unless the element is CORS-enabled. The
-    // stream origin (music.baxtergroup.io) answers with ACAO: *.
-    audioRef.current.crossOrigin = 'anonymous';
+    for (const ref of [audioRef, spareRef]) {
+      ref.current = new Audio();
+      // The visualizer taps the elements through MediaElementSources, which
+      // are silent for cross-origin media unless the element is CORS-enabled.
+      // The stream origin (music.baxtergroup.io) answers with ACAO: *.
+      ref.current.crossOrigin = 'anonymous';
+      ref.current.preload = 'auto';
+    }
   }
+  useEffect(() => { setActiveEl(audioRef.current); }, []);
+  // iOS unlocks preload/play per element on a user gesture: the spare gets its
+  // load() inside the first tap so it can buffer the next track unprompted.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const unlock = () => { try { spareRef.current?.load(); } catch { /* nothing to load yet */ } };
+    document.addEventListener('touchend', unlock, { once: true, capture: true });
+    document.addEventListener('click', unlock, { once: true, capture: true });
+    return () => { document.removeEventListener('touchend', unlock, { capture: true }); document.removeEventListener('click', unlock, { capture: true }); };
+  }, []);
   // The element is routed through a Web Audio graph from the moment it is
   // created (element -> source -> destination), so the visualizer can tap the
   // source at any time without re-plumbing a playing element (that re-plumb
@@ -135,9 +155,17 @@ export function usePlayer(jf) {
     const el = audioRef.current; if (!el) return null;
     const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return null;
     const ctx = new Ctx({ latencyHint: 'playback' });
-    const source = ctx.createMediaElementSource(el);
-    source.connect(ctx.destination);
-    webAudioRef.current = { ctx, source, onSource: () => () => {} };
+    // One source per element (a MediaElementSource can only be made once);
+    // `source` is the active element's, and swaps tell the visualizer.
+    const sources = new Map();
+    for (const e of [el, spareRef.current]) if (e) { const src = ctx.createMediaElementSource(e); src.connect(ctx.destination); sources.set(e, src); }
+    const listeners = new Set();
+    const wa = {
+      ctx, source: sources.get(el), sources,
+      onSource: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+      setActive: (e) => { const prev = wa.source, next = sources.get(e); if (!next || next === prev) return; wa.source = next; for (const fn of listeners) { try { fn(next, prev); } catch { /* listener */ } } },
+    };
+    webAudioRef.current = wa;
     return webAudioRef.current;
   }, []);
   // Build it before anything plays.
@@ -319,12 +347,41 @@ export function usePlayer(jf) {
     async (dev, track, seekSeconds = 0, gen = null) => {
       if (!jf || !track) return;
       if (dev.kind === 'local') {
-        const el = audioRef.current;
         webAudioRef.current?.ctx.resume?.().catch(() => {});
+        const transcoded = jf.transcoded?.();
+        const spare = spareRef.current;
+        if (!transcoded && seekSeconds === 0 && spare && spare.dataset.track === track.Id && spare.src && !spare.error) {
+          // The spare already holds this track: swap. The old element is
+          // paused first (two songs at once would be worse than a few ms of
+          // silence), then emptied to become the next spare.
+          const old = audioRef.current;
+          old.pause();
+          audioRef.current = spare; spareRef.current = old; setActiveEl(spare);
+          webAudioRef.current?.setActive?.(spare);
+          localBaseRef.current = 0;
+          spare.volume = volume / 100;
+          let swapped = false;
+          try { await spare.play(); swapped = true; } catch (e) {
+            if (e?.name === 'AbortError') return; // a newer start took over
+            // Not unlocked (or the buffered stream went bad): swap back and load normally.
+            audioRef.current = old; spareRef.current = spare; setActiveEl(old);
+            webAudioRef.current?.setActive?.(old);
+            spare.removeAttribute('src'); spare.load(); delete spare.dataset.track;
+          }
+          if (swapped) {
+            old.removeAttribute('src'); old.load(); delete old.dataset.track;
+            if (gen != null && startGenRef.current !== gen) return;
+            loadedRef.current = track.Id;
+            const id = track.Id;
+            setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
+            return;
+          }
+        }
+        const el = audioRef.current;
         // A transcode starts at the wanted moment on the server; the element's
         // clock then runs from 0 and localBaseRef holds the offset.
-        const transcoded = jf.transcoded?.();
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
+        el.dataset.track = track.Id;
         el.src = jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0 });
         el.volume = volume / 100;
         if (seekSeconds > 0 && !transcoded) {
@@ -377,10 +434,13 @@ export function usePlayer(jf) {
       if (!dev) return;
       loadedRef.current = null;
       if (dev.kind === 'local') {
-        const el = audioRef.current;
-        el.pause();
-        el.removeAttribute('src');
-        el.load();
+        for (const el of [audioRef.current, spareRef.current]) {
+          if (!el) continue;
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+          delete el.dataset.track;
+        }
         return;
       }
       // Acknowledging a stop is not the same as having stopped, so we verify.
@@ -1024,9 +1084,10 @@ export function usePlayer(jf) {
 
   // --- progress tracking --------------------------------------------------
 
-  // Local playback drives position from the audio element itself.
+  // Local playback drives position from the audio element itself (re-bound
+  // whenever a swap makes the other element the active one).
   useEffect(() => {
-    const el = audioRef.current;
+    const el = activeEl;
     if (!el) return undefined;
     const onTime = () => {
       if (deviceRef.current.kind !== 'local') return;
@@ -1055,7 +1116,7 @@ export function usePlayer(jf) {
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('loadedmetadata', onDuration);
     };
-  }, [next]);
+  }, [activeEl, next]);
 
   // Remote devices have to be polled; they do not push state to us. Polling
   // alone makes the clock jump in 2s steps, so the poll only moves an anchor
@@ -1241,6 +1302,14 @@ export function usePlayer(jf) {
       if (!ahead.length) return;
       jf.warm?.(ahead);
       jf.prewarm?.(ahead[0]);
+      // The spare element opens the next track now (paused): iOS fetches the
+      // playlist and buffers ahead, so the skip is a swap, not a load.
+      const spare = spareRef.current;
+      if (spare && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
+        spare.dataset.track = ahead[0];
+        spare.src = jf.playbackUrl(ahead[0]);
+        try { spare.load(); } catch { /* not unlocked yet */ }
+      }
     }, 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps

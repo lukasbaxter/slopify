@@ -4,15 +4,18 @@
 // everyone after. The playlist is written as an EVENT playlist while ffmpeg
 // runs and closed with ENDLIST when done.
 //
-// The first playlist answer waits for a few segments rather than one: an
-// open playlist is "live" to iOS, which will not start within three target
-// durations of its end and re-polls it only once per target duration, so a
-// one-segment answer meant 4 s of audio and then a 4 s wait. Four segments
-// (~200 ms more, AAC encodes at ~55x) give it runway, and by its first
-// re-poll the whole track is done. Upcoming tracks are warmed in the
-// background (the session tells us the queue), a nightly job pre-transcodes
-// the hot set (likes, playlists, recent plays), and the cache is trimmed by
-// age above a size cap.
+// iOS will not take an open (ENDLIST-less) playlist at its word: it treats
+// it as live and starts at the edge minus three target durations, ignoring
+// EXT-X-START, so a phone began songs anywhere from 4 s to 40 s in. It is
+// never handed one. Until ffmpeg finishes, the playlist it gets is
+// synthesised as complete VOD: ffmpeg's segment boundaries are deterministic
+// (AAC frames of 1024 samples, cut at the first frame past each k x 4 s
+// mark), and the track's duration and sample rate are in the database, so
+// every EXTINF is known before it is encoded. The segment route waits for
+// segments not yet written. Upcoming tracks are warmed in the background
+// (the session tells us the queue), a nightly job pre-transcodes the hot
+// set (likes, playlists, recent plays), and the cache is trimmed by age
+// above a size cap.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -26,12 +29,39 @@ const MIME: Record<string, string> = { '.flac': 'audio/flac', '.mp3': 'audio/mpe
 
 const running = new Map<string, Promise<void>>(); // key -> startable (RUNWAY segments or done)
 const finishing = new Map<string, Promise<void>>(); // key -> ffmpeg exited (what a warm slot waits for)
-const RUNWAY = 4;          // segments in the first playlist answer (16 s > three 4 s target durations)
+const SEG = 4;             // -hls_time
+const RUNWAY = 1;          // segments written before the (synthetic) playlist is answered
 const RUNWAY_WAIT = 1500;  // ms cap on waiting for them
+const SEG_WAIT_MS = 30000; // how long a segment request waits for ffmpeg
 const CACHE_CAP_GB = 60;   // /data/transcodes, oldest-used dirs go first
 
 function transcodeDir(dataDir: string, id: string, profile: string) { return path.join(dataDir, 'transcodes', id, profile); }
 const segmentCount = (txt: string) => (txt.match(/^s\d+\.ts\s*$/gm) || []).length;
+
+// The playlist ffmpeg will end up writing, from the track's duration and
+// sample rate: segment k ends at the first AAC frame boundary at or past
+// k*SEG seconds (measured: 4.01706/3.99383 s alternating at 44.1 kHz,
+// 4.01067/3.98933 at 48 kHz, 4.0 at 96 kHz; totals within 25 ms of the
+// database). A sliver under 150 ms at the end folds into the segment before
+// it, so a duration a few ms off never lists a segment that never comes.
+export function syntheticPlaylist(durationMs: number, sampleRate: number): string | null {
+  const dur = durationMs / 1000;
+  const sr = sampleRate > 0 ? sampleRate : 44100;
+  if (!(dur > 0)) return null;
+  const ends: number[] = [];
+  for (let k = 1; ; k++) {
+    const end = Math.ceil((k * SEG * sr) / 1024) * (1024 / sr);
+    if (end >= dur) break;
+    ends.push(end);
+  }
+  if (ends.length && dur - ends[ends.length - 1] < 0.15) ends.pop();
+  ends.push(dur);
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', `#EXT-X-TARGETDURATION:${Math.ceil(SEG + 0.05)}`, '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:VOD'];
+  let prev = 0;
+  ends.forEach((end, i) => { lines.push(`#EXTINF:${(end - prev).toFixed(6)},`, `s${String(i).padStart(4, '0')}.ts`); prev = end; });
+  lines.push('#EXT-X-ENDLIST', '');
+  return lines.join('\n');
+}
 
 // Starts (or joins) the transcode and resolves once the playlist is startable.
 // `nice` runs ffmpeg at low priority: warms must never slow a foreground start.
@@ -46,7 +76,7 @@ async function ensureHls(dataDir: string, id: string, file: string, profile: str
       await fsp.rm(dir, { recursive: true, force: true });
       await fsp.mkdir(dir, { recursive: true });
       const args = ['-v', 'error', '-nostdin', '-i', file, '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', PROFILES[profile].bitrate, '-ac', '2',
-        '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index];
+        '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index];
       const ff = nice ? spawn('nice', ['-n', '10', 'ffmpeg', ...args], { stdio: ['ignore', 'ignore', 'pipe'] }) : spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
       let err = '';
       ff.stderr.on('data', (d) => { err += d; });
@@ -188,11 +218,16 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     try { index = await ensureHls(dataDir, id, file, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
     const tok = (req.query as any).token ? `?token=${encodeURIComponent((req.query as any).token)}` : '';
-    let body = (await fsp.readFile(index, 'utf8')).replace(/^(s\d+\.ts)$/gm, `$1${tok}`);
-    // Still open (ffmpeg writing): pin the start, or iOS picks the live edge.
-    // Apple's players want a small positive offset rather than 0.
-    if (!/#EXT-X-ENDLIST/.test(body)) body = body.replace(/^(#EXT-X-VERSION:\d+\n)/m, '$1#EXT-X-START:TIME-OFFSET=0.01,PRECISE=YES\n');
-    else fsp.utimes(path.join(path.dirname(index), 'done'), new Date(), new Date()).catch(() => {}); // last-used, for eviction
+    let body = await fsp.readFile(index, 'utf8');
+    if (/#EXT-X-ENDLIST/.test(body)) fsp.utimes(path.join(path.dirname(index), 'done'), new Date(), new Date()).catch(() => {}); // last-used, for eviction
+    else {
+      // Still encoding: the complete playlist it is going to be (see top).
+      const t = db.prepare('SELECT duration_ms, sample_rate FROM tracks WHERE id = ?').get(id) as any;
+      const synth = t && syntheticPlaylist(t.duration_ms, t.sample_rate);
+      // No duration on file: the open playlist, start pinned (best effort).
+      body = synth || body.replace(/^(#EXT-X-VERSION:\d+\n)/m, '$1#EXT-X-START:TIME-OFFSET=0.01,PRECISE=YES\n');
+    }
+    body = body.replace(/^(s\d+\.ts)$/gm, `$1${tok}`);
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return body;
   });
@@ -200,8 +235,14 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     const { id, profile, seg } = req.params as any;
     if (!PROFILES[profile] || !/^s\d{4}\.ts$/.test(seg)) return reply.code(404).send();
     const p = path.join(transcodeDir(dataDir, id, profile), seg);
-    // A segment ffmpeg has not written yet: wait briefly rather than 404 (players would stall).
-    for (let i = 0; i < 200 && !fs.existsSync(p); i++) await new Promise((r) => setTimeout(r, 50));
+    // A segment ffmpeg has not written yet: wait for it rather than 404 (the
+    // synthetic playlist lists every segment from the start). Once ffmpeg is
+    // done, a missing segment is missing for good.
+    const dir = path.dirname(p);
+    for (let i = 0; i < SEG_WAIT_MS / 50 && !fs.existsSync(p); i++) {
+      if (fs.existsSync(path.join(dir, 'done')) || !running.has(`${id}:${profile}`) && !fs.existsSync(path.join(dir, 'index.m3u8'))) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     if (!fs.existsSync(p)) return reply.code(404).send();
     const size = (await fsp.stat(p)).size;
     // Immutable once written; a fetch() of it lands in the browser's disk

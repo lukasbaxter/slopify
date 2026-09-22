@@ -147,13 +147,30 @@ export class Slopify {
   }
   transcoded() { return this.streamMode() === 'chunked'; }
   _warm = new Map();
-  // HLS only: asking for the playlist starts the transcode, so the first
-  // segments are ready by the time the element asks.
-  prewarm(itemId) {
+  // HLS only. Two things at once: the server transcodes the track (and the
+  // playlist comes back complete once it has), and the first segments are
+  // fetched so they sit in the browser's disk cache. iOS's native HLS loader
+  // reads that cache (it never writes it), so a warmed track starts without
+  // a round trip per segment. ~300 KB per warmed track at 320k.
+  prewarm(itemId, { segments = 2 } = {}) {
     if (!itemId || this.streamMode() !== 'hls') return;
     const at = this._warm.get(itemId); if (at && Date.now() - at < 60000) return;
     this._warm.set(itemId, Date.now());
-    fetch(this.playbackUrl(itemId)).then((r) => r.text()).catch(() => {});
+    const url = this.playbackUrl(itemId);
+    const base = url.slice(0, url.lastIndexOf('/') + 1);
+    const tok = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+    const pull = (tries) => fetch(url).then((r) => r.text()).then((txt) => {
+      if (!/#EXT-X-ENDLIST/.test(txt)) { if (tries > 0) setTimeout(() => pull(tries - 1), 2500); return; }
+      const segs = (txt.match(/^s\d+\.ts$/gm) || []).slice(0, segments);
+      for (const sg of segs) fetch(`${base}${sg}${tok}`).then((r) => r.arrayBuffer()).catch(() => {});
+    }).catch(() => {});
+    pull(3);
+  }
+  // Ask the server to transcode these (low priority, in the background).
+  warm(itemIds) {
+    const ids = (itemIds || []).filter(Boolean).slice(0, 10);
+    if (!ids.length || this.streamMode() !== 'hls') return Promise.resolve(null);
+    return this._fetch('/api/stream/warm', { method: 'POST', body: JSON.stringify({ ids, profile: this._profile() }), timeoutMs: 8000 }).catch(() => null);
   }
   _profile() { return { high: 'aac-320', normal: 'aac-160', low: 'aac-96' }[this.quality] || 'aac-320'; }
   playbackUrl(itemId, { startAt = 0 } = {}) {

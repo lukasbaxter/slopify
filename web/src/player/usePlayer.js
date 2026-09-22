@@ -76,6 +76,12 @@ export function usePlayer(jf) {
   const [queue, setQueue] = useState([]);
   const [index, setIndex] = useState(-1);
   const [playing, setPlaying] = useState(false);
+  const playingRef = useRef(false);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
+  // Every start bumps this; a start that finishes after a newer one began is
+  // ignored (its element load was already torn down by the newer src).
+  const startGenRef = useRef(0);
+  const lastSkipAtRef = useRef(0);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(80);
@@ -310,7 +316,7 @@ export function usePlayer(jf) {
   // --- low-level per-transport operations ---------------------------------
 
   const startOn = useCallback(
-    async (dev, track, seekSeconds = 0) => {
+    async (dev, track, seekSeconds = 0, gen = null) => {
       if (!jf || !track) return;
       if (dev.kind === 'local') {
         const el = audioRef.current;
@@ -356,8 +362,12 @@ export function usePlayer(jf) {
         const url = jf.streamUrl(track.Id);
         await remote.play(dev, url, metaFor(track), seekSeconds > 0 ? seekSeconds : 0);
       }
+      if (gen != null && startGenRef.current !== gen) return; // superseded while loading
       loadedRef.current = track.Id;
-      jf.reportStart(track.Id);
+      // A play counts after 8 s on the same track (the socket path applies
+      // the same rule); a song skipped past never enters history.
+      const id = track.Id;
+      setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
     },
     [jf, metaFor, remote, volume]
   );
@@ -520,11 +530,23 @@ export function usePlayer(jf) {
       const track = q[nextIndex];
       setDuration(ticksToSeconds(track?.RunTimeTicks));
       anchorAt(0, true);
+      const gen = ++startGenRef.current;
+      // Hunting through the queue: the UI moves at once, but the load waits
+      // until the taps stop (300 ms), so ten quick skips cost one start, not
+      // ten transcodes and ten aborted streams.
+      const now = Date.now();
+      const rapid = now - lastSkipAtRef.current < 300;
+      lastSkipAtRef.current = now;
+      if (rapid) {
+        await new Promise((r) => setTimeout(r, 300));
+        if (startGenRef.current !== gen) return;
+      }
       try {
-        await startOn(deviceRef.current, track, 0);
+        await startOn(deviceRef.current, track, 0, gen);
+        if (startGenRef.current !== gen) return;
         setPlaying(true);
       } catch (e) {
-        setError(e.message);
+        if (startGenRef.current === gen) setError(e.message);
       }
     },
     [anchorAt, startOn, stopOn]
@@ -619,9 +641,14 @@ export function usePlayer(jf) {
     const act = activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'previous' }); return; }
     // Match the usual convention: restart the track unless we are near its start.
-    if (positionRef.current > 3) return skipTo(indexRef.current);
+    if (positionRef.current > 3) {
+      // Same track: rewind in place rather than reloading the stream.
+      const el = audioRef.current;
+      if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) { el.currentTime = 0; anchorAt(0, playingRef.current); return; }
+      return skipTo(indexRef.current);
+    }
     return skipTo(indexRef.current - 1);
-  }, [skipTo]);
+  }, [skipTo, anchorAt]);
 
   const toggle = useCallback(async () => {
     const dev = deviceRef.current;
@@ -1201,14 +1228,23 @@ export function usePlayer(jf) {
     return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [device, next, remote, startOn]);
 
-  // The next song's stream is warmed 20 s before this one ends (HLS only, see
-  // jf.prewarm), so the track change does not wait on Jellyfin starting it.
+  // As soon as a track is playing, the next two are transcoded on the server
+  // (one request) and the next one's playlist and first segments are pulled
+  // into the browser cache, so a skip lands on a finished, half-loaded track.
+  // Delayed a little so it never competes with this track's own first segments.
   useEffect(() => {
-    if (device.kind !== 'local' || !playing || !jf || !duration || position < duration - 20) return;
-    const next = queueRef.current[indexRef.current + 1] || (repeatRef.current === 'all' ? queueRef.current[0] : null);
-    if (next) jf.prewarm?.(next.Id);
+    if (device.kind !== 'local' || !playing || !jf || !current) return undefined;
+    const t = setTimeout(() => {
+      const q = queueRef.current, i = indexRef.current;
+      const ahead = [q[i + 1], q[i + 2]].filter(Boolean).map((x) => x.Id);
+      if (!ahead.length && repeatRef.current === 'all' && q[0]) ahead.push(q[0].Id);
+      if (!ahead.length) return;
+      jf.warm?.(ahead);
+      jf.prewarm?.(ahead[0]);
+    }, 1500);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.kind, playing, Math.floor(position), duration, jf]);
+  }, [device.kind, playing, current?.Id, jf]);
 
   // Interpolate the remote clock between polls so the seek bar moves smoothly.
   useEffect(() => {
@@ -1307,10 +1343,13 @@ export function usePlayer(jf) {
   useEffect(() => { saveQueueRef.current = saveQueue; }, [saveQueue]);
   useEffect(() => { savePlayheadRef.current = savePlayhead; }, [savePlayhead]);
 
+  // The queue itself, not the position in it (that is the playhead's job):
+  // serialising the whole queue on every track change was work at the tap.
   useEffect(() => {
-    if (!jf || !current) return;
+    if (!jf || !queue.length) return;
     saveQueueRef.current();
-  }, [jf, current, queue, contextId, shuffle]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jf, queue, contextId, shuffle]);
 
   useEffect(() => {
     if (!jf || !current) return;
@@ -1638,7 +1677,8 @@ export function usePlayer(jf) {
     if (!ms) return undefined;
     if ((!msLocal && !msRemote) || !nowPlaying) { try { ms.metadata = null; ms.playbackState = 'none'; } catch { /* unsupported */ } return undefined; }
     const artwork = [];
-    if (jf && nowPlaying.artId) for (const px of [256, 512, 1024]) artwork.push({ src: jf.imageUrl(nowPlaying.artId, { maxHeight: px }), sizes: `${px}x${px}`, type: 'image/jpeg' });
+    // One size: iOS fetches every listed artwork at once, on the same link as the first segments.
+    if (jf && nowPlaying.artId) artwork.push({ src: jf.imageUrl(nowPlaying.artId, { maxHeight: 512 }), sizes: '512x512', type: 'image/jpeg' });
     else if (nowPlaying.artUrl) artwork.push({ src: nowPlaying.artUrl, sizes: '512x512', type: 'image/jpeg' });
     else if (jf && nowPlaying.artistId) artwork.push({ src: jf.imageUrl(nowPlaying.artistId, { maxHeight: 512 }), sizes: '512x512', type: 'image/jpeg' });
     try {

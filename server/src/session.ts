@@ -26,7 +26,7 @@ export type Session = {
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
-type Client = { id: string; uid: string; name: string; kind: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; player?: ServerPlayer };
+type Client = { id: string; uid: string; name: string; kind: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; player?: ServerPlayer };
 
 export const Event = z.object({
   type: z.enum(['play', 'pause', 'toggle', 'seek', 'next', 'previous', 'queue', 'transfer', 'progress', 'stop']),
@@ -168,6 +168,13 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   };
   app.decorate('speakers', { list: () => (discovery ? discovery.list().map((d) => ({ ...d, playing: [...clients.values()].some((c) => c.kind === 'server' && c.player?.device?.id === d.id && c.player.playing) })) : []) });
 
+  // The next few tracks of whatever is playing get transcoded ahead of time
+  // (low priority), so a skip lands on a finished playlist.
+  const warmAhead = (uid: string, ids: string[], index: number) => {
+    if (index < 0 || !(app as any).warmTracks) return;
+    (app as any).warmTracks(uid, ids.slice(index + 1, index + 4));
+  };
+
   // --- one message from a client (or from the server player) ---------------------
   const handle = (me: Client, msg: any) => {
     me.lastSeen = Date.now();
@@ -182,6 +189,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
           const ids = me.queue.map((t: any) => t?.Id).filter((x: any) => typeof x === 'string');
           const idx = s.trackId ? ids.indexOf(s.trackId) : -1;
           s.queue = ids; s.queueItems = me.queue; s.index = idx; s.rev++; s.updatedAt = now; saveSession(db, me.uid, s, log);
+          warmAhead(me.uid, ids, idx);
         }
         for (const c of ofUser(me.uid)) if (c.id !== me.id) send(c, { type: 'queue', from: me.id, queue: me.queue });
         break;
@@ -189,7 +197,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       case 'nowplaying': {
         const np = msg.nowPlaying && typeof msg.nowPlaying === 'object' ? msg.nowPlaying : null;
         me.nowPlaying = np;
-        if (me.kind !== 'server' && np?.playing && typeof np.itemId === 'string' && np.itemId !== me._lastPlayId) { me._lastPlayId = np.itemId; logPlay(me.uid, np.itemId, me.name); }
+        // A play is logged once the same track has been reported playing for
+        // 8 s: songs skipped past while hunting for one never enter history.
+        if (me.kind !== 'server' && np?.playing && typeof np.itemId === 'string') {
+          if (!me._playSince || me._playSince.id !== np.itemId) me._playSince = { id: np.itemId, at: now };
+          else if (now - me._playSince.at >= 8000 && np.itemId !== me._lastPlayId) { me._lastPlayId = np.itemId; logPlay(me.uid, np.itemId, me.name); }
+        }
         // Sound coming out of a client nobody else has claimed makes it the active one.
         if (np?.playing && !s.active) { s.active = me.id; s.rev++; }
         // The active client has nothing playing any more: release the session,
@@ -204,6 +217,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
           s.nowPlaying = np; s.device = np.device && typeof np.device === 'object' ? { id: String(np.device.id ?? ''), name: String(np.device.name ?? ''), kind: String(np.device.kind ?? '') } : s.device;
           if (me.queue) { s.queueItems = me.queue; s.queue = me.queue.map((t: any) => t?.Id).filter((x: any) => typeof x === 'string'); s.index = s.trackId ? s.queue.indexOf(s.trackId) : -1; }
           s.updatedAt = now; saveSession(db, me.uid, s, log);
+          if (np.itemId !== me._lastWarmFor) { me._lastWarmFor = np.itemId; warmAhead(me.uid, s.queue, s.index); }
         }
         broadcastRoster(me.uid);
         break;

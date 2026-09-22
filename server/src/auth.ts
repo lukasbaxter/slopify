@@ -22,8 +22,10 @@ export async function ensureAdmin(db: DB, name: string, pass: string) {
 }
 
 export function userByToken(db: DB, tok: string): User | undefined {
-  const row = db.prepare('SELECT u.id, u.name, u.role, u.must_change_pw FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token = ?').get(tok) as User | undefined;
-  if (row) db.prepare('UPDATE tokens SET last_seen = ? WHERE token = ?').run(Date.now(), tok);
+  const row = db.prepare('SELECT u.id, u.name, u.role, u.must_change_pw, t.last_seen AS seen FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token = ?').get(tok) as (User & { seen?: number }) | undefined;
+  // Once a minute per token: a phone streaming HLS makes 50+ requests a track.
+  if (row && Date.now() - (row.seen || 0) > 60000) db.prepare('UPDATE tokens SET last_seen = ? WHERE token = ?').run(Date.now(), tok);
+  if (row) delete row.seen;
   return row;
 }
 

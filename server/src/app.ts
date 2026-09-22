@@ -27,7 +27,8 @@ export const repoRoot = path.resolve(here, '..', '..');
 export type BuildOptions = { dataDir?: string; musicDir?: string; db?: DB; speakers?: boolean };
 
 export async function buildServer(opts: BuildOptions = {}) {
-  const app = Fastify({ logger: { level: config.logLevel } });
+  // Behind nginx: rate limits per real client, not one bucket for the proxy.
+  const app = Fastify({ logger: { level: config.logLevel }, trustProxy: true });
   const dataDir = opts.dataDir ?? config.dataDir;
   const db = opts.db ?? openDb(dataDir);
   await ensureAdmin(db, config.adminUser, config.adminPass);

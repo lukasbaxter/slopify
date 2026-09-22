@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from './db.js';
-import { scanLibrary, splitArtists } from './scanner.js';
+import { scanLibrary, splitArtists, canonicalArtistNames } from './scanner.js';
+import { artistId, albumId } from './ids.js';
 import { parseLrc } from './lyrics.js';
 
 // vitest runs with cwd = server/; the fixture library lives at the repo root
@@ -58,5 +59,27 @@ describe('helpers', () => {
   it('parses LRC with repeated timestamps and offsets', () => {
     const l = parseLrc('[offset:+500]\n[ar:x]\n[00:01.00][00:03.00] hi\nplain');
     expect(l.map((x) => x.start)).toEqual([null, 1500, 3500]);
+  });
+});
+
+describe('artist spelling', () => {
+  it('writes the majority spelling to the artist, its albums and every credit', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-canon-'));
+    const db = openDb(dir);
+    const id = artistId('Tory Lanez');
+    db.prepare('INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?)').run(id, 'TORY LANEZ', 'tory lanez');
+    const alb = (name: string, spelled: string) => {
+      const a = albumId(spelled, name);
+      db.prepare('INSERT INTO albums (id, name, artist_id, artist, dir, added_at, sort_name) VALUES (?, ?, ?, ?, ?, 0, ?)').run(a, name, id, spelled, '/x', name);
+      return a;
+    };
+    const a1 = alb('One', 'Tory Lanez'), a2 = alb('Two', 'TORY LANEZ');
+    const tr = (tid: string, a: string, spelled: string) => db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, genres, duration_ms, added_at)
+      VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?, 'x', ?, '[]', 0, 0)`).run(tid, `/x/${tid}`, tid, spelled, JSON.stringify([spelled]), JSON.stringify([id]), a, spelled);
+    tr('t1', a1, 'Tory Lanez'); tr('t2', a1, 'Tory Lanez'); tr('t3', a2, 'TORY LANEZ');
+    canonicalArtistNames(db);
+    expect((db.prepare('SELECT name FROM artists WHERE id = ?').get(id) as any).name).toBe('Tory Lanez');
+    expect(db.prepare('SELECT DISTINCT artist FROM albums').all()).toEqual([{ artist: 'Tory Lanez' }]);
+    expect(db.prepare('SELECT DISTINCT artist, artists, album_artist FROM tracks').all()).toEqual([{ artist: 'Tory Lanez', artists: '["Tory Lanez"]', album_artist: 'Tory Lanez' }]);
   });
 });

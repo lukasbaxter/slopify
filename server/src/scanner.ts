@@ -150,6 +150,7 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   let removed = 0;
   for (const [p, r] of known) if (!seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
   recount(db);
+  canonicalArtistNames(db);
   bumpLibraryVersion(db);
   const ms = Date.now() - t0;
   db.prepare('UPDATE scans SET finished = ?, files = ?, added = ?, changed = ?, removed = ? WHERE id = ?').run(Date.now(), files, added, changed, removed, scanId);
@@ -173,4 +174,44 @@ export function recount(db: DB) {
     UPDATE artists SET track_count = (SELECT COUNT(*) FROM tracks t WHERE t.artist_ids LIKE '%"' || artists.id || '"%'), album_count = (SELECT COUNT(*) FROM albums a WHERE a.artist_id = artists.id);
     DELETE FROM artists WHERE track_count = 0 AND album_count = 0;
   `);
+}
+
+// One spelling per artist. Ids already fold case ("JMSN" and "Jmsn" are one
+// artist), but each album and track kept its own tag's spelling and the
+// artist row took whichever file was scanned last, so the same artist showed
+// as "Tory Lanez" on one album and "TORY LANEZ" on the next. The spelling
+// most of the artist's tracks use wins (ties: mixed case, then alphabetical)
+// and is written to the artist, its albums and every track credit.
+export function canonicalArtistNames(db: DB) {
+  const rows = db.prepare('SELECT id, artists, artist_ids, album_artist FROM tracks').all() as { id: string; artists: string; artist_ids: string; album_artist: string }[];
+  const tally = new Map<string, Map<string, number>>();
+  const add = (id: string, name: string) => {
+    let m = tally.get(id); if (!m) tally.set(id, (m = new Map()));
+    m.set(name, (m.get(name) ?? 0) + 1);
+  };
+  const parsed = rows.map((r) => {
+    const names = JSON.parse(r.artists) as string[], ids = JSON.parse(r.artist_ids) as string[];
+    names.forEach((n, i) => add(ids[i], n));
+    add(artistId(r.album_artist), r.album_artist);
+    return { ...r, names, ids };
+  });
+  const mixed = (s: string) => (s !== s.toUpperCase() && s !== s.toLowerCase() ? 1 : 0);
+  const canon = new Map<string, string>();
+  for (const [id, m] of tally) {
+    if (m.size < 2) { canon.set(id, m.keys().next().value!); continue; }
+    canon.set(id, [...m].sort((a, b) => b[1] - a[1] || mixed(b[0]) - mixed(a[0]) || (a[0] < b[0] ? -1 : 1))[0][0]);
+  }
+  const setTrack = db.prepare('UPDATE tracks SET artist = ?, artists = ?, album_artist = ? WHERE id = ?');
+  const setAlbums = db.prepare('UPDATE albums SET artist = ? WHERE artist_id = ? AND artist != ?');
+  const setArtist = db.prepare('UPDATE artists SET name = ?, sort_name = ? WHERE id = ? AND name != ?');
+  let fixed = 0;
+  db.transaction(() => {
+    for (const r of parsed) {
+      const names = r.names.map((n, i) => canon.get(r.ids[i]) ?? n);
+      const aa = canon.get(artistId(r.album_artist)) ?? r.album_artist;
+      if (aa !== r.album_artist || names.some((n, i) => n !== r.names[i])) { setTrack.run(names.join(', '), JSON.stringify(names), aa, r.id); fixed++; }
+    }
+    for (const [id, name] of canon) { fixed += setAlbums.run(name, id, name).changes; setArtist.run(name, sortName(name), id, name); }
+  })();
+  return fixed;
 }

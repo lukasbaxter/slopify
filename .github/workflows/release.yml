@@ -109,7 +109,8 @@ jobs:
       # Uploads one file at a time with retries: GitHub's asset upload API
       # dropped parallel uploads of these ~100 MB files ("other side closed",
       # "Error creating asset temp dir") on the first two releases.
-      - env: { GH_TOKEN: ${{ github.token }} }
+      - env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes
           for f in out/*; do

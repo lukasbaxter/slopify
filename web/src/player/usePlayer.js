@@ -187,6 +187,9 @@ export function usePlayer(jf) {
   // position we are trying to carry across. Ignore poll results while this is
   // set, and the handoff keeps its timestamp.
   const transitionRef = useRef(false);
+  // Until this time, pause/play events on the audio element are our own doing
+  // (a load, a swap, a stop) rather than the system's.
+  const ownUntilRef = useRef(0);
   const notPlayingSinceRef = useRef(0); // first moment the speaker said not-playing while we believed it was
   // Counts consecutive polls that disagree with our interpolated clock. One
   // bad reading is a hiccup (a receiver reopening a stream reports secs=0 for a
@@ -347,6 +350,7 @@ export function usePlayer(jf) {
     async (dev, track, seekSeconds = 0, gen = null) => {
       if (!jf || !track) return;
       if (dev.kind === 'local') {
+        ownUntilRef.current = Date.now() + 3000;
         webAudioRef.current?.ctx.resume?.().catch(() => {});
         const transcoded = jf.transcoded?.();
         const spare = spareRef.current;
@@ -448,6 +452,7 @@ export function usePlayer(jf) {
       if (!dev) return;
       loadedRef.current = null;
       if (dev.kind === 'local') {
+        ownUntilRef.current = Date.now() + 3000;
         for (const el of [audioRef.current, spareRef.current]) {
           if (!el) continue;
           el.pause();
@@ -1121,15 +1126,32 @@ export function usePlayer(jf) {
         setDuration(el.duration);
       }
     };
+    // iOS pauses and resumes the element by itself (a call, Siri, AirPods
+    // out, an interruption ending). Not following it left `playing` the
+    // opposite of the sound: the lock screen showed play while it played,
+    // and every tap flipped the wrong way. Loads, swaps and track ends are ours.
+    const followSystem = (nowPlaying) => () => {
+      if (deviceRef.current.kind !== 'local' || transitionRef.current) return;
+      if (el !== audioRef.current || !el.getAttribute('src') || el.ended || Date.now() < ownUntilRef.current) return;
+      if (playingRef.current === nowPlaying) return;
+      playingRef.current = nowPlaying;
+      setPlaying(nowPlaying);
+      anchorAt(localBaseRef.current + el.currentTime, nowPlaying);
+    };
+    const onPause = followSystem(false), onPlay = followSystem(true);
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('ended', onEnded);
     el.addEventListener('loadedmetadata', onDuration);
+    el.addEventListener('pause', onPause);
+    el.addEventListener('play', onPlay);
     return () => {
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('loadedmetadata', onDuration);
+      el.removeEventListener('pause', onPause);
+      el.removeEventListener('play', onPlay);
     };
-  }, [activeEl, next]);
+  }, [activeEl, next, anchorAt]);
 
   // Remote devices have to be polled; they do not push state to us. Polling
   // alone makes the clock jump in 2s steps, so the poll only moves an anchor
@@ -1741,7 +1763,21 @@ export function usePlayer(jf) {
   // the lock-screen scrubber tracks the song.
   const msLocal = !relayTarget && device?.kind === 'local' && !!current;
   const msRemote = !msLocal && !!nowPlaying;
-  const msRefs = useRef({}); msRefs.current = { toggle, next, previous, seek };
+  const msRefs = useRef({});
+  // Lock-screen play and pause ask for a state; they used to both toggle, so
+  // once the app and the sound disagreed each tap went the wrong way. A tap
+  // for the state we are already in re-syncs the sound and the icon instead.
+  const msResync = () => {
+    const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
+    try { if (ms) ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
+    keepAlive(msRemote && shownPlaying, shownPosition);
+    const el = audioRef.current;
+    if (msLocal && el && el.getAttribute('src')) {
+      if (shownPlaying && el.paused) el.play().catch(() => {});
+      else if (!shownPlaying && !el.paused) el.pause();
+    }
+  };
+  msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync };
   // Lock screen / headset buttons: previous and next TRACK, never 10-second
   // skips (with seekbackward/seekforward set, iOS replaces the track buttons
   // with skips and greys them out).
@@ -1749,8 +1785,8 @@ export function usePlayer(jf) {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     if (!ms) return;
     const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* action unsupported */ } };
-    on('play', () => msRefs.current.toggle());
-    on('pause', () => msRefs.current.toggle());
+    on('play', () => { if (msRefs.current.playing) msRefs.current.resync(); else msRefs.current.toggle(); });
+    on('pause', () => { if (!msRefs.current.playing) msRefs.current.resync(); else msRefs.current.toggle(); });
     on('previoustrack', () => msRefs.current.previous());
     on('nexttrack', () => msRefs.current.next());
     on('seekto', (d) => { if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });

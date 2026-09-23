@@ -33,8 +33,8 @@ def on_bg(im, size, frac, bg=(0, 0, 0, 255)):
 
 W, M = f'{R}/web/public', f'{R}/mobile/assets'
 at(full, 192).save(f'{W}/icon-192.png'); at(full, 512).save(f'{W}/icon-512.png')
-on_bg(full, 512, 0.72).save(f'{W}/icon-maskable-512.png')
-on_bg(full, 180, 0.80).convert('RGB').save(f'{W}/apple-touch-icon.png')
+on_bg(full, 512, 0.80, (0, 0, 0, 0)).save(f'{W}/icon-maskable-512.png')
+at(full, 180).save(f'{W}/apple-touch-icon.png')
 at(full, 256).save(f'{W}/favicon.ico', sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
 at(full, 1024).save(f'{R}/desktop/build/icon.png'); at(full, 1024).save(f'{M}/icon.png'); at(full, 48).save(f'{M}/favicon.png')
 Image.new('RGBA', (512, 512), (0, 0, 0, 255)).save(f'{M}/android-icon-background.png')

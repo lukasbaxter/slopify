@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Every icon slot from web/public/favicon.svg (the logo's source of truth).
-Headless Chrome draws the SVG at 1024 px (full colour, and a white silhouette
+Headless Brave (or Chrome) draws the SVG at 1024 px (full colour, and a white silhouette
 for Android's monochrome layer); PIL cuts the sizes and backgrounds.
 
   python3 tools/logo-export.py"""
@@ -8,7 +8,8 @@ import os, re, subprocess, tempfile
 from PIL import Image, ImageChops
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+CHROME = next(p for p in ('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+                          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') if os.path.exists(p))
 SVG = open(f'{R}/web/public/favicon.svg').read()
 
 def render(svg, size=1024):

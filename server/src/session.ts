@@ -275,7 +275,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         // of the same browser): that is another player, not a reconnect. It
         // gets an id of its own instead of replacing the first, which would
         // reconnect, replace this one back, and so on every second.
-        if (prev && prev !== self && instance && prev.instance && prev.instance !== instance && prev.open?.()) {
+        // Pages from before the instance id (a tab nobody reloaded) cannot say
+        // which page they are: a socket that is still open and heard from in
+        // the last 30 s (pings go every 25 s) is taken to be another page too.
+        // A real reconnect finds its old socket closed, or silent.
+        const otherPage = instance && prev?.instance ? prev.instance !== instance : Date.now() - (prev?.lastSeen ?? 0) < 30000;
+        if (prev && prev !== self && prev.open?.() && otherPage) {
           id = `${id.slice(0, 55)}-${Math.random().toString(36).slice(2, 8)}`; prev = undefined;
         }
         if (prev && prev !== self) { try { prev.close(); } catch { /* gone */ } clients.delete(id); }

@@ -112,13 +112,13 @@ describe('likes, playlists, plays, home, prefs', () => {
 
 describe('session socket', () => {
   let port = 0;
-  const hello = async (instance: string) => {
+  const hello = async (instance?: string, clientId = 'c_sharedtabid') => {
     if (!port) { await app.listen({ host: '127.0.0.1', port: 0 }); port = (app.server.address() as any).port; }
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
     await new Promise((r) => ws.on('open', r));
     const got = new Promise<any>((resolve) => ws.on('message', (d: any) => { const m = JSON.parse(String(d)); if (m.type === 'hello-ok') resolve(m); }));
     let closed = false; ws.on('close', () => { closed = true; });
-    ws.send(JSON.stringify({ type: 'hello', token: tok, clientId: 'c_sharedtabid', instance, kind: 'web' }));
+    ws.send(JSON.stringify({ type: 'hello', token: tok, clientId, instance, kind: 'web' }));
     return { ws, ok: await got, closed: () => closed };
   };
   it('two tabs sharing a stored id both stay connected, each with its own id', async () => {
@@ -133,5 +133,13 @@ describe('session socket', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(a2.ok.clientId).toBe('c_sharedtabid'); expect(a.closed()).toBe(true);
     for (const x of [b, a2]) x.ws.terminate();
+  });
+  it('two tabs of the old page code (no instance id) stop replacing each other too', async () => {
+    const a = await hello(undefined, 'c_oldtabs');
+    const b = await hello(undefined, 'c_oldtabs');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(a.ok.clientId).toBe('c_oldtabs'); expect(b.ok.clientId).not.toBe('c_oldtabs');
+    expect(a.closed()).toBe(false); expect(b.closed()).toBe(false);
+    for (const x of [a, b]) x.ws.terminate();
   });
 });

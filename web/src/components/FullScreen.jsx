@@ -131,7 +131,10 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   // per speaker). Calibrating needs the clock of the client that drives the
   // speaker, so a mirroring client is told to do it from the player.
   const speaker = sessionDevice && sessionDevice.kind !== 'local' && sessionDevice.kind !== 'relay' ? sessionDevice : null;
-  const driving = !!speaker && !player.mirroring && player.device?.id === speaker.id;
+  // The server driving the speaker counts too: its playhead follows the
+  // speaker's own clock, which is what the calibration measures against.
+  const serverDriven = String(player.roster?.activeClientId || '').startsWith('server:');
+  const driving = !!speaker && ((!player.mirroring && player.device?.id === speaker.id) || serverDriven);
   const offset = useOffset(speaker?.id);
   const [calibrating, setCalibrating] = useState(null);
   const saveOffset = (v) => { if (speaker) player.relay?.sendOffset(speaker.id, v); };

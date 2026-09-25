@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useOffset } from '../api/offsets.js';
 import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph } from './TrackRow.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import { isLiked } from '../api/likes.js';
@@ -306,7 +307,10 @@ export function Lyrics({ player, jf }) {
   // perception is asymmetric here: a lyric arriving a hair early reads as in
   // time, while the same error late reads as lagging.
   const LEAD_SECONDS = 0.25;
-  const at = position + LEAD_SECONDS;
+  // A speaker reports the position it is decoding; the sound leaves it its
+  // measured delay later (the calibration in the full-screen visualizer).
+  const speakerDelay = useOffset(player.nowPlaying?.device?.id) || 0;
+  const at = position - speakerDelay + LEAD_SECONDS;
   const activeIndex = lines
     ? lines.reduce((acc, l, i) => (l.start != null && at >= l.start ? i : acc), -1)
     : -1;

@@ -169,7 +169,10 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const ar = db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as any; if (ar) return ar.image_hash ? (kind === 'banner' ? `${ar.image_hash}/banner` : ar.image_hash) : null;
     return null;
   };
-  app.get('/api/image/:id', async (req, reply) => {
+  // Own, larger bucket: one album grid is hundreds of covers, and every phone on
+  // the LAN reaches the public hostname through the router's hairpin NAT, so the
+  // whole house shares one client IP. The 600/min default 429'd covers.
+  app.get('/api/image/:id', { config: { rateLimit: { max: 6000, timeWindow: '1 minute' } } }, async (req, reply) => {
     const id = String((req.params as any).id || ''); const q = req.query as any;
     const kind = q.kind === 'banner' ? 'banner' : 'primary';
     const hash = coverOf(id, kind);

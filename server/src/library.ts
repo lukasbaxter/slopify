@@ -42,6 +42,21 @@ export function ftsQuery(q: string) {
   return words.map((w) => `"${w.replace(/"/g, '')}"*`).join(' ');
 }
 
+// Tracks that go with one: same artists first, then the same genres, shuffled.
+// The track itself leads. Shared by the mix endpoint and the server player's
+// end-of-queue continuation.
+export function mixFor(db: DB, id: string, limit: number): TrackRow[] | null {
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id) as TrackRow | undefined;
+  if (!t) return null;
+  const artistIds = JSON.parse(t.artist_ids) as string[], genres = JSON.parse(t.genres) as string[];
+  const pick = new Map<string, TrackRow>();
+  for (const a of artistIds) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 40`).all(`%"${a}"%`, t.id) as TrackRow[]) pick.set(r.id, r);
+  for (const g of genres) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 60`).all(`%${JSON.stringify(g)}%`, t.id) as TrackRow[]) pick.set(r.id, r);
+  if (pick.size < 20) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.id != ? ORDER BY RANDOM() LIMIT 60`).all(t.id) as TrackRow[]) pick.set(r.id, r);
+  const rows = [...pick.values()]; for (let i = rows.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rows[i], rows[j]] = [rows[j], rows[i]]; }
+  return [t, ...rows.slice(0, limit - 1)];
+}
+
 export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   const auth = { preHandler: (app as any).requireUser };
 
@@ -115,18 +130,10 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const artists = (db.prepare(`SELECT * FROM artists WHERE ${where('name')} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(artistOut);
     return { tracks, albums, artists };
   });
-  // Tracks that go with one: same artists first, then the same genres, shuffled.
   app.get('/api/tracks/:id/mix', auth, async (req, reply) => {
-    const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get((req.params as any).id) as TrackRow | undefined;
-    if (!t) return reply.code(404).send({ error: 'no such track' });
-    const limit = Math.min(200, Number((req.query as any).limit) || 100);
-    const artistIds = JSON.parse(t.artist_ids) as string[], genres = JSON.parse(t.genres) as string[];
-    const pick = new Map<string, TrackRow>();
-    for (const a of artistIds) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 40`).all(`%"${a}"%`, t.id) as TrackRow[]) pick.set(r.id, r);
-    for (const g of genres) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 60`).all(`%${JSON.stringify(g)}%`, t.id) as TrackRow[]) pick.set(r.id, r);
-    if (pick.size < 20) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.id != ? ORDER BY RANDOM() LIMIT 60`).all(t.id) as TrackRow[]) pick.set(r.id, r);
-    const rows = [...pick.values()]; for (let i = rows.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rows[i], rows[j]] = [rows[j], rows[i]]; }
-    return { items: [trackOut(t), ...rows.slice(0, limit - 1).map(trackOut)] };
+    const items = mixFor(db, (req.params as any).id, Math.min(200, Number((req.query as any).limit) || 100));
+    if (!items) return reply.code(404).send({ error: 'no such track' });
+    return { items: items.map(trackOut) };
   });
   // Search page tiles: genres with a cover, most tracks first.
   app.get('/api/browse', auth, async () => {

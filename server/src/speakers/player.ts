@@ -5,7 +5,7 @@
 // account's session exactly like a client would, so every phone and browser
 // mirrors it and can control it, from anywhere.
 import type { DB } from '../db.js';
-import { tracksByIds } from '../library.js';
+import { mixFor, tracksByIds } from '../library.js';
 import type { Discovery, Speaker } from './discovery.js';
 import { transportFor, type Transport } from './transports.js';
 
@@ -80,13 +80,17 @@ export class ServerPlayer {
     if (!dev) throw new Error(`no such speaker ${cmd.deviceId}`);
     const ids: string[] = Array.isArray(cmd.trackIds) ? cmd.trackIds : [];
     if (!ids.length) throw new Error('transfer carried no tracks');
-    const rows = this.rowsFor(ids);
-    const idx = Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
+    // A mirror that never got this session's queue sends only the current
+    // song; switching speakers must not throw the rest of the queue away.
+    const keep = ids.length === 1 && this.queue.some((r) => r.Id === ids[0]);
+    const rows = keep ? this.queue : this.rowsFor(ids);
+    const idx = keep ? this.queue.findIndex((r) => r.Id === ids[0]) : Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     // The chosen track first (the speaker starts within a second), the rest around it.
-    const chosenId = ids[idx];
+    const chosenId = keep ? ids[0] : ids[idx];
     const at = Math.max(0, rows.findIndex((r) => r.Id === chosenId));
     await this.switchDevice(dev);
-    this.queue = rows; this.original = rows; this.index = at;
+    if (!keep) { this.queue = rows; this.original = rows; }
+    this.index = at;
     this.d.claim();
     await this.start(this.queue[at], Number(cmd.position) || 0, cmd.playing !== false);
     this.d.reportQueue(this.queue);
@@ -158,8 +162,23 @@ export class ServerPlayer {
     const n = this.index + 1;
     if (n < this.queue.length) return this.skipTo(n);
     if (this.repeat === 'all') return this.skipTo(0);
-    // End of the queue: park at the start of the last track, paused.
+    // End of the queue: the music never stops (the web player's Autoplay).
+    // Songs that go with the last one are appended and play on; only when
+    // there is nothing to add does it park at the start of the last track.
+    if (this.extend()) return this.skipTo(n);
     if (auto && this.transport) { this.setPos(0, false); this.report(); }
+  }
+  private extend() {
+    const cur = this.current; if (!cur) return false;
+    const have = new Set(this.queue.map((t) => t.Id));
+    const prefs = this.d.db.prepare('SELECT json FROM prefs WHERE user_id = ?').get(this.uid) as any;
+    let dislikes: Record<string, unknown> = {};
+    try { dislikes = JSON.parse(prefs?.json || '{}').dislikes || {}; } catch {}
+    const ids = (mixFor(this.d.db, cur.Id, 25) || []).map((t) => t.id).filter((id) => !have.has(id) && !dislikes[id]);
+    const rows = this.rowsFor(ids); if (!rows.length) return false;
+    this.queue.push(...rows); this.original.push(...rows);
+    this.d.reportQueue(this.queue);
+    return true;
   }
   async previous() {
     if (this.position > 3 || this.index <= 0) return this.seek(0);

@@ -22,7 +22,8 @@ export class ServerPlayer {
   device: Speaker | null = null; transport: Transport | null = null;
   playing = false; anchor = { pos: 0, at: Date.now() }; duration = 0; volume: number | null = null;
   repeat: 'off' | 'all' | 'one' = 'off'; shuffle: 'off' | 'on' = 'off';
-  private timer: NodeJS.Timeout | null = null; private starting = false; private lastTick = 0;
+  private timer: NodeJS.Timeout | null = null; private starting = false; private ticking = false; private lastTick = 0;
+  private lastRead: { pos: number; at: number } | null = null;
   constructor(public uid: string, private d: PlayerDeps) {}
 
   get current() { return this.queue[this.index] ?? null; }
@@ -49,7 +50,7 @@ export class ServerPlayer {
     };
   }
   private report() { this.d.report(this.nowPlaying()); }
-  private setPos(pos: number, playing = this.playing) { this.anchor = { pos: Math.max(0, pos), at: Date.now() }; this.playing = playing; }
+  private setPos(pos: number, playing = this.playing) { this.anchor = { pos: Math.max(0, pos), at: Date.now() }; this.playing = playing; this.lastRead = null; }
 
   async execute(cmd: any) {
     const a = cmd?.action;
@@ -204,12 +205,21 @@ export class ServerPlayer {
   // someone paused or stopped it from the speaker's own app.
   private startPolling() {
     this.stopPolling();
-    this.timer = setInterval(() => this.tick().catch(() => {}), 1000);
+    // BluOS only reports whole seconds, so it is polled four times a second
+    // to catch the moment each second ticks over (see tick()).
+    const every = this.device?.kind === 'bluos' ? 250 : 1000;
+    this.timer = setInterval(() => {
+      if (this.ticking) return;
+      this.ticking = true;
+      this.tick().catch(() => {}).finally(() => { this.ticking = false; });
+    }, every);
   }
   private stopPolling() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   private async tick() {
     if (!this.transport || this.starting || !this.current) return;
+    const t0 = Date.now();
     const s = await this.transport.status();
+    const readAt = (t0 + Date.now()) / 2;
     if (typeof s.volume === 'number') this.volume = s.volume;
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
@@ -221,8 +231,22 @@ export class ServerPlayer {
       if (this.playing) { this.setPos(this.position, false); this.report(); }
       return;
     }
-    const drift = Math.abs(s.position - this.position);
-    if (s.playing !== this.playing || drift > 2.5) this.setPos(s.position, s.playing);
+    // Lyrics follow this clock, so it has to match what is coming out of
+    // the speaker to a fraction of a second. The old rule (re-sync only past
+    // 2.5 s of drift) left every start, seek and rebuffer that far off.
+    if (s.playing !== this.playing) this.setPos(s.position + (s.coarse && s.playing ? 0.5 : 0), s.playing);
+    else if (s.coarse && s.playing) {
+      // A whole-second clock reports the floor of the true position. When
+      // it steps up by one between two readings, that second began between
+      // them: anchor there (accurate to half the poll interval). Otherwise
+      // only a reading the clock cannot explain (a stall, a seek landing
+      // elsewhere) moves it, to the middle of the reported second.
+      const prev = this.lastRead;
+      const pos = this.position;
+      if (prev && s.position === prev.pos + 1) this.anchor = { pos: s.position, at: (prev.at + readAt) / 2 };
+      else if (pos < s.position - 0.25 || pos >= s.position + 1.25) this.setPos(s.position + 0.5, true);
+      this.lastRead = { pos: s.position, at: readAt };
+    } else if (Math.abs(s.position - this.position) > 0.75) this.setPos(s.position, s.playing);
     if (s.duration > 0) this.duration = s.duration;
     // Reports every second while playing, like a client (mirrors follow the clock).
     const now = Date.now();

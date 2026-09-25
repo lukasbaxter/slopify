@@ -84,9 +84,13 @@ export class Discovery {
   }
 
   // ---- port sweep -------------------------------------------------------------
+  // Only real LAN interfaces: with host networking every Docker bridge (and
+  // the VPNs) shows up here too, and sweeping 20-odd of them took over a
+  // minute after each restart, during which nobody could see a speaker.
   private subnets(): string[] {
     const out = new Set<string>();
-    for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) {
+    for (const [name, list] of Object.entries(os.networkInterfaces())) for (const a of list || []) {
+      if (/^(br-|docker|veth|virbr|wg|tailscale|tun|tap)/.test(name)) continue;
       if (a.family !== 'IPv4' || a.internal || a.address.startsWith('169.254.') || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address)) continue;
       if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) continue;
       out.add(a.address.split('.').slice(0, 3).join('.'));

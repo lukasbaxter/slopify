@@ -174,7 +174,7 @@ export class ServerPlayer {
     const have = new Set(this.queue.map((t) => t.Id));
     const prefs = this.d.db.prepare('SELECT json FROM prefs WHERE user_id = ?').get(this.uid) as any;
     let dislikes: Record<string, unknown> = {};
-    try { dislikes = JSON.parse(prefs?.json || '{}').dislikes || {}; } catch {}
+    try { dislikes = JSON.parse(prefs?.json || '{}').dislikes || {}; } catch { /* unreadable prefs: no dislikes */ }
     const ids = (mixFor(this.d.db, cur.Id, 25) || []).map((t) => t.id).filter((id) => !have.has(id) && !dislikes[id]);
     const rows = this.rowsFor(ids); if (!rows.length) return false;
     this.queue.push(...rows); this.original.push(...rows);

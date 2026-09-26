@@ -1144,7 +1144,20 @@ export function usePlayer(jf) {
     el.addEventListener('loadedmetadata', onDuration);
     el.addEventListener('pause', onPause);
     el.addEventListener('play', onPlay);
+    // A pause or play iOS made inside one of our own windows (a load, a swap,
+    // a track change) is ignored above, and nothing brought the app back in
+    // line afterwards: the lock screen kept the wrong icon until a tap. So
+    // once a second, outside those windows, the element's real state wins
+    // when it has disagreed with ours for two checks running.
+    let disagree = 0;
+    const reconcile = setInterval(() => {
+      if (!el.getAttribute('src') || el.ended || transitionRef.current || Date.now() < ownUntilRef.current) { disagree = 0; return; }
+      const sounding = !el.paused;
+      if (sounding === playingRef.current) { disagree = 0; return; }
+      if (++disagree >= 2) { disagree = 0; followSystem(sounding)(); }
+    }, 1000);
     return () => {
+      clearInterval(reconcile);
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('loadedmetadata', onDuration);

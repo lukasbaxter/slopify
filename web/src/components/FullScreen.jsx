@@ -79,6 +79,10 @@ function useProgressiveSrc(lo, hi) {
   }, [lo, hi]);
   return src;
 }
+// An <img> that shows `lo` at once and swaps to `hi` when it has loaded.
+export function ProgressiveImg({ lo, hi, ...rest }) {
+  return <img src={useProgressiveSrc(lo, hi)} {...rest} />;
+}
 
 export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAlbum, onLike, onAddTo, onNewPlaylist, playlists = [], prefs, onUpdatePrefs, onPanel, devices = [], sessionDevice = null }) {
   // Phone: the mini bar always opens on the album view (Spotify); lyrics and
@@ -154,10 +158,11 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   ];
   const { nowPlaying, playing, position, duration, shuffle, repeat, volume } = player;
   const liked = useLiked(nowPlaying?.itemId);
-  // The big cover paints from the 320px copy the lists already fetched (it is
-  // in the cache), while the full-size one (640 on the phone: 3x of the 24pt
-  // gutter width, 1000 on the desktop) loads behind it and swaps in.
-  const artHi = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: phone ? 640 : 1000 }) : nowPlaying?.artUrl || null;
+  // The big cover paints from the small copy the lists already fetched (it is
+  // in the cache: 64 px on the phone, 320 on the desktop), while the full-size
+  // one (640 on the phone: 3x of the 24pt gutter width, 1000 on the desktop)
+  // downloads behind it and swaps in.
+  const artHi = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: phone ? 640 : 1000, full: true }) : nowPlaying?.artUrl || null;
   const artLo = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: 320 }) : null;
   const art = useProgressiveSrc(artLo, artHi);
   // The row-menu shape of the playing track (onLike / onAddTo want a track

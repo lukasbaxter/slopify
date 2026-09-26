@@ -156,7 +156,7 @@ export class Slopify {
     if (!itemId || this.streamMode() !== 'hls') return;
     const at = this._warm.get(itemId); if (at && Date.now() - at < 60000) return;
     this._warm.set(itemId, Date.now());
-    const url = this.playbackUrl(itemId);
+    const url = this._url(`/api/stream/${itemId}/hls/${this._profile()}/index.m3u8`);
     const base = url.slice(0, url.lastIndexOf('/') + 1);
     const tok = url.includes('?') ? url.slice(url.indexOf('?')) : '';
     const pull = (tries) => fetch(url).then((r) => r.text()).then((txt) => {
@@ -176,7 +176,10 @@ export class Slopify {
   playbackUrl(itemId, { startAt = 0 } = {}) {
     const mode = this.streamMode();
     if (mode === 'file') return this.streamUrl(itemId);
-    if (mode === 'hls') return this._url(`/api/stream/${itemId}/hls/${this._profile()}/index.m3u8`);
+    // Adaptive up to the chosen quality: on a weak signal iOS drops to a
+    // lower one instead of stopping to buffer. (The first segments of the
+    // top quality are what prewarm() puts in the cache, so starts stay fast.)
+    if (mode === 'hls') return this._url(`/api/stream/${itemId}/hls/master.m3u8`, { max: this._profile() });
     return this.transcodeUrl(itemId, { codec: 'mp3', bitrate: { high: 320000, normal: 160000, low: 96000 }[this.quality], startAt });
   }
   streamUrl(itemId) { return this._url(`/api/stream/${itemId}`); }
@@ -340,9 +343,15 @@ export class Slopify {
   // --- pictures ------------------------------------------------------------------
   bustImage(itemId) { (this._bust ||= {})[itemId] = Date.now(); }
   imageQuality = 82;
-  imageUrl(itemId, { maxHeight = 480 } = {}) {
+  // On a phone every list, grid and mini-player picture is the 64 px copy
+  // (about 1 KB, so a whole screen of them costs less than one normal cover
+  // on a weak connection). Only the big views ask for `full`: the full-screen
+  // player and a page's own header, which paint the 64 px copy first and swap
+  // the sharp one in once it has downloaded.
+  imageUrl(itemId, { maxHeight = 480, full = false } = {}) {
     if (!itemId) return null;
-    const q = { size: String(maxHeight) };
+    const small = !full && typeof window !== 'undefined' && window.matchMedia?.('(max-width: 760px)').matches;
+    const q = { size: String(small ? 64 : maxHeight) };
     if (this._bust?.[itemId]) q.v = String(this._bust[itemId]);
     return this._url(`/api/image/${itemId}`, q);
   }

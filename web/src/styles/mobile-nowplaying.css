@@ -261,6 +261,9 @@
      speaker): 16pt glyphs either side of a 4pt green bar with a 44pt touch
      height, like Spotify's Connect slider. */
   .dm-volume { display: flex; align-items: center; gap: 14px; margin: 8px 0 0; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.1); color: #fff; }
+  /* Pinned to the bottom of the sheet: however many speakers there are, the
+     volume stays on screen (the sheet's bottom padding moves into it). */
+  .devicemenu .dm-volume { position: sticky; bottom: calc(-24px - env(safe-area-inset-bottom)); z-index: 1; background: #282828; margin: 8px -16px calc(-24px - env(safe-area-inset-bottom)); padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); }
   .dm-volume svg { flex: none; width: 22px; height: 22px; }
   .dm-volume input[type="range"] { touch-action: none; -webkit-tap-highlight-color: transparent; flex: 1 1 auto; height: 44px; border-radius: 0; margin: 0; background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 8px no-repeat; }
   .dm-volume input[type="range"]:hover { background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--pct, 0%), rgba(255,255,255,.3) var(--pct, 0%), rgba(255,255,255,.3) 100%) center / 100% 8px no-repeat; }

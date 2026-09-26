@@ -1798,9 +1798,9 @@ export function usePlayer(jf) {
     if ((!msLocal && !msRemote) || !nowPlaying) { try { ms.metadata = null; ms.playbackState = 'none'; } catch { /* unsupported */ } return undefined; }
     const artwork = [];
     // One size: iOS fetches every listed artwork at once, on the same link as the first segments.
-    if (jf && nowPlaying.artId) artwork.push({ src: jf.imageUrl(nowPlaying.artId, { maxHeight: 512 }), sizes: '512x512', type: 'image/jpeg' });
+    if (jf && nowPlaying.artId) artwork.push({ src: jf.imageUrl(nowPlaying.artId, { maxHeight: 512, full: true }), sizes: '512x512', type: 'image/jpeg' });
     else if (nowPlaying.artUrl) artwork.push({ src: nowPlaying.artUrl, sizes: '512x512', type: 'image/jpeg' });
-    else if (jf && nowPlaying.artistId) artwork.push({ src: jf.imageUrl(nowPlaying.artistId, { maxHeight: 512 }), sizes: '512x512', type: 'image/jpeg' });
+    else if (jf && nowPlaying.artistId) artwork.push({ src: jf.imageUrl(nowPlaying.artistId, { maxHeight: 512, full: true }), sizes: '512x512', type: 'image/jpeg' });
     try {
       ms.metadata = new window.MediaMetadata({
         title: nowPlaying.title || 'Unknown title',

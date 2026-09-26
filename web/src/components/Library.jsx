@@ -10,6 +10,7 @@ import History from './History.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
 import FittedTitle from './FittedTitle.jsx';
 import VirtualList from './VirtualList.jsx';
+import { ProgressiveImg } from './FullScreen.jsx';
 
 export const LIKED_ID = '__liked__';
 
@@ -212,7 +213,7 @@ export default function Library({
   // shown like a playlist (list, play, shuffle) rather than played blind.
   const openMix = async (seed, n, color) => {
     const id = `mix:${seed.Id}`;
-    setDetail({ item: { Id: id, Name: `Daily Mix ${n}`, Type: 'Playlist', _mix: true, _art: jf.imageUrl(seed.Id, { maxHeight: 464 }), _color: color, _sub: `${seed.Name} and more` }, tracks: [], kind: 'Playlist', loading: true });
+    setDetail({ item: { Id: id, Name: `Daily Mix ${n}`, Type: 'Playlist', _mix: true, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: `${seed.Name} and more` }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.instantMix(seed.Id, 50);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
@@ -922,7 +923,7 @@ export default function Library({
                   title={canEdit ? 'Choose photo' : undefined}
                   disabled={!canEdit}
                 >
-                  <img src={item._art || jf.imageUrl(item.Id, { maxHeight: 464 })} alt="" />
+                  {item._art ? <img src={item._art} alt="" /> : <ProgressiveImg lo={jf.imageUrl(item.Id, { maxHeight: 320 })} hi={jf.imageUrl(item.Id, { maxHeight: 464, full: true })} alt="" />}
                   {canEdit && <span className="hero-cover-edit">Choose photo</span>}
                 </button>
               )}
@@ -1068,7 +1069,7 @@ export default function Library({
               <h3>Edit details</h3>
               <div className="editdetails-body">
                 <label className="editdetails-cover" title="Choose photo">
-                  <img src={editPl.preview || jf.imageUrl(item.Id, { maxHeight: 360 })} alt="" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+                  <img src={editPl.preview || jf.imageUrl(item.Id, { maxHeight: 360, full: true })} alt="" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
                   <span>Choose photo</span>
                   <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setEditPl((d) => ({ ...d, file: f, preview: URL.createObjectURL(f) })); }} />
                 </label>

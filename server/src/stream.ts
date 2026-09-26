@@ -208,12 +208,30 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   // A phone pulls 40-60 segments per track in a burst: keep the HLS routes out
   // of the per-IP rate limit (which, behind nginx, is one bucket for everyone).
   const hls = { ...auth, config: { rateLimit: false } };
+  // Adaptive: every quality up to `max`, best first. iOS starts on the first
+  // and steps down by itself when segments arrive slower than they play (a
+  // phone on a weak signal), back up when they come fast again. All three are
+  // AAC-LC cut at the same frame boundaries, so a switch mid-song is seamless.
+  const LADDER: [string, number][] = [['aac-320', 400000], ['aac-160', 200000], ['aac-96', 125000]];
+  app.get('/api/stream/:id/hls/master.m3u8', hls, async (req, reply) => {
+    const { id } = req.params as any; const q = req.query as any;
+    const file = trackFile(id);
+    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const max = PROFILES[q.max] ? q.max : 'aac-320';
+    lastProfile.set(req.user!.id, max);
+    const tok = q.token ? `token=${encodeURIComponent(q.token)}&` : '';
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
+    for (const [profile, bw] of LADDER.slice(LADDER.findIndex(([p]) => p === max))) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${profile}/index.m3u8?${tok}abr=1`);
+    reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
+    return lines.join('\n') + '\n';
+  });
   app.get('/api/stream/:id/hls/:profile/index.m3u8', hls, async (req, reply) => {
     const { id, profile } = req.params as any;
     if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });
     const file = trackFile(id);
     if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
-    lastProfile.set(req.user!.id, profile);
+    // A step down inside an adaptive stream is not the quality they chose.
+    if (!(req.query as any).abr) lastProfile.set(req.user!.id, profile);
     let index: string;
     try { index = await ensureHls(dataDir, id, file, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
     // Segment URIs carry the token, since <audio> cannot send headers.

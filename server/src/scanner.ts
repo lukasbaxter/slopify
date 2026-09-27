@@ -11,6 +11,8 @@ import { parseLrc, isSynced } from './lyrics.js';
 import { storeArtwork } from './artwork.js';
 import { buildHead, headOf } from './heads.js';
 
+import { officialKey } from './enrich.js';
+
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
 const COVER_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -229,10 +231,18 @@ export function canonicalArtistNames(db: DB) {
     return { ...r, names, ids };
   });
   const mixed = (s: string) => (s !== s.toUpperCase() && s !== s.toLowerCase() ? 1 : 0);
+  // The artist's own spelling when known (officialNamesPass): "INZO" stays
+  // INZO even if most files say "Inzo". Only a case/spacing difference is
+  // taken, so a lookup can never rename one artist into another.
+  const official = new Map<string, string>();
+  for (const r of db.prepare("SELECT k, json FROM ext_cache WHERE k LIKE 'spotify:artistname:%'").all() as { k: string; json: string }[]) {
+    const n = (JSON.parse(r.json) as { name: string | null }).name; if (n) official.set(r.k.slice('spotify:artistname:'.length), n);
+  }
   const canon = new Map<string, string>();
   for (const [id, m] of tally) {
-    if (m.size < 2) { canon.set(id, m.keys().next().value!); continue; }
-    canon.set(id, [...m].sort((a, b) => b[1] - a[1] || mixed(b[0]) - mixed(a[0]) || (a[0] < b[0] ? -1 : 1))[0][0]);
+    const pick = m.size < 2 ? m.keys().next().value! : [...m].sort((a, b) => b[1] - a[1] || mixed(b[0]) - mixed(a[0]) || (a[0] < b[0] ? -1 : 1))[0][0];
+    const off = official.get(officialKey(pick));
+    canon.set(id, off && officialKey(off) === officialKey(pick) ? off : pick);
   }
   const setTrack = db.prepare('UPDATE tracks SET artist = ?, artists = ?, album_artist = ? WHERE id = ?');
   const setAlbums = db.prepare('UPDATE albums SET artist = ? WHERE artist_id = ? AND artist != ?');

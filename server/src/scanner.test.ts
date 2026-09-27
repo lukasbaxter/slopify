@@ -76,6 +76,26 @@ describe('folder scan (a download landing)', () => {
   }, 120000);
 });
 
+describe('artist spelling', () => {
+  it('keeps the artist\'s own spelling ("INZO") over the most common one, and never renames to another artist', () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-names-')));
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, added_at, sort_name) VALUES ('al', 'A', 'x', 'x', '/m', 0, 'a')").run();
+    const t = db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at) VALUES (?, ?, 0, 0, 't', ?, ?, ?, 'al', 'A', ?, 0)`);
+    const add = (id: string, name: string) => { t.run(id, `/m/${id}`, name, JSON.stringify([name]), JSON.stringify([artistId(name)]), name); db.prepare('INSERT OR IGNORE INTO artists (id, name, sort_name) VALUES (?, ?, ?)').run(artistId(name), name, name.toLowerCase()); };
+    add('1', 'Inzo'); add('2', 'Inzo'); add('3', 'INZO');   // most files say Inzo
+    add('4', 'Lauv');
+    add('5', 'Syko');
+    const cache = db.prepare('INSERT INTO ext_cache (k, json, at) VALUES (?, ?, 0)');
+    cache.run('spotify:artistname:inzo', JSON.stringify({ name: 'INZO' }));
+    cache.run('spotify:artistname:lauv', JSON.stringify({ name: 'LAUV Official' })); // not the same name: ignored
+    cache.run('spotify:artistname:syko', JSON.stringify({ name: 'SyKo' }));
+    canonicalArtistNames(db);
+    const names = (db.prepare('SELECT DISTINCT artist FROM tracks ORDER BY artist').all() as any[]).map((r) => r.artist);
+    expect(names).toEqual(['INZO', 'Lauv', 'SyKo']);
+    expect((db.prepare('SELECT name FROM artists WHERE id = ?').get(artistId('inzo')) as any).name).toBe('INZO');
+  });
+});
+
 describe('helpers', () => {
   it('splits artist credits but keeps known bands', () => {
     expect(splitArtists(undefined, 'Tyla feat. Gunna')).toEqual(['Tyla', 'Gunna']);

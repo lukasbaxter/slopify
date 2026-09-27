@@ -52,7 +52,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerStream(app, db, cacheDir, songCache);
   registerSocial(app, db, dataDir, cacheDir);
   const heads = { cacheDir, seconds: config.headSeconds };
-  registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs });
+  registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, musicRequestsUrl: config.musicRequestsUrl });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds }));
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
   registerExplore(app, db, { slskdUrl: config.slskdUrl, slskdKey: config.slskdKey });

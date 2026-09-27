@@ -94,16 +94,33 @@ export function headOf(db: DB, cacheDir: string, id: string, size: number): { pa
   return fs.existsSync(p) ? { path: p, bytes: h.bytes } : null;
 }
 
+// A byte range of a file; if the file is not there (a song the library
+// lists at its NAS path that the ingest has not copied yet), the same range
+// of `alt` (its copy in the SSD drop folder).
+function openFile(file: string, start: number, end: number, alt?: string | null): Readable {
+  if (!alt) return fs.createReadStream(file, { start, end });
+  const out = new PassThrough();
+  const first = fs.createReadStream(file, { start, end });
+  first.on('error', (e: any) => {
+    if (e?.code !== 'ENOENT') { out.destroy(e); return; }
+    const second = fs.createReadStream(alt, { start, end });
+    second.on('error', (e2) => out.destroy(e2));
+    second.pipe(out);
+  });
+  first.pipe(out);
+  return out;
+}
+
 // Bytes [start, end] of the song: from the head while it lasts, then from
 // the full file. `file` is only opened when the range goes past the head.
-export function openBytes(file: string, head: { path: string; bytes: number } | null, start: number, end: number): Readable {
-  if (!head || start >= head.bytes) return fs.createReadStream(file, { start, end });
+export function openBytes(file: string, head: { path: string; bytes: number } | null, start: number, end: number, alt?: string | null): Readable {
+  if (!head || start >= head.bytes) return openFile(file, start, end, alt);
   if (end < head.bytes) return fs.createReadStream(head.path, { start, end });
   const out = new PassThrough();
   const first = fs.createReadStream(head.path, { start, end: head.bytes - 1 });
   first.on('error', (e) => out.destroy(e));
   first.on('end', () => {
-    const rest = fs.createReadStream(file, { start: head.bytes, end });
+    const rest = openFile(file, head.bytes, end, alt);
     rest.on('error', (e) => out.destroy(e));
     rest.pipe(out);
   });

@@ -69,13 +69,13 @@ export function syntheticPlaylist(durationMs: number, sampleRate: number): strin
 // A song as the stream routes see it: where the full file is, its size (from
 // the database: no stat of the NAS on the request path, where a wedged mount
 // would block the whole process) and its head on the SSD if it has one.
-export type Src = { file: string; size: number; head: { path: string; bytes: number } | null };
+export type Src = { file: string; size: number; head: { path: string; bytes: number } | null; alt?: string | null };
 
 // ffmpeg's input: the local copy when the head is the whole file (m4a & co),
 // the joined head + NAS stream on stdin otherwise, the file itself without a head.
 function ffIn(src: Src): { args: string[]; feed: (() => Readable) | null } {
   if (src.head && src.head.bytes >= src.size) return { args: ['-i', src.head.path], feed: null };
-  if (src.head) return { args: ['-i', 'pipe:0'], feed: () => openBytes(src.file, src.head, 0, src.size - 1) };
+  if (src.head || src.alt) return { args: ['-i', 'pipe:0'], feed: () => openBytes(src.file, src.head, 0, src.size - 1, src.alt) };
   return { args: ['-i', src.file], feed: null };
 }
 function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | 'ignore', nice = false) {
@@ -153,7 +153,7 @@ function pumpWarm(dataDir: string, srcOf: (id: string) => Src | undefined, log: 
 // whole-song download where a dead zone cut it off.
 function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type: string, cache = 'private, max-age=3600', src?: Src) {
   const st = src ? { size: src.size } : fs.statSync(file);
-  const open = (start: number, end: number) => (src ? openBytes(src.file, src.head, start, end) : fs.createReadStream(file, { start, end }));
+  const open = (start: number, end: number) => (src ? openBytes(src.file, src.head, start, end, src.alt) : fs.createReadStream(file, { start, end }));
   reply.header('Accept-Ranges', 'bytes').header('Cache-Control', cache).type(type);
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
   if (range) {
@@ -195,7 +195,7 @@ async function joinSegments(dir: string) {
   return out;
 }
 
-export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, songs?: SongCache) {
+export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, songs?: SongCache, altOf?: (file: string) => string | null) {
   const dataDir = cacheDir; // transcodes live in the cache
   const auth = { preHandler: (app as any).requireUser };
   // Every caller is about to play the song (or warm it as next in a queue):
@@ -207,7 +207,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const local = songs?.get(id, t.size);
     if (local) return { file: local, size: t.size, head: null };
     songs?.want(id, t.path, t.size);
-    return { file: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size) };
+    return { file: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size), alt: altOf?.(t.path) ?? null };
   };
   app.get('/api/admin/cache', { preHandler: (app as any).requireAdmin }, async () => ({
     songs: songs?.stats() ?? null,
@@ -272,7 +272,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     if (fmt === 'original' || !DL[fmt]) {
       const ext = path.extname(t.path).toLowerCase();
       reply.header('Content-Disposition', disposition(`${base}${ext}`)).header('Content-Length', src.size).type(MIME[ext] || 'application/octet-stream');
-      return reply.send(openBytes(src.file, src.head, 0, src.size - 1));
+      return reply.send(openBytes(src.file, src.head, 0, src.size - 1, src.alt));
     }
     const d = DL[fmt];
     const ff = spawnFf([], src, ['-map', '0:a:0', '-vn', ...d.args, ...(d.args.includes('-f') ? [] : ['-f', d.ext]), 'pipe:1'], 'pipe');

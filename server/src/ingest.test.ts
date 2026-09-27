@@ -151,3 +151,14 @@ describe('ingest remembers', () => {
     expect(del.kept).toBeGreaterThan(0);
   });
 });
+
+describe('reading a song not on the NAS yet', () => {
+  it('falls back to the same path in the drop folder, head or not', async () => {
+    const nas = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-nas6-')), drop = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-drop6-'));
+    const data = Buffer.from('0123456789abcdefghij'); fs.writeFileSync(path.join(drop, 'a.flac'), data);
+    const readAll2 = async (s: NodeJS.ReadableStream) => { const parts: Buffer[] = []; for await (const c of s) parts.push(c as Buffer); return Buffer.concat(parts); };
+    expect((await readAll2(openBytes(path.join(nas, 'a.flac'), null, 2, 9, path.join(drop, 'a.flac')))).toString()).toBe('23456789');
+    const headFile = path.join(drop, 'head'); fs.writeFileSync(headFile, data.subarray(0, 5));
+    expect((await readAll2(openBytes(path.join(nas, 'a.flac'), { path: headFile, bytes: 5 }, 0, 19, path.join(drop, 'a.flac')))).equals(data)).toBe(true);
+  });
+});

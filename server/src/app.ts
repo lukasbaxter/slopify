@@ -49,7 +49,10 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAuth(app, db);
   registerLibrary(app, db, cacheDir);
   const songCache = new SongCache(db, cacheDir, config.songCacheGb * 1e9, (m) => app.log.warn(m));
-  registerStream(app, db, cacheDir, songCache);
+  // A song the library lists on the NAS but the ingest has not copied yet is read from the SSD drop folder.
+  const incoming = config.ingest.incomingDir ? path.resolve(config.ingest.incomingDir) : null;
+  const altOf = incoming && incoming !== path.resolve(musicDir) ? (f: string) => (f.startsWith(path.resolve(musicDir) + path.sep) ? path.join(incoming, path.relative(path.resolve(musicDir), f)) : null) : undefined;
+  registerStream(app, db, cacheDir, songCache, altOf);
   registerSocial(app, db, dataDir, cacheDir);
   const heads = { cacheDir, seconds: config.headSeconds };
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs });

@@ -77,6 +77,9 @@ const MIGRATIONS: string[] = [
   ALTER TABLE playlists ADD COLUMN cover_hash TEXT;
   ALTER TABLE artists ADD COLUMN image_tries INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  ALTER TABLE tracks ADD COLUMN bit_depth INTEGER;
+  `,
 ];
 
 export type DB = Database.Database;

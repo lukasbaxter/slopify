@@ -10,12 +10,23 @@ import { artPath, nearestSize, SIZES } from './artwork.js';
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
   track_no: number | null; disc_no: number | null; year: number | null; genres: string; duration_ms: number; codec: string | null; bitrate: number | null;
+  sample_rate?: number | null; bit_depth?: number | null; path?: string;
   identity_state: string; identity_score: number; added_at: number; cover_hash?: string | null;
 };
+// The file's own format, named the way people know it: the parser says
+// "MPEG 1 Layer 3" and "PCM"; a listener says MP3 and WAV.
+export function formatOf(t: Pick<TrackRow, 'codec' | 'bitrate' | 'sample_rate' | 'bit_depth' | 'path'>) {
+  const raw = String(t.codec || ''); const ext = String(t.path || '').split('.').pop()!.toLowerCase();
+  const codec = /layer 3/i.test(raw) ? 'MP3' : /^pcm/i.test(raw) ? (ext === 'aif' || ext === 'aiff' ? 'AIFF' : 'WAV')
+    : /alac/i.test(raw) ? 'ALAC' : /aac/i.test(raw) ? 'AAC' : /opus/i.test(raw) ? 'Opus' : /vorbis/i.test(raw) ? 'Ogg Vorbis' : raw || (ext ? ext.toUpperCase() : null);
+  if (!codec) return null;
+  return { codec, lossless: ['FLAC', 'WAV', 'AIFF', 'ALAC', 'APE', 'WV'].includes(codec), bitrate: t.bitrate ?? null, sampleRate: t.sample_rate ?? null, bitDepth: t.bit_depth ?? null };
+}
 export const trackOut = (t: TrackRow) => ({
   id: t.id, title: t.title, artist: t.artist, artists: JSON.parse(t.artists) as string[], artistIds: JSON.parse(t.artist_ids) as string[],
   albumId: t.album_id, album: t.album, albumArtist: t.album_artist, trackNo: t.track_no, discNo: t.disc_no, year: t.year,
   genres: JSON.parse(t.genres) as string[], durationMs: t.duration_ms, codec: t.codec, bitrate: t.bitrate, cover: t.cover_hash ?? null,
+  format: formatOf(t),
   identity: { state: t.identity_state, score: t.identity_score }, addedAt: t.added_at,
 });
 const albumOut = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artistId: a.artist_id, year: a.year, trackCount: a.track_count, durationMs: a.duration_ms, cover: a.cover_hash, addedAt: a.added_at });

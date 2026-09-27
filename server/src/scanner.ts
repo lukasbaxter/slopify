@@ -67,11 +67,11 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   const coverHashByFile = new Map<string, string>();
   let files = 0, added = 0, changed = 0;
 
-  const upsertTrack = db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, track_no, disc_no, year, genres, duration_ms, codec, bitrate, sample_rate, channels, jf_id, added_at)
-    VALUES (@id, @path, @mtime, @size, @title, @artist, @artists, @artist_ids, @album_id, @album, @album_artist, @track_no, @disc_no, @year, @genres, @duration_ms, @codec, @bitrate, @sample_rate, @channels, @jf_id, @added_at)
+  const upsertTrack = db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, track_no, disc_no, year, genres, duration_ms, codec, bitrate, sample_rate, bit_depth, channels, jf_id, added_at)
+    VALUES (@id, @path, @mtime, @size, @title, @artist, @artists, @artist_ids, @album_id, @album, @album_artist, @track_no, @disc_no, @year, @genres, @duration_ms, @codec, @bitrate, @sample_rate, @bit_depth, @channels, @jf_id, @added_at)
     ON CONFLICT(id) DO UPDATE SET path=excluded.path, mtime=excluded.mtime, size=excluded.size, title=excluded.title, artist=excluded.artist, artists=excluded.artists, artist_ids=excluded.artist_ids,
       album_id=excluded.album_id, album=excluded.album, album_artist=excluded.album_artist, track_no=excluded.track_no, disc_no=excluded.disc_no, year=excluded.year, genres=excluded.genres,
-      duration_ms=excluded.duration_ms, codec=excluded.codec, bitrate=excluded.bitrate, sample_rate=excluded.sample_rate, channels=excluded.channels, jf_id=excluded.jf_id`);
+      duration_ms=excluded.duration_ms, codec=excluded.codec, bitrate=excluded.bitrate, sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth, channels=excluded.channels, jf_id=excluded.jf_id`);
   const upsertAlbum = db.prepare(`INSERT INTO albums (id, name, artist_id, artist, year, dir, cover_hash, added_at, sort_name) VALUES (@id, @name, @artist_id, @artist, @year, @dir, @cover_hash, @added_at, @sort_name)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name, artist_id=excluded.artist_id, artist=excluded.artist, year=COALESCE(excluded.year, albums.year), dir=excluded.dir, cover_hash=COALESCE(excluded.cover_hash, albums.cover_hash), sort_name=excluded.sort_name`);
   const upsertArtist = db.prepare(`INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, sort_name=excluded.sort_name`);
@@ -133,7 +133,7 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
         id, path: file, mtime: Math.floor(st.mtimeMs), size: st.size, title, artist: artists.join(', '), artists: JSON.stringify(artists), artist_ids: JSON.stringify(artIds),
         album_id: alId, album, album_artist: albumArtist, track_no: c.track?.no ?? null, disc_no: c.disk?.no ?? null, year: c.year ?? null,
         genres: JSON.stringify(c.genre ?? []), duration_ms: Math.round((meta.format.duration ?? 0) * 1000), codec: meta.format.codec ?? null,
-        bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate) : null, sample_rate: meta.format.sampleRate ?? null, channels: meta.format.numberOfChannels ?? null,
+        bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate) : null, sample_rate: meta.format.sampleRate ?? null, bit_depth: meta.format.bitsPerSample ?? null, channels: meta.format.numberOfChannels ?? null,
         jf_id: jfId, added_at: prev ? (db.prepare('SELECT added_at FROM tracks WHERE id = ?').get(id) as any)?.added_at ?? now : now,
       });
     });

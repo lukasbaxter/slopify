@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Lyrics } from './RightPanel.jsx';
 import Visualizer, { EQ_STYLES, GRADIENTS, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
 import ContextMenu from './ContextMenu.jsx';
+import QualityBadge, { useQuality } from './QualityBadge.jsx';
 import DevicePicker from './DevicePicker.jsx';
 import { seekHover } from '../api/seekHover.js';
 import { useLiked } from '../api/likes.js';
@@ -158,6 +159,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   ];
   const { nowPlaying, playing, position, duration, shuffle, repeat, volume } = player;
   const liked = useLiked(nowPlaying?.itemId);
+  const quality = useQuality(player, jf);
   // The big cover paints from the small copy the lists already fetched (it is
   // in the cache: 64 px on the phone, 320 on the desktop), while the full-size
   // one (640 on the phone: 3x of the 24pt gutter width, 1000 on the desktop)
@@ -288,6 +290,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
               ? <Marquee className="fs-title" text={nowPlaying?.title || 'Nothing playing'} />
               : <div className="fs-title">{nowPlaying?.title || 'Nothing playing'}</div>}
             <div className="fs-artist"><ArtistLinks artists={nowPlaying?.artists} fallback={nowPlaying?.artist || ''} onOpen={goArtist} className="linkish" /></div>
+            <QualityBadge quality={quality} />
           </div>
           {nowPlaying?.itemId && (
             <button className={`fs-like ${liked ? 'on' : ''}`} onClick={toggleLike} title={liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}>
@@ -306,7 +309,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         </div>
         {/* Bottom-right: the speaker picker with the device it is on as green text, and the volume. */}
         <div className="fs-output">
-          {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} />}
+          {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} quality={quality} />}
           <div className="fs-volume" title={`Volume ${volume}%`}>
             <button onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? 'Mute' : 'Unmute'}>
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
@@ -325,7 +328,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         {phone && (
           <div className="fs-phone-row">
             <div className="fs-phone-device">
-              {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} />}
+              {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} quality={quality} />}
             </div>
             <button className={tab === 'lyrics' ? 'on' : ''} onClick={() => setTab(tab === 'lyrics' ? 'album' : 'lyrics')} title="Lyrics" aria-label="Lyrics">{G.lyrics}</button>
             <button onClick={() => { close(); onPanel?.('queue'); }} title="Queue" aria-label="Queue">{G.queue}</button>

@@ -1522,3 +1522,11 @@ button:disabled { cursor: default; }
 .settings-phone .admin-list li { padding: 10px 12px; }
 .settings-phone .settings-actions { flex-wrap: wrap; }
 .settings-phone .settings-input { min-width: 0; width: 100%; }
+
+/* Spotify's green "Lossless" tag, naming the format instead (QualityBadge.jsx):
+   green when what reaches the listener is lossless, quiet grey when it is not. */
+.quality-badge { display: block; width: max-content; max-width: 100%; margin-top: 3px; font-size: 11px; line-height: 14px; font-weight: 500; letter-spacing: .02em; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quality-badge.lossless { color: var(--accent); }
+.deviceitem .quality-badge.in-menu { margin: 0 8px 0 auto; flex: none; }
+.dm-current-text .quality-badge { margin-top: 4px; }
+.fs-meta .quality-badge { margin-top: 6px; font-size: 12px; }

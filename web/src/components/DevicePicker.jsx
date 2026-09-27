@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import QualityBadge from './QualityBadge.jsx';
 import { LOCAL_DEVICE } from '../player/usePlayer.js';
 import { usePhone, slideOut } from './Player.jsx';
 
@@ -77,7 +78,7 @@ function SheetVolume({ volume, onChange }) {
  * The device selector. Groups discovered players by family so the Bluesound gear
  * and the Cast gear read as distinct things rather than one flat list.
  */
-export default function DevicePicker({ devices, active, onSelect, showName = false, volume = null, onVolume = null }) {
+export default function DevicePicker({ devices, active, onSelect, showName = false, volume = null, onVolume = null, quality = null }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const phone = usePhone();
@@ -156,6 +157,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
               <span className="dm-current-label">Current device</span>
               <span className="dm-current-name">{labelFor(active)}</span>
               <span className="dm-current-sub">{subtitleFor(active) || kindLabel(active)}</span>
+              <QualityBadge quality={quality} />
             </span>
           </div>
           {others.length > 0 && <div className="dm-others">Select another device</div>}
@@ -198,6 +200,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
                     <span className="deviceitem-name">{labelFor(d)}</span>
                     <span className="deviceitem-model">{subtitleFor(d)}</span>
                   </span>
+                  {d.id === active.id && <QualityBadge quality={quality} className="in-menu" />}
                   {d.id === active.id && <span className="deviceitem-dot" />}
                 </button>
               ))}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import QualityBadge, { useQuality } from './QualityBadge.jsx';
 import DevicePicker from './DevicePicker.jsx';
 import { usePhone, Heart, ShuffleGlyph, ArtistLinks } from './TrackRow.jsx';
 import { vibrantColor } from '../api/colors.js';
@@ -169,6 +170,7 @@ export function sessionDeviceOf(player, devices) {
 }
 
 export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist, panel, onPanel, onLike, onFullScreen }) {
+  const quality = useQuality(player, jf);
   const phone = usePhone();
   const elsewhere = elsewhereLabel(player);
   const { current, nowPlaying, playing, position, duration, volume, device, error, roster, relay, repeat, shuffle } = player;
@@ -277,6 +279,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
               )}
             </div>
             )}
+            {!phone && <QualityBadge quality={quality} />}
           </div>
           {nowPlaying?.itemId && (
             // Follows the SESSION track (mirrored liked state included), so the
@@ -380,7 +383,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
               <path d="M15 15H1v-1.5h14V15zm0-4.5H1V9h14v1.5zm-14-7A2.5 2.5 0 0 1 3.5 1h9a2.5 2.5 0 0 1 0 5h-9A2.5 2.5 0 0 1 1 3.5zm2.5-1a1 1 0 0 0 0 2h9a1 1 0 1 0 0-2h-9z" />
             </svg>
           </button>
-          <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} volume={volume} onVolume={player.setVolume} />
+          <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} volume={volume} onVolume={player.setVolume} quality={quality} />
           <div className="player-volume" title={`Volume ${volume}%`}>
             {/* Spotify's speaker glyph, one arc per volume band; click = mute toggle. */}
             <button className="vol-ico" onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? 'Mute' : 'Unmute'}>

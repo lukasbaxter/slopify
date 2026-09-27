@@ -192,6 +192,12 @@ export class Slopify {
 
   // --- library ----------------------------------------------------------------
   // Whole lists, held for 10 minutes (3,000 albums is one 400 KB response).
+  // A track's file format ({ codec, lossless, bitrate, sampleRate, bitDepth }), held for the session.
+  trackFormat(id) {
+    this._formats = this._formats || new Map();
+    if (!this._formats.has(id)) this._formats.set(id, this._fetch(`/api/tracks/${id}`).then((t) => t?.format || null).catch((e) => { this._formats.delete(id); throw e; }));
+    return this._formats.get(id);
+  }
   _albums() { return this._cachedFor('albums', 10 * 60 * 1000, async () => ((await this._fetch('/api/albums?limit=20000')).items || []).map(rowAlbum)); }
   _artists() { return this._cachedFor('artists', 10 * 60 * 1000, async () => ((await this._fetch('/api/artists?limit=20000')).items || []).map(rowArtist)); }
   async albums({ limit, startIndex = 0, search = null } = {}) {

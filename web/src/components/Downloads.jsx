@@ -41,7 +41,8 @@ function Row({ d, onRetry, retrying, onPlay, onOpen }) {
           </div>
         )}
         <div className="dl-line">
-          {d.state === 'downloading' && <span>{d.done} of {d.total} {songs}{d.started ? ` • started ${ago(d.started)}` : ''}</span>}
+          {d.state === 'downloading' && d.via === 'torrent' && <span>Torrent • {d.detail}</span>}
+          {d.state === 'downloading' && d.via !== 'torrent' && <span>{d.done} of {d.total} {songs}{d.started ? ` • started ${ago(d.started)}` : ''}</span>}
           {d.state === 'stuck' && <span className="dl-warn">No progress for {mins(Date.now() - (d.progressAt || d.started || Date.now()))} • {d.done} of {d.total} {songs}</span>}
           {d.state === 'queued' && <span>{d.queuePos ? `#${d.queuePos} in line` : 'In line'}{d.requested ? ` • requested ${ago(d.requested)}` : ''}</span>}
           {d.state === 'failed' && <span className="dl-warn">{d.reason || 'Failed'}{d.finished ? ` • ${ago(d.finished)}` : ''}</span>}

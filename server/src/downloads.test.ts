@@ -62,3 +62,12 @@ describe('downloads', () => {
     expect(by).toEqual({ Language: ['done', 'al'], Worlds: ['adding', null], Nurture: ['done', null] });
   });
 });
+
+describe('downloads via torrent', () => {
+  it('a torrent request shows as downloading with where it is, never stuck', () => {
+    const now = 10_000_000_000;
+    const d = downloadOut(row({ status: 'torrent', log: 'torrent: downloading 45% (2 peers)', started: (now - STUCK_MS * 3) / 1000, progress_at: (now - STUCK_MS * 2) / 1000 }), now);
+    expect(d).toMatchObject({ state: 'downloading', via: 'torrent', detail: 'downloading 45% (2 peers)' });
+    expect(downloadOut(row({ status: 'torrent', log: '' }), now).detail).toBe('searching torrents');
+  });
+});

@@ -31,14 +31,19 @@ export function recordRequest(db: DB, uid: string, r: { id?: number; album_id?: 
 export function downloadOut(r: MrRequest, now = Date.now()) {
   const secs = (t: number | null) => (t ? Math.round(t * 1000) : null);
   const progressAt = secs(r.progress_at) ?? secs(r.started);
-  let state = r.status as string;
-  if (state === 'downloading' && progressAt && now - progressAt > STUCK_MS) state = 'stuck';
+  // 'torrent': Soulseek had nothing, Lidarr is searching or downloading it
+  // (Music Requests keeps its own stall handling for those; log says where it is).
+  const torrent = r.status === 'torrent';
+  let state = torrent ? 'downloading' : r.status as string;
+  if (!torrent && state === 'downloading' && progressAt && now - progressAt > STUCK_MS) state = 'stuck';
   const reason = state === 'failed' ? String(r.log || '').replace(/^failed:\s*/i, '') || null : null;
   return {
     id: r.id, albumId: r.album_id, artist: r.artist, title: r.title, type: r.rtype, year: r.year, image: r.image,
     state, total: r.total_tracks || 0, done: state === 'done' ? (r.tracks_added || r.total_tracks || 0) : (r.tracks_done || 0),
     queuePos: r.queue_pos ?? null, requested: secs(r.created), started: secs(r.started), progressAt, finished: r.status === 'done' || r.status === 'failed' ? secs(r.updated) : null,
     reason,
+    via: torrent ? 'torrent' : 'soulseek',
+    detail: torrent ? String(r.log || '').replace(/^torrent:\s*/i, '') || 'searching torrents' : null,
   };
 }
 

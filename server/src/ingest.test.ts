@@ -57,7 +57,7 @@ describe('ingest', () => {
 
   it('with deletion on, clears the SSD folder only after all of that; a hold file stops the sweep', async () => {
     const { incoming, nas, cache, db } = setup();
-    const ing = new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 0, deleteAfter: true });
+    const ing = new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 0, deleteAfter: true, deleteSettleMs: 0 });
     fs.writeFileSync(path.join(incoming, '.ingest-hold'), '');
     const held = await ing.sweep();
     expect(held.errors).toEqual(['on hold']); expect(held.copied).toBe(0);
@@ -118,5 +118,17 @@ describe('ingest and Synology leftovers', () => {
     expect(fs.statSync(blocker).isFile()).toBe(true);
     expect(fs.existsSync(path.join(nas, 'The Fixture Band', 'Second Wind', '@eaDir'))).toBe(false);
     expect(fs.existsSync(path.join(nas, 'The Fixture Band', 'Second Wind', 'Junk.flac'))).toBe(false);
+  });
+});
+
+describe('ingest deletion waits', () => {
+  it('copies a folder written a minute ago but does not delete it yet', async () => {
+    const incoming = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-in4-')), nas = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-nas4-')), cache = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-c4-'));
+    fs.cpSync(path.join(MUSIC, 'The Fixture Band'), path.join(incoming, 'The Fixture Band'), { recursive: true }); // fresh mtimes
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-idb4-')));
+    const st = await new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 0, deleteAfter: true }).sweep();
+    expect(st.copied).toBeGreaterThan(0);
+    expect(st.deletedDirs).toBe(0);
+    expect(fs.existsSync(path.join(incoming, 'The Fixture Band'))).toBe(true);
   });
 });

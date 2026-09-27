@@ -29,6 +29,7 @@ export const config = {
     everyMin: Number(env('INGEST_EVERY_MIN', '10')),
     settleMin: Number(env('INGEST_SETTLE_MIN', '10')),
     deleteAfter: env('INGEST_DELETE', '0') === '1',
+    deleteSettleMin: Number(env('INGEST_DELETE_SETTLE_MIN', '60')), // nothing written in a folder this long before it is deleted
   },
   publicUrl: env('PUBLIC_URL', '').replace(/\/+$/, ''),
   adminUser: env('ADMIN_USER', 'admin'),

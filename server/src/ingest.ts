@@ -29,6 +29,9 @@ import { bumpLibraryVersion } from './db.js';
 export type IngestOptions = {
   incomingDir: string; nasDir: string; musicDir: string; cacheDir: string; headSeconds: number;
   settleMs: number; deleteAfter: boolean; batchDirs?: number; log?: (m: string) => void;
+  // Copying early is harmless; deleting a folder a download is still writing to
+  // is not (a stalled Soulseek album looks settled after 10 min): deletion waits longer.
+  deleteSettleMs?: number;
 };
 export type IngestStats = {
   startedAt: number; finishedAt: number | null; dirs: number; files: number; copied: number; copiedBytes: number; alreadyThere: number;
@@ -199,6 +202,10 @@ export class Ingest {
     const rel = path.relative(this.o.incomingDir, dir) || '.';
     let files: string[];
     try { files = (await fsp.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile() && !e.name.startsWith('.')).map((e) => path.join(dir, e.name)); } catch { return; }
+    const wait = this.o.deleteSettleMs ?? 60 * 60000;
+    let newest = 0;
+    for (const f of files) { try { newest = Math.max(newest, (await fsp.stat(f)).mtimeMs); } catch { /* gone */ } }
+    if (Date.now() - newest < wait) { st.kept++; return; } // still settling: copied now, deleted on a later sweep
     const keptSet = new Set(kept);
     // A duplicate picture that was not copied still counts as covered by its twin.
     const covered = (f: string) => keptSet.has(f) || (!isAudio(f) && kept.some((k) => path.basename(k).toLowerCase() === path.basename(f).toLowerCase()));
@@ -220,11 +227,11 @@ export class Ingest {
   }
 }
 
-export type IngestConfig = { incomingDir: string; nasDir: string; everyMin: number; settleMin: number; deleteAfter: boolean };
+export type IngestConfig = { incomingDir: string; nasDir: string; everyMin: number; settleMin: number; deleteAfter: boolean; deleteSettleMin: number };
 
 export function registerIngest(app: FastifyInstance, db: DB, o: IngestConfig & { musicDir: string; cacheDir: string; headSeconds: number }) {
   if (!o.incomingDir) return null;
-  const ing = new Ingest(db, { incomingDir: path.resolve(o.incomingDir), nasDir: path.resolve(o.nasDir), musicDir: path.resolve(o.musicDir), cacheDir: o.cacheDir, headSeconds: o.headSeconds, settleMs: o.settleMin * 60000, deleteAfter: o.deleteAfter, log: (m) => app.log.info(m) });
+  const ing = new Ingest(db, { incomingDir: path.resolve(o.incomingDir), nasDir: path.resolve(o.nasDir), musicDir: path.resolve(o.musicDir), cacheDir: o.cacheDir, headSeconds: o.headSeconds, settleMs: o.settleMin * 60000, deleteAfter: o.deleteAfter, deleteSettleMs: o.deleteSettleMin * 60000, log: (m) => app.log.info(m) });
   const admin = { preHandler: (app as any).requireAdmin };
   const after = () => (app as any).runAfterScan?.();
   // Music Requests: {dirs: [relative folders]} when an album has landed (awaited);

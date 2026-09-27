@@ -46,14 +46,15 @@ describe('generated playlists', () => {
     const calls: string[] = [];
     const ask: Ask = async (system: string, user: string, schema: any) => {
       calls.push(system.slice(0, 20));
-      if (schema.properties.vibe) return { ...emptyPlan, yearFrom: 0, yearTo: 0, title: 'Plan Title', songs: tracks.slice(0, 6).map((t) => ({ artist: t.artist, title: t.title })) } as any;
+      if (schema.properties.vibe) return { ...emptyPlan, yearFrom: 0, yearTo: 0, title: 'Plan Title' } as any;
+      if (schema.properties.songs) return { songs: tracks.slice(0, 6).map((t) => ({ artist: t.artist, title: t.title })) } as any;
       const n = (user.match(/^\d+\. (NEW|KNOWN) /gm) || []).length;
       return { title: 'Late Night Test', picks: Array.from({ length: n }, (_, i) => n - i), request: [] } as any;
     };
     const job: any = { state: 'running', step: '', progress: null };
     const r = await generatePlaylist(db, ask, 'u1', 'something calm', job);
     job.state = 'done';
-    expect(calls.length).toBe(2);
+    expect(calls.length).toBe(4); // plan + 2 song lists + pick
     expect(r.name).toBe('Late Night Test');
     const ids = (db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(r.playlistId) as any[]).map((x) => x.track_id);
     expect(ids.length).toBe(Math.min(25, r.poolSize));

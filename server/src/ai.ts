@@ -2,9 +2,10 @@
 // 20 of them songs the listener has never played and 5 they know.
 //
 // Claude (Opus 5, through the Anthropic API; ANTHROPIC_API_KEY) does the
-// judging, in two calls:
+// judging:
 //   1. plan: request + listener profile -> the vibe in words, artists
-//      (mostly ones they do not play), genres, specific songs, eras;
+//      (mostly ones they do not play), genres, eras; beside it two calls
+//      for specific songs (one close to their taste, one beyond it);
 //   2. pick: those found in the library, plus Deezer's similar artists that
 //      the library has, genres at random (played/liked songs marked known),
 //      numbered -> Claude picks 20 new + 5 known in listening order, and
@@ -106,10 +107,10 @@ const obj = (properties: Record<string, object>) => ({ type: 'object', propertie
 const strs = { type: 'array', items: { type: 'string' } };
 const PlanSchema = obj({
   title: { type: 'string' }, vibe: { type: 'string' }, artists: strs, genres: strs,
-  songs: { type: 'array', items: obj({ artist: { type: 'string' }, title: { type: 'string' } }) },
   playlists: strs, useHistory: { type: 'boolean' },
   yearFrom: { type: 'integer' }, yearTo: { type: 'integer' },
 });
+const SongsSchema = obj({ songs: { type: 'array', items: obj({ artist: { type: 'string' }, title: { type: 'string' } }) } });
 export type Plan = { title: string; vibe: string; artists: string[]; genres: string[]; songs: { artist: string; title: string }[]; playlists: string[]; useHistory: boolean; yearFrom: number | null; yearTo: number | null };
 
 const PLAN_SYSTEM = `You plan playlists for a personal music server. The playlist can only contain songs from the listener's own library, so your plan is used to search that library. Most of the playlist (80%) must be songs the listener has NOT played before: discovery that still fits their taste.
@@ -118,11 +119,20 @@ Given the request and the listener's profile, answer with:
 - vibe: one or two sentences on exactly what the songs should feel like: mood, energy, tempo, setting, and what does NOT belong.
 - artists: up to 30 real artists whose music fits the vibe. At most a third from their profile (only ones that truly fit); the rest artists they do not play much but would likely enjoy.
 - genres: up to 8 genre names as music libraries tag them (e.g. "R&B", "Hip Hop", "Indie Pop", "House").
-- songs: up to 40 specific real songs (artist + exact title) that fit the vibe closely, mostly deeper cuts over the biggest hits. Never repeat a title.
 - playlists: names of the listener's own playlists (exactly as listed) the request refers to; empty if none.
 - useHistory: true only when the request is about their own favourites (e.g. "my favourites", "what I have been playing").
 - yearFrom / yearTo: only when the request names an era (e.g. "90s" = 1990 and 1999), otherwise 0.
-If the request names artists or songs, include them.`;
+If the request names artists, include them.`;
+
+// Specific songs come from two calls running beside the plan (three short
+// answers at once instead of one long one: Claude's writing speed is the
+// wait): one close to what they play, one from artists they do not.
+const SONGS_SYSTEM = (angle: string) => `You suggest songs for a playlist on a personal music server. Name up to 20 specific real songs (artist + exact title) that fit the request closely. Never repeat a title. ${angle}
+If the request names songs, include them.`;
+const SONG_ANGLES = [
+  'Use artists from the listener profile, or artists very close to them, favouring deeper cuts over the biggest hits.',
+  'Use artists who are NOT in the listener profile but whom this listener would likely enjoy.',
+];
 
 const PickSchema = obj({ title: { type: 'string' }, picks: { type: 'array', items: { type: 'integer' } }, request: { type: 'array', items: { type: 'integer' } } });
 const PICK_SYSTEM = (known: number) => `You build a playlist from songs the listener owns. Pick exactly ${SIZE} numbers from the Songs list: exactly ${SIZE - known} marked NEW (never played) and exactly ${known} marked KNOWN.
@@ -139,6 +149,12 @@ type Cand = { row: Row; known: boolean; src: number };
 // spread of their tracks), artists similar to those (Deezer, library only:
 // mostly never played), their genres at random, and any playlist of theirs
 // the request names. `known` = played or liked before.
+// The planned artists that this library has.
+function seedArtists(db: DB, names: string[]) {
+  const byNorm = new Map((db.prepare('SELECT id, name FROM artists').all() as { id: string; name: string }[]).map((a) => [norm(a.name), a]));
+  return names.map((n) => byNorm.get(norm(n))).filter(Boolean) as { id: string; name: string }[];
+}
+
 export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>) {
   const plays = new Map((db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]).map((r) => [r.track_id as string, r.n as number]));
   const liked = new Set((db.prepare('SELECT track_id FROM likes WHERE user_id = ?').all(uid) as any[]).map((r) => r.track_id as string));
@@ -185,8 +201,7 @@ export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', si
   }
 
   // 3. the planned artists, and 4. artists similar to them
-  const artistByNorm = new Map((db.prepare('SELECT id, name FROM artists').all() as { id: string; name: string }[]).map((a) => [norm(a.name), a]));
-  const seeds = plan.artists.map((n) => artistByNorm.get(norm(n))).filter(Boolean) as { id: string; name: string }[];
+  const seeds = seedArtists(db, plan.artists);
   for (const a of seeds) artistTracks(a.id, 5, 2);
   if (similar) {
     const seen = new Set(seeds.map((a) => a.id));
@@ -313,9 +328,16 @@ export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: st
   pr.start('plan', 'reading your listening');
   const taste = tasteOf(db, uid);
   pr.set(null, 'deciding on artists, genres and songs');
-  const raw = await ask<Plan>(PLAN_SYSTEM, `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}`, PlanSchema, 8000);
-  const plan: Plan = { ...raw, yearFrom: raw.yearFrom || null, yearTo: raw.yearTo || null, artists: (raw.artists || []).slice(0, 30), songs: (raw.songs || []).slice(0, 40) };
-  pr.extra.title = plan.title; pr.extra.vibe = plan.vibe;
+  const user = `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}`;
+  const songCalls = Promise.all(SONG_ANGLES.map((angle) => ask<{ songs: Plan['songs'] }>(SONGS_SYSTEM(angle), user, SongsSchema, 4000).catch(() => ({ songs: [] as Plan['songs'] }))));
+  const raw = await ask<Omit<Plan, 'songs'>>(PLAN_SYSTEM, user, PlanSchema, 4000);
+  pr.extra.title = raw.title; pr.extra.vibe = raw.vibe;
+  pr.set(null, 'choosing specific songs');
+  // Deezer's similar artists for the planned ones, while the song lists are
+  // still being written (buildPool then reads them from the cache).
+  const warm = similar ? Promise.all(seedArtists(db, raw.artists || []).slice(0, 10).map((a) => similar(a).catch(() => []))) : null;
+  const [lists] = await Promise.all([songCalls, warm]);
+  const plan: Plan = { ...raw, yearFrom: raw.yearFrom || null, yearTo: raw.yearTo || null, artists: (raw.artists || []).slice(0, 30), songs: lists.flatMap((l) => l.songs || []).slice(0, 40) };
 
   pr.start('find');
   const pool = await buildPool(db, uid, plan, prompt, similar);

@@ -9,7 +9,7 @@ import { bumpLibraryVersion } from './db.js';
 import { albumId, artistId, audioContentId, jellyfinAudioId, sortName } from './ids.js';
 import { parseLrc, isSynced } from './lyrics.js';
 import { storeArtwork } from './artwork.js';
-import { buildHead, headOf } from './heads.js';
+import { buildHead, headOf, reconcileHeads } from './heads.js';
 
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
@@ -177,6 +177,7 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   // Files that are gone (a renamed file is not gone: its id was met under the new path).
   let removed = 0;
   if (!opts.files) for (const [p, r] of known) if (inScope(p) && !seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
+  if (opts.heads) { const n = await reconcileHeads(db, opts.heads.cacheDir, opts.heads.seconds, log); if (n) log(`recut ${n} heads that belonged to a duplicate`); }
   recount(db);
   canonicalArtistNames(db);
   bumpLibraryVersion(db);

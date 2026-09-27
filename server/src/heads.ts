@@ -59,7 +59,7 @@ export async function buildHead(db: DB, cacheDir: string, id: string, src: strin
   const len = await headLength(src, size, durationMs, seconds);
   const dst = headPath(cacheDir, id);
   await fsp.mkdir(path.dirname(dst), { recursive: true });
-  const tmp = `${dst}.tmp`;
+  const tmp = `${dst}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`; // two scans may cut the same head
   const fh = await fsp.open(src, 'r');
   try {
     const buf = Buffer.alloc(len);
@@ -72,6 +72,18 @@ export async function buildHead(db: DB, cacheDir: string, id: string, src: strin
   db.prepare('INSERT INTO heads (track_id, bytes, size, created) VALUES (?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET bytes = excluded.bytes, size = excluded.size, created = excluded.created')
     .run(id, len, size, Date.now());
   return len;
+}
+
+// Heads cut from another file with the same audio (a duplicate recording:
+// one id, two files, and each scan can leave the row on the other one) no
+// longer match the row: recut them from the file the row points at.
+export async function reconcileHeads(db: DB, cacheDir: string, seconds: number, log: (m: string) => void = () => {}) {
+  const rows = db.prepare('SELECT t.id, t.path, t.size, t.duration_ms FROM tracks t JOIN heads h ON h.track_id = t.id WHERE h.size != t.size').all() as { id: string; path: string; size: number; duration_ms: number }[];
+  let n = 0;
+  for (const r of rows) {
+    try { await buildHead(db, cacheDir, r.id, r.path, r.size, r.duration_ms, seconds); n++; } catch (e: any) { log(`head recut failed ${r.path}: ${e.message}`); }
+  }
+  return n;
 }
 
 // The head for this track, if it matches the file the database knows.

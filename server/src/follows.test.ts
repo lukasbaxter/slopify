@@ -42,3 +42,15 @@ describe('artists: follow, Daily Mix, picture', () => {
     expect(r.statusCode).toBe(200);
   });
 });
+
+describe('heads of duplicate recordings', () => {
+  it('a head that no longer matches its row is recut from the row\'s file', async () => {
+    const { buildHead, headOf, reconcileHeads } = await import('./heads.js');
+    const t = db.prepare('SELECT id, path, size, duration_ms FROM tracks LIMIT 1').get();
+    await buildHead(db, DATA, t.id, t.path, t.size, t.duration_ms, 1);
+    db.prepare('UPDATE heads SET size = size + 7 WHERE track_id = ?').run(t.id); // as if cut from the other copy
+    expect(headOf(db, DATA, t.id, t.size)).toBeNull();
+    expect(await reconcileHeads(db, DATA, 1)).toBe(1);
+    expect(headOf(db, DATA, t.id, t.size)).not.toBeNull();
+  });
+});

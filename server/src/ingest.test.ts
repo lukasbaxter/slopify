@@ -132,3 +132,22 @@ describe('ingest deletion waits', () => {
     expect(fs.existsSync(path.join(incoming, 'The Fixture Band'))).toBe(true);
   });
 });
+
+describe('ingest remembers', () => {
+  it('a second sweep does not touch the NAS for files it verified; deletion still re-checks the NAS', async () => {
+    const incoming = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-in5-')), nas = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-nas5-')), cache = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-c5-'));
+    fs.cpSync(path.join(MUSIC, 'The Fixture Band'), path.join(incoming, 'The Fixture Band'), { recursive: true, preserveTimestamps: true });
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-idb5-')));
+    const o = { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 0, deleteAfter: false };
+    await new Ingest(db, o).sweep();
+    // the NAS copy of one album disappears: the next sweep trusts its record (no NAS access)...
+    const album = path.join(nas, 'The Fixture Band', 'Second Wind');
+    fs.rmSync(album, { recursive: true });
+    const again = await new Ingest(db, o).sweep();
+    expect(again.copied).toBe(0);
+    // ...but deleting from the SSD looks at the NAS first and keeps that album
+    const del = await new Ingest(db, { ...o, deleteAfter: true, deleteSettleMs: 0 }).sweep();
+    expect(fs.existsSync(path.join(incoming, 'The Fixture Band', 'Second Wind'))).toBe(true);
+    expect(del.kept).toBeGreaterThan(0);
+  });
+});

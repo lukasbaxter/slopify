@@ -128,7 +128,11 @@ export class Ingest {
       const toIndex: string[] = []; const ok = new Map<string, string[]>();
       for (const [dir, files] of batch) {
         st.current = path.relative(this.o.incomingDir, dir) || '.';
-        try { const kept = await this.copyFolder(dir, files, st); ok.set(dir, kept); toIndex.push(...kept.filter(isAudio)); }
+        try {
+          const kept = await this.copyFolder(dir, files, st); ok.set(dir, kept);
+          const fresh = new Set(this.fresh);
+          for (const f of kept.filter(isAudio)) if (fresh.has(f) || await this.needsIndex(f)) toIndex.push(f);
+        }
         catch (e: any) { st.errors.push(`${st.current}: ${e.message}`); this.log(`ingest ${st.current}: ${e.message}`); }
         st.dirs++;
       }
@@ -169,32 +173,63 @@ export class Ingest {
         this.log(`ingest: renamed ${path.relative(this.o.incomingDir, f)} -> ${path.basename(to)} (case clash on the NAS)`);
       }
     }
-    const kept: string[] = [];
+    // Files this ingest already verified on the NAS and that have not changed
+    // since: nothing to do, no NAS access at all (a sweep every 10 minutes over
+    // the whole SSD must not touch the NAS for what it already knows).
+    const known = this.db.prepare('SELECT size, mtime FROM ingested WHERE rel = ?');
+    const mark = this.db.prepare('INSERT INTO ingested (rel, size, mtime, at) VALUES (?, ?, ?, ?) ON CONFLICT(rel) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, at = excluded.at');
+    const kept: string[] = []; const pending: { f: string; s: fs.Stats; rel: string }[] = [];
     for (const f of list) {
       st.files++;
       const s = await fsp.stat(f);
-      const dst = this.nasPath(f);
-      let there: fs.Stats | null = null;
-      try { there = await fsp.stat(dst); } catch { /* not there */ }
+      const rel = path.relative(this.o.incomingDir, f);
+      const r = known.get(rel) as { size: number; mtime: number } | undefined;
+      if (r && r.size === s.size && r.mtime === secs(s.mtimeMs)) { st.alreadyThere++; kept.push(f); continue; }
+      pending.push({ f, s, rel });
+    }
+    this.fresh = [];
+    if (!pending.length) return kept;
+    // The rest: one listing of the NAS folder (names matched ignoring case, as the share does).
+    const nasDir = path.dirname(this.nasPath(pending[0].f));
+    const there = new Map<string, string>();
+    try { for (const e of await fsp.readdir(nasDir)) there.set(e.toLowerCase(), e); } catch { /* folder not there yet */ }
+    for (const { f, s, rel } of pending) {
+      const name = there.get(path.basename(f).toLowerCase());
+      const dst = name ? path.join(nasDir, name) : this.nasPath(f);
+      let t: fs.Stats | null = null;
+      if (name) { try { t = await fsp.stat(dst); } catch { /* gone meanwhile */ } }
       // A Synology index folder sitting where this file goes: remove it (only
       // ever a folder of SYNO* index files); anything else in the way is an error.
-      if (there?.isDirectory()) {
+      if (t?.isDirectory()) {
         if (!(await onlySynoJunk(dst))) throw new Error(`a folder is in the way on the NAS: ${path.basename(dst)}`);
         await fsp.rm(dst, { recursive: true, force: true });
         this.log(`ingest: removed a Synology index folder in the way on the NAS: ${path.relative(this.o.nasDir, dst)}`);
-        there = null;
+        t = null;
       }
-      if (there && there.size === s.size && secs(there.mtimeMs) === secs(s.mtimeMs) && await sameFile(f, dst, s.size)) { st.alreadyThere++; kept.push(f); continue; }
-      await fsp.mkdir(path.dirname(dst), { recursive: true });
-      const tmp = path.join(path.dirname(dst), `.slopify-${process.pid}-${path.basename(dst)}`);
+      if (t && t.size === s.size && secs(t.mtimeMs) === secs(s.mtimeMs)) {
+        st.alreadyThere++; kept.push(f); mark.run(rel, s.size, secs(s.mtimeMs), Date.now()); continue;
+      }
+      const target = this.nasPath(f);
+      await fsp.mkdir(path.dirname(target), { recursive: true });
+      const tmp = path.join(path.dirname(target), `.slopify-${process.pid}-${path.basename(target)}`);
       await fsp.copyFile(f, tmp);
       await fsp.utimes(tmp, s.atime, s.mtime);
-      await fsp.rename(tmp, dst);
-      const now = await fsp.stat(dst);
-      if (now.size !== s.size || !(await sameFile(f, dst, s.size))) throw new Error(`copy of ${path.basename(f)} did not verify`);
-      st.copied++; st.copiedBytes += s.size; kept.push(f);
+      await fsp.rename(tmp, target);
+      const now = await fsp.stat(target);
+      if (now.size !== s.size || !(await sameFile(f, target, s.size))) throw new Error(`copy of ${path.basename(f)} did not verify`);
+      mark.run(rel, s.size, secs(s.mtimeMs), Date.now());
+      st.copied++; st.copiedBytes += s.size; kept.push(f); this.fresh.push(f);
     }
     return kept;
+  }
+  private fresh: string[] = [];
+
+  // Not in the library at its NAS path with this size, or without a head.
+  private async needsIndex(f: string) {
+    const t = this.db.prepare('SELECT id, size FROM tracks WHERE path = ?').get(this.finalPath(f)) as { id: string; size: number } | undefined;
+    if (!t) return true;
+    const size = (await fsp.stat(f)).size;
+    return t.size !== size || !headOf(this.db, this.o.cacheDir, t.id, t.size);
   }
 
   // Delete the SSD folder only when every file is on the NAS and every song is indexed at its NAS path with a head.
@@ -209,8 +244,16 @@ export class Ingest {
     const keptSet = new Set(kept);
     // A duplicate picture that was not copied still counts as covered by its twin.
     const covered = (f: string) => keptSet.has(f) || (!isAudio(f) && kept.some((k) => path.basename(k).toLowerCase() === path.basename(f).toLowerCase()));
+    // Look at the NAS again right before deleting (the record may be old).
+    const nasDir = path.dirname(this.nasPath(files[0] ?? dir));
+    const onNas = new Map<string, number>();
+    try { for (const e of await fsp.readdir(nasDir)) { try { const s = await fsp.stat(path.join(nasDir, e)); if (s.isFile()) onNas.set(e.toLowerCase(), s.size); } catch { /* gone */ } } } catch { st.kept++; return; }
     for (const f of files) {
       if (!covered(f)) { st.kept++; return; }
+      if (keptSet.has(f)) {
+        const size = (await fsp.stat(f)).size;
+        if (onNas.get(path.basename(f).toLowerCase()) !== size) { st.kept++; this.log(`ingest: keeping ${rel} on the SSD (${path.basename(f)} is not on the NAS right now)`); return; }
+      }
       if (!isAudio(f)) continue;
       const s = await fsp.stat(f);
       const t = this.db.prepare('SELECT id, size FROM tracks WHERE path = ?').get(this.finalPath(f)) as { id: string; size: number } | undefined;

@@ -105,6 +105,9 @@ const MIGRATIONS: string[] = [
   INSERT OR IGNORE INTO artist_follows (user_id, artist_id, at) SELECT user_id, track_id, at FROM likes WHERE track_id IN (SELECT id FROM artists);
   DELETE FROM likes WHERE track_id IN (SELECT id FROM artists);
   `,
+  `
+  CREATE TABLE ingested (rel TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, at INTEGER NOT NULL);
+  `,
 ];
 
 export type DB = Database.Database;

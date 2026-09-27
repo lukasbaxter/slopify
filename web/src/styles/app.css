@@ -1539,7 +1539,6 @@ button:disabled { cursor: default; }
 .genpl textarea:focus { outline: none; border-color: var(--fg); }
 .genpl-ideas { display: flex; flex-wrap: wrap; gap: 8px; }
 .genpl-ideas .pill { font-size: 13px; }
-.genpl-busy { display: flex; align-items: center; gap: 10px; color: #b3b3b3; font-size: 14px; }
 .genpl-spin { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); animation: genpl-spin .8s linear infinite; }
 @keyframes genpl-spin { to { transform: rotate(360deg); } }
 .genpl-error { margin: 0; color: #f3727f; font-size: 14px; }
@@ -1551,3 +1550,17 @@ button:disabled { cursor: default; }
 .spimport-result ol { margin: 8px 0 0; padding-left: 22px; max-height: 280px; overflow: auto; display: grid; gap: 2px; }
 .spimport-result small { color: #8a8a8a; }
 .settings-phone .spimport { padding: 0 0 8px; }
+.genpl-progress { display: grid; gap: 10px; }
+.genpl-title { font-weight: 700; font-size: 16px; }
+.genpl-vibe { margin: -4px 0 2px; color: #b3b3b3; font-size: 13px; line-height: 1.45; }
+.genpl-bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); overflow: hidden; }
+.genpl-bar span { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width .6s ease; }
+.genpl-left { color: #b3b3b3; font-size: 13px; }
+.genpl-stages { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.genpl-stages li { display: flex; align-items: center; gap: 10px; color: #6a6a6a; }
+.genpl-stages li.active { color: var(--fg); font-weight: 600; }
+.genpl-stages li.done { color: #b3b3b3; }
+.genpl-stages li.done .genpl-ico { color: var(--accent); }
+.genpl-stages small { font-weight: 400; color: #8a8a8a; }
+.genpl-ico { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
+.genpl-dot { width: 6px; height: 6px; border-radius: 50%; background: #535353; }

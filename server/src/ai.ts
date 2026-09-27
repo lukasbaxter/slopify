@@ -100,7 +100,7 @@ export class Llm {
       step('Loading the model onto the GPU');
       const bin = this.o.llamaBin;
       const args = ['-m', this.o.modelPath, '--host', '127.0.0.1', '--port', String(this.o.port),
-        '-ngl', this.o.gpuLayers, '-c', String(this.o.ctx), '-np', '1', '--jinja', '--no-webui', '--reasoning-budget', '0'];
+        ...(this.o.gpuLayers ? ['-ngl', this.o.gpuLayers] : []), '-c', String(this.o.ctx), '-np', '1', '--jinja', '--no-webui', '--reasoning-budget', '0'];
       const env = { ...process.env, LD_LIBRARY_PATH: [path.join(path.dirname(bin), 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') };
       const p = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
       this.proc = p; this.tail = [];
@@ -109,7 +109,10 @@ export class Llm {
       p.on('exit', (code) => { if (this.proc === p) { this.proc = null; this.o.log?.(`llm exited (${code})`); } });
       const t0 = Date.now();
       while (Date.now() - t0 < 180000) {
-        if (!this.proc) throw new Error(`The model failed to start: ${this.tail.slice(-3).join(' | ')}`);
+        if (!this.proc) {
+          const why = this.tail.join('\n');
+          throw new Error(/out of memory|cudaMalloc/i.test(why) ? 'Not enough free GPU memory right now (something else is using the GPU). Try again in a bit.' : `The model failed to start: ${this.tail.slice(-2).join(' | ')}`);
+        }
         try { const r = await fetch(`${this.base()}/health`); if (r.ok) { this.o.log?.(`llm ready in ${Date.now() - t0} ms`); return; } } catch { /* not listening yet */ }
         await new Promise((res) => setTimeout(res, 500));
       }
@@ -140,6 +143,9 @@ export class Llm {
       const j = await r.json() as any;
       const text = String(j.choices?.[0]?.message?.content || '').replace(/^[\s\S]*<\/think>/, '').trim();
       return JSON.parse(text) as T;
+    } catch (e: any) {
+      if (/fetch failed|ECONNREFUSED|socket/i.test(String(e?.message || e))) throw new Error('The model stopped unexpectedly. Try again.');
+      throw e;
     } finally { this.busy--; this.armIdle(); }
   }
 }
@@ -327,26 +333,103 @@ export function choose(pool: Cand[], plan: Pick<Plan, 'artists'>) {
   return out;
 }
 
+// --- progress the dialog can show ---------------------------------------------------
+// Each step with a time estimate: how long it took on recent runs (kv
+// ai_stage_ms, a moving average), else a first guess. Rating scales with
+// the number of 40-song batches. The client shows the checklist, a bar and
+// the time left, and counts down between polls.
+const GUESS_MS: Record<string, number> = { model: 9000, plan: 18000, find: 4000, rateBatch: 4500, order: 5000, request: 12000 };
+type StageKey = 'model' | 'plan' | 'find' | 'rate' | 'order' | 'request';
+const LABELS: Record<StageKey, string> = {
+  model: 'Starting the model', plan: 'Planning the vibe', find: 'Finding songs in your library',
+  rate: 'Checking each song fits', order: 'Putting them in order', request: 'Requesting songs you do not have',
+};
+export class Progress {
+  private est: Record<string, number>;
+  private stages: { key: StageKey; label: string; state: 'pending' | 'active' | 'done' | 'skipped'; ms: number; est: number; detail: string | null }[];
+  private cur = -1; private t = 0; private frac = 0;
+  readonly took: Record<string, number> = {};
+  extra: Record<string, unknown> = {};
+  constructor(private job: Job, private db: DB | null, modelLoaded: boolean) {
+    let saved: Record<string, number> = {};
+    try { saved = JSON.parse((db?.prepare("SELECT v FROM kv WHERE k = 'ai_stage_ms'").get() as any)?.v || '{}'); } catch { /* none yet */ }
+    this.est = { ...GUESS_MS, ...saved };
+    this.stages = (Object.keys(LABELS) as StageKey[]).map((key) => ({ key, label: LABELS[key], state: 'pending', ms: 0, est: key === 'rate' ? this.est.rateBatch * 5 : this.est[key], detail: null }));
+    if (modelLoaded) this.skip('model');
+    // Re-published every second, so a step running past its estimate moves the
+    // time left instead of sitting at zero; stops with the job.
+    this.timer = setInterval(() => { if (this.job.state !== 'running') { clearInterval(this.timer); return; } this.publish(); }, 1000);
+    this.timer.unref?.();
+  }
+  private timer: NodeJS.Timeout;
+  perBatch() { return this.est.rateBatch; }
+  skip(key: StageKey) { const s = this.stages.find((x) => x.key === key)!; if (s.state === 'pending') s.state = 'skipped'; this.publish(); }
+  estimate(key: StageKey, ms: number) { this.stages.find((x) => x.key === key)!.est = ms; this.publish(); }
+  start(key: StageKey, detail: string | null = null) {
+    this.finishCurrent();
+    this.cur = this.stages.findIndex((x) => x.key === key); const s = this.stages[this.cur];
+    s.state = 'active'; s.detail = detail; this.t = Date.now(); this.frac = 0; this.publish();
+  }
+  set(frac: number | null, detail?: string | null) { if (frac != null) this.frac = Math.max(0, Math.min(1, frac)); if (detail !== undefined && this.cur >= 0) this.stages[this.cur].detail = detail; this.publish(); }
+  private finishCurrent() {
+    if (this.cur < 0) return; const s = this.stages[this.cur];
+    if (s.state === 'active') { s.state = 'done'; s.ms = Date.now() - this.t; this.took[s.key] = s.ms; }
+  }
+  // All done: fold this run's timings into the saved averages.
+  finish(rateBatches: number) {
+    this.finishCurrent(); this.cur = -1; clearInterval(this.timer); this.publish();
+    const next = { ...this.est };
+    for (const [k, ms] of Object.entries(this.took)) {
+      const key = k === 'rate' ? 'rateBatch' : k; const v = k === 'rate' ? ms / Math.max(1, rateBatches) : ms;
+      if (k === 'model' && ms > 60000) continue; // a first-time download is not a load
+      next[key] = Math.round(next[key] ? next[key] * 0.6 + v * 0.4 : v);
+    }
+    try { this.db?.prepare("INSERT INTO kv (k, v) VALUES ('ai_stage_ms', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(JSON.stringify(next)); } catch { /* keep going */ }
+  }
+  private publish() {
+    const live = this.stages.filter((s) => s.state !== 'skipped');
+    const now = Date.now();
+    let total = 0, doneMs = 0;
+    for (const s of live) {
+      const est = s.state === 'done' ? s.ms : s.state === 'active' ? Math.max(s.est, now - this.t) : s.est;
+      total += est;
+      if (s.state === 'done') doneMs += s.ms;
+      else if (s.state === 'active') doneMs += Math.max(now - this.t, est * this.frac);
+    }
+    const left = Math.max(0, total - doneMs);
+    const active = this.cur >= 0 ? this.stages[this.cur] : null;
+    this.job.step = active ? `${active.label}${active.detail ? `: ${active.detail}` : ''}` : this.job.step;
+    this.job.progress = total ? Math.min(0.99, doneMs / total) : null;
+    this.job.info = { stages: live.map(({ key, label, state, detail }) => ({ key, label, state, detail })), leftMs: Math.round(left), at: now, ...this.extra };
+  }
+}
+
 export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
   requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>) {
-  const step = (s: string, p?: number) => { job.step = s; job.progress = p ?? null; };
-  await llm.ensure(step);
-  step('Reading your listening');
+  const pr = new Progress(job, db, llm.loaded);
+  if (!llm.loaded) pr.start('model');
+  await llm.ensure((msg, frac) => pr.set(frac ?? null, msg.replace(/^Loading the model onto the GPU$/, 'loading onto the GPU')));
+  pr.start('plan', 'reading your listening');
   const taste = tasteOf(db, uid);
-  step('Thinking about what fits');
+  pr.set(null, 'deciding on artists, genres and songs');
   const plan = await llm.json<Plan>([
     { role: 'system', content: PLAN_SYSTEM },
     { role: 'user', content: `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}` },
   ], PlanSchema, { temperature: 0.6, maxTokens: 3000 });
-  step('Finding songs in your library');
+  pr.extra.title = plan.title; pr.extra.vibe = plan.vibe;
+  pr.start('find');
   const pool = await buildPool(db, uid, plan, prompt, similar);
   if (!pool.length) throw new Error('Nothing in the library matched');
 
   // Every candidate scored for fit, 40 at a time (a list that long is where
   // a small model stops paying attention to each line).
   const CHUNK = 40;
+  const batches = Math.ceil(pool.length / CHUNK);
+  pr.extra.found = pool.length; pr.extra.foundNew = pool.filter((c) => !c.known).length;
+  pr.start('rate', `0 of ${pool.length} songs`);
+  pr.estimate('rate', batches * pr.perBatch());
   for (let i = 0; i < pool.length; i += CHUNK) {
-    step(`Listening for the vibe: ${Math.min(i + CHUNK, pool.length)} of ${pool.length} songs`, i / pool.length);
+    pr.set(i / pool.length, `${i} of ${pool.length} songs`);
     const part = pool.slice(i, i + CHUNK);
     const r = await llm.json<{ scores: number[] }>([
       { role: 'system', content: RATE_SYSTEM },
@@ -357,7 +440,7 @@ export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: st
   }
   const chosen = choose(pool, plan);
 
-  step('Putting them in order');
+  pr.start('order');
   let order: number[] = [];
   try {
     const r = await llm.json<{ order: number[] }>([
@@ -380,10 +463,11 @@ export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: st
   // Suggestions the library lacks: rated like everything else; only clear
   // fits (8+) are requested, best first.
   let requested = 0, missingFits = 0, requestError: string | null = null;
+  if (!requestMissing || !pool.missing.length) pr.skip('request');
   if (requestMissing && pool.missing.length) {
     try {
       const miss = pool.missing.slice(0, 40);
-      step('Requesting songs you do not have yet');
+      pr.start('request', `checking ${miss.length} suggestions`);
       const r = await llm.json<{ scores: number[] }>([
         { role: 'system', content: RATE_SYSTEM },
         { role: 'user', content: `Playlist request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${miss.map((m, j) => `${j + 1}. ${m.artist} - ${m.title}`).join('\n')}` },
@@ -392,9 +476,11 @@ export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: st
       const good = miss.map((m, j) => ({ m, fit: Number(r.scores?.[j]) || 0 })).filter((x) => x.fit >= 8).sort((a, b) => b.fit - a.fit).map((x) => x.m)
         .filter(((per) => (m: { artist: string }) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; })(new Map<string, number>()));
       missingFits = good.length;
+      pr.set(0.5, good.length ? `looking up ${Math.min(8, good.length)} good fits` : 'none fit well enough');
       requested = await requestMissing(id, good);
     } catch (e: any) { requestError = e.message; }
   }
+  pr.finish(batches);
   return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested, missing: pool.missing.length, missingFits, requestError, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, fit: t.fit ?? null, known: t.known })) };
 }
 

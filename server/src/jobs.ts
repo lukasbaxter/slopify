@@ -9,6 +9,7 @@ export type Job = {
   id: string; userId: string; kind: string;
   state: 'queued' | 'running' | 'done' | 'error';
   step: string; progress: number | null; // 0..1 when the step can say
+  info?: any; // job-specific detail for the client (stages, time left)
   result: any; error: string | null; created: number; finished: number | null;
 };
 
@@ -25,7 +26,7 @@ export function startJob(userId: string, kind: string, run: (job: Job) => Promis
   return job;
 }
 
-export const jobOut = (j: Job) => ({ id: j.id, kind: j.kind, state: j.state, step: j.step, progress: j.progress, result: j.result, error: j.error, created: j.created, finished: j.finished });
+export const jobOut = (j: Job) => ({ id: j.id, kind: j.kind, state: j.state, step: j.step, progress: j.progress, info: j.info ?? null, result: j.result, error: j.error, created: j.created, finished: j.finished });
 
 export function registerJobs(app: FastifyInstance) {
   app.get('/api/jobs/:id', { preHandler: (app as any).requireUser }, async (req: any, reply) => {

@@ -33,7 +33,9 @@ export const config = {
     llmUrl: env('LLM_URL', '').replace(/\/+$/, '') || undefined, // an OpenAI-compatible server instead (development)
     port: Number(env('LLM_PORT', '18091')),
     idleMs: Number(env('LLM_IDLE_MIN', '10')) * 60000,
-    gpuLayers: env('LLM_GPU_LAYERS', '99'),
+    // empty = llama.cpp fits as many layers as the free VRAM allows (another GPU user
+    // loaded means slower, not a failed load); a number forces it
+    gpuLayers: env('LLM_GPU_LAYERS', ''),
     ctx: Number(env('LLM_CTX', '16384')),
   },
 };

@@ -3,7 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { zipSync, strToU8 } from 'fflate';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { buildPool, choose, generatePlaylist, type Llm } from './ai.js';
+import { buildPool, choose, generatePlaylist, Progress, type Llm } from './ai.js';
 import { parseExport, importSpotify, type Parsed } from './spotifyImport.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
@@ -57,6 +57,22 @@ describe('generated playlists', () => {
     const ids = (db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(r.playlistId) as any[]).map((x) => x.track_id);
     expect(ids.length).toBe(Math.min(25, r.poolSize));
     expect(ids).toEqual(r.tracks.map((t: any) => t.id));
+  });
+});
+
+describe('progress', () => {
+  it('walks the checklist, skips what does not run, and the time left only goes down', () => {
+    const job: any = { state: 'running', step: '', progress: null };
+    const pr = new Progress(job, null, true);
+    expect(job.info.stages.map((x: any) => x.key)).toEqual(['plan', 'find', 'rate', 'order', 'request']);
+    pr.start('plan'); const left0 = job.info.leftMs;
+    pr.start('find'); pr.start('rate', '0 of 80 songs'); pr.estimate('rate', 2 * pr.perBatch()); pr.set(0.5, '40 of 80 songs');
+    expect(job.step).toBe('Checking each song fits: 40 of 80 songs');
+    expect(job.info.stages.map((x: any) => x.state)).toEqual(['done', 'done', 'active', 'pending', 'pending']);
+    expect(job.info.leftMs).toBeLessThan(left0);
+    pr.skip('request'); pr.start('order'); pr.finish(2);
+    expect(job.info.stages.map((x: any) => x.state)).toEqual(['done', 'done', 'done', 'done']);
+    expect(job.info.leftMs).toBe(0);
   });
 });
 

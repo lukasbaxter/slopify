@@ -2,13 +2,13 @@
 // and reports progress; a library version bump tells clients to refetch.
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { bumpLibraryVersion, type DB } from './db.js';
-import { canonicalArtistNames, scanLibrary } from './scanner.js';
-import { enrichPass, enrichStatus, artistImagesPass, officialNamesPass } from './enrich.js';
+import type { DB } from './db.js';
+import { scanLibrary } from './scanner.js';
+import { enrichPass, enrichStatus, artistImagesPass } from './enrich.js';
 
 // heads: cut each scanned song's head into the cache; pauseMs: breathing room
 // between files when the library is on a network share.
-export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, dataDir: string, scanOpts: { heads?: { cacheDir: string; seconds: number }; pauseMs?: number; musicRequestsUrl?: string } = {}) {
+export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, dataDir: string, scanOpts: { heads?: { cacheDir: string; seconds: number }; pauseMs?: number } = {}) {
   const admin = { preHandler: (app as any).requireAdmin };
   let current: { started: number; files: number } | null = null;
   // Work that waits on new files (generated playlists' requested songs).
@@ -31,10 +31,6 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     enriching = true;
     try {
       // Keep going while there is work: a first run over a big library takes hours.
-      // Official artist spellings first; they apply on the canonical pass below.
-      let differ = 0;
-      for (let i = 0; i < 60; i++) { const o = await officialNamesPass(db, { log: (m) => app.log.warn(m), musicRequestsUrl: scanOpts.musicRequestsUrl, max: 200 }); differ += o.differ; if (o.checked) app.log.info(`official names: ${JSON.stringify(o)}`); if (o.checked < 200) break; }
-      if (differ) { const n = canonicalArtistNames(db); bumpLibraryVersion(db); app.log.info(`official names applied: ${n} rows`); }
       for (let i = 0; i < 40; i++) { const a = await artistImagesPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300 }); if (a.found + a.missing) app.log.info(`artist images: ${JSON.stringify(a)}`); if (a.found + a.missing < 300) break; }
       for (let i = 0; i < 100; i++) { const r = await enrichPass(db, { log: (m) => app.log.warn(m), max: 500 }); if (r.done + r.missing + r.instrumental) app.log.info(`enrich: ${JSON.stringify(r)}`); if (r.done + r.missing + r.instrumental < 500) break; }
     }

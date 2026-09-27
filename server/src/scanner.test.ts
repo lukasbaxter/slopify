@@ -86,9 +86,10 @@ describe('artist spelling', () => {
     add('4', 'Lauv');
     add('5', 'Syko');
     const cache = db.prepare('INSERT INTO ext_cache (k, json, at) VALUES (?, ?, 0)');
-    cache.run('spotify:artistname:inzo', JSON.stringify({ name: 'INZO' }));
-    cache.run('spotify:artistname:lauv', JSON.stringify({ name: 'LAUV Official' })); // not the same name: ignored
-    cache.run('spotify:artistname:syko', JSON.stringify({ name: 'SyKo' }));
+    cache.run('artistspelling:inzo', JSON.stringify({ name: 'INZO' }));
+    cache.run('artistspelling:lauv', JSON.stringify({ name: 'LAUV Official' })); // not the same name: ignored
+    cache.run('artistspelling:syko', JSON.stringify({ name: 'SyKo' }));
+    cache.run('spotify:artistname:syko', JSON.stringify({ name: 'Syko Other' })); // old Spotify cache rows are ignored
     canonicalArtistNames(db);
     const names = (db.prepare('SELECT DISTINCT artist FROM tracks ORDER BY artist').all() as any[]).map((r) => r.artist);
     expect(names).toEqual(['INZO', 'Lauv', 'SyKo']);

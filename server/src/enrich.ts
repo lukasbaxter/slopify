@@ -91,35 +91,6 @@ const normName = (s: string) => s.normalize('NFKC').replace(/[\uFEFF\u200B]/g, '
 // Artist pictures (portrait + wide banner): Deezer's artist search, exact
 // name match only, the 1000 px picture stored like a cover. Tried a few
 // times over increasing gaps; artists Deezer does not know stay blank.
-// The artist's own spelling ("INZO", "SyKo", "AHEE"), from Spotify through
-// Music Requests, cached for good. The scanner's canonicalArtistNames prefers
-// it over whichever spelling most tags use, but only ever for a change of
-// case or spacing: a lookup can never rename an artist to someone else.
-export const officialKey = (s: string) => s.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
-export async function officialNamesPass(db: DB, opts: EnrichOptions & { musicRequestsUrl?: string; pauseMs?: number } = {}): Promise<{ checked: number; differ: number }> {
-  const MR = (opts.musicRequestsUrl || '').replace(/\/+$/, '');
-  const stats = { checked: 0, differ: 0 };
-  if (!MR) return stats;
-  const fetcher = opts.fetcher ?? fetch;
-  const log = opts.log ?? (() => {});
-  const known = new Set((db.prepare("SELECT k FROM ext_cache WHERE k LIKE 'spotify:artistname:%'").all() as { k: string }[]).map((r) => r.k));
-  const due = (db.prepare('SELECT name FROM artists ORDER BY track_count DESC').all() as { name: string }[])
-    .filter((a) => !known.has(`spotify:artistname:${officialKey(a.name)}`)).slice(0, opts.max ?? 200);
-  for (const a of due) {
-    try {
-      const r = await fetcher(`${MR}/api/artist-name?name=${encodeURIComponent(a.name)}`);
-      if (r.status !== 200) { log(`official name ${a.name}: ${r.status}`); if (r.status >= 500) break; continue; }
-      const name = ((await r.json()) as any).name as string | null;
-      db.prepare('INSERT INTO ext_cache (k, json, at) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET json = excluded.json, at = excluded.at')
-        .run(`spotify:artistname:${officialKey(a.name)}`, JSON.stringify({ name }), Date.now());
-      stats.checked++;
-      if (name && name !== a.name && officialKey(name) === officialKey(a.name)) stats.differ++;
-    } catch (e: any) { log(`official name ${a.name}: ${e.message}`); break; }
-    await new Promise((res) => setTimeout(res, opts.pauseMs ?? 350));
-  }
-  return stats;
-}
-
 export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promise<{ found: number; missing: number }> {
   const fetcher: Fetcher = opts.fetcher ?? ((url) => fetch(url, { headers: { 'User-Agent': UA } }));
   const bytes = opts.bytes ?? (async (url: string) => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; });

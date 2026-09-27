@@ -14,7 +14,9 @@ export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opu
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
 const COVER_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 
-export type ScanOptions = { musicDir: string; dataDir: string; jellyfinRoot?: string; onProgress?: (n: number) => void; log?: (m: string) => void };
+// only: folders under musicDir to scan instead of all of it (a just-finished
+// download). Files outside them are neither read nor treated as gone.
+export type ScanOptions = { musicDir: string; dataDir: string; jellyfinRoot?: string; only?: string[]; onProgress?: (n: number) => void; log?: (m: string) => void };
 export type ScanResult = { files: number; added: number; changed: number; removed: number; ms: number };
 
 async function* walk(dir: string): AsyncGenerator<string> {
@@ -78,8 +80,10 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   const upsertLyrics = db.prepare(`INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET kind=excluded.kind, lines=excluded.lines, source=excluded.source, fetched_at=excluded.fetched_at WHERE lyrics.source = 'sidecar' OR lyrics.source = 'none'`);
   const upsertArt = db.prepare(`INSERT OR IGNORE INTO artwork (hash, kind, src, width, height, created) VALUES (?, ?, ?, ?, ?, ?)`);
 
+  const roots = opts.only?.length ? opts.only : [opts.musicDir];
+  const inScope = (p: string) => roots.some((r) => p === r || p.startsWith(r.endsWith(path.sep) ? r : r + path.sep));
   const all: string[] = [];
-  for await (const file of walk(opts.musicDir)) all.push(file);
+  for (const root of roots) for await (const file of walk(root)) all.push(file);
   // Tag reading, audio hashing and cover rendering run CONCURRENT_FILES at a
   // time (ffmpeg + sharp are the cost: ~0.6 s per new file alone, 27k files
   // = hours); the database writes stay serial.
@@ -148,7 +152,7 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   await Promise.all(Array.from({ length: CONCURRENT_FILES }, worker));
   // Files that are gone (a renamed file is not gone: its id was met under the new path).
   let removed = 0;
-  for (const [p, r] of known) if (!seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
+  for (const [p, r] of known) if (inScope(p) && !seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
   recount(db);
   canonicalArtistNames(db);
   bumpLibraryVersion(db);

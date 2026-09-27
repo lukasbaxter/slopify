@@ -7,9 +7,13 @@
 // live state is read from Music Requests on every look.
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
+import { releaseInLibrary } from './discover.js';
 
 // No finished song for this long while downloading = stuck.
 export const STUCK_MS = 10 * 60 * 1000;
+// Done in Music Requests but not in the library yet: the folder scan that
+// follows a finished download takes seconds, so past this it is not coming.
+export const ADDING_MS = 5 * 60 * 1000;
 
 type MrRequest = {
   id: number; album_id: string; artist: string; title: string; rtype: string; year: string; image: string | null;
@@ -65,8 +69,15 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { musicReq
       }
     } catch (e: any) { return reply.code(502).send({ error: e.message }); }
     const now = Date.now();
-    const items = rows.map((r) => ({ ...downloadOut(r, now), source: meta.get(r.id)?.source ?? null, note: meta.get(r.id)?.note ?? null, mine: meta.has(r.id) }));
-    const order = ['downloading', 'stuck', 'queued', 'failed', 'done'];
+    const items = rows.map((r) => {
+      const d = downloadOut(r, now);
+      // A finished download is only done for the listener once it can be
+      // played: link the library album, or say it is still being added.
+      const album = d.state === 'done' ? releaseInLibrary(db, r.artist, r.title) : null;
+      const state = d.state === 'done' && !album && d.finished && now - d.finished < ADDING_MS ? 'adding' : d.state;
+      return { ...d, state, libraryAlbumId: album?.id ?? null, source: meta.get(r.id)?.source ?? null, note: meta.get(r.id)?.note ?? null, mine: meta.has(r.id) };
+    });
+    const order = ['downloading', 'adding', 'stuck', 'queued', 'failed', 'done'];
     items.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (a.state === 'queued' ? (a.queuePos ?? 1e9) - (b.queuePos ?? 1e9) : (b.finished ?? b.requested ?? 0) - (a.finished ?? a.requested ?? 0)));
     return { scope, items, counts, stuckAfterMs: STUCK_MS };
   });

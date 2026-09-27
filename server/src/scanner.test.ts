@@ -50,6 +50,32 @@ describe('scanner on the fixture library', () => {
   });
 });
 
+describe('folder scan (a download landing)', () => {
+  it('reads only the given folders and removes nothing outside them', async () => {
+    const lib = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-lib-'));
+    fs.cpSync(MUSIC, lib, { recursive: true });
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-only-'));
+    const db = openDb(data);
+    await scanLibrary(db, { musicDir: lib, dataDir: data });
+    const count = () => (db.prepare('SELECT COUNT(*) n FROM tracks').get() as any).n;
+    expect(count()).toBe(30);
+    // an album arrives in a new folder, and a file elsewhere disappears
+    const albumDir = path.dirname((db.prepare("SELECT path FROM tracks WHERE album = 'First Light' LIMIT 1").get() as any).path);
+    const landed = path.join(lib, 'Landed', path.basename(albumDir));
+    fs.mkdirSync(path.dirname(landed)); fs.renameSync(albumDir, landed);
+    const gone = (db.prepare("SELECT path FROM tracks WHERE album != 'First Light' LIMIT 1").get() as any).path;
+    fs.rmSync(gone);
+    const r = await scanLibrary(db, { musicDir: lib, dataDir: data, only: [path.join(lib, 'Landed')] });
+    expect(r.files).toBe(8);
+    expect(r.removed).toBe(0);
+    expect(count()).toBe(30);
+    expect((db.prepare("SELECT COUNT(*) n FROM tracks WHERE album = 'First Light' AND path LIKE ?").get(`${landed}%`) as any).n).toBe(8);
+    // the full walk still notices the missing file
+    expect((await scanLibrary(db, { musicDir: lib, dataDir: data })).removed).toBe(1);
+    expect(count()).toBe(29);
+  }, 120000);
+});
+
 describe('helpers', () => {
   it('splits artist credits but keeps known bands', () => {
     expect(splitArtists(undefined, 'Tyla feat. Gunna')).toEqual(['Tyla', 'Gunna']);

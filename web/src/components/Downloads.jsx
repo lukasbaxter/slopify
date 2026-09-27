@@ -4,8 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 // Request buttons, generated playlists' missing songs) and where each one is.
 // "Everyone" shows the whole Music Requests queue. Refreshes every 5 s while
 // open; stuck = downloading with no finished song for the server's limit.
+// adding = downloaded, the library scan has not shown it yet (seconds).
 const SECTIONS = [
   ['downloading', 'Downloading'],
+  ['adding', 'Adding to library'],
   ['stuck', 'Stuck'],
   ['queued', 'Waiting in line'],
   ['failed', 'Failed'],
@@ -21,21 +23,21 @@ const ago = (t) => {
 };
 const mins = (ms) => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? `${m} min` : `${Math.round(m / 60)} h`; };
 
-function Row({ d, onRetry, retrying }) {
+function Row({ d, onRetry, retrying, onPlay, onOpen }) {
   const pct = d.total ? Math.min(100, Math.round((d.done / d.total) * 100)) : 0;
   const songs = d.total === 1 ? 'song' : 'songs';
   return (
     <div className={`dl-row ${d.state}`}>
       {d.image ? <img className="dl-art" src={d.image} alt="" loading="lazy" /> : <div className="dl-art ph" />}
-      <div className="dl-text">
+      <div className={`dl-text ${d.libraryAlbumId ? 'link' : ''}`} role={d.libraryAlbumId ? 'button' : undefined} onClick={d.libraryAlbumId ? () => onOpen(d) : undefined}>
         <b title={d.title}>{d.title}</b>
         <span>{[d.artist, d.type, d.year].filter(Boolean).join(' • ')}</span>
         {d.note && <small>{d.note}</small>}
       </div>
       <div className="dl-status">
-        {(d.state === 'downloading' || d.state === 'stuck' || d.state === 'done') && (
-          <div className="dl-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={d.state === 'done' ? 100 : pct}>
-            <span style={{ width: `${d.state === 'done' ? 100 : Math.max(pct, d.state === 'downloading' ? 3 : 0)}%` }} />
+        {(d.state === 'downloading' || d.state === 'stuck' || d.state === 'adding' || d.state === 'done') && (
+          <div className="dl-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={d.state === 'done' || d.state === 'adding' ? 100 : pct}>
+            <span style={{ width: `${d.state === 'done' || d.state === 'adding' ? 100 : Math.max(pct, d.state === 'downloading' ? 3 : 0)}%` }} />
           </div>
         )}
         <div className="dl-line">
@@ -43,7 +45,13 @@ function Row({ d, onRetry, retrying }) {
           {d.state === 'stuck' && <span className="dl-warn">No progress for {mins(Date.now() - (d.progressAt || d.started || Date.now()))} • {d.done} of {d.total} {songs}</span>}
           {d.state === 'queued' && <span>{d.queuePos ? `#${d.queuePos} in line` : 'In line'}{d.requested ? ` • requested ${ago(d.requested)}` : ''}</span>}
           {d.state === 'failed' && <span className="dl-warn">{d.reason || 'Failed'}{d.finished ? ` • ${ago(d.finished)}` : ''}</span>}
-          {d.state === 'done' && <span>{d.done} {d.done === 1 ? 'song' : 'songs'} added{d.finished ? ` • ${ago(d.finished)}` : ''}</span>}
+          {d.state === 'adding' && <span>Downloaded • adding to your library…</span>}
+          {d.state === 'done' && (d.libraryAlbumId
+            ? <span>{d.done} {d.done === 1 ? 'song' : 'songs'} added{d.finished ? ` • ${ago(d.finished)}` : ''}</span>
+            : <span className="dl-warn">Downloaded, but not found in your library{d.finished ? ` • ${ago(d.finished)}` : ''}</span>)}
+          {d.state === 'done' && d.libraryAlbumId && (
+            <button className="dl-retry" onClick={() => onPlay(d)}>Play</button>
+          )}
           {(d.state === 'failed' || d.state === 'stuck') && (
             <button className="dl-retry" disabled={retrying} onClick={() => onRetry(d)}>{retrying ? 'Retrying…' : 'Retry'}</button>
           )}
@@ -53,7 +61,7 @@ function Row({ d, onRetry, retrying }) {
   );
 }
 
-export default function Downloads({ jf, notify }) {
+export default function Downloads({ jf, notify, onPlay, onOpen }) {
   const [scope, setScope] = useState('mine');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -106,7 +114,7 @@ export default function Downloads({ jf, notify }) {
             <section key={k} className="dl-section">
               <h2>{label} <span>{list.length}</span></h2>
               {k === 'stuck' && <p className="dl-hint">No new song for {mins(data.stuckAfterMs)} or more. Usually the Soulseek user went offline; Retry puts it back at the front of the line.</p>}
-              {shown.map((d) => <Row key={d.id} d={d} onRetry={retry} retrying={retrying === d.id} />)}
+              {shown.map((d) => <Row key={d.id} d={d} onRetry={retry} retrying={retrying === d.id} onPlay={onPlay} onOpen={onOpen} />)}
             </section>
           );
         })}

@@ -40,4 +40,25 @@ describe('downloads', () => {
     expect((db.prepare("SELECT mr_id, source, note FROM my_requests WHERE user_id = 'u1'").all() as any[])).toEqual([{ mr_id: 9, source: 'ai', note: '"Song" for Mix' }]);
     await app.close();
   });
+
+  it('a finished download links its library album; not there yet is "adding", long after is done-but-missing', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl2-')));
+    db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('ar', 'Porter Robinson', 'porter robinson')").run();
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al', 'Language', 'ar', 'Porter Robinson', '/m', 1, 0, 'language')").run();
+    for (const id of [1, 2, 3]) recordRequest(db, 'u1', { id, album_id: `a${id}` }, 'request');
+    const now = Date.now() / 1000;
+    const fetcher: any = async () => ({ ok: true, json: async () => ({ requests: [
+      row({ id: 1, album_id: 'a1', artist: 'Porter Robinson', title: 'Language', status: 'done', tracks_added: 1, updated: now - 30 }),
+      row({ id: 2, album_id: 'a2', artist: 'Porter Robinson', title: 'Worlds', status: 'done', updated: now - 30 }),
+      row({ id: 3, album_id: 'a3', artist: 'Porter Robinson', title: 'Nurture', status: 'done', updated: now - 3600 }),
+    ] }) });
+    const app = Fastify();
+    app.decorateRequest('user', undefined);
+    app.addHook('onRequest', async (req: any) => { req.user = { id: 'u1' }; });
+    app.decorate('requireUser', async () => {});
+    registerDownloads(app, db, { musicRequestsUrl: 'http://mr', fetcher });
+    const items = (await app.inject({ url: '/api/downloads' })).json().items;
+    const by = Object.fromEntries(items.map((x: any) => [x.title, [x.state, x.libraryAlbumId]]));
+    expect(by).toEqual({ Language: ['done', 'al'], Worlds: ['adding', null], Nurture: ['done', null] });
+  });
 });

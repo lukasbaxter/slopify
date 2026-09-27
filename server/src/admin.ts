@@ -1,5 +1,6 @@
 // Admin: scans and status. The scan runs in the process (one at a time)
 // and reports progress; a library version bump tells clients to refetch.
+import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { scanLibrary } from './scanner.js';
@@ -36,9 +37,27 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   };
   app.decorate('runEnrich', runEnrich);
   app.post('/api/admin/enrich', admin, async () => { void runEnrich(); return { started: true }; });
+  // Just these folders (relative to the library), awaited: Music Requests
+  // calls it when an album lands so the album is playable seconds later
+  // instead of after the next full walk. Safe beside a running full scan:
+  // every write is an upsert and neither removes the other's files.
+  const scanFolders = async (rel: string[]) => {
+    const only = rel.map((r) => path.resolve(musicDir, r)).filter((p) => p.startsWith(path.resolve(musicDir) + path.sep));
+    if (!only.length) throw new Error('no folders inside the library');
+    const r = await scanLibrary(db, { musicDir, dataDir, only, log: (m) => app.log.warn(m) });
+    app.log.info(`folder scan ${rel.join(', ')}: ${JSON.stringify(r)}`);
+    for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } }
+    return r;
+  };
   app.decorate('runScan', runScan);
   app.decorate('scanning', () => current);
-  app.post('/api/admin/scan', admin, async () => ({ started: true, scan: await runScan() }));
+  app.post('/api/admin/scan', admin, async (req: any, reply) => {
+    const paths = req.body?.paths;
+    if (Array.isArray(paths) && paths.length) {
+      try { return { folders: await scanFolders(paths.map(String)) }; } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+    }
+    return { started: true, scan: await runScan() };
+  });
   app.get('/api/admin/status', admin, async () => ({
     scanning: current,
     library: {

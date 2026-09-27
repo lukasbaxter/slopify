@@ -1583,6 +1583,8 @@ button:disabled { cursor: default; }
 .dl-text b { font-weight: 500; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-text span, .dl-text small { color: var(--fg-dim); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-text small { font-size: 13px; }
+.dl-text.link { cursor: pointer; }
+.dl-text.link:hover b { text-decoration: underline; }
 .dl-status { display: grid; gap: 6px; }
 .dl-bar { height: 4px; border-radius: 2px; background: var(--tint-hi); overflow: hidden; }
 .dl-bar span { display: block; height: 100%; border-radius: 2px; background: var(--accent); transition: width .6s var(--ease); }

@@ -340,6 +340,15 @@ export default function Library({
     await onAddTo?.(pl, t);
   };
 
+  // One vocabulary for a release's request button everywhere. The server's
+  // state wins once it reports progress; until then the tap's own state shows
+  // (a retry must not flash the old "failed").
+  const PENDING = ['queued', 'exists', 'downloading', 'adding'];
+  const stateOf = (r) => { const mine = requesting[r.album_id]; const srv = r.requestStatus; return mine && (!srv || srv === 'failed' || srv === 'missing') ? mine : srv || mine; };
+  const requestUi = (st) => ({
+    label: st === 'queued' || st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'adding' ? 'Adding…' : st === 'failed' ? 'Retry' : st === 'missing' ? 'Request again' : st === 'error' ? 'Failed' : 'Request',
+    busy: PENDING.includes(st) || st === 'done',
+  });
   const requestRelease = async (artistId, rel) => {
     setRequesting((m) => ({ ...m, [rel.album_id]: 'queued' }));
     try {
@@ -348,6 +357,23 @@ export default function Library({
       setDiscog((d) => { const cur = d[artistId]; if (!cur) return d; return { ...d, [artistId]: { ...cur, releases: cur.releases.map((x) => (x.album_id === rel.album_id ? { ...x, requestStatus: r.state || 'queued' } : x)) } }; });
     } catch (e) { setRequesting((m) => ({ ...m, [rel.album_id]: 'error' })); setErr(e.message); }
   };
+  // While a requested release is on its way, look again every few seconds:
+  // it turns playable the moment the library has it, with no new search.
+  const gPending = Boolean(gres?.albums?.some((a) => !a.inLibrary && PENDING.includes(stateOf(a))));
+  useEffect(() => {
+    if (!gPending || !query.trim()) return undefined;
+    const q = query.trim();
+    const t = setInterval(() => { relayGlobal(jf, q).then((r) => setGres(r)).catch(() => {}); }, 4000);
+    return () => clearInterval(t);
+  }, [gPending, query]); // eslint-disable-line react-hooks/exhaustive-deps
+  const artistNow = detail?.kind === 'Artist' ? detail.item : null;
+  const dPending = Boolean(artistNow && discog[artistNow.Id]?.releases?.some((r) => !r.inLibrary && PENDING.includes(stateOf(r))));
+  useEffect(() => {
+    if (!dPending) return undefined;
+    const { Id, Name } = artistNow;
+    const t = setInterval(() => { relayDiscography(jf, Id, Name).then((r) => setDiscog((d) => ({ ...d, [Id]: r }))).catch(() => {}); }, 5000);
+    return () => clearInterval(t);
+  }, [dPending, artistNow?.Id]); // eslint-disable-line react-hooks/exhaustive-deps
   const headSentinelRef = useRef(null);
   const [headStuck, setHeadStuck] = useState(false);
   useEffect(() => {
@@ -546,9 +572,7 @@ export default function Library({
                     <div className="card-art">
                       {r.image ? <img src={r.image} alt="" loading="lazy" /> : <div className="ph" />}
                       {(() => {
-                        const st = requesting[r.album_id] || r.requestStatus;
-                        const busy = ['queued', 'exists', 'downloading', 'done'].includes(st);
-                        const label = st === 'queued' || st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'done' ? 'Added' : st === 'failed' ? 'Retry request' : 'Request';
+                        const { label, busy } = requestUi(stateOf(r));
                         return <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy} onClick={() => requestRelease(r.artistId, r)}>{label}</button>;
                       })()}
                     </div>
@@ -604,7 +628,7 @@ export default function Library({
       );
     }
 
-    if (kind === 'Downloads') return <Downloads jf={jf} notify={notify} />;
+    if (kind === 'Downloads') return <Downloads jf={jf} notify={notify} onPlay={(d) => playItem({ Id: d.libraryAlbumId, Type: 'MusicAlbum', Name: d.title })} onOpen={(d) => openAlbum({ Id: d.libraryAlbumId, Name: d.title })} />;
     if (kind === 'History') {
       return <History jf={jf} player={player} me={me} onOpenArtist={onOpenArtistById} onOpenAlbum={onOpenAlbumById} onOpenSettings={onOpenSettings} />;
     }
@@ -1140,9 +1164,7 @@ export default function Library({
                 .sort((a, b) => (yearOf(b) - yearOf(a)) || String(b.r.date || '').localeCompare(String(a.r.date || '')));
               const have = all.filter((x) => x.inLib).length;
               const requestBtn = (r) => {
-                const st = requesting[r.album_id] || r.requestStatus;
-                const label = st === 'queued' || st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'done' ? 'Added' : st === 'failed' ? 'Retry' : st === 'error' ? 'Failed' : 'Request';
-                const busy = st === 'queued' || st === 'exists' || st === 'downloading' || st === 'done';
+                const { label, busy } = requestUi(stateOf(r));
                 return (
                   <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy || !r.album_id} onClick={(e) => { e.stopPropagation(); requestRelease(item.Id, r); }} title="Download this release into your library">
                     {label}
@@ -1522,14 +1544,16 @@ export default function Library({
 
           {searchType === 'Everywhere' && query.trim() && (() => {
             const btn = (a) => {
-              const st = requesting[a.album_id] || a.requestStatus;
-              const label = a.inLibrary ? 'In library' : st === 'queued' || st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'done' ? 'Added' : st === 'failed' ? 'Retry' : st === 'error' ? 'Failed' : 'Request';
-              const busy = Boolean(a.inLibrary) || st === 'queued' || st === 'exists' || st === 'downloading' || st === 'done';
+              const { label, busy } = requestUi(stateOf(a));
               return (
                 <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy} onClick={(e) => { e.stopPropagation(); requestRelease(a.artistId, a); }} title="Download this release into your library">{label}</button>
               );
             };
-            const openOrRequest = (a) => { if (a.inLibrary) openAlbum({ Id: a.inLibrary, Name: a.title }); else if (!(requesting[a.album_id] || a.requestStatus)) requestRelease(a.artistId, a); };
+            const openOrRequest = (a) => { if (a.inLibrary) openAlbum({ Id: a.inLibrary, Name: a.title }); else if (!stateOf(a)) requestRelease(a.artistId, a); };
+            // A release that is in the library plays straight from its result.
+            const playBtn = (a) => (
+              <button className="card-play" onClick={(e) => { e.stopPropagation(); playItem({ Id: a.inLibrary, Type: 'MusicAlbum', Name: a.title }); }} title="Play"><PlayGlyph /></button>
+            );
             const sub = (a) => [a.rtype, a.year, a.artist].filter(Boolean).join(' • ');
             if (!gres) return <p className="placeholder-note gsearch-note">Searching everywhere…</p>;
             if (!gres.albums?.length) return (
@@ -1542,7 +1566,7 @@ export default function Library({
                   <div className="searchlist">
                     {gres.albums.map((a) => (
                       <SearchRow key={a.album_id} image={a.inLibrary ? jf.imageUrl(a.inLibrary, { maxHeight: 96 }) : a.image} name={a.title} sub={sub(a)}
-                        className={a.inLibrary ? '' : 'missing'} onClick={() => openOrRequest(a)} action={a.inLibrary ? null : btn(a)} />
+                        className={a.inLibrary ? '' : 'missing'} onClick={() => openOrRequest(a)} action={a.inLibrary ? playBtn(a) : btn(a)} />
                     ))}
                   </div>
                 ) : (
@@ -1551,7 +1575,7 @@ export default function Library({
                       <div key={a.album_id} className={`card ${a.inLibrary ? '' : 'missing'}`} role="button" tabIndex={0} onClick={() => openOrRequest(a)} onKeyDown={(e) => e.key === 'Enter' && openOrRequest(a)}>
                         <div className="card-art">
                           {a.inLibrary ? <img src={jf.imageUrl(a.inLibrary, { maxHeight: 320 })} alt="" loading="lazy" /> : a.image ? <img src={a.image} alt="" loading="lazy" /> : <div className="ph" />}
-                          {!a.inLibrary && btn(a)}
+                          {a.inLibrary ? playBtn(a) : btn(a)}
                         </div>
                         <div className="card-title">{a.title}</div>
                         <div className="card-sub">{sub(a)}</div>

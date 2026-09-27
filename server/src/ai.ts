@@ -379,7 +379,7 @@ export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: st
   })();
   // Suggestions the library lacks: rated like everything else; only clear
   // fits (8+) are requested, best first.
-  let requested = 0;
+  let requested = 0, missingFits = 0, requestError: string | null = null;
   if (requestMissing && pool.missing.length) {
     try {
       const miss = pool.missing.slice(0, 40);
@@ -391,10 +391,11 @@ export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: st
       { temperature: 0, maxTokens: 400 });
       const good = miss.map((m, j) => ({ m, fit: Number(r.scores?.[j]) || 0 })).filter((x) => x.fit >= 8).sort((a, b) => b.fit - a.fit).map((x) => x.m)
         .filter(((per) => (m: { artist: string }) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; })(new Map<string, number>()));
+      missingFits = good.length;
       requested = await requestMissing(id, good);
-    } catch { /* the playlist stands without them */ }
+    } catch (e: any) { requestError = e.message; }
   }
-  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, fit: t.fit ?? null, known: t.known })) };
+  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested, missing: pool.missing.length, missingFits, requestError, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, fit: t.fit ?? null, known: t.known })) };
 }
 
 export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
@@ -409,6 +410,7 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   // appended to the playlist by the scan that brings them in.
   const MR = opts.musicRequestsUrl;
   const requestMissing = async (playlistId: string, songs: { artist: string; title: string }[]) => {
+    app.log.info(`ai request: ${songs.length} suggested songs to fetch${MR ? '' : ' (no MUSIC_REQUESTS_URL)'}`);
     if (!MR) return 0;
     let n = 0;
     for (const s of songs.slice(0, 8)) {

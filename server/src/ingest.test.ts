@@ -100,3 +100,23 @@ describe('ingest while a sweep runs', () => {
     expect((await mine).copied).toBeGreaterThan(0);
   });
 });
+
+describe('ingest and Synology leftovers', () => {
+  it('never copies @eaDir or SYNO index folders, and clears one that blocks a real file on the NAS', async () => {
+    const incoming = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-in3-')), nas = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-nas3-')), cache = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-c3-'));
+    const album = path.join(incoming, 'The Fixture Band');
+    fs.cpSync(path.join(MUSIC, 'The Fixture Band'), album, { recursive: true, preserveTimestamps: true });
+    const sub = path.join(album, 'Second Wind');
+    fs.mkdirSync(path.join(sub, '@eaDir', 'x.flac'), { recursive: true }); fs.writeFileSync(path.join(sub, '@eaDir', 'x.flac', 'SYNOINDEX_MEDIA_INFO'), 'i');
+    fs.mkdirSync(path.join(sub, 'Junk.flac')); fs.writeFileSync(path.join(sub, 'Junk.flac', 'SYNOINDEX_MEDIA_INFO'), 'i');
+    const song = fs.readdirSync(sub).find((f) => f.endsWith('.mp3'))!;
+    const blocker = path.join(nas, 'The Fixture Band', 'Second Wind', song);
+    fs.mkdirSync(blocker, { recursive: true }); fs.writeFileSync(path.join(blocker, 'SYNOAUDIO_01APIC_03.jpg'), 'i');
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-idb3-')));
+    const st = await new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 0, deleteAfter: false }).sweep();
+    expect(st.errors).toEqual([]);
+    expect(fs.statSync(blocker).isFile()).toBe(true);
+    expect(fs.existsSync(path.join(nas, 'The Fixture Band', 'Second Wind', '@eaDir'))).toBe(false);
+    expect(fs.existsSync(path.join(nas, 'The Fixture Band', 'Second Wind', 'Junk.flac'))).toBe(false);
+  });
+});

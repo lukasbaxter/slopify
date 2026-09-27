@@ -36,6 +36,14 @@ export type IngestStats = {
 };
 
 const isAudio = (f: string) => AUDIO_EXT.has(path.extname(f).toLowerCase());
+// Leftovers of a Synology NAS the library once lived on: @eaDir index folders,
+// sometimes flattened into folders named like the song or cover they indexed.
+// Never copied; removed on the NAS where one blocks a real file.
+const NAS_JUNK_DIRS = new Set(['@eaDir', '#recycle', '#snapshot', '.@__thumb']);
+const isSynoFile = (name: string) => /^SYNO(INDEX|AUDIO|PHOTO|VIDEO)_/i.test(name) || name === 'Thumbs.db' || name === '.DS_Store';
+async function onlySynoJunk(dir: string) {
+  try { const names = await fsp.readdir(dir); return names.every(isSynoFile); } catch { return false; }
+}
 const secs = (ms: number) => Math.floor(ms / 1000);
 const SAMPLE = 64 * 1024;
 
@@ -61,7 +69,7 @@ async function folders(root: string): Promise<Map<string, string[]>> {
     try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
     const files: string[] = [];
     for (const e of entries) {
-      if (e.name.startsWith('.')) continue;
+      if (e.name.startsWith('.') || NAS_JUNK_DIRS.has(e.name) || isSynoFile(e.name)) continue;
       const p = path.join(dir, e.name);
       if (e.isDirectory()) await walk(p); else if (e.isFile()) files.push(p);
     }
@@ -165,6 +173,14 @@ export class Ingest {
       const dst = this.nasPath(f);
       let there: fs.Stats | null = null;
       try { there = await fsp.stat(dst); } catch { /* not there */ }
+      // A Synology index folder sitting where this file goes: remove it (only
+      // ever a folder of SYNO* index files); anything else in the way is an error.
+      if (there?.isDirectory()) {
+        if (!(await onlySynoJunk(dst))) throw new Error(`a folder is in the way on the NAS: ${path.basename(dst)}`);
+        await fsp.rm(dst, { recursive: true, force: true });
+        this.log(`ingest: removed a Synology index folder in the way on the NAS: ${path.relative(this.o.nasDir, dst)}`);
+        there = null;
+      }
       if (there && there.size === s.size && secs(there.mtimeMs) === secs(s.mtimeMs) && await sameFile(f, dst, s.size)) { st.alreadyThere++; kept.push(f); continue; }
       await fsp.mkdir(path.dirname(dst), { recursive: true });
       const tmp = path.join(path.dirname(dst), `.slopify-${process.pid}-${path.basename(dst)}`);

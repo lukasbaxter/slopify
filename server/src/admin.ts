@@ -8,13 +8,16 @@ import { enrichPass, enrichStatus, artistImagesPass } from './enrich.js';
 export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, dataDir: string) {
   const admin = { preHandler: (app as any).requireAdmin };
   let current: { started: number; files: number } | null = null;
+  // Work that waits on new files (generated playlists' requested songs).
+  const afterScan: (() => void)[] = [];
+  app.decorate('afterScan', (fn: () => void) => { afterScan.push(fn); });
   const runScan = async () => {
     if (current) return current;
     current = { started: Date.now(), files: 0 };
     // The scan is "current" only while it walks the files; the enrichment it
     // kicks off afterwards can run for hours and must not block the next scan.
     scanLibrary(db, { musicDir, dataDir, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
-      .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; void runEnrich(); })
+      .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } void runEnrich(); })
       .catch((e) => { app.log.error(`scan failed: ${e.message}`); current = null; });
     return current;
   };

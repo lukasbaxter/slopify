@@ -3,7 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { zipSync, strToU8 } from 'fflate';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { buildPool, finalize, generatePlaylist, type Llm } from './ai.js';
+import { buildPool, choose, generatePlaylist, type Llm } from './ai.js';
 import { parseExport, importSpotify, type Parsed } from './spotifyImport.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
@@ -17,43 +17,66 @@ beforeAll(async () => {
   db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run('u1', 'ai', 'x', 'user', Date.now());
 }, 120000);
 
-const emptyPlan = { title: 'T', artists: [], genres: [], songs: [], playlists: [], useHistory: false, yearFrom: null, yearTo: null };
+const emptyPlan = { title: 'T', vibe: 'calm', artists: [] as string[], genres: [] as string[], songs: [] as { artist: string; title: string }[], playlists: [] as string[], useHistory: false, yearFrom: null, yearTo: null };
 
 describe('generated playlists', () => {
-  it('pool: songs the model named come first, dislikes never appear', () => {
-    const [a, b] = tracks;
+  it('pool: songs the model named are in, dislikes never are, played songs are marked known', async () => {
+    const [a, b, c] = tracks;
     db.prepare('INSERT INTO prefs (user_id, json, updated) VALUES (?, ?, ?)').run('u1', JSON.stringify({ dislikes: { [b.id]: 1 } }), Date.now());
-    const { pool } = buildPool(db, 'u1', { ...emptyPlan, songs: [{ artist: a.artist, title: a.title }, { artist: b.artist, title: b.title }] });
-    expect(pool[0].row.id).toBe(a.id);
-    expect(pool.some((c) => c.row.id === b.id)).toBe(false);
-    db.prepare('DELETE FROM prefs').run();
+    db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', c.id, 1);
+    const pool = await buildPool(db, 'u1', { ...emptyPlan, songs: [a, b, c].map((t) => ({ artist: t.artist, title: t.title })) });
+    expect(pool.some((x) => x.row.id === a.id && !x.known)).toBe(true);
+    expect(pool.some((x) => x.row.id === b.id)).toBe(false);
+    expect(pool.find((x) => x.row.id === c.id)?.known).toBe(true);
+    db.prepare('DELETE FROM prefs').run(); db.prepare('DELETE FROM plays').run();
   });
 
-  it('finalize: always 25 when the pool allows, no repeats, bad numbers ignored', () => {
-    const pool = Array.from({ length: 40 }, (_, i) => ({ row: { id: `t${i}`, title: `S${i}`, artist: `A${i % 20}` } as any, score: 40 - i }));
-    const out = finalize(pool, [3, 3, 999, -1, 5], { artists: [] });
+  it('choose: 5 known + 20 new, best fit first, weak fits only when nothing else is left', () => {
+    const mk = (i: number, known: boolean, fit: number) => ({ row: { id: `${known ? 'k' : 'n'}${i}`, title: `S${i}`, artist: `${known ? 'K' : 'N'}${i}`, artists: '[]' } as any, known, src: 1, fit });
+    const pool = [...Array.from({ length: 30 }, (_, i) => mk(i, false, i < 22 ? 8 : 2)), ...Array.from({ length: 20 }, (_, i) => mk(i, true, 9))];
+    const out = choose(pool, { artists: [] });
     expect(out.length).toBe(25);
-    expect(out[0].id).toBe('t2'); expect(out[1].id).toBe('t4');
-    expect(new Set(out.map((t) => t.id)).size).toBe(25);
+    expect(out.filter((c) => c.known).length).toBe(5);
+    expect(out.filter((c) => !c.known).every((c) => c.fit === 8)).toBe(true);
   });
 
-  it('runs plan -> pool -> pick and saves the playlist in the order picked', async () => {
+  it('runs plan -> rate -> order and saves the playlist in the order given', async () => {
     const calls: string[] = [];
     const llm = {
       ensure: async () => {},
-      json: async (msgs: any[]) => {
-        calls.push(msgs[0].content.slice(0, 20));
-        if (calls.length === 1) return { ...emptyPlan, title: 'Plan title', songs: tracks.slice(0, 3).map((t) => ({ artist: t.artist, title: t.title })) };
-        return { title: 'Late Night Test', picks: [2, 1, 3] };
+      json: async (msgs: any[], schema: any) => {
+        calls.push(msgs[0].content.slice(0, 12));
+        if (calls.length === 1) return { ...emptyPlan, title: 'Late Night Test', songs: tracks.slice(0, 6).map((t) => ({ artist: t.artist, title: t.title })) };
+        if (schema.properties.scores) return { scores: Array.from({ length: schema.properties.scores.minItems }, () => 7) };
+        return { order: Array.from({ length: schema.properties.order.minItems }, (_, i) => schema.properties.order.minItems - i) };
       },
     } as unknown as Llm;
     const job: any = { step: '', progress: null };
     const r = await generatePlaylist(db, llm, 'u1', 'something calm', job);
-    expect(calls.length).toBe(2);
     expect(r.name).toBe('Late Night Test');
     const ids = (db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(r.playlistId) as any[]).map((x) => x.track_id);
     expect(ids.length).toBe(Math.min(25, r.poolSize));
+    expect(ids).toEqual(r.tracks.map((t: any) => t.id));
   });
+});
+
+describe('requested songs', () => {
+  it('a requested song that arrives is appended to its playlist once', async () => {
+    const { buildServer } = await import('./app.js');
+    const D2 = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-ai2-'));
+    const app = await buildServer({ dataDir: D2, musicDir: MUSIC });
+    const d2 = (app as any).db;
+    await scanLibrary(d2, { musicDir: MUSIC, dataDir: D2 });
+    const t = d2.prepare('SELECT id, title, artist FROM tracks GROUP BY title, artist HAVING COUNT(*) = 1 LIMIT 1').get();
+    const uid = d2.prepare('SELECT id FROM users LIMIT 1').get().id;
+    d2.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run('pl_x', uid, 'X', 1, 1);
+    d2.prepare('INSERT INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run('pl_x', t.artist, t.title, 'r', Date.now());
+    d2.prepare('INSERT INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run('pl_x', 'Nobody', 'Not Yet', 'r', Date.now());
+    const llm = (app as any).aiLlm; llm.fillPending(); llm.fillPending();
+    expect(d2.prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = 'pl_x'").all().map((r: any) => r.track_id)).toEqual([t.id]);
+    expect(d2.prepare('SELECT title FROM ai_pending').all().map((r: any) => r.title)).toEqual(['Not Yet']);
+    await app.close();
+  }, 60000);
 });
 
 describe('Spotify import', () => {

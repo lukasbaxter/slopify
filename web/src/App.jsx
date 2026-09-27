@@ -1241,7 +1241,9 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
             setGenerating(false);
             await refreshPlaylists();
             player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
-            if (hidden) notify(`${r.name} is ready in Your Library`);
+            const more = r.requested ? ` ${r.requested} more ${r.requested === 1 ? 'song is' : 'songs are'} downloading and will be added.` : '';
+            if (hidden) notify(`${r.name} is ready in Your Library.${more}`);
+            else if (more) notify(more.trim());
             else openPlaylist({ Id: r.playlistId, Name: r.name, Type: 'Playlist', ChildCount: r.count, ImageTags: {}, UserData: {} });
           }} />
       )}

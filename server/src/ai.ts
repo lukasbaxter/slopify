@@ -1,20 +1,24 @@
-// Generated playlists: describe a playlist, get 25 songs from this library.
+// Generated playlists: describe a playlist, get 25 songs from this library,
+// 20 of them songs the listener has never played and 5 they know.
 //
 // The model is llama.cpp's server running Qwen3.5-9B on the machine's GPU,
 // inside this container (the Dockerfile builds it). It is started on the
 // first request and stopped after LLM_IDLE_MIN minutes without one, so the
 // 6 GB of VRAM go back to Jellyfin's transcoder and the other GPU tools.
 //
-// The model never invents the list on its own: a song it names from memory
-// may not be here. Two calls instead:
-//   1. plan: the request + the listener's profile (most played artists,
-//      liked artists, playlist names, genres) -> artists, genres, eras,
-//      specific songs and playlists of theirs that fit;
-//   2. pick: those turned into real library tracks (plus their own plays and
-//      likes as tie-breakers), numbered -> the model picks and orders 25.
-// Whatever it gets wrong (a number out of range, too few picks, one artist
-// ten times) is fixed from the scored pool, so the answer is always 25 real
-// tracks.
+// The model never invents the list on its own (a song it names from memory
+// may not be here):
+//   1. plan: request + listener profile -> the vibe in words, artists
+//      (mostly ones they do not play), genres, specific songs, eras;
+//   2. pool: those found in the library, plus Deezer's similar artists that
+//      the library has, genres at random; played/liked songs marked known.
+//      Nothing favours what they already play (that made the first version
+//      all repeats);
+//   3. rate: every candidate scored 0-10 against the vibe, 40 at a time
+//      (the step that keeps a party song out of a late-night playlist);
+//   4. choose: 5 known + 20 new by fit, capped per artist; 5. order.
+// Suggested songs the library lacks are rated too; the clear fits are
+// requested on Music Requests and join the playlist when they download.
 import type { FastifyInstance } from 'fastify';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
@@ -23,11 +27,13 @@ import { z } from 'zod';
 import type { DB } from './db.js';
 import { playlistId } from './ids.js';
 import { matchTrack } from './explore.js';
+import { similarInLibrary } from './discover.js';
 import { startJob, jobOut, type Job } from './jobs.js';
 
 export type AiOptions = {
   llamaBin: string; modelPath: string; modelUrl: string;
   llmUrl?: string;           // an OpenAI-compatible server to use instead of starting one (development)
+  musicRequestsUrl?: string; // songs it suggests that the library lacks are requested here
   port: number; idleMs: number; gpuLayers: string; ctx: number;
   log?: (m: string) => void;
 };
@@ -171,141 +177,158 @@ function profileText(t: ReturnType<typeof tasteOf>) {
   ].join('\n');
 }
 
-// --- plan -> pool -> pick -------------------------------------------------------
+// --- plan -> pool -> rate -> choose -> order ------------------------------------
 const PlanSchema = {
   type: 'object',
   properties: {
     title: { type: 'string', maxLength: 40 },
+    vibe: { type: 'string', maxLength: 300 },
     artists: { type: 'array', items: { type: 'string' }, maxItems: 30 },
     genres: { type: 'array', items: { type: 'string' }, maxItems: 8 },
-    songs: { type: 'array', maxItems: 40, items: { type: 'object', properties: { artist: { type: 'string' }, title: { type: 'string' } }, required: ['artist', 'title'] } },
+    songs: { type: 'array', maxItems: 50, items: { type: 'object', properties: { artist: { type: 'string' }, title: { type: 'string' } }, required: ['artist', 'title'] } },
     playlists: { type: 'array', items: { type: 'string' }, maxItems: 5 },
     useHistory: { type: 'boolean' },
     yearFrom: { type: ['integer', 'null'] },
     yearTo: { type: ['integer', 'null'] },
   },
-  required: ['title', 'artists', 'genres', 'songs', 'playlists', 'useHistory', 'yearFrom', 'yearTo'],
+  required: ['title', 'vibe', 'artists', 'genres', 'songs', 'playlists', 'useHistory', 'yearFrom', 'yearTo'],
 };
-type Plan = { title: string; artists: string[]; genres: string[]; songs: { artist: string; title: string }[]; playlists: string[]; useHistory: boolean; yearFrom: number | null; yearTo: number | null };
+export type Plan = { title: string; vibe: string; artists: string[]; genres: string[]; songs: { artist: string; title: string }[]; playlists: string[]; useHistory: boolean; yearFrom: number | null; yearTo: number | null };
 
-const PLAN_SYSTEM = `You plan playlists for a personal music server. The playlist can only contain songs from the listener's own library, so your plan is used to search that library.
+const PLAN_SYSTEM = `You plan playlists for a personal music server. The playlist can only contain songs from the listener's own library, so your plan is used to search that library. Most of the playlist (80%) must be songs the listener has NOT played before, so the plan is about discovery that still fits their taste.
 Given the request and the listener's profile, answer with:
 - title: a short playlist name (2 to 5 words, no quotes, no emoji).
-- artists: up to 30 real artists whose music fits the request. Use artists from their profile only when they really fit the request; add others that fit it well.
+- vibe: one or two sentences on exactly what the songs should feel like: mood, energy, tempo, setting, and what does NOT belong.
+- artists: up to 30 real artists whose music fits the vibe. At most a third from their profile (only ones that truly fit); the rest should be artists they do not play much but would likely enjoy.
 - genres: up to 8 genre names that fit, as music libraries tag them (e.g. "R&B", "Hip Hop", "Indie Pop", "House").
-- songs: up to 40 specific real songs (artist + exact title) that fit the request. Every song different: never repeat a title.
-- playlists: names of the listener's own playlists (exactly as listed) the request refers to or that clearly fit it; empty if none.
-- useHistory: true when the request is about their own taste or favourites (e.g. "my favourites", "songs I love", "what I have been playing").
+- songs: up to 50 specific real songs (artist + exact title) that fit the vibe closely. Every song different, never repeat a title. Favour deeper cuts over the biggest hits.
+- playlists: names of the listener's own playlists (exactly as listed) the request refers to; empty if none.
+- useHistory: true only when the request is about their own favourites (e.g. "my favourites", "what I have been playing").
 - yearFrom / yearTo: only when the request names an era (e.g. "90s" = 1990 to 1999), otherwise null.
 If the request names artists or songs, include them.`;
 
-const PICK_SYSTEM = `You pick songs for a playlist from a numbered list of songs the listener owns. Choose exactly ${SIZE} different numbers that best fit the request, and order them so the playlist flows well (a strong opener, related songs near each other, a good closer).
-Unless the request is about one or two artists, use at most 3 songs by the same artist.
-Songs marked "liked" or with plays are songs the listener already enjoys: prefer them when they fit equally well, but the request comes first.
-Also give the playlist a short title (2 to 5 words, no quotes, no emoji).`;
+const RATE_SYSTEM = `You judge whether songs fit a playlist. For every numbered song, give a score from 0 to 10 for how well it fits the playlist's vibe: mood, energy, tempo and setting.
+Be strict and use the whole range: most songs in the list will NOT fit, and should get 5 or less. 9-10: exactly the vibe, a song you would put on this playlist yourself. 7-8: fits well. 5-6: could pass. 3-4: same genre but a different energy or mood. 0-2: does not belong.
+A song does not fit just because the artist or genre is related: a hype party song does not fit a calm playlist, an instrumental ambient track does not fit a sing-along one.
+Answer with one score per song, in the order given.`;
 
-type Cand = { row: Row; score: number; base: number };
+const ORDER_SYSTEM = `Put these playlist songs in the best listening order: a strong, inviting opener, songs with a similar feel next to each other, energy that flows instead of jumping around, a satisfying closer. Answer with every number exactly once.`;
 
-export function buildPool(db: DB, uid: string, plan: Plan, extraText = '') {
+type Cand = { row: Row; known: boolean; src: number; fit?: number };
+export const KNOWN_SHARE = 0.2;
+
+// Candidates from everything the plan points at, without favouring what they
+// already play: the model's named songs, the planned artists (a random
+// spread of their tracks), artists similar to those (Deezer, library only:
+// mostly never played), their genres at random, and any playlist of theirs
+// the request names. `known` = played or liked before.
+export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>) {
   const plays = new Map((db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]).map((r) => [r.track_id as string, r.n as number]));
   const liked = new Set((db.prepare('SELECT track_id FROM likes WHERE user_id = ?').all(uid) as any[]).map((r) => r.track_id as string));
   const prefs = JSON.parse((db.prepare('SELECT json FROM prefs WHERE user_id = ?').get(uid) as any)?.json ?? '{}');
   const disliked = new Set(Object.keys(prefs.dislikes || {}));
-  const own = (id: string) => (liked.has(id) ? 2 : 0) + Math.min(3, Math.log2(1 + (plays.get(id) || 0)));
   const pool = new Map<string, Cand>();
-  const add = (r: Row | undefined, score: number) => {
+  // Versions nobody means unless they ask: instrumentals, sped-up and slowed
+  // edits, karaoke, skits, interludes, holiday songs.
+  const ODD = /\b(instrumental|karaoke|a ?cappella|sped[ -]?up|slowed|nightcore|skit|interlude|intro|outro|commentary|christmas|xmas|holiday|jingle|santa|snow(man)?|drummer boy)\b/i;
+  const LIVE = /[([][^)\]]*\b(live|soundcheck|demo)\b/i; // "(live)", "(Walmart Soundcheck version)"; not "Live Your Life"
+  const asked = ODD.test(prompt) || ODD.test(plan.vibe);
+  const askedLive = /\blive\b/i.test(prompt);
+  const add = (r: Row | undefined, src: number) => {
     if (!r || disliked.has(r.id)) return;
+    if (!asked && (ODD.test(r.title) || ODD.test(r.album))) return;
+    if (!askedLive && (LIVE.test(r.title) || LIVE.test(r.album))) return;
     if (plan.yearFrom && r.year && r.year < plan.yearFrom) return;
     if (plan.yearTo && r.year && r.year > plan.yearTo) return;
     const c = pool.get(r.id);
-    if (c) { c.score += score / 2; c.base += score / 2; } else pool.set(r.id, { row: r, score: score + own(r.id), base: score });
+    if (c) c.src = Math.max(c.src, src); else pool.set(r.id, { row: r, known: plays.has(r.id) || liked.has(r.id), src });
   };
   const SEL = 'SELECT id, title, artist, artists, artist_ids, album, year, genres FROM tracks';
   const byId = db.prepare(`${SEL} WHERE id = ?`);
+  const shuffle = <T>(xs: T[]) => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; } return xs; };
+  const artistTracks = (aid: string, n: number, src: number) => {
+    const rows = shuffle(db.prepare(`${SEL} WHERE artist_ids LIKE ?`).all(`%"${aid}"%`) as Row[]);
+    // a few they know, mostly ones they do not
+    const known = rows.filter((r) => plays.has(r.id) || liked.has(r.id)).slice(0, 2);
+    const fresh = rows.filter((r) => !plays.has(r.id) && !liked.has(r.id)).slice(0, n);
+    for (const r of [...fresh, ...known]) add(r, src);
+  };
 
-  // 1. songs it named, found here
-  for (const s of plan.songs) { const id = matchTrack(db, { title: s.title, artist: s.artist }); if (id) add(byId.get(id) as Row, 10); }
+  // 1. songs it named, found here (the rest can be requested)
+  const missing: { artist: string; title: string }[] = [];
+  for (const s of plan.songs) { const id = matchTrack(db, { title: s.title, artist: s.artist }); if (id) add(byId.get(id) as Row, 3); else if (!ODD.test(s.title) || asked) missing.push(s); }
 
-  // 2. their playlists it pointed at (by name, or named in the request itself)
+  // 2. their playlists the request names
   const pls = db.prepare('SELECT id, name FROM playlists WHERE user_id = ?').all(uid) as { id: string; name: string }[];
-  const wanted = new Set(plan.playlists.map(norm));
-  const req = norm(extraText);
+  const wanted = new Set(plan.playlists.map(norm)); const req = norm(prompt);
   for (const p of pls) {
     const n = norm(p.name);
     if (!n || !(wanted.has(n) || (n.length >= 3 && ` ${req} `.includes(` ${n} `)))) continue;
-    for (const r of db.prepare(`SELECT t.id, t.title, t.artist, t.artists, t.artist_ids, t.album, t.year, t.genres FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id WHERE x.playlist_id = ? ORDER BY x.pos LIMIT 80`).all(p.id) as Row[]) add(r, 6);
+    for (const r of db.prepare(`SELECT t.id, t.title, t.artist, t.artists, t.artist_ids, t.album, t.year, t.genres FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id WHERE x.playlist_id = ? ORDER BY RANDOM() LIMIT 40`).all(p.id) as Row[]) add(r, 2);
   }
 
-  // 3. artists: their own favourites of each first, then the rest at random
-  const artistRows = db.prepare('SELECT id, name FROM artists').all() as { id: string; name: string }[];
-  const artistByNorm = new Map(artistRows.map((a) => [norm(a.name), a.id]));
-  for (const name of plan.artists) {
-    const aid = artistByNorm.get(norm(name)); if (!aid) continue;
-    const rows = db.prepare(`${SEL} WHERE artist_ids LIKE ?`).all(`%"${aid}"%`) as Row[];
-    rows.sort((a, b) => own(b.id) - own(a.id) || Math.random() - 0.5);
-    for (const r of rows.slice(0, 12)) add(r, 5);
+  // 3. the planned artists, and 4. artists similar to them
+  const artistByNorm = new Map((db.prepare('SELECT id, name FROM artists').all() as { id: string; name: string }[]).map((a) => [norm(a.name), a]));
+  const seeds = plan.artists.map((n) => artistByNorm.get(norm(n))).filter(Boolean) as { id: string; name: string }[];
+  for (const a of seeds) artistTracks(a.id, 5, 2);
+  if (similar) {
+    const seen = new Set(seeds.map((a) => a.id));
+    const lists = await Promise.all(seeds.slice(0, 10).map((a) => similar(a).catch(() => [])));
+    for (const list of lists) for (const a of list.slice(0, 6)) { if (seen.has(a.id)) continue; seen.add(a.id); artistTracks(a.id, 3, 1); }
   }
 
-  // 4. genres: every library genre whose name contains one it asked for
+  // 5. genres, at random
   const genreNames = (db.prepare(`SELECT DISTINCT j.value AS g FROM tracks, json_each(tracks.genres) j`).all() as any[]).map((r) => String(r.g));
   const gWanted = plan.genres.map(norm).filter(Boolean);
   const gHit = genreNames.filter((g) => { const n = norm(g); return n && gWanted.some((w) => n === w || ` ${n} `.includes(` ${w} `)); });
-  for (const g of gHit.slice(0, 40)) {
-    const rows = db.prepare(`${SEL} WHERE genres LIKE ? ORDER BY RANDOM() LIMIT 300`).all(`%${JSON.stringify(g)}%`) as Row[];
-    const mine = rows.filter((r) => own(r.id) > 0).slice(0, 15), rest = rows.filter((r) => own(r.id) === 0).slice(0, 10);
-    for (const r of [...mine, ...rest]) add(r, 3);
-  }
+  for (const g of shuffle(gHit).slice(0, 30)) for (const r of db.prepare(`${SEL} WHERE genres LIKE ? ORDER BY RANDOM() LIMIT 8`).all(`%${JSON.stringify(g)}%`) as Row[]) add(r, 1);
 
-  // 5. their own favourites when the request is about them (or nothing else hit)
-  if (plan.useHistory || pool.size < 60) {
+  // 6. their favourites when the request is about them
+  if (plan.useHistory) {
     const top = db.prepare(`SELECT track_id FROM plays WHERE user_id = ? AND at > ? GROUP BY track_id ORDER BY COUNT(*) DESC LIMIT 60`).all(uid, Date.now() - 180 * 86400000) as any[];
-    const lk = db.prepare(`SELECT track_id FROM likes WHERE user_id = ? ORDER BY at DESC LIMIT 60`).all(uid) as any[];
-    for (const r of [...top, ...lk]) add(byId.get(r.track_id) as Row, plan.useHistory ? 4 : 1);
+    for (const r of top) add(byId.get(r.track_id) as Row, 2);
   }
-  if (pool.size < 40) for (const r of db.prepare(`${SEL} ORDER BY RANDOM() LIMIT 60`).all() as Row[]) add(r, 0);
 
-  // One copy of each song (the same recording sits on the album and on a compilation).
-  // Keyed by every credited artist, so "Starboy" and "Starboy (live)" by The
-  // Weeknd and by "The Weeknd, Daft Punk" are one song.
+  // One copy of each song (same recording on the album and a compilation,
+  // or credited "The Weeknd" once and "The Weeknd, Daft Punk" once).
   const seen = new Set<string>(); const out: Cand[] = [];
-  for (const c of [...pool.values()].sort((a, b) => b.score - a.score || Math.random() - 0.5)) {
+  for (const c of shuffle([...pool.values()]).sort((a, b) => b.src - a.src)) {
     const t = norm(c.row.title); const keys = credits(c.row).map((a) => `${a}|${t}`);
     if (keys.some((k) => seen.has(k))) continue; keys.forEach((k) => seen.add(k)); out.push(c);
-    if (out.length >= 200) break;
   }
-  return { pool: out, plays, liked };
+  // What gets rated: up to 150 new and 50 known, best sources first.
+  return Object.assign([...out.filter((c) => !c.known).slice(0, 150), ...out.filter((c) => c.known).slice(0, 50)], { missing });
 }
 
-function poolText(pool: Cand[], plays: Map<string, number>, liked: Set<string>) {
-  return pool.map((c, i) => {
-    const r = c.row; const g = (JSON.parse(r.genres || '[]') as string[]).slice(0, 2).join('/');
-    const bits = [r.year, g].filter(Boolean).join(', ');
-    const mine = [liked.has(r.id) ? 'liked' : '', plays.get(r.id) ? `${plays.get(r.id)} plays` : ''].filter(Boolean).join(', ');
-    return `${i + 1}. ${r.artist} - ${r.title}${bits ? ` (${bits})` : ''}${mine ? ` [${mine}]` : ''}`;
-  }).join('\n');
-}
+const line = (r: Row) => {
+  const g = (JSON.parse(r.genres || '[]') as string[]).slice(0, 2).join('/');
+  const bits = [r.year, g].filter(Boolean).join(', ');
+  return `${r.artist} - ${r.title}${bits ? ` (${bits})` : ''}`;
+};
 
-// Turn the model's picks into exactly SIZE tracks: valid, unique, at most 3
-// per artist (unless the plan is about one or two artists), topped up from
-// the pool's best.
-export function finalize(pool: (Omit<Cand, 'base'> & { base?: number })[], picks: number[], plan: Pick<Plan, 'artists'>) {
-  const cap = plan.artists.length && plan.artists.length <= 2 ? SIZE : 3;
-  const out: Row[] = []; const per = new Map<string, number>(); const used = new Set<number>();
-  const take = (i: number, capped = true) => {
-    const c = pool[i]; if (!c || used.has(i)) return;
-    const as = credits(c.row); if (capped && as.some((a) => (per.get(a) || 0) >= cap)) return;
-    used.add(i); for (const a of as) per.set(a, (per.get(a) || 0) + 1); out.push(c.row);
-  };
-  for (const n of picks) { if (out.length >= SIZE) break; take(n - 1); }
-  // Top-up: what fits the request best, not what they play most.
-  const byFit = pool.map((c, i) => [c.base ?? c.score, i] as const).sort((a, b) => b[0] - a[0]).map(([, i]) => i);
-  for (const i of byFit) { if (out.length >= SIZE) break; take(i); }
-  // A small library can run out of artists: 25 songs beats a fair spread.
-  for (const i of byFit) { if (out.length >= SIZE) break; take(i, false); }
+// Pick SIZE: KNOWN_SHARE of them songs they know, the rest new; best fit
+// first, fit 6+ unless there is nothing better; at most 2 per artist among
+// the new ones and 3 overall (unless the plan is about one or two artists).
+export function choose(pool: Cand[], plan: Pick<Plan, 'artists'>) {
+  const few = plan.artists.length > 0 && plan.artists.length <= 2;
+  const per = new Map<string, number>(); const out: Cand[] = []; const used = new Set<Cand>();
+  const room = (c: Cand, cap: number) => credits(c.row).every((a) => (per.get(a) || 0) < cap);
+  const take = (c: Cand) => { used.add(c); out.push(c); for (const a of credits(c.row)) per.set(a, (per.get(a) || 0) + 1); };
+  const ranked = (known: boolean) => pool.filter((c) => c.known === known).sort((a, b) => (b.fit ?? 0) - (a.fit ?? 0) || b.src - a.src);
+  const wantKnown = Math.round(SIZE * KNOWN_SHARE);
+  const fill = (list: Cand[], n: number, minFit: number, cap: number) => { for (const c of list) { if (n <= 0) break; if (used.has(c) || (c.fit ?? 0) < minFit || !room(c, cap)) continue; take(c); n--; } };
+  const cap = (n: number) => (few ? SIZE : n);
+  fill(ranked(true), wantKnown, 6, cap(3));
+  fill(ranked(false), SIZE - out.length, 6, cap(2));
+  // Not enough good new songs: good known ones, then the best of the rest.
+  fill(ranked(true), SIZE - out.length, 6, cap(3));
+  fill([...ranked(false), ...ranked(true)].sort((a, b) => (b.fit ?? 0) - (a.fit ?? 0)), SIZE - out.length, 0, cap(3));
+  fill([...ranked(false), ...ranked(true)], SIZE - out.length, 0, SIZE);
   return out;
 }
 
-export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: string, job: Job) {
+export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
+  requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>) {
   const step = (s: string, p?: number) => { job.step = s; job.progress = p ?? null; };
   await llm.ensure(step);
   step('Reading your listening');
@@ -314,41 +337,116 @@ export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: st
   const plan = await llm.json<Plan>([
     { role: 'system', content: PLAN_SYSTEM },
     { role: 'user', content: `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}` },
-  ], PlanSchema, { temperature: 0.6, maxTokens: 2500 });
+  ], PlanSchema, { temperature: 0.6, maxTokens: 3000 });
   step('Finding songs in your library');
-  const { pool, plays, liked } = buildPool(db, uid, plan, prompt);
+  const pool = await buildPool(db, uid, plan, prompt, similar);
   if (!pool.length) throw new Error('Nothing in the library matched');
-  step('Picking 25 songs');
-  const pick = await llm.json<{ title: string; picks: number[] }>([
-    { role: 'system', content: PICK_SYSTEM },
-    { role: 'user', content: `Request: ${prompt}\n\nSongs:\n${poolText(pool, plays, liked)}` },
-  ], {
-    type: 'object',
-    properties: { title: { type: 'string', maxLength: 40 }, picks: { type: 'array', items: { type: 'integer', minimum: 1, maximum: pool.length }, minItems: SIZE, maxItems: SIZE } },
-    required: ['title', 'picks'],
-  }, { temperature: 0.5, maxTokens: 400 });
-  const tracks = finalize(pool, pick.picks || [], plan);
-  const name = (pick.title || plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
+
+  // Every candidate scored for fit, 40 at a time (a list that long is where
+  // a small model stops paying attention to each line).
+  const CHUNK = 40;
+  for (let i = 0; i < pool.length; i += CHUNK) {
+    step(`Listening for the vibe: ${Math.min(i + CHUNK, pool.length)} of ${pool.length} songs`, i / pool.length);
+    const part = pool.slice(i, i + CHUNK);
+    const r = await llm.json<{ scores: number[] }>([
+      { role: 'system', content: RATE_SYSTEM },
+      { role: 'user', content: `Playlist request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${part.map((c, j) => `${j + 1}. ${line(c.row)}`).join('\n')}` },
+    ], { type: 'object', properties: { scores: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 10 }, minItems: part.length, maxItems: part.length } }, required: ['scores'] },
+    { temperature: 0, maxTokens: 400 });
+    part.forEach((c, j) => { c.fit = Number(r.scores?.[j]) || 0; });
+  }
+  const chosen = choose(pool, plan);
+
+  step('Putting them in order');
+  let order: number[] = [];
+  try {
+    const r = await llm.json<{ order: number[] }>([
+      { role: 'system', content: ORDER_SYSTEM },
+      { role: 'user', content: `Playlist: ${plan.title}. ${plan.vibe}\n\nSongs:\n${chosen.map((c, j) => `${j + 1}. ${line(c.row)}`).join('\n')}` },
+    ], { type: 'object', properties: { order: { type: 'array', items: { type: 'integer', minimum: 1, maximum: chosen.length }, minItems: chosen.length, maxItems: chosen.length } }, required: ['order'] },
+    { temperature: 0.3, maxTokens: 300 });
+    order = r.order || [];
+  } catch { /* keep the fit order */ }
+  const seen = new Set<number>(); const tracks: Cand[] = [];
+  for (const n of order) if (n >= 1 && n <= chosen.length && !seen.has(n)) { seen.add(n); tracks.push(chosen[n - 1]); }
+  chosen.forEach((c, j) => { if (!seen.has(j + 1)) tracks.push(c); });
+
+  const name = (plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
   const id = playlistId(), now = Date.now();
   db.transaction(() => {
     db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
-    tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.id, now));
+    tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.row.id, now));
   })();
-  return { playlistId: id, name, count: tracks.length, poolSize: pool.length };
+  // Suggestions the library lacks: rated like everything else; only clear
+  // fits (8+) are requested, best first.
+  let requested = 0;
+  if (requestMissing && pool.missing.length) {
+    try {
+      const miss = pool.missing.slice(0, 40);
+      step('Requesting songs you do not have yet');
+      const r = await llm.json<{ scores: number[] }>([
+        { role: 'system', content: RATE_SYSTEM },
+        { role: 'user', content: `Playlist request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${miss.map((m, j) => `${j + 1}. ${m.artist} - ${m.title}`).join('\n')}` },
+      ], { type: 'object', properties: { scores: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 10 }, minItems: miss.length, maxItems: miss.length } }, required: ['scores'] },
+      { temperature: 0, maxTokens: 400 });
+      const good = miss.map((m, j) => ({ m, fit: Number(r.scores?.[j]) || 0 })).filter((x) => x.fit >= 8).sort((a, b) => b.fit - a.fit).map((x) => x.m)
+        .filter(((per) => (m: { artist: string }) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; })(new Map<string, number>()));
+      requested = await requestMissing(id, good);
+    } catch { /* the playlist stands without them */ }
+  }
+  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, fit: t.fit ?? null, known: t.known })) };
 }
 
 export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   const llm = new Llm({ ...opts, log: opts.log ?? ((m) => app.log.info(m)) });
   app.addHook('onClose', async () => llm.stop());
   const auth = { preHandler: (app as any).requireUser };
+  const log = (m: string) => app.log.warn(m);
+  const similar = (a: { id: string; name: string }) => similarInLibrary(db, a, { log });
+
+  // Songs the model suggested that the library lacks: their releases are
+  // requested on Music Requests (Soulseek), remembered in ai_pending, and
+  // appended to the playlist by the scan that brings them in.
+  const MR = opts.musicRequestsUrl;
+  const requestMissing = async (playlistId: string, songs: { artist: string; title: string }[]) => {
+    if (!MR) return 0;
+    let n = 0;
+    for (const s of songs.slice(0, 8)) {
+      try {
+        const t = await (await fetch(`${MR}/api/track?${new URLSearchParams({ artist: s.artist, title: s.title })}`, { signal: AbortSignal.timeout(15000) })).json() as any;
+        if (!t.release?.album_id) continue;
+        const r = await (await fetch(`${MR}/api/request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: t.release.album_id }), signal: AbortSignal.timeout(30000) })).json() as any;
+        db.prepare('INSERT OR IGNORE INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(playlistId, s.artist, s.title, `${t.release.artist} - ${t.release.title}`, Date.now());
+        n++; app.log.info(`ai request: ${s.artist} - ${s.title} -> ${t.release.artist} - ${t.release.title} (${r.status})`);
+      } catch (e: any) { log(`ai request ${s.artist} - ${s.title}: ${e.message}`); }
+    }
+    return n;
+  };
+  const fillPending = () => {
+    db.prepare('DELETE FROM ai_pending WHERE requested < ?').run(Date.now() - 21 * 86400000);
+    for (const p of db.prepare('SELECT * FROM ai_pending').all() as any[]) {
+      const id = matchTrack(db, { artist: p.artist, title: p.title }); if (!id) continue;
+      db.transaction(() => {
+        if (!db.prepare('SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?').get(p.playlist_id, id)) {
+          const pos = ((db.prepare('SELECT COALESCE(MAX(pos), -1) m FROM playlist_tracks WHERE playlist_id = ?').get(p.playlist_id) as any).m as number) + 1;
+          db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(p.playlist_id, pos, id, Date.now());
+          db.prepare('UPDATE playlists SET updated = ? WHERE id = ?').run(Date.now(), p.playlist_id);
+        }
+        db.prepare('DELETE FROM ai_pending WHERE playlist_id = ? AND artist = ? AND title = ?').run(p.playlist_id, p.artist, p.title);
+      })();
+      app.log.info(`ai request arrived: ${p.artist} - ${p.title}`);
+    }
+  };
+  (app as any).afterScan?.(fillPending);
+
   app.get('/api/ai/status', auth, async () => ({ ...llm.available(), loaded: llm.loaded }));
   app.post('/api/ai/playlists', auth, async (req: any, reply) => {
     const b = z.object({ prompt: z.string().trim().min(3).max(1000) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'Describe the playlist' });
     const av = llm.available(); if (!av.ok) return reply.code(503).send({ error: av.reason });
-    const job = startJob(req.user.id, 'ai-playlist', (j) => { j.step = 'Waiting for the model'; return llm.run(() => generatePlaylist(db, llm, req.user.id, b.data.prompt, j)); });
+    const job = startJob(req.user.id, 'ai-playlist', (j) => { j.step = 'Waiting for the model'; return llm.run(() => generatePlaylist(db, llm, req.user.id, b.data.prompt, j, similar, requestMissing)); });
     app.log.info({ uid: req.user.id, prompt: b.data.prompt }, 'ai playlist');
     return jobOut(job);
   });
-  return llm;
+  return Object.assign(llm, { fillPending });
 }

@@ -80,6 +80,12 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE tracks ADD COLUMN bit_depth INTEGER;
   `,
+  `
+  CREATE TABLE ai_pending (
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE, artist TEXT NOT NULL, title TEXT NOT NULL,
+    release TEXT, requested INTEGER NOT NULL, PRIMARY KEY (playlist_id, artist, title)
+  );
+  `,
 ];
 
 export type DB = Database.Database;

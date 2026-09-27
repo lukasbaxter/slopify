@@ -29,6 +29,29 @@ const cache = new Map<string, { at: number; v: any }>();
 const cached = (k: string, ttl: number) => { const e = cache.get(k); return e && Date.now() - e.at < ttl ? e.v : null; };
 const remember = <T>(k: string, v: T): T => { cache.set(k, { at: Date.now(), v }); return v; };
 
+// Deezer's related artists (up to 40) that this library has, cached a day.
+// Shared by the artist page and generated playlists (where they bring in
+// artists the listener has never played).
+export async function similarInLibrary(db: DB, a: { id: string; name: string }, o: { fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<{ id: string; name: string }[]> {
+  const hit = cached(`similar:${a.id}`, 24 * 60 * 60 * 1000); if (hit) return hit;
+  const f = o.fetcher || fetch;
+  const json = (url: string) => f(url, { signal: AbortSignal.timeout(8000) }).then(async (r) => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.json() as any; });
+  const out: { id: string; name: string }[] = [];
+  try {
+    const s = await json(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=5`);
+    const dz = (s.data || []).find((x: any) => norm(x.name) === norm(a.name)) || (s.data || [])[0];
+    if (dz) {
+      const rel = await json(`https://api.deezer.com/artist/${dz.id}/related?limit=40`);
+      const byName = db.prepare('SELECT id, name FROM artists WHERE name = ? COLLATE NOCASE');
+      for (const r of rel.data || []) {
+        const h = byName.get(r.name) as any;
+        if (h && h.id !== a.id) out.push({ id: h.id, name: h.name });
+      }
+    }
+  } catch (e: any) { o.log?.(`similar ${a.name}: ${e.message}`); return out; }
+  return remember(`similar:${a.id}`, out);
+}
+
 export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOptions = {}) {
   const auth = { preHandler: (app as any).requireUser };
   const log = opts.log || (() => {});
@@ -80,22 +103,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     const id = (req.params as any).id as string;
     const a = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as any;
     if (!a) return reply.code(404).send({ error: 'no such artist' });
-    const hit = cached(`similar:${id}`, 24 * 60 * 60 * 1000); if (hit) return hit;
-    let out: { id: string; name: string }[] = [];
-    try {
-      const s = await json(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=5`, 8000);
-      const dz = (s.data || []).find((x: any) => norm(x.name) === norm(a.name)) || (s.data || [])[0];
-      if (dz) {
-        const rel = await json(`https://api.deezer.com/artist/${dz.id}/related?limit=40`, 8000);
-        const byName = db.prepare('SELECT id, name FROM artists WHERE name = ? COLLATE NOCASE');
-        for (const r of rel.data || []) {
-          const h = byName.get(r.name) as any;
-          if (h && h.id !== id) out.push({ id: h.id, name: h.name });
-        }
-      }
-    } catch (e: any) { log(`similar ${a.name}: ${e.message}`); }
-    out = out.slice(0, 12);
-    return remember(`similar:${id}`, { artists: out });
+    return { artists: (await similarInLibrary(db, a, { fetcher, log })).slice(0, 12) };
   });
 
   // Queue an album with Music Requests; it downloads into this library.

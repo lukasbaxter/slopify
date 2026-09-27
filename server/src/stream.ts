@@ -69,7 +69,8 @@ export function syntheticPlaylist(durationMs: number, sampleRate: number): strin
 // A song as the stream routes see it: where the full file is, its size (from
 // the database: no stat of the NAS on the request path, where a wedged mount
 // would block the whole process) and its head on the SSD if it has one.
-export type Src = { file: string; size: number; head: { path: string; bytes: number } | null; alt?: string | null };
+// name: the song's own path in the library (its type comes from that: a cached copy has no extension)
+export type Src = { file: string; name: string; size: number; head: { path: string; bytes: number } | null; alt?: string | null };
 
 // ffmpeg's input: the local copy when the head is the whole file (m4a & co),
 // the joined head + NAS stream on stdin otherwise, the file itself without a head.
@@ -205,9 +206,9 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const t = db.prepare('SELECT path, size FROM tracks WHERE id = ?').get(id) as { path: string; size: number } | undefined;
     if (!t) return undefined;
     const local = songs?.get(id, t.size);
-    if (local) return { file: local, size: t.size, head: null };
+    if (local) return { file: local, name: t.path, size: t.size, head: null };
     songs?.want(id, t.path, t.size);
-    return { file: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size), alt: altOf?.(t.path) ?? null };
+    return { file: t.path, name: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size), alt: altOf?.(t.path) ?? null };
   };
   app.get('/api/admin/cache', { preHandler: (app as any).requireAdmin }, async () => ({
     songs: songs?.stats() ?? null,
@@ -232,7 +233,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const id = (req.params as any).id as string;
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
-    return sendRanged(req, reply, src.file, MIME[path.extname(src.file).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src);
+    return sendRanged(req, reply, src.file, MIME[path.extname(src.name).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src);
   });
 
   // One progressive transcode, started at `startAt` seconds: what a browser

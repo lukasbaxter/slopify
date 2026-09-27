@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DB } from './db.js';
+import { recordRequest } from './downloads.js';
 
 export type DiscoverOptions = { musicRequestsUrl?: string; log?: (m: string) => void; fetcher?: typeof fetch };
 
@@ -65,6 +66,15 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     return remember('requests', new Map((r.requests || []).map((x: any) => [x.album_id, x.status])));
   };
   const libraryAlbums = (artistId: string) => db.prepare('SELECT id, name, year, track_count FROM albums WHERE artist_id = ?').all(artistId) as { id: string; name: string; year: number | null; track_count: number }[];
+  // Albums the artist is credited on in any track, not only those filed under
+  // them: a collaboration stored under a combined album artist ("Porter
+  // Robinson; League of Legends") is still theirs. Own albums last, so they
+  // win a title clash in the matcher's map.
+  const creditedAlbums = (artistId: string) => [
+    ...db.prepare(`SELECT DISTINCT a.id, a.name, a.year, a.track_count FROM albums a JOIN tracks t ON t.album_id = a.id
+      WHERE t.artist_ids LIKE ? AND a.artist_id != ?`).all(`%"${artistId}"%`, artistId) as { id: string; name: string; year: number | null; track_count: number }[],
+    ...libraryAlbums(artistId),
+  ];
   const matcher = (albums: { id: string; name: string }[]) => {
     const exact = new Map(albums.map((a) => [norm(a.name), a]));
     const base = new Map(albums.map((a) => [normTitle(a.name), a]));
@@ -78,7 +88,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
       MR ? json(`${MR}/api/artist?name=${encodeURIComponent(name)}`, 25000).catch((e) => { log(`discography ${name}: ${e.message}`); return { artist: null, releases: [] }; }) : { artist: null, releases: [] },
       requestStatuses(),
     ]);
-    const have = matcher(lib);
+    const have = matcher(creditedAlbums(artistId));
     const releases: Release[] = (mr.releases || []).map((r: any) => {
       const local = have(r.title);
       return { ...r, inLibrary: local ? local.id : null, localName: local?.name || null, requestStatus: status.get(r.album_id) || null };
@@ -114,6 +124,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     if (!body.success) return reply.code(400).send({ error: 'album_id required' });
     const r = await json(`${MR}/api/request`, 30000, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: body.data.album_id }) });
     cache.delete('requests');
+    recordRequest(db, (req as any).user.id, { ...r, album_id: body.data.album_id }, 'request');
     log(`request ${body.data.album_id}: ${r.status}${r.artist ? ` ${r.artist} - ${r.title}` : ''}`);
     return r;
   });
@@ -132,7 +143,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     const byArtist = new Map<string, { artist: any; have: (t: string) => { id: string; name: string } | null }>();
     for (const name of new Set(results.map(first))) {
       const art = byName.get(name) as any;
-      byArtist.set(norm(name), { artist: art || null, have: art ? matcher(libraryAlbums(art.id)) : () => null });
+      byArtist.set(norm(name), { artist: art || null, have: art ? matcher(creditedAlbums(art.id)) : () => null });
     }
     const albums = results.map((r) => {
       const lib = byArtist.get(norm(first(r)));

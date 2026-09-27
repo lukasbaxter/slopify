@@ -44,9 +44,10 @@ const credits = (r: { artist: string; artists?: string }) => {
 // not); a declined request is re-run on Anthropic's default fallback model.
 export type Ask = <T>(system: string, user: string, schema: object, maxTokens: number) => Promise<T>;
 
-export function claudeAsk(apiKey: string, model: string): Ask {
+export function claudeAsk(apiKey: string, model: string, log?: (m: string) => void): Ask {
   const client = new Anthropic({ apiKey });
   return async <T>(system: string, user: string, schema: object, maxTokens: number) => {
+    const t0 = Date.now();
     const r = await client.beta.messages.create({
       model, max_tokens: maxTokens, system,
       messages: [{ role: 'user', content: user }],
@@ -55,6 +56,8 @@ export function claudeAsk(apiKey: string, model: string): Ask {
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
     });
+    const u = r.usage as any;
+    log?.(`claude ${model}: ${Date.now() - t0} ms, in ${u.input_tokens} (+${u.cache_read_input_tokens || 0} cached), out ${u.output_tokens}, stop ${r.stop_reason}`);
     if (r.stop_reason === 'refusal') throw new Error('Claude declined this request');
     if (r.stop_reason === 'max_tokens') throw new Error('Claude ran out of room for the answer');
     const text = r.content.find((b) => b.type === 'text');
@@ -348,7 +351,7 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   const auth = { preHandler: (app as any).requireUser };
   const log = (m: string) => app.log.warn(m);
   const similar = (a: { id: string; name: string }) => similarInLibrary(db, a, { log });
-  const ask = opts.apiKey ? claudeAsk(opts.apiKey, opts.model) : null;
+  const ask = opts.apiKey ? claudeAsk(opts.apiKey, opts.model, (m) => app.log.info(m)) : null;
 
   // Songs the model suggested that the library lacks: their releases are
   // requested on Music Requests (Soulseek), remembered in ai_pending, and

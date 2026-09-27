@@ -86,3 +86,17 @@ describe('ingest', () => {
     expect(fs.statSync(path.join(nas, 'The Fixture Band', 'Second Wind', 'cover.png')).size).toBeGreaterThan(1);
   });
 });
+
+describe('ingest while a sweep runs', () => {
+  it('a request for particular folders waits for the running sweep, then runs itself', async () => {
+    const incoming = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-in2-')), nas = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-nas2-')), cache = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-c2-'));
+    fs.cpSync(path.join(MUSIC, 'The Fixture Band'), path.join(incoming, 'The Fixture Band'), { recursive: true, preserveTimestamps: true });
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-idb2-')));
+    // settleMs huge: the background sweep takes nothing; the folder request ignores settling
+    const ing = new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 1e12, deleteAfter: false });
+    const bg = ing.sweep();
+    const mine = ing.sweep({ only: ['The Fixture Band'], settleMs: 0 });
+    expect((await bg).copied).toBe(0);
+    expect((await mine).copied).toBeGreaterThan(0);
+  });
+});

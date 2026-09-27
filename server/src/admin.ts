@@ -57,7 +57,12 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   app.post('/api/admin/scan', admin, async (req: any, reply) => {
     const paths = req.body?.paths;
     if (Array.isArray(paths) && paths.length) {
-      try { return { folders: await scanFolders(paths.map(String)) }; } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+      // With an ingest, a folder that just landed is still on the SSD: take it
+      // to the NAS first (that indexes it), then scan what is in the library.
+      const ing = (app as any).ingest;
+      const ingested = ing ? await ing.sweep({ only: paths.map(String), settleMs: 0 }) : null;
+      try { return { ingested, folders: await scanFolders(paths.map(String)) }; }
+      catch (e: any) { return ingested ? { ingested, folders: null } : reply.code(400).send({ error: e.message }); }
     }
     return { started: true, scan: await runScan() };
   });

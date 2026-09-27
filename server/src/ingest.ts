@@ -82,6 +82,9 @@ export class Ingest {
   // One sweep at a time. only: folders (relative to INCOMING_DIR) to take now,
   // settled or not; settleMs: a shorter settle time for this sweep.
   sweep(opts: { only?: string[]; settleMs?: number } = {}): Promise<IngestStats> {
+    // A request for particular folders while a sweep runs (an album just
+    // landed during a long sweep) waits for it and then runs on its own.
+    if (this.running && opts.only?.length) return this.running.catch(() => null).then(() => this.sweep(opts));
     if (this.running) return this.running;
     this.running = this.run(opts.only, opts.settleMs ?? this.o.settleMs).finally(() => { this.running = null; });
     return this.running;

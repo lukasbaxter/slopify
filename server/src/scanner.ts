@@ -112,9 +112,11 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     // Seconds, not milliseconds: a copy (rsync, the NAS) keeps whole seconds,
     // and a millisecond compare made every copied file look changed.
     if (prev && Math.floor(prev.mtime / 1000) === Math.floor(st.mtimeMs / 1000) && prev.size === st.size) {
-      // Unchanged file: only a new sidecar next to it (or a missing head) can matter.
+      // Unchanged file: only a sidecar for a song without lyrics yet (or a
+      // missing head) can matter. Lyrics once in the database live there; not
+      // re-reading sidecars keeps a walk over a NAS to one stat per song.
       seenIds.add(prev.id);
-      await syncSidecar(db, prev.id, file, upsertLyrics);
+      if (!db.prepare('SELECT 1 FROM lyrics WHERE track_id = ?').get(prev.id)) await syncSidecar(db, prev.id, file, upsertLyrics);
       if (opts.heads && !headOf(db, opts.heads.cacheDir, prev.id, st.size)) {
         const d = (db.prepare('SELECT duration_ms FROM tracks WHERE id = ?').get(prev.id) as any)?.duration_ms ?? 0;
         try { await buildHead(db, opts.heads.cacheDir, prev.id, file, st.size, d, opts.heads.seconds); } catch (e: any) { log(`head failed ${file}: ${e.message}`); }

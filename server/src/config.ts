@@ -14,6 +14,9 @@ export const config = {
   dataDir: path.resolve(env('CONFIG_DIR', env('DATA_DIR', '/data'))),
   cacheDir: path.resolve(env('CACHE_DIR', env('CONFIG_DIR', env('DATA_DIR', '/data')))),
   headSeconds: Number(env('HEAD_SECONDS', '5')),
+  // Whole songs copied from the NAS to the cache when they are about to play,
+  // least recently played dropped first past this size (0 = off).
+  songCacheGb: Number(env('SONG_CACHE_GB', '0')),
   // A full walk of MUSIC_DIR at boot and every SCAN_EVERY_H hours (0 = never);
   // SCAN_PAUSE_MS between files keeps a walk over a NAS gentle.
   scanOnBoot: env('SCAN_ON_BOOT', '1') !== '0',

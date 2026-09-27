@@ -95,6 +95,10 @@ const MIGRATIONS: string[] = [
   `
   CREATE TABLE heads (track_id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, size INTEGER NOT NULL, created INTEGER NOT NULL);
   `,
+  `
+  CREATE TABLE song_cache (track_id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, last_used INTEGER NOT NULL, added INTEGER NOT NULL);
+  CREATE INDEX song_cache_used ON song_cache(last_used);
+  `,
 ];
 
 export type DB = Database.Database;

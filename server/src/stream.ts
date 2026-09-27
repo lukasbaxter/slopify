@@ -25,6 +25,7 @@ import type { DB } from './db.js';
 import { z } from 'zod';
 import type { Readable } from 'node:stream';
 import { headOf, openBytes } from './heads.js';
+import type { SongCache } from './songcache.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
 const MIME: Record<string, string> = { '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.aiff': 'audio/aiff', '.aif': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.ape': 'audio/x-ape', '.wv': 'audio/x-wavpack' };
@@ -194,13 +195,24 @@ async function joinSegments(dir: string) {
   return out;
 }
 
-export function registerStream(app: FastifyInstance, db: DB, cacheDir: string) {
+export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, songs?: SongCache) {
   const dataDir = cacheDir; // transcodes live in the cache
   const auth = { preHandler: (app as any).requireUser };
+  // Every caller is about to play the song (or warm it as next in a queue):
+  // the whole file comes from the song cache when it is there, and is fetched
+  // into it in the background when it is not.
   const srcOf = (id: string): Src | undefined => {
     const t = db.prepare('SELECT path, size FROM tracks WHERE id = ?').get(id) as { path: string; size: number } | undefined;
-    return t ? { file: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size) } : undefined;
+    if (!t) return undefined;
+    const local = songs?.get(id, t.size);
+    if (local) return { file: local, size: t.size, head: null };
+    songs?.want(id, t.path, t.size);
+    return { file: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size) };
   };
+  app.get('/api/admin/cache', { preHandler: (app as any).requireAdmin }, async () => ({
+    songs: songs?.stats() ?? null,
+    heads: db.prepare('SELECT COUNT(*) songs, COALESCE(SUM(bytes), 0) bytes FROM heads').get(),
+  }));
   const log = (m: string) => app.log.warn(m);
   // The profile each account last streamed at: what its upcoming tracks are warmed in.
   const lastProfile = new Map<string, string>();

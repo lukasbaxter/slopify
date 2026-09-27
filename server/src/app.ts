@@ -23,6 +23,7 @@ import { registerAi } from './ai.js';
 import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { registerIngest } from './ingest.js';
+import { SongCache } from './songcache.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +48,8 @@ export async function buildServer(opts: BuildOptions = {}) {
   const musicDir = opts.musicDir ?? config.musicDir;
   registerAuth(app, db);
   registerLibrary(app, db, cacheDir);
-  registerStream(app, db, cacheDir);
+  const songCache = new SongCache(db, cacheDir, config.songCacheGb * 1e9, (m) => app.log.warn(m));
+  registerStream(app, db, cacheDir, songCache);
   registerSocial(app, db, dataDir, cacheDir);
   const heads = { cacheDir, seconds: config.headSeconds };
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs });

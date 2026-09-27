@@ -294,6 +294,42 @@ export class Slopify {
     return this.setPrefs({ dislikes: cur });
   }
 
+  // --- generated playlists + Spotify import (server jobs, polled) -----------
+  aiStatus() { return this._fetch('/api/ai/status'); }
+  generatePlaylist(prompt) { return this._fetch('/api/ai/playlists', { method: 'POST', body: JSON.stringify({ prompt }) }); }
+  job(id) { return this._fetch(`/api/jobs/${id}`, { retries: 2 }); }
+  // Poll a job until it ends; onStep sees every state on the way.
+  async waitJob(job, onStep, signal) {
+    let j = job;
+    while (j.state === 'running' || j.state === 'queued') {
+      onStep?.(j);
+      await new Promise((r) => setTimeout(r, 1000));
+      if (signal?.aborted) throw new Error('cancelled');
+      j = await this.job(j.id);
+    }
+    onStep?.(j);
+    if (j.state === 'error') throw new Error(j.error || 'failed');
+    return j.result;
+  }
+  // XHR, not fetch: an export zip can be hundreds of MB and fetch cannot report upload progress.
+  uploadSpotifyFile(file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', `${this.baseUrl}/api/import/spotify/upload`);
+      x.setRequestHeader('Authorization', `Bearer ${this.token || ''}`);
+      x.setRequestHeader('Content-Type', 'application/octet-stream');
+      x.setRequestHeader('X-Filename', file.name.replace(/[^\x20-\x7e]/g, '_'));
+      x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+      x.onload = () => {
+        let body = {}; try { body = JSON.parse(x.responseText); } catch { /* plain */ }
+        if (x.status >= 200 && x.status < 300) resolve(body); else reject(new Error(body.error || `upload failed (${x.status})`));
+      };
+      x.onerror = () => reject(new Error('upload failed (network)'));
+      x.send(file);
+    });
+  }
+  async importSpotify(fileIds) { const j = await this._fetch('/api/import/spotify', { method: 'POST', body: JSON.stringify({ fileIds }) }); this._cache.clear(); return j; }
+
   // --- playlist edits -------------------------------------------------------
   async createPlaylist(name, itemIds = []) {
     const r = await this._fetch('/api/playlists', { method: 'POST', body: JSON.stringify({ name, trackIds: itemIds }) });

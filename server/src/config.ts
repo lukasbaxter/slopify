@@ -22,5 +22,19 @@ export const config = {
   // Music Requests (Spotify lookups + the album download queue) for the artist
   // page's full discography, "Request" buttons, Release Radar and global search.
   musicRequestsUrl: env('MUSIC_REQUESTS_URL', '').replace(/\/+$/, ''),
+  // The local model behind generated playlists (llama.cpp's server, built into
+  // the image). Downloaded into /data/models on first use; started on demand
+  // and stopped after LLM_IDLE_MIN minutes so the GPU is free the rest of the time.
+  llm: {
+    llamaBin: env('LLAMA_BIN', '/opt/llama/llama-server'),
+    modelFile: env('LLM_MODEL_FILE', 'Qwen3.5-9B-Q4_K_M.gguf'),
+    modelPath: env('LLM_MODEL', ''),
+    modelUrl: env('LLM_MODEL_URL', 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf'),
+    llmUrl: env('LLM_URL', '').replace(/\/+$/, '') || undefined, // an OpenAI-compatible server instead (development)
+    port: Number(env('LLM_PORT', '18091')),
+    idleMs: Number(env('LLM_IDLE_MIN', '10')) * 60000,
+    gpuLayers: env('LLM_GPU_LAYERS', '99'),
+    ctx: Number(env('LLM_CTX', '16384')),
+  },
 };
 export type Config = typeof config;

@@ -23,5 +23,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t slopify:ci .
+      - run: docker build --build-arg LLM=0 -t slopify:ci .
       - run: docker run --rm slopify:ci node -e "console.log('image ok')"

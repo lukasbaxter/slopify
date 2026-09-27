@@ -18,6 +18,9 @@ import websocket from '@fastify/websocket';
 import { registerSession } from './session.js';
 import { registerExplore } from './explore.js';
 import { registerDiscover } from './discover.js';
+import { registerJobs } from './jobs.js';
+import { registerAi } from './ai.js';
+import { registerSpotifyImport } from './spotifyImport.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +50,9 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
   registerExplore(app, db, { slskdUrl: config.slskdUrl, slskdKey: config.slskdKey });
   registerDiscover(app, db, { musicRequestsUrl: config.musicRequestsUrl, log: (m) => app.log.info(m) });
+  registerJobs(app);
+  registerAi(app, db, { ...config.llm, modelPath: config.llm.modelPath || path.join(dataDir, 'models', config.llm.modelFile) });
+  registerSpotifyImport(app, db, dataDir);
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

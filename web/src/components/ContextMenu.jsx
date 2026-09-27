@@ -94,7 +94,7 @@ function Panel({ x, y, items, onClose, depth = 0, anchorRight = false, onEnter, 
               }}
             >
               <span className="ctx-ico">{it.icon || null}</span>
-              <span className="ctx-label">{it.label}</span>
+              <span className="ctx-label">{it.label}{it.desc && <span className="ctx-desc">{it.desc}</span>}</span>
               {it.checked && <svg className="ctx-check" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M13.985 2.383 5.127 12.754 1.388 8.375l-1.14 1.048 4.879 5.617L15.184 3.36l-1.199-.977z" /></svg>}
               {it.sub && <Chevron />}
             </button>

@@ -399,6 +399,7 @@ input, textarea, select { font-family: inherit; }
 .ctxmenu .ctx-ico { width: 16px; height: 16px; display: grid; place-items: center; color: var(--fg-dim); flex: 0 0 16px; }
 .ctxmenu .ctxitem:hover .ctx-ico { color: var(--fg); }
 .ctxmenu .ctx-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.ctxmenu .ctx-desc { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: #a7a7a7; white-space: normal; }
 .ctxmenu .ctx-chev { color: var(--fg-dim); flex: 0 0 14px; }
 .ctxmenu-label { padding: 8px 12px 4px; font-size: 12px; color: var(--fg-dim); font-weight: 700; }
 .ctxslider { padding: 8px 12px 10px 40px; display: flex; flex-direction: column; gap: 6px; }
@@ -1530,3 +1531,23 @@ button:disabled { cursor: default; }
 .deviceitem .quality-badge.in-menu { margin: 0 8px 0 auto; flex: none; }
 .dm-current-text .quality-badge { margin-top: 4px; }
 .fs-meta .quality-badge { margin-top: 6px; font-size: 12px; }
+
+/* Generated playlist dialog */
+.genpl { width: min(520px, calc(100vw - 32px)); }
+.genpl-note { margin: -6px 0 0; color: #b3b3b3; font-size: 14px; line-height: 1.45; }
+.genpl textarea { width: 100%; padding: 12px 14px; border-radius: 4px; border: 1px solid #555; background: #1f1f1f; color: var(--fg); font: inherit; font-size: 15px; resize: vertical; min-height: 84px; }
+.genpl textarea:focus { outline: none; border-color: var(--fg); }
+.genpl-ideas { display: flex; flex-wrap: wrap; gap: 8px; }
+.genpl-ideas .pill { font-size: 13px; }
+.genpl-busy { display: flex; align-items: center; gap: 10px; color: #b3b3b3; font-size: 14px; }
+.genpl-spin { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); animation: genpl-spin .8s linear infinite; }
+@keyframes genpl-spin { to { transform: rotate(360deg); } }
+.genpl-error { margin: 0; color: #f3727f; font-size: 14px; }
+@media (max-width: 760px) { .genpl textarea { font-size: 16px; } }
+.spimport-result { margin-top: 14px; font-size: 14px; color: #b3b3b3; }
+.spimport-result ul { margin: 0 0 10px; padding-left: 18px; display: grid; gap: 4px; }
+.spimport-result b { color: var(--fg); }
+.spimport-result summary { cursor: pointer; color: var(--fg); }
+.spimport-result ol { margin: 8px 0 0; padding-left: 22px; max-height: 280px; overflow: auto; display: grid; gap: 2px; }
+.spimport-result small { color: #8a8a8a; }
+.settings-phone .spimport { padding: 0 0 8px; }

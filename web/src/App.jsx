@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Slopify, loadSession, persistSession, clearSession } from './api/slopify.js';
 import { usePlayer } from './player/usePlayer.js';
 import { SessionLink } from './api/session.js';
+import GeneratePlaylist from './components/GeneratePlaylist.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Library, { LIKED_ID } from './components/Library.jsx';
 import Player, { PlayingElsewhereBar, sessionDeviceOf } from './components/Player.jsx';
@@ -141,6 +142,8 @@ export default function App() {
   // "New playlist" dialog: {track} while open. window.prompt() does not exist
   // in Electron, which is why creating a playlist from a row did nothing there.
   const [namePrompt, setNamePrompt] = useState(null);
+  // "Generated playlist (AI)" dialog.
+  const [generating, setGenerating] = useState(false);
   // Now-playing view (Spotify's expand button): Album / Visualizer / Lyrics
   // filling the app window. It never asks the OS for full screen itself; if
   // the window is already full screen it fills that.
@@ -717,6 +720,12 @@ export default function App() {
   };
   // Another client changed the library (saved an album, made a playlist).
   const relayLibraryPing = useRef(0);
+  // A Spotify import added playlists, likes and saved albums.
+  useEffect(() => {
+    const on = () => { refreshPlaylists(); player.relay?.sendPrefs?.({ _libraryChanged: Date.now() }); };
+    window.addEventListener('slopify:librarychanged', on);
+    return () => window.removeEventListener('slopify:librarychanged', on);
+  });
 
   const onCreatePlaylist = async (name, firstTrack = null) => {
     try {
@@ -1149,6 +1158,7 @@ export default function App() {
           onOpen={openPlaylist}
           onOpenLiked={openLiked}
           onCreate={(name) => onCreatePlaylist(name)}
+          onGenerate={() => setGenerating(true)}
           jf={jf}
         />
         <div
@@ -1224,6 +1234,17 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
+      {generating && (
+        <GeneratePlaylist jf={jf} onClose={() => setGenerating(false)}
+          onDone={async (r, { hidden, error } = {}) => {
+            if (error) { notify(`Could not generate the playlist: ${error}`); return; }
+            setGenerating(false);
+            await refreshPlaylists();
+            player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
+            if (hidden) notify(`${r.name} is ready in Your Library`);
+            else openPlaylist({ Id: r.playlistId, Name: r.name, Type: 'Playlist', ChildCount: r.count, ImageTags: {}, UserData: {} });
+          }} />
+      )}
       {namePrompt && (
         <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) setNamePrompt(null); }}>
           <form className="modal" onSubmit={submitNamePrompt}>

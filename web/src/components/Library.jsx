@@ -8,6 +8,7 @@ import { search as relaySearch, browse as relayBrowse, discography as relayDisco
 import Home from './Home.jsx';
 import History from './History.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
+import SpotifyImport from './SpotifyImport.jsx';
 import FittedTitle from './FittedTitle.jsx';
 import VirtualList from './VirtualList.jsx';
 import { ProgressiveImg } from './FullScreen.jsx';
@@ -667,6 +668,9 @@ export default function Library({
               <Chev />
             </button>
 
+            <h2>Import from Spotify</h2>
+            <SpotifyImport jf={jf} />
+
             <h2>Appearance</h2>
             <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'theme' }); }}>
               <span className="setrow-text"><b>Theme</b><small>{preset ? preset.name : 'Custom'}</small></span>
@@ -761,6 +765,11 @@ export default function Library({
                   </form>
                 );
               })()}
+            </section>
+
+            <section className="settings-section">
+              <h2>Import from Spotify</h2>
+              <SpotifyImport jf={jf} />
             </section>
 
             <section className="settings-section">

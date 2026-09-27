@@ -37,11 +37,16 @@ export function lbCreds(db: DB, uid: string): { user: string; token: string } | 
 // --- library matching -------------------------------------------------------
 export function matchTrack(db: DB, t: LbTrack): string | null {
   // Title words through FTS (all of them), the artist checked loosely after:
-  // "feat." credits and spelling variants must not lose the match.
+  // "feat." credits and spelling variants must not lose the match. Title +
+  // artist words first: a common title ("Intro", "Home") has more than 60
+  // rows in a big library and the right one fell off the end.
   const fq = ftsQuery(t.title);
   if (!fq) return null;
+  const q = db.prepare('SELECT t.id, t.title, t.artist, t.artists, t.album FROM tracks_fts f JOIN tracks t ON t.rowid = f.rowid WHERE tracks_fts MATCH ? LIMIT 60');
+  const firstArtistWord = norm(t.artist).split(' ').find((w) => w.length > 1);
   let rows: any[] = [];
-  try { rows = db.prepare('SELECT t.id, t.title, t.artist, t.artists, t.album FROM tracks_fts f JOIN tracks t ON t.rowid = f.rowid WHERE tracks_fts MATCH ? LIMIT 60').all(fq); } catch { return null; }
+  try { if (firstArtistWord) rows = q.all(`${fq} "${firstArtistWord}"*`); } catch { /* fall through to the title alone */ }
+  if (!rows.length) { try { rows = q.all(fq); } catch { return null; } }
   const nt = norm(t.title), na = norm(t.artist);
   let best: { id: string; score: number } | null = null;
   for (const r of rows) {

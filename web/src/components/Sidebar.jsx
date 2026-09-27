@@ -35,7 +35,7 @@ const Pin = () => (
 );
 
 export default function Sidebar({ view, onView, playlists, likedCount, onOpen, onOpenLiked, onCreate, jf, loading,
-  savedAlbums = [], onOpenAlbum, player, prefs, onUpdatePrefs, onEditPlaylist, onDeletePlaylist, onFollowAlbum, onOpenArtist }) {
+  savedAlbums = [], onOpenAlbum, player, prefs, onUpdatePrefs, onEditPlaylist, onDeletePlaylist, onFollowAlbum, onOpenArtist, onGenerate }) {
   const [menu, setMenu] = useState(null); // { x, y, entry }
   const [dragId, setDragId] = useState(null);
   const dragRef = useRef(null); // the drop handler must not depend on a re-render having happened
@@ -121,11 +121,18 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
   // playlists request has no flag of its own, so also let the first paint settle).
   const [settled, setSettled] = useState(false);
   useEffect(() => { const t = setTimeout(() => setSettled(true), 1500); return () => clearTimeout(t); }, []);
+  // "+": Spotify's create menu, on the desktop too now that there are two
+  // kinds: a plain playlist (named inline on the desktop, full screen on the
+  // phone) or one the local model generates from a description.
   const openCreate = (e) => {
-    if (!phone) { setCreating((v) => !v); return; }
+    if (creating) { setCreating(false); return; }
     const r = e?.currentTarget?.getBoundingClientRect?.();
-    setCreateSheet({ x: r ? r.left : 0, y: r ? r.bottom : 0 });
+    setCreateSheet({ x: r ? r.left : 0, y: r ? r.bottom + 4 : 0 });
   };
+  const createItems = [
+    { label: 'Playlist', desc: phone ? null : 'Build a playlist with songs', icon: MI.playlist, onClick: () => { setName(''); if (phone) setNaming(true); else setCreating(true); } },
+    onGenerate && { label: 'Generated playlist (AI)', desc: phone ? null : 'Describe it, get 25 songs from your library', icon: MI.sparkle, onClick: () => onGenerate() },
+  ].filter(Boolean);
   const q = libQuery.trim().toLowerCase();
   const matches = (n) => !q || (n || '').toLowerCase().includes(q);
   const showLiked = (!libFilter || libFilter === 'playlist') && matches('Liked Songs');
@@ -252,7 +259,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
           {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
           {createSheet && (
             <ContextMenu x={createSheet.x} y={createSheet.y} onClose={() => setCreateSheet(null)}
-              items={[{ label: 'Playlist', icon: MI.playlist, onClick: () => { setName(''); setNaming(true); } }]} />
+              items={createItems} />
           )}
           {naming && createPortal(
             <form className="newpl" onSubmit={(e) => { submit(e); setNaming(false); }}>

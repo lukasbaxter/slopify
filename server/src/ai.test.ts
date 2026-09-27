@@ -3,7 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { zipSync, strToU8 } from 'fflate';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { buildPool, choose, generatePlaylist, Progress, type Llm } from './ai.js';
+import { buildPool, finalize, generatePlaylist, Progress, type Ask } from './ai.js';
 import { parseExport, importSpotify, type Parsed } from './spotifyImport.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
@@ -31,28 +31,29 @@ describe('generated playlists', () => {
     db.prepare('DELETE FROM prefs').run(); db.prepare('DELETE FROM plays').run();
   });
 
-  it('choose: 5 known + 20 new, best fit first, weak fits only when nothing else is left', () => {
-    const mk = (i: number, known: boolean, fit: number) => ({ row: { id: `${known ? 'k' : 'n'}${i}`, title: `S${i}`, artist: `${known ? 'K' : 'N'}${i}`, artists: '[]' } as any, known, src: 1, fit });
-    const pool = [...Array.from({ length: 30 }, (_, i) => mk(i, false, i < 22 ? 8 : 2)), ...Array.from({ length: 20 }, (_, i) => mk(i, true, 9))];
-    const out = choose(pool, { artists: [] });
+  it('finalize: keeps the order picked, 5 known + 20 new, bad numbers and repeats dropped, 2 per artist among the new', () => {
+    const mk = (i: number, known: boolean, artist = `${known ? 'K' : 'N'}${i}`) => ({ row: { id: `${known ? 'k' : 'n'}${i}`, title: `S${i}`, artist, artists: '[]' } as any, known, src: 1 });
+    const pool = [...Array.from({ length: 30 }, (_, i) => mk(i, false, i < 5 ? 'Same' : undefined)), ...Array.from({ length: 20 }, (_, i) => mk(i, true))];
+    const picks = [31, 2, 1, 2, 3, 4, 999, 0, 32, 33, 34, 35, 36, 10, 11];
+    const out = finalize(pool, picks, { artists: [] });
     expect(out.length).toBe(25);
     expect(out.filter((c) => c.known).length).toBe(5);
-    expect(out.filter((c) => !c.known).every((c) => c.fit === 8)).toBe(true);
+    expect(out.slice(0, 3).map((c) => c.row.id)).toEqual(['k0', 'n1', 'n0']);
+    expect(out.filter((c) => c.row.artist === 'Same').length).toBe(2);
   });
 
-  it('runs plan -> rate -> order and saves the playlist in the order given', async () => {
+  it('runs plan -> pool -> pick and saves the playlist in the order picked', async () => {
     const calls: string[] = [];
-    const llm = {
-      ensure: async () => {},
-      json: async (msgs: any[], schema: any) => {
-        calls.push(msgs[0].content.slice(0, 12));
-        if (calls.length === 1) return { ...emptyPlan, title: 'Late Night Test', songs: tracks.slice(0, 6).map((t) => ({ artist: t.artist, title: t.title })) };
-        if (schema.properties.scores) return { scores: Array.from({ length: schema.properties.scores.minItems }, () => 7) };
-        return { order: Array.from({ length: schema.properties.order.minItems }, (_, i) => schema.properties.order.minItems - i) };
-      },
-    } as unknown as Llm;
-    const job: any = { step: '', progress: null };
-    const r = await generatePlaylist(db, llm, 'u1', 'something calm', job);
+    const ask: Ask = async (system: string, user: string, schema: any) => {
+      calls.push(system.slice(0, 20));
+      if (schema.properties.vibe) return { ...emptyPlan, yearFrom: 0, yearTo: 0, title: 'Plan Title', songs: tracks.slice(0, 6).map((t) => ({ artist: t.artist, title: t.title })) } as any;
+      const n = (user.match(/^\d+\. (NEW|KNOWN) /gm) || []).length;
+      return { title: 'Late Night Test', picks: Array.from({ length: n }, (_, i) => n - i), request: [] } as any;
+    };
+    const job: any = { state: 'running', step: '', progress: null };
+    const r = await generatePlaylist(db, ask, 'u1', 'something calm', job);
+    job.state = 'done';
+    expect(calls.length).toBe(2);
     expect(r.name).toBe('Late Night Test');
     const ids = (db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(r.playlistId) as any[]).map((x) => x.track_id);
     expect(ids.length).toBe(Math.min(25, r.poolSize));
@@ -61,17 +62,17 @@ describe('generated playlists', () => {
 });
 
 describe('progress', () => {
-  it('walks the checklist, skips what does not run, and the time left only goes down', () => {
+  it('walks the checklist and the time left only goes down', () => {
     const job: any = { state: 'running', step: '', progress: null };
-    const pr = new Progress(job, null, true);
-    expect(job.info.stages.map((x: any) => x.key)).toEqual(['plan', 'find', 'rate', 'order', 'request']);
+    const pr = new Progress(job, null);
+    expect(job.info.stages.map((x: any) => x.key)).toEqual(['plan', 'find', 'pick']);
     pr.start('plan'); const left0 = job.info.leftMs;
-    pr.start('find'); pr.start('rate', '0 of 80 songs'); pr.estimate('rate', 2 * pr.perBatch()); pr.set(0.5, '40 of 80 songs');
-    expect(job.step).toBe('Checking each song fits: 40 of 80 songs');
-    expect(job.info.stages.map((x: any) => x.state)).toEqual(['done', 'done', 'active', 'pending', 'pending']);
+    pr.start('find'); pr.start('pick', 'from 200 songs');
+    expect(job.step).toBe('Picking and ordering 25 songs: from 200 songs');
+    expect(job.info.stages.map((x: any) => x.state)).toEqual(['done', 'done', 'active']);
     expect(job.info.leftMs).toBeLessThan(left0);
-    pr.skip('request'); pr.start('order'); pr.finish(2);
-    expect(job.info.stages.map((x: any) => x.state)).toEqual(['done', 'done', 'done', 'done']);
+    pr.finish(); job.state = 'done';
+    expect(job.info.stages.map((x: any) => x.state)).toEqual(['done', 'done', 'done']);
     expect(job.info.leftMs).toBe(0);
   });
 });
@@ -88,7 +89,7 @@ describe('requested songs', () => {
     d2.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run('pl_x', uid, 'X', 1, 1);
     d2.prepare('INSERT INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run('pl_x', t.artist, t.title, 'r', Date.now());
     d2.prepare('INSERT INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run('pl_x', 'Nobody', 'Not Yet', 'r', Date.now());
-    const llm = (app as any).aiLlm; llm.fillPending(); llm.fillPending();
+    const ai = (app as any).ai; ai.fillPending(); ai.fillPending();
     expect(d2.prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = 'pl_x'").all().map((r: any) => r.track_id)).toEqual([t.id]);
     expect(d2.prepare('SELECT title FROM ai_pending').all().map((r: any) => r.title)).toEqual(['Not Yet']);
     await app.close();

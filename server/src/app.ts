@@ -51,7 +51,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerExplore(app, db, { slskdUrl: config.slskdUrl, slskdKey: config.slskdKey });
   registerDiscover(app, db, { musicRequestsUrl: config.musicRequestsUrl, log: (m) => app.log.info(m) });
   registerJobs(app);
-  app.decorate('aiLlm', registerAi(app, db, { ...config.llm, musicRequestsUrl: config.musicRequestsUrl, modelPath: config.llm.modelPath || path.join(dataDir, 'models', config.llm.modelFile) }));
+  app.decorate('ai', registerAi(app, db, { ...config.ai, musicRequestsUrl: config.musicRequestsUrl }));
   registerSpotifyImport(app, db, dataDir);
 
   const health = async () => ({ ok: true, version: VERSION });

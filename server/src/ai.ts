@@ -1,28 +1,20 @@
 // Generated playlists: describe a playlist, get 25 songs from this library,
 // 20 of them songs the listener has never played and 5 they know.
 //
-// The model is llama.cpp's server running Qwen3.5-9B on the machine's GPU,
-// inside this container (the Dockerfile builds it). It is started on the
-// first request and stopped after LLM_IDLE_MIN minutes without one, so the
-// 6 GB of VRAM go back to Jellyfin's transcoder and the other GPU tools.
-//
-// The model never invents the list on its own (a song it names from memory
-// may not be here):
+// Claude (Opus 5, through the Anthropic API; ANTHROPIC_API_KEY) does the
+// judging, in two calls:
 //   1. plan: request + listener profile -> the vibe in words, artists
 //      (mostly ones they do not play), genres, specific songs, eras;
-//   2. pool: those found in the library, plus Deezer's similar artists that
-//      the library has, genres at random; played/liked songs marked known.
-//      Nothing favours what they already play (that made the first version
-//      all repeats);
-//   3. rate: every candidate scored 0-10 against the vibe, 40 at a time
-//      (the step that keeps a party song out of a late-night playlist);
-//   4. choose: 5 known + 20 new by fit, capped per artist; 5. order.
-// Suggested songs the library lacks are rated too; the clear fits are
-// requested on Music Requests and join the playlist when they download.
+//   2. pick: those found in the library, plus Deezer's similar artists that
+//      the library has, genres at random (played/liked songs marked known),
+//      numbered -> Claude picks 20 new + 5 known in listening order, and
+//      which suggested songs the library lacks are worth fetching.
+// Whatever it gets wrong (a bad number, the wrong mix) is fixed from the
+// pool, so the answer is always 25 real tracks. Suggested songs the library
+// lacks are requested on Music Requests and join the playlist when they
+// download.
 import type { FastifyInstance } from 'fastify';
-import { spawn, type ChildProcess } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
+import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { playlistId } from './ids.js';
@@ -31,123 +23,44 @@ import { similarInLibrary } from './discover.js';
 import { startJob, jobOut, type Job } from './jobs.js';
 
 export type AiOptions = {
-  llamaBin: string; modelPath: string; modelUrl: string;
-  llmUrl?: string;           // an OpenAI-compatible server to use instead of starting one (development)
+  apiKey?: string;
+  model: string;
   musicRequestsUrl?: string; // songs it suggests that the library lacks are requested here
-  port: number; idleMs: number; gpuLayers: string; ctx: number;
   log?: (m: string) => void;
 };
 
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const SIZE = 25;
+export const KNOWN_SHARE = 0.2;
 // Every artist credited on a track, normalized ("The Weeknd, Daft Punk" -> both).
 const credits = (r: { artist: string; artists?: string }) => {
   let a: string[] = []; try { a = JSON.parse(r.artists || '[]'); } catch { /* old row */ }
   return [...new Set((a.length ? a : [r.artist]).map(norm).filter(Boolean))];
 };
 
-// --- the model process ---------------------------------------------------------
-type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
+// --- Claude ---------------------------------------------------------------------
+// One structured call: a system prompt, one user message, JSON back in the
+// given schema. Low effort (the judgement is easy for Opus, the wait is
+// not); a declined request is re-run on Anthropic's default fallback model.
+export type Ask = <T>(system: string, user: string, schema: object, maxTokens: number) => Promise<T>;
 
-export class Llm {
-  private proc: ChildProcess | null = null;
-  private starting: Promise<void> | null = null;
-  private idle: NodeJS.Timeout | null = null;
-  private busy = 0;
-  private tail: string[] = [];
-  private chain: Promise<unknown> = Promise.resolve();
-  constructor(private o: AiOptions) {}
-
-  available(): { ok: boolean; reason?: string } {
-    if (this.o.llmUrl) return { ok: true };
-    if (!fs.existsSync(this.o.llamaBin)) return { ok: false, reason: 'This server was built without the local model.' };
-    return { ok: true };
-  }
-  get loaded() { return !!this.o.llmUrl || !!this.proc; }
-  private base() { return this.o.llmUrl || `http://127.0.0.1:${this.o.port}`; }
-
-  // One request at a time: the server runs one slot, and a second playlist
-  // waiting behind the first is better than both at half speed.
-  run<T>(fn: () => Promise<T>): Promise<T> {
-    const p = this.chain.then(fn, fn);
-    this.chain = p.catch(() => {});
-    return p;
-  }
-
-  private async download(step: (s: string, p?: number) => void) {
-    if (fs.existsSync(this.o.modelPath)) return;
-    fs.mkdirSync(path.dirname(this.o.modelPath), { recursive: true });
-    const part = `${this.o.modelPath}.part`;
-    const r = await fetch(this.o.modelUrl);
-    if (!r.ok || !r.body) throw new Error(`model download: HTTP ${r.status}`);
-    const total = Number(r.headers.get('content-length')) || 0;
-    const out = fs.createWriteStream(part);
-    let got = 0, last = 0;
-    for await (const chunk of r.body as any as AsyncIterable<Uint8Array>) {
-      got += chunk.length;
-      if (!out.write(chunk)) await new Promise<void>((res) => out.once('drain', () => res()));
-      if (total && Date.now() - last > 500) { last = Date.now(); step(`Downloading the model (first time only): ${(got / 1e9).toFixed(1)} of ${(total / 1e9).toFixed(1)} GB`, got / total); }
-    }
-    await new Promise<void>((res, rej) => out.end((e?: Error | null) => (e ? rej(e) : res())));
-    fs.renameSync(part, this.o.modelPath);
-  }
-
-  async ensure(step: (s: string, p?: number) => void) {
-    if (this.o.llmUrl || this.proc) return;
-    if (this.starting) return this.starting;
-    this.starting = (async () => {
-      await this.download(step);
-      step('Loading the model onto the GPU');
-      const bin = this.o.llamaBin;
-      const args = ['-m', this.o.modelPath, '--host', '127.0.0.1', '--port', String(this.o.port),
-        ...(this.o.gpuLayers ? ['-ngl', this.o.gpuLayers] : []), '-c', String(this.o.ctx), '-np', '1', '--jinja', '--no-webui', '--reasoning-budget', '0'];
-      const env = { ...process.env, LD_LIBRARY_PATH: [path.join(path.dirname(bin), 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') };
-      const p = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
-      this.proc = p; this.tail = [];
-      const keep = (b: Buffer) => { for (const l of b.toString().split('\n')) if (l.trim()) { this.tail.push(l); if (this.tail.length > 40) this.tail.shift(); } };
-      p.stdout!.on('data', keep); p.stderr!.on('data', keep);
-      p.on('exit', (code) => { if (this.proc === p) { this.proc = null; this.o.log?.(`llm exited (${code})`); } });
-      const t0 = Date.now();
-      while (Date.now() - t0 < 180000) {
-        if (!this.proc) {
-          const why = this.tail.join('\n');
-          throw new Error(/out of memory|cudaMalloc/i.test(why) ? 'Not enough free GPU memory right now (something else is using the GPU). Try again in a bit.' : `The model failed to start: ${this.tail.slice(-2).join(' | ')}`);
-        }
-        try { const r = await fetch(`${this.base()}/health`); if (r.ok) { this.o.log?.(`llm ready in ${Date.now() - t0} ms`); return; } } catch { /* not listening yet */ }
-        await new Promise((res) => setTimeout(res, 500));
-      }
-      this.stop(); throw new Error('The model took too long to load');
-    })();
-    try { await this.starting; } finally { this.starting = null; }
-  }
-
-  stop() { if (this.proc) { this.proc.kill('SIGTERM'); this.proc = null; } }
-  private armIdle() {
-    if (this.idle) clearTimeout(this.idle);
-    this.idle = setTimeout(() => { if (!this.busy && this.proc) { this.o.log?.('llm idle, stopping'); this.stop(); } }, this.o.idleMs);
-    this.idle.unref?.();
-  }
-
-  async json<T>(messages: Msg[], schema: object, opts: { temperature?: number; maxTokens?: number } = {}): Promise<T> {
-    this.busy++;
-    try {
-      const r = await fetch(`${this.base()}/v1/chat/completions`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages, temperature: opts.temperature ?? 0.7, top_p: 0.8, max_tokens: opts.maxTokens ?? 2000,
-          response_format: { type: 'json_schema', json_schema: { name: 'answer', schema } },
-          chat_template_kwargs: { enable_thinking: false },
-        }),
-      });
-      if (!r.ok) throw new Error(`model: HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
-      const j = await r.json() as any;
-      const text = String(j.choices?.[0]?.message?.content || '').replace(/^[\s\S]*<\/think>/, '').trim();
-      return JSON.parse(text) as T;
-    } catch (e: any) {
-      if (/fetch failed|ECONNREFUSED|socket/i.test(String(e?.message || e))) throw new Error('The model stopped unexpectedly. Try again.');
-      throw e;
-    } finally { this.busy--; this.armIdle(); }
-  }
+export function claudeAsk(apiKey: string, model: string): Ask {
+  const client = new Anthropic({ apiKey });
+  return async <T>(system: string, user: string, schema: object, maxTokens: number) => {
+    const r = await client.beta.messages.create({
+      model, max_tokens: maxTokens, system,
+      messages: [{ role: 'user', content: user }],
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: schema as any } },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+    });
+    if (r.stop_reason === 'refusal') throw new Error('Claude declined this request');
+    if (r.stop_reason === 'max_tokens') throw new Error('Claude ran out of room for the answer');
+    const text = r.content.find((b) => b.type === 'text');
+    if (!text || text.type !== 'text') throw new Error('Claude sent no answer');
+    return JSON.parse(text.text) as T;
+  };
 }
 
 // --- what the listener is like ---------------------------------------------------
@@ -183,45 +96,40 @@ function profileText(t: ReturnType<typeof tasteOf>) {
   ].join('\n');
 }
 
-// --- plan -> pool -> rate -> choose -> order ------------------------------------
-const PlanSchema = {
-  type: 'object',
-  properties: {
-    title: { type: 'string', maxLength: 40 },
-    vibe: { type: 'string', maxLength: 300 },
-    artists: { type: 'array', items: { type: 'string' }, maxItems: 30 },
-    genres: { type: 'array', items: { type: 'string' }, maxItems: 8 },
-    songs: { type: 'array', maxItems: 50, items: { type: 'object', properties: { artist: { type: 'string' }, title: { type: 'string' } }, required: ['artist', 'title'] } },
-    playlists: { type: 'array', items: { type: 'string' }, maxItems: 5 },
-    useHistory: { type: 'boolean' },
-    yearFrom: { type: ['integer', 'null'] },
-    yearTo: { type: ['integer', 'null'] },
-  },
-  required: ['title', 'vibe', 'artists', 'genres', 'songs', 'playlists', 'useHistory', 'yearFrom', 'yearTo'],
-};
+// --- plan -> pool -> pick ---------------------------------------------------------
+// Schemas in the subset structured outputs accept: every property required,
+// no extra properties, no numeric bounds (counts are enforced in code).
+const obj = (properties: Record<string, object>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+const strs = { type: 'array', items: { type: 'string' } };
+const PlanSchema = obj({
+  title: { type: 'string' }, vibe: { type: 'string' }, artists: strs, genres: strs,
+  songs: { type: 'array', items: obj({ artist: { type: 'string' }, title: { type: 'string' } }) },
+  playlists: strs, useHistory: { type: 'boolean' },
+  yearFrom: { type: 'integer' }, yearTo: { type: 'integer' },
+});
 export type Plan = { title: string; vibe: string; artists: string[]; genres: string[]; songs: { artist: string; title: string }[]; playlists: string[]; useHistory: boolean; yearFrom: number | null; yearTo: number | null };
 
-const PLAN_SYSTEM = `You plan playlists for a personal music server. The playlist can only contain songs from the listener's own library, so your plan is used to search that library. Most of the playlist (80%) must be songs the listener has NOT played before, so the plan is about discovery that still fits their taste.
+const PLAN_SYSTEM = `You plan playlists for a personal music server. The playlist can only contain songs from the listener's own library, so your plan is used to search that library. Most of the playlist (80%) must be songs the listener has NOT played before: discovery that still fits their taste.
 Given the request and the listener's profile, answer with:
 - title: a short playlist name (2 to 5 words, no quotes, no emoji).
 - vibe: one or two sentences on exactly what the songs should feel like: mood, energy, tempo, setting, and what does NOT belong.
-- artists: up to 30 real artists whose music fits the vibe. At most a third from their profile (only ones that truly fit); the rest should be artists they do not play much but would likely enjoy.
-- genres: up to 8 genre names that fit, as music libraries tag them (e.g. "R&B", "Hip Hop", "Indie Pop", "House").
-- songs: up to 50 specific real songs (artist + exact title) that fit the vibe closely. Every song different, never repeat a title. Favour deeper cuts over the biggest hits.
+- artists: up to 30 real artists whose music fits the vibe. At most a third from their profile (only ones that truly fit); the rest artists they do not play much but would likely enjoy.
+- genres: up to 8 genre names as music libraries tag them (e.g. "R&B", "Hip Hop", "Indie Pop", "House").
+- songs: up to 40 specific real songs (artist + exact title) that fit the vibe closely, mostly deeper cuts over the biggest hits. Never repeat a title.
 - playlists: names of the listener's own playlists (exactly as listed) the request refers to; empty if none.
 - useHistory: true only when the request is about their own favourites (e.g. "my favourites", "what I have been playing").
-- yearFrom / yearTo: only when the request names an era (e.g. "90s" = 1990 to 1999), otherwise null.
+- yearFrom / yearTo: only when the request names an era (e.g. "90s" = 1990 and 1999), otherwise 0.
 If the request names artists or songs, include them.`;
 
-const RATE_SYSTEM = `You judge whether songs fit a playlist. For every numbered song, give a score from 0 to 10 for how well it fits the playlist's vibe: mood, energy, tempo and setting.
-Be strict and use the whole range: most songs in the list will NOT fit, and should get 5 or less. 9-10: exactly the vibe, a song you would put on this playlist yourself. 7-8: fits well. 5-6: could pass. 3-4: same genre but a different energy or mood. 0-2: does not belong.
-A song does not fit just because the artist or genre is related: a hype party song does not fit a calm playlist, an instrumental ambient track does not fit a sing-along one.
-Answer with one score per song, in the order given.`;
+const PickSchema = obj({ title: { type: 'string' }, picks: { type: 'array', items: { type: 'integer' } }, request: { type: 'array', items: { type: 'integer' } } });
+const PICK_SYSTEM = (known: number) => `You build a playlist from songs the listener owns. Pick exactly ${SIZE} numbers from the Songs list: exactly ${SIZE - known} marked NEW (never played) and exactly ${known} marked KNOWN.
+Be strict about the vibe: mood, energy, tempo and setting. A song does not fit just because the artist or genre is related (a hype party song does not belong on a calm playlist, an instrumental does not belong on a sing-along one). Better a less famous song that fits than a famous one that does not.
+Unless the request is about one or two artists, use at most 2 songs by the same artist.
+Give the picks in listening order: an inviting opener, songs with a similar feel next to each other, energy that flows, a satisfying closer.
+"request": numbers from the Missing list (songs the library lacks) that fit the vibe clearly enough to download, best first, at most 8; empty if none fit well.
+title: a short playlist name (2 to 5 words, no quotes, no emoji).`;
 
-const ORDER_SYSTEM = `Put these playlist songs in the best listening order: a strong, inviting opener, songs with a similar feel next to each other, energy that flows instead of jumping around, a satisfying closer. Answer with every number exactly once.`;
-
-type Cand = { row: Row; known: boolean; src: number; fit?: number };
-export const KNOWN_SHARE = 0.2;
+type Cand = { row: Row; known: boolean; src: number };
 
 // Candidates from everything the plan points at, without favouring what they
 // already play: the model's named songs, the planned artists (a random
@@ -302,7 +210,7 @@ export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', si
     const t = norm(c.row.title); const keys = credits(c.row).map((a) => `${a}|${t}`);
     if (keys.some((k) => seen.has(k))) continue; keys.forEach((k) => seen.add(k)); out.push(c);
   }
-  // What gets rated: up to 150 new and 50 known, best sources first.
+  // What Claude sees: up to 150 new and 50 known, best sources first.
   return Object.assign([...out.filter((c) => !c.known).slice(0, 150), ...out.filter((c) => c.known).slice(0, 50)], { missing });
 }
 
@@ -312,59 +220,56 @@ const line = (r: Row) => {
   return `${r.artist} - ${r.title}${bits ? ` (${bits})` : ''}`;
 };
 
-// Pick SIZE: KNOWN_SHARE of them songs they know, the rest new; best fit
-// first, fit 6+ unless there is nothing better; at most 2 per artist among
-// the new ones and 3 overall (unless the plan is about one or two artists).
-export function choose(pool: Cand[], plan: Pick<Plan, 'artists'>) {
+// Claude's picks made valid: real numbers, no repeats, the 5/20 mix, at most
+// 2 per artist among the new (3 overall) unless the plan is about one or two
+// artists; the rest filled from the pool's best sources. Order kept.
+export function finalize(pool: Cand[], picks: number[], plan: Pick<Plan, 'artists'>) {
   const few = plan.artists.length > 0 && plan.artists.length <= 2;
+  const wantKnown = Math.min(Math.round(SIZE * KNOWN_SHARE), pool.filter((c) => c.known).length);
+  const wantNew = SIZE - wantKnown;
   const per = new Map<string, number>(); const out: Cand[] = []; const used = new Set<Cand>();
-  const room = (c: Cand, cap: number) => credits(c.row).every((a) => (per.get(a) || 0) < cap);
-  const take = (c: Cand) => { used.add(c); out.push(c); for (const a of credits(c.row)) per.set(a, (per.get(a) || 0) + 1); };
-  const ranked = (known: boolean) => pool.filter((c) => c.known === known).sort((a, b) => (b.fit ?? 0) - (a.fit ?? 0) || b.src - a.src);
-  const wantKnown = Math.round(SIZE * KNOWN_SHARE);
-  const fill = (list: Cand[], n: number, minFit: number, cap: number) => { for (const c of list) { if (n <= 0) break; if (used.has(c) || (c.fit ?? 0) < minFit || !room(c, cap)) continue; take(c); n--; } };
-  const cap = (n: number) => (few ? SIZE : n);
-  fill(ranked(true), wantKnown, 6, cap(3));
-  fill(ranked(false), SIZE - out.length, 6, cap(2));
-  // Not enough good new songs: good known ones, then the best of the rest.
-  fill(ranked(true), SIZE - out.length, 6, cap(3));
-  fill([...ranked(false), ...ranked(true)].sort((a, b) => (b.fit ?? 0) - (a.fit ?? 0)), SIZE - out.length, 0, cap(3));
-  fill([...ranked(false), ...ranked(true)], SIZE - out.length, 0, SIZE);
+  let nNew = 0, nKnown = 0;
+  const take = (c: Cand | undefined, capNew: number, capAll: number, mix = true) => {
+    if (!c || used.has(c) || out.length >= SIZE) return;
+    if (mix && (c.known ? nKnown >= wantKnown : nNew >= wantNew)) return;
+    const cap = few ? SIZE : c.known ? capAll : capNew;
+    if (credits(c.row).some((a) => (per.get(a) || 0) >= cap)) return;
+    used.add(c); out.push(c); if (c.known) nKnown++; else nNew++;
+    for (const a of credits(c.row)) per.set(a, (per.get(a) || 0) + 1);
+  };
+  for (const n of picks) take(pool[n - 1], 2, 3);
+  for (const c of pool) take(c, 2, 3);
+  for (const c of pool) take(c, SIZE, SIZE, false); // a small library: 25 songs beats the exact mix
   return out;
 }
 
 // --- progress the dialog can show ---------------------------------------------------
 // Each step with a time estimate: how long it took on recent runs (kv
-// ai_stage_ms, a moving average), else a first guess. Rating scales with
-// the number of 40-song batches. The client shows the checklist, a bar and
-// the time left, and counts down between polls.
-const GUESS_MS: Record<string, number> = { model: 9000, plan: 18000, find: 4000, rateBatch: 4500, order: 5000, request: 12000 };
-type StageKey = 'model' | 'plan' | 'find' | 'rate' | 'order' | 'request';
+// ai_stage_ms, a moving average), else a first guess. The client shows the
+// checklist, a bar and the time left, and counts down between polls.
+const GUESS_MS: Record<string, number> = { plan: 12000, find: 3000, pick: 15000 };
+type StageKey = 'plan' | 'find' | 'pick';
 const LABELS: Record<StageKey, string> = {
-  model: 'Starting the model', plan: 'Planning the vibe', find: 'Finding songs in your library',
-  rate: 'Checking each song fits', order: 'Putting them in order', request: 'Requesting songs you do not have',
+  plan: 'Planning the vibe', find: 'Finding songs in your library', pick: 'Picking and ordering 25 songs',
 };
 export class Progress {
   private est: Record<string, number>;
   private stages: { key: StageKey; label: string; state: 'pending' | 'active' | 'done' | 'skipped'; ms: number; est: number; detail: string | null }[];
   private cur = -1; private t = 0; private frac = 0;
+  private timer: NodeJS.Timeout;
   readonly took: Record<string, number> = {};
   extra: Record<string, unknown> = {};
-  constructor(private job: Job, private db: DB | null, modelLoaded: boolean) {
+  constructor(private job: Job, private db: DB | null) {
     let saved: Record<string, number> = {};
-    try { saved = JSON.parse((db?.prepare("SELECT v FROM kv WHERE k = 'ai_stage_ms'").get() as any)?.v || '{}'); } catch { /* none yet */ }
+    try { saved = JSON.parse((db?.prepare("SELECT v FROM kv WHERE k = 'ai_claude_ms'").get() as any)?.v || '{}'); } catch { /* none yet */ }
     this.est = { ...GUESS_MS, ...saved };
-    this.stages = (Object.keys(LABELS) as StageKey[]).map((key) => ({ key, label: LABELS[key], state: 'pending', ms: 0, est: key === 'rate' ? this.est.rateBatch * 5 : this.est[key], detail: null }));
-    if (modelLoaded) this.skip('model');
+    this.stages = (Object.keys(LABELS) as StageKey[]).map((key) => ({ key, label: LABELS[key], state: 'pending', ms: 0, est: this.est[key], detail: null }));
     // Re-published every second, so a step running past its estimate moves the
     // time left instead of sitting at zero; stops with the job.
     this.timer = setInterval(() => { if (this.job.state !== 'running') { clearInterval(this.timer); return; } this.publish(); }, 1000);
     this.timer.unref?.();
+    this.publish();
   }
-  private timer: NodeJS.Timeout;
-  perBatch() { return this.est.rateBatch; }
-  skip(key: StageKey) { const s = this.stages.find((x) => x.key === key)!; if (s.state === 'pending') s.state = 'skipped'; this.publish(); }
-  estimate(key: StageKey, ms: number) { this.stages.find((x) => x.key === key)!.est = ms; this.publish(); }
   start(key: StageKey, detail: string | null = null) {
     this.finishCurrent();
     this.cur = this.stages.findIndex((x) => x.key === key); const s = this.stages[this.cur];
@@ -376,15 +281,11 @@ export class Progress {
     if (s.state === 'active') { s.state = 'done'; s.ms = Date.now() - this.t; this.took[s.key] = s.ms; }
   }
   // All done: fold this run's timings into the saved averages.
-  finish(rateBatches: number) {
+  finish() {
     this.finishCurrent(); this.cur = -1; clearInterval(this.timer); this.publish();
     const next = { ...this.est };
-    for (const [k, ms] of Object.entries(this.took)) {
-      const key = k === 'rate' ? 'rateBatch' : k; const v = k === 'rate' ? ms / Math.max(1, rateBatches) : ms;
-      if (k === 'model' && ms > 60000) continue; // a first-time download is not a load
-      next[key] = Math.round(next[key] ? next[key] * 0.6 + v * 0.4 : v);
-    }
-    try { this.db?.prepare("INSERT INTO kv (k, v) VALUES ('ai_stage_ms', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(JSON.stringify(next)); } catch { /* keep going */ }
+    for (const [k, ms] of Object.entries(this.took)) next[k] = Math.round(next[k] ? next[k] * 0.6 + ms * 0.4 : ms);
+    try { this.db?.prepare("INSERT INTO kv (k, v) VALUES ('ai_claude_ms', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(JSON.stringify(next)); } catch { /* keep going */ }
   }
   private publish() {
     const live = this.stages.filter((s) => s.state !== 'skipped');
@@ -396,100 +297,58 @@ export class Progress {
       if (s.state === 'done') doneMs += s.ms;
       else if (s.state === 'active') doneMs += Math.max(now - this.t, est * this.frac);
     }
-    const left = Math.max(0, total - doneMs);
     const active = this.cur >= 0 ? this.stages[this.cur] : null;
-    this.job.step = active ? `${active.label}${active.detail ? `: ${active.detail}` : ''}` : this.job.step;
+    if (active) this.job.step = `${active.label}${active.detail ? `: ${active.detail}` : ''}`;
     this.job.progress = total ? Math.min(0.99, doneMs / total) : null;
-    this.job.info = { stages: live.map(({ key, label, state, detail }) => ({ key, label, state, detail })), leftMs: Math.round(left), at: now, ...this.extra };
+    this.job.info = { stages: live.map(({ key, label, state, detail }) => ({ key, label, state, detail })), leftMs: Math.round(Math.max(0, total - doneMs)), at: now, ...this.extra };
   }
 }
 
-export async function generatePlaylist(db: DB, llm: Llm, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
+export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
   requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>) {
-  const pr = new Progress(job, db, llm.loaded);
-  if (!llm.loaded) pr.start('model');
-  await llm.ensure((msg, frac) => pr.set(frac ?? null, msg.replace(/^Loading the model onto the GPU$/, 'loading onto the GPU')));
+  const pr = new Progress(job, db);
   pr.start('plan', 'reading your listening');
   const taste = tasteOf(db, uid);
   pr.set(null, 'deciding on artists, genres and songs');
-  const plan = await llm.json<Plan>([
-    { role: 'system', content: PLAN_SYSTEM },
-    { role: 'user', content: `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}` },
-  ], PlanSchema, { temperature: 0.6, maxTokens: 3000 });
+  const raw = await ask<Plan>(PLAN_SYSTEM, `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}`, PlanSchema, 8000);
+  const plan: Plan = { ...raw, yearFrom: raw.yearFrom || null, yearTo: raw.yearTo || null, artists: (raw.artists || []).slice(0, 30), songs: (raw.songs || []).slice(0, 40) };
   pr.extra.title = plan.title; pr.extra.vibe = plan.vibe;
+
   pr.start('find');
   const pool = await buildPool(db, uid, plan, prompt, similar);
   if (!pool.length) throw new Error('Nothing in the library matched');
-
-  // Every candidate scored for fit, 40 at a time (a list that long is where
-  // a small model stops paying attention to each line).
-  const CHUNK = 40;
-  const batches = Math.ceil(pool.length / CHUNK);
   pr.extra.found = pool.length; pr.extra.foundNew = pool.filter((c) => !c.known).length;
-  pr.start('rate', `0 of ${pool.length} songs`);
-  pr.estimate('rate', batches * pr.perBatch());
-  for (let i = 0; i < pool.length; i += CHUNK) {
-    pr.set(i / pool.length, `${i} of ${pool.length} songs`);
-    const part = pool.slice(i, i + CHUNK);
-    const r = await llm.json<{ scores: number[] }>([
-      { role: 'system', content: RATE_SYSTEM },
-      { role: 'user', content: `Playlist request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${part.map((c, j) => `${j + 1}. ${line(c.row)}`).join('\n')}` },
-    ], { type: 'object', properties: { scores: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 10 }, minItems: part.length, maxItems: part.length } }, required: ['scores'] },
-    { temperature: 0, maxTokens: 400 });
-    part.forEach((c, j) => { c.fit = Number(r.scores?.[j]) || 0; });
-  }
-  const chosen = choose(pool, plan);
 
-  pr.start('order');
-  let order: number[] = [];
-  try {
-    const r = await llm.json<{ order: number[] }>([
-      { role: 'system', content: ORDER_SYSTEM },
-      { role: 'user', content: `Playlist: ${plan.title}. ${plan.vibe}\n\nSongs:\n${chosen.map((c, j) => `${j + 1}. ${line(c.row)}`).join('\n')}` },
-    ], { type: 'object', properties: { order: { type: 'array', items: { type: 'integer', minimum: 1, maximum: chosen.length }, minItems: chosen.length, maxItems: chosen.length } }, required: ['order'] },
-    { temperature: 0.3, maxTokens: 300 });
-    order = r.order || [];
-  } catch { /* keep the fit order */ }
-  const seen = new Set<number>(); const tracks: Cand[] = [];
-  for (const n of order) if (n >= 1 && n <= chosen.length && !seen.has(n)) { seen.add(n); tracks.push(chosen[n - 1]); }
-  chosen.forEach((c, j) => { if (!seen.has(j + 1)) tracks.push(c); });
+  pr.start('pick', `from ${pool.length} songs`);
+  const miss = requestMissing ? pool.missing.slice(0, 40) : [];
+  const wantKnown = Math.min(Math.round(SIZE * KNOWN_SHARE), pool.filter((c) => c.known).length);
+  const pick = await ask<{ title: string; picks: number[]; request: number[] }>(PICK_SYSTEM(wantKnown),
+    `Request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${pool.map((c, j) => `${j + 1}. ${c.known ? 'KNOWN' : 'NEW'} ${line(c.row)}`).join('\n')}`
+    + (miss.length ? `\n\nMissing:\n${miss.map((m, j) => `${j + 1}. ${m.artist} - ${m.title}`).join('\n')}` : ''),
+    PickSchema, 8000);
+  const tracks = finalize(pool, pick.picks || [], plan);
 
-  const name = (plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
+  const name = (pick.title || plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
   const id = playlistId(), now = Date.now();
   db.transaction(() => {
     db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
     tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.row.id, now));
   })();
-  // Suggestions the library lacks: rated like everything else; only clear
-  // fits (8+) are requested, best first.
-  let requested = 0, missingFits = 0, requestError: string | null = null;
-  if (!requestMissing || !pool.missing.length) pr.skip('request');
-  if (requestMissing && pool.missing.length) {
-    try {
-      const miss = pool.missing.slice(0, 40);
-      pr.start('request', `checking ${miss.length} suggestions`);
-      const r = await llm.json<{ scores: number[] }>([
-        { role: 'system', content: RATE_SYSTEM },
-        { role: 'user', content: `Playlist request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${miss.map((m, j) => `${j + 1}. ${m.artist} - ${m.title}`).join('\n')}` },
-      ], { type: 'object', properties: { scores: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 10 }, minItems: miss.length, maxItems: miss.length } }, required: ['scores'] },
-      { temperature: 0, maxTokens: 400 });
-      const good = miss.map((m, j) => ({ m, fit: Number(r.scores?.[j]) || 0 })).filter((x) => x.fit >= 8).sort((a, b) => b.fit - a.fit).map((x) => x.m)
-        .filter(((per) => (m: { artist: string }) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; })(new Map<string, number>()));
-      missingFits = good.length;
-      pr.set(0.5, good.length ? `looking up ${Math.min(8, good.length)} good fits` : 'none fit well enough');
-      requested = await requestMissing(id, good);
-    } catch (e: any) { requestError = e.message; }
-  }
-  pr.finish(batches);
-  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested, missing: pool.missing.length, missingFits, requestError, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, fit: t.fit ?? null, known: t.known })) };
+  // Missing songs it judged worth fetching: requested in the background, 2 per
+  // artist at most; the playlist does not wait for Music Requests.
+  const per = new Map<string, number>();
+  const good = [...new Set(pick.request || [])].map((n) => miss[n - 1]).filter(Boolean)
+    .filter((m) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; }).slice(0, 8);
+  if (requestMissing && good.length) void requestMissing(id, good).catch(() => 0);
+  pr.finish();
+  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested: good.length, missing: pool.missing.length, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })) };
 }
 
 export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
-  const llm = new Llm({ ...opts, log: opts.log ?? ((m) => app.log.info(m)) });
-  app.addHook('onClose', async () => llm.stop());
   const auth = { preHandler: (app as any).requireUser };
   const log = (m: string) => app.log.warn(m);
   const similar = (a: { id: string; name: string }) => similarInLibrary(db, a, { log });
+  const ask = opts.apiKey ? claudeAsk(opts.apiKey, opts.model) : null;
 
   // Songs the model suggested that the library lacks: their releases are
   // requested on Music Requests (Soulseek), remembered in ai_pending, and
@@ -499,15 +358,15 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
     app.log.info(`ai request: ${songs.length} suggested songs to fetch${MR ? '' : ' (no MUSIC_REQUESTS_URL)'}`);
     if (!MR) return 0;
     let n = 0;
-    for (const s of songs.slice(0, 8)) {
+    await Promise.all(songs.slice(0, 8).map(async (s) => {
       try {
         const t = await (await fetch(`${MR}/api/track?${new URLSearchParams({ artist: s.artist, title: s.title })}`, { signal: AbortSignal.timeout(15000) })).json() as any;
-        if (!t.release?.album_id) continue;
+        if (!t.release?.album_id) return;
         const r = await (await fetch(`${MR}/api/request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: t.release.album_id }), signal: AbortSignal.timeout(30000) })).json() as any;
         db.prepare('INSERT OR IGNORE INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(playlistId, s.artist, s.title, `${t.release.artist} - ${t.release.title}`, Date.now());
         n++; app.log.info(`ai request: ${s.artist} - ${s.title} -> ${t.release.artist} - ${t.release.title} (${r.status})`);
       } catch (e: any) { log(`ai request ${s.artist} - ${s.title}: ${e.message}`); }
-    }
+    }));
     return n;
   };
   const fillPending = () => {
@@ -527,14 +386,14 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   };
   (app as any).afterScan?.(fillPending);
 
-  app.get('/api/ai/status', auth, async () => ({ ...llm.available(), loaded: llm.loaded }));
+  app.get('/api/ai/status', auth, async () => (ask ? { ok: true } : { ok: false, reason: 'Generated playlists need an Anthropic API key on the server (ANTHROPIC_API_KEY).' }));
   app.post('/api/ai/playlists', auth, async (req: any, reply) => {
     const b = z.object({ prompt: z.string().trim().min(3).max(1000) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'Describe the playlist' });
-    const av = llm.available(); if (!av.ok) return reply.code(503).send({ error: av.reason });
-    const job = startJob(req.user.id, 'ai-playlist', (j) => { j.step = 'Waiting for the model'; return llm.run(() => generatePlaylist(db, llm, req.user.id, b.data.prompt, j, similar, requestMissing)); });
+    if (!ask) return reply.code(503).send({ error: 'Generated playlists need an Anthropic API key on the server (ANTHROPIC_API_KEY).' });
+    const job = startJob(req.user.id, 'ai-playlist', (j) => generatePlaylist(db, ask, req.user.id, b.data.prompt, j, similar, requestMissing));
     app.log.info({ uid: req.user.id, prompt: b.data.prompt }, 'ai playlist');
     return jobOut(job);
   });
-  return Object.assign(llm, { fillPending });
+  return { fillPending };
 }

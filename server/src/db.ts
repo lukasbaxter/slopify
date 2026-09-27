@@ -92,6 +92,9 @@ const MIGRATIONS: string[] = [
     source TEXT NOT NULL, note TEXT, created INTEGER NOT NULL, PRIMARY KEY (user_id, mr_id)
   );
   `,
+  `
+  CREATE TABLE heads (track_id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, size INTEGER NOT NULL, created INTEGER NOT NULL);
+  `,
 ];
 
 export type DB = Database.Database;

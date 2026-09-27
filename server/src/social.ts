@@ -11,7 +11,7 @@ import { storeArtwork } from './artwork.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export function registerSocial(app: FastifyInstance, db: DB, dataDir: string) {
+export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, cacheDir: string = dataDir) {
   const auth = { preHandler: (app as any).requireUser };
   const uid = (req: any) => req.user.id as string;
 
@@ -92,7 +92,7 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string) {
   app.post('/api/playlists/:id/cover', auth, async (req, reply) => {
     const p = own(req, (req.params as any).id); if (!p) return reply.code(404).send({ error: 'no such playlist' });
     let bytes: Buffer; try { bytes = await rawBody(req); } catch { return reply.code(413).send({ error: 'too large' }); }
-    try { const { hash } = await storeArtwork(dataDir, bytes); db.prepare('UPDATE playlists SET cover_hash = ?, updated = ? WHERE id = ?').run(hash, Date.now(), p.id); return { ok: true, cover: hash }; }
+    try { const { hash } = await storeArtwork(cacheDir, bytes); db.prepare('UPDATE playlists SET cover_hash = ?, updated = ? WHERE id = ?').run(hash, Date.now(), p.id); return { ok: true, cover: hash }; }
     catch { return reply.code(400).send({ error: 'not an image' }); }
   });
   app.delete('/api/playlists/:id', auth, async (req, reply) => {

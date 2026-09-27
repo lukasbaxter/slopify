@@ -23,6 +23,8 @@ import path from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from './db.js';
 import { z } from 'zod';
+import type { Readable } from 'node:stream';
+import { headOf, openBytes } from './heads.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
 const MIME: Record<string, string> = { '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.aiff': 'audio/aiff', '.aif': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.ape': 'audio/x-ape', '.wv': 'audio/x-wavpack' };
@@ -63,9 +65,35 @@ export function syntheticPlaylist(durationMs: number, sampleRate: number): strin
   return lines.join('\n');
 }
 
+// A song as the stream routes see it: where the full file is, its size (from
+// the database: no stat of the NAS on the request path, where a wedged mount
+// would block the whole process) and its head on the SSD if it has one.
+export type Src = { file: string; size: number; head: { path: string; bytes: number } | null };
+
+// ffmpeg's input: the local copy when the head is the whole file (m4a & co),
+// the joined head + NAS stream on stdin otherwise, the file itself without a head.
+function ffIn(src: Src): { args: string[]; feed: (() => Readable) | null } {
+  if (src.head && src.head.bytes >= src.size) return { args: ['-i', src.head.path], feed: null };
+  if (src.head) return { args: ['-i', 'pipe:0'], feed: () => openBytes(src.file, src.head, 0, src.size - 1) };
+  return { args: ['-i', src.file], feed: null };
+}
+function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | 'ignore', nice = false) {
+  const inp = ffIn(src);
+  const args = ['-v', 'error', '-nostdin', ...pre, ...inp.args, ...post].filter((a) => !(inp.feed && a === '-nostdin'));
+  const stdio: any = [inp.feed ? 'pipe' : 'ignore', out, 'pipe'];
+  const ff = nice ? spawn('nice', ['-n', '10', 'ffmpeg', ...args], { stdio }) : spawn('ffmpeg', args, { stdio });
+  if (inp.feed) {
+    const r = inp.feed();
+    r.on('error', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
+    ff.stdin!.on('error', () => { r.destroy(); }); // ffmpeg done or killed: stop reading
+    r.pipe(ff.stdin!);
+  }
+  return ff;
+}
+
 // Starts (or joins) the transcode and resolves once the playlist is startable.
 // `nice` runs ffmpeg at low priority: warms must never slow a foreground start.
-async function ensureHls(dataDir: string, id: string, file: string, profile: string, log: (m: string) => void, nice = false): Promise<string> {
+async function ensureHls(dataDir: string, id: string, src: Src, profile: string, log: (m: string) => void, nice = false): Promise<string> {
   const dir = transcodeDir(dataDir, id, profile);
   const index = path.join(dir, 'index.m3u8');
   const done = path.join(dir, 'done');
@@ -75,11 +103,10 @@ async function ensureHls(dataDir: string, id: string, file: string, profile: str
     const p = (async () => {
       await fsp.rm(dir, { recursive: true, force: true });
       await fsp.mkdir(dir, { recursive: true });
-      const args = ['-v', 'error', '-nostdin', '-i', file, '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', PROFILES[profile].bitrate, '-ac', '2',
-        '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index];
-      const ff = nice ? spawn('nice', ['-n', '10', 'ffmpeg', ...args], { stdio: ['ignore', 'ignore', 'pipe'] }) : spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      const ff = spawnFf([], src, ['-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', PROFILES[profile].bitrate, '-ac', '2',
+        '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
       let err = '';
-      ff.stderr.on('data', (d) => { err += d; });
+      ff.stderr!.on('data', (d) => { err += d; });
       const exit = new Promise<void>((resolve, reject) => { ff.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.slice(0, 300)}`)))); ff.on('error', reject); });
       let finished = false;
       finishing.set(key, exit.then(() => { finished = true; return fsp.writeFile(done, '1'); }).catch((e) => { finished = true; log(`hls ${key}: ${e.message}`); }).finally(() => { running.delete(key); finishing.delete(key); }));
@@ -109,22 +136,23 @@ async function ensureHls(dataDir: string, id: string, file: string, profile: str
 const WARM_CONCURRENCY = 2;
 const warmQueue: { id: string; profile: string }[] = [];
 let warmActive = 0;
-function pumpWarm(dataDir: string, trackFile: (id: string) => string | undefined, log: (m: string) => void) {
+function pumpWarm(dataDir: string, srcOf: (id: string) => Src | undefined, log: (m: string) => void) {
   while (warmActive < WARM_CONCURRENCY && warmQueue.length) {
     const { id, profile } = warmQueue.shift()!;
-    const file = trackFile(id);
-    if (!file || !fs.existsSync(file) || fs.existsSync(path.join(transcodeDir(dataDir, id, profile), 'done'))) continue;
+    const file = srcOf(id);
+    if (!file || fs.existsSync(path.join(transcodeDir(dataDir, id, profile), 'done'))) continue;
     warmActive++;
     // The slot is held until ffmpeg exits, not just until the track is startable.
     ensureHls(dataDir, id, file, profile, log, true).then(() => finishing.get(`${id}:${profile}`)).catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
-      .finally(() => { warmActive--; pumpWarm(dataDir, trackFile, log); });
+      .finally(() => { warmActive--; pumpWarm(dataDir, srcOf, log); });
   }
 }
 
 // A file with byte ranges: speakers seek in originals, and a phone resumes a
 // whole-song download where a dead zone cut it off.
-function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type: string, cache = 'private, max-age=3600') {
-  const st = fs.statSync(file);
+function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type: string, cache = 'private, max-age=3600', src?: Src) {
+  const st = src ? { size: src.size } : fs.statSync(file);
+  const open = (start: number, end: number) => (src ? openBytes(src.file, src.head, start, end) : fs.createReadStream(file, { start, end }));
   reply.header('Accept-Ranges', 'bytes').header('Cache-Control', cache).type(type);
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
   if (range) {
@@ -135,10 +163,10 @@ function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type
     end = Math.min(end, st.size - 1);
     if (start >= st.size || start > end) return reply.code(416).header('Content-Range', `bytes */${st.size}`).send();
     reply.code(206).header('Content-Range', `bytes ${start}-${end}/${st.size}`).header('Content-Length', end - start + 1);
-    return reply.send(fs.createReadStream(file, { start, end }));
+    return reply.send(open(start, end));
   }
   reply.header('Content-Length', st.size);
-  return reply.send(fs.createReadStream(file));
+  return reply.send(open(0, st.size - 1));
 }
 
 // The finished HLS segments of one profile joined into one .m4a: no
@@ -166,9 +194,13 @@ async function joinSegments(dir: string) {
   return out;
 }
 
-export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
+export function registerStream(app: FastifyInstance, db: DB, cacheDir: string) {
+  const dataDir = cacheDir; // transcodes live in the cache
   const auth = { preHandler: (app as any).requireUser };
-  const trackFile = (id: string) => (db.prepare('SELECT path FROM tracks WHERE id = ?').get(id) as any)?.path as string | undefined;
+  const srcOf = (id: string): Src | undefined => {
+    const t = db.prepare('SELECT path, size FROM tracks WHERE id = ?').get(id) as { path: string; size: number } | undefined;
+    return t ? { file: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size) } : undefined;
+  };
   const log = (m: string) => app.log.warn(m);
   // The profile each account last streamed at: what its upcoming tracks are warmed in.
   const lastProfile = new Map<string, string>();
@@ -179,16 +211,16 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
       if (running.has(`${id}:${prof}`) || fs.existsSync(path.join(transcodeDir(dataDir, id, prof), 'done'))) continue;
       warmQueue.push({ id, profile: prof });
     }
-    pumpWarm(dataDir, trackFile, log);
+    pumpWarm(dataDir, srcOf, log);
   };
   app.decorate('warmTracks', warm);
 
   // Original file, byte ranges honoured by @fastify/static-free code (ranges by hand: it is 20 lines).
   app.get('/api/stream/:id', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
-    const file = trackFile(id);
-    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
-    return sendRanged(req, reply, file, MIME[path.extname(file).toLowerCase()] || 'application/octet-stream');
+    const src = srcOf(id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
+    return sendRanged(req, reply, src.file, MIME[path.extname(src.file).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src);
   });
 
   // One progressive transcode, started at `startAt` seconds: what a browser
@@ -196,12 +228,13 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   // stream), and what the visualizer decodes on a device that is mirroring.
   app.get('/api/stream/:id/mp3', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
-    const file = trackFile(id);
-    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const src = srcOf(id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
     const q = req.query as any;
     const kbps = Math.min(320, Math.max(64, Math.round((Number(q.bitrate) || 320000) / 1000)));
     const startAt = Math.max(0, Number(q.startAt) || 0);
-    const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', ...(startAt ? ['-ss', String(startAt)] : []), '-i', file, '-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-ac', '2', '-f', 'mp3', '-id3v2_version', '0', '-write_xing', '0', 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const ff = spawnFf(startAt ? ['-ss', String(startAt)] : [], src, ['-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-ac', '2', '-f', 'mp3', '-id3v2_version', '0', '-write_xing', '0', 'pipe:1'], 'pipe');
+    ff.stderr!.resume();
     reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
     reply.header('Cache-Control', 'no-store').header('Accept-Ranges', 'none').type('audio/mpeg');
     return reply.send(ff.stdout);
@@ -217,7 +250,8 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   app.get('/api/download/:id', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
     const t = db.prepare('SELECT path, title, artist FROM tracks WHERE id = ?').get(id) as any;
-    if (!t || !fs.existsSync(t.path)) return reply.code(404).send({ error: 'no such track' });
+    const src = srcOf(id);
+    if (!t || !src) return reply.code(404).send({ error: 'no such track' });
     const q = req.query as any;
     const safe = (x: string) => String(x || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120);
     const base = safe(q.name) || safe(`${t.artist} - ${t.title}`);
@@ -225,11 +259,12 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     const disposition = (name: string) => `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(name)}`;
     if (fmt === 'original' || !DL[fmt]) {
       const ext = path.extname(t.path).toLowerCase();
-      reply.header('Content-Disposition', disposition(`${base}${ext}`)).header('Content-Length', fs.statSync(t.path).size).type(MIME[ext] || 'application/octet-stream');
-      return reply.send(fs.createReadStream(t.path));
+      reply.header('Content-Disposition', disposition(`${base}${ext}`)).header('Content-Length', src.size).type(MIME[ext] || 'application/octet-stream');
+      return reply.send(openBytes(src.file, src.head, 0, src.size - 1));
     }
     const d = DL[fmt];
-    const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', '-i', t.path, '-map', '0:a:0', '-vn', ...d.args, ...(d.args.includes('-f') ? [] : ['-f', d.ext]), 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const ff = spawnFf([], src, ['-map', '0:a:0', '-vn', ...d.args, ...(d.args.includes('-f') ? [] : ['-f', d.ext]), 'pipe:1'], 'pipe');
+    ff.stderr!.resume();
     reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
     reply.header('Content-Disposition', disposition(`${base}.${d.ext}`)).type(d.mime);
     return reply.send(ff.stdout);
@@ -245,8 +280,8 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   const LADDER: [string, number][] = [['aac-320', 400000], ['aac-160', 200000], ['aac-96', 125000]];
   app.get('/api/stream/:id/hls/master.m3u8', hls, async (req, reply) => {
     const { id } = req.params as any; const q = req.query as any;
-    const file = trackFile(id);
-    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const src = srcOf(id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
     const max = PROFILES[q.max] ? q.max : 'aac-320';
     lastProfile.set(req.user!.id, max);
     const tok = q.token ? `token=${encodeURIComponent(q.token)}&` : '';
@@ -260,13 +295,13 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   app.get('/api/stream/:id/whole/:profile', hls, async (req, reply) => {
     const { id, profile } = req.params as any;
     if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });
-    const file = trackFile(id);
-    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const src = srcOf(id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
     const dir = transcodeDir(dataDir, id, profile);
     let out = path.join(dir, 'whole.m4a');
     if (!fs.existsSync(out)) {
       try {
-        await ensureHls(dataDir, id, file, profile, log);
+        await ensureHls(dataDir, id, src, profile, log);
         await finishing.get(`${id}:${profile}`);
         if (!fs.existsSync(path.join(dir, 'done'))) return reply.code(503).send({ error: 'transcode failed' });
         out = await joinSegments(dir);
@@ -278,12 +313,12 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   app.get('/api/stream/:id/hls/:profile/index.m3u8', hls, async (req, reply) => {
     const { id, profile } = req.params as any;
     if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });
-    const file = trackFile(id);
-    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const src = srcOf(id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
     // A step down inside an adaptive stream is not the quality they chose.
     if (!(req.query as any).abr) lastProfile.set(req.user!.id, profile);
     let index: string;
-    try { index = await ensureHls(dataDir, id, file, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
+    try { index = await ensureHls(dataDir, id, src, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
     const tok = (req.query as any).token ? `?token=${encodeURIComponent((req.query as any).token)}` : '';
     let body = await fsp.readFile(index, 'utf8');

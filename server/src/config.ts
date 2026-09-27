@@ -8,7 +8,25 @@ export const config = {
   port: Number(env('PORT', '8080')),
   host: env('HOST', '0.0.0.0'),
   musicDir: path.resolve(env('MUSIC_DIR', '/music')),
-  dataDir: path.resolve(env('DATA_DIR', '/data')),
+  // Three places: config (the database, avatars, imports: small, precious),
+  // cache (song heads, transcodes, artwork sizes: all rebuildable, on the SSD)
+  // and the music itself (MUSIC_DIR, may be a NAS).
+  dataDir: path.resolve(env('CONFIG_DIR', env('DATA_DIR', '/data'))),
+  cacheDir: path.resolve(env('CACHE_DIR', env('CONFIG_DIR', env('DATA_DIR', '/data')))),
+  headSeconds: Number(env('HEAD_SECONDS', '5')),
+  // A full walk of MUSIC_DIR at boot and every SCAN_EVERY_H hours (0 = never);
+  // SCAN_PAUSE_MS between files keeps a walk over a NAS gentle.
+  scanOnBoot: env('SCAN_ON_BOOT', '1') !== '0',
+  scanEveryH: Number(env('SCAN_EVERY_H', '6')),
+  scanPauseMs: Number(env('SCAN_PAUSE_MS', '0')),
+  // New music lands in INCOMING_DIR (SSD) and is moved to NAS_DIR (see ingest.ts).
+  ingest: {
+    incomingDir: env('INCOMING_DIR', ''),
+    nasDir: env('NAS_DIR', env('MUSIC_DIR', '/music')),
+    everyMin: Number(env('INGEST_EVERY_MIN', '10')),
+    settleMin: Number(env('INGEST_SETTLE_MIN', '10')),
+    deleteAfter: env('INGEST_DELETE', '0') === '1',
+  },
   publicUrl: env('PUBLIC_URL', '').replace(/\/+$/, ''),
   adminUser: env('ADMIN_USER', 'admin'),
   adminPass: env('ADMIN_PASS', 'admin'),

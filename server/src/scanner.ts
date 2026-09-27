@@ -9,6 +9,7 @@ import { bumpLibraryVersion } from './db.js';
 import { albumId, artistId, audioContentId, jellyfinAudioId, sortName } from './ids.js';
 import { parseLrc, isSynced } from './lyrics.js';
 import { storeArtwork } from './artwork.js';
+import { buildHead, headOf } from './heads.js';
 
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
@@ -16,7 +17,15 @@ const COVER_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // only: folders under musicDir to scan instead of all of it (a just-finished
 // download). Files outside them are neither read nor treated as gone.
-export type ScanOptions = { musicDir: string; dataDir: string; jellyfinRoot?: string; only?: string[]; onProgress?: (n: number) => void; log?: (m: string) => void };
+// recordAs: read the file where it is (a fast local copy) but record it at
+// another path (where it lives for good: the NAS). heads: cut each song's
+// head into the cache, from the file being read. pauseMs: breathing room
+// between files, for a walk over a network share.
+export type ScanOptions = {
+  musicDir: string; dataDir: string; jellyfinRoot?: string; only?: string[]; onProgress?: (n: number) => void; log?: (m: string) => void;
+  recordAs?: (file: string) => string; heads?: { cacheDir: string; seconds: number }; pauseMs?: number;
+  files?: string[]; // exactly these files (no walk, nothing treated as gone)
+};
 export type ScanResult = { files: number; added: number; changed: number; removed: number; ms: number };
 
 async function* walk(dir: string): AsyncGenerator<string> {
@@ -83,7 +92,8 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   const roots = opts.only?.length ? opts.only : [opts.musicDir];
   const inScope = (p: string) => roots.some((r) => p === r || p.startsWith(r.endsWith(path.sep) ? r : r + path.sep));
   const all: string[] = [];
-  for (const root of roots) for await (const file of walk(root)) all.push(file);
+  if (opts.files) all.push(...opts.files);
+  else for (const root of roots) for await (const file of walk(root)) all.push(file);
   // Tag reading, audio hashing and cover rendering run CONCURRENT_FILES at a
   // time (ffmpeg + sharp are the cost: ~0.6 s per new file alone, 27k files
   // = hours); the database writes stay serial.
@@ -93,14 +103,22 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   const one = async (file: string) => {
     files++;
     if (files % 200 === 0) opts.onProgress?.(files);
-    seen.add(file);
+    const rec = opts.recordAs ? opts.recordAs(file) : file;
+    seen.add(rec);
+    if (opts.pauseMs) await new Promise((r) => setTimeout(r, opts.pauseMs));
     let st;
     try { st = await fs.stat(file); } catch { return; }
-    const prev = known.get(file);
-    if (prev && prev.mtime === Math.floor(st.mtimeMs) && prev.size === st.size) {
-      // Unchanged file: only a new sidecar next to it can matter.
+    const prev = known.get(rec);
+    // Seconds, not milliseconds: a copy (rsync, the NAS) keeps whole seconds,
+    // and a millisecond compare made every copied file look changed.
+    if (prev && Math.floor(prev.mtime / 1000) === Math.floor(st.mtimeMs / 1000) && prev.size === st.size) {
+      // Unchanged file: only a new sidecar next to it (or a missing head) can matter.
       seenIds.add(prev.id);
       await syncSidecar(db, prev.id, file, upsertLyrics);
+      if (opts.heads && !headOf(db, opts.heads.cacheDir, prev.id, st.size)) {
+        const d = (db.prepare('SELECT duration_ms FROM tracks WHERE id = ?').get(prev.id) as any)?.duration_ms ?? 0;
+        try { await buildHead(db, opts.heads.cacheDir, prev.id, file, st.size, d, opts.heads.seconds); } catch (e: any) { log(`head failed ${file}: ${e.message}`); }
+      }
       return;
     }
     let meta;
@@ -108,7 +126,8 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     let id: string;
     try { id = await audioContentId(file); } catch (e: any) { log(`hash failed ${file}: ${e.message}`); return; }
     const c = meta.common;
-    const dir = path.dirname(file);
+    const dir = path.dirname(file);     // where it is read (covers, sidecars)
+    const recDir = path.dirname(rec);   // where it is recorded
     const title = (c.title || path.basename(file, path.extname(file))).trim();
     const artists = splitArtists(c.artists, c.artist);
     const albumArtist = (c.albumartist || artists[0]).trim();
@@ -132,9 +151,9 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     const tx = db.transaction(() => {
       upsertArtist.run(artistId(albumArtist), albumArtist, sortName(albumArtist));
       artists.forEach((a, i) => upsertArtist.run(artIds[i], a, sortName(a)));
-      upsertAlbum.run({ id: alId, name: album, artist_id: artistId(albumArtist), artist: albumArtist, year: c.year ?? null, dir, cover_hash: coverHash, added_at: now, sort_name: sortName(album) });
+      upsertAlbum.run({ id: alId, name: album, artist_id: artistId(albumArtist), artist: albumArtist, year: c.year ?? null, dir: recDir, cover_hash: coverHash, added_at: now, sort_name: sortName(album) });
       upsertTrack.run({
-        id, path: file, mtime: Math.floor(st.mtimeMs), size: st.size, title, artist: artists.join(', '), artists: JSON.stringify(artists), artist_ids: JSON.stringify(artIds),
+        id, path: rec, mtime: Math.floor(st.mtimeMs), size: st.size, title, artist: artists.join(', '), artists: JSON.stringify(artists), artist_ids: JSON.stringify(artIds),
         album_id: alId, album, album_artist: albumArtist, track_no: c.track?.no ?? null, disc_no: c.disk?.no ?? null, year: c.year ?? null,
         genres: JSON.stringify(c.genre ?? []), duration_ms: Math.round((meta.format.duration ?? 0) * 1000), codec: meta.format.codec ?? null,
         bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate) : null, sample_rate: meta.format.sampleRate ?? null, bit_depth: meta.format.bitsPerSample ?? null, channels: meta.format.numberOfChannels ?? null,
@@ -148,11 +167,14 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     seenIds.add(id);
     if (prev) changed++; else added++;
     await syncSidecar(db, id, file, upsertLyrics);
+    if (opts.heads) {
+      try { await buildHead(db, opts.heads.cacheDir, id, file, st.size, Math.round((meta.format.duration ?? 0) * 1000), opts.heads.seconds); } catch (e: any) { log(`head failed ${file}: ${e.message}`); }
+    }
   };
   await Promise.all(Array.from({ length: CONCURRENT_FILES }, worker));
   // Files that are gone (a renamed file is not gone: its id was met under the new path).
   let removed = 0;
-  for (const [p, r] of known) if (inScope(p) && !seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
+  if (!opts.files) for (const [p, r] of known) if (inScope(p) && !seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
   recount(db);
   canonicalArtistNames(db);
   bumpLibraryVersion(db);

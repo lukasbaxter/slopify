@@ -207,7 +207,8 @@ export function submitListen(db: DB, opts: ExploreOptions, uid: string, trackId:
 
 export function registerExplore(app: FastifyInstance, db: DB, opts: ExploreOptions) {
   const log = (m: string) => app.log.info(m);
-  const o = { ...opts, log, runScan: async () => { await (app as any).runScan?.(); /* wait for it */ for (let i = 0; i < 600; i++) { if (!(app as any).scanning?.()) break; await new Promise((r) => setTimeout(r, 1000)); } } };
+  // With an ingest (new music on the SSD, library on the NAS) the fresh downloads are taken in by a sweep, not a walk of the NAS.
+  const o = { ...opts, log, runScan: async () => { const ing = (app as any).ingest; if (ing) { await ing.sweep({ settleMs: 60000 }); (app as any).runAfterScan?.(); return; } await (app as any).runScan?.(); /* wait for it */ for (let i = 0; i < 600; i++) { if (!(app as any).scanning?.()) break; await new Promise((r) => setTimeout(r, 1000)); } } };
   let running = false;
   const run = async (kinds: Kind[]) => { if (running) return { running: true }; running = true; try { return await exploreAll(db, o, kinds); } finally { running = false; } };
   app.decorate('exploreRun', run);

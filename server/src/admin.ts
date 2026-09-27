@@ -6,7 +6,9 @@ import type { DB } from './db.js';
 import { scanLibrary } from './scanner.js';
 import { enrichPass, enrichStatus, artistImagesPass } from './enrich.js';
 
-export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, dataDir: string) {
+// heads: cut each scanned song's head into the cache; pauseMs: breathing room
+// between files when the library is on a network share.
+export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, dataDir: string, scanOpts: { heads?: { cacheDir: string; seconds: number }; pauseMs?: number } = {}) {
   const admin = { preHandler: (app as any).requireAdmin };
   let current: { started: number; files: number } | null = null;
   // Work that waits on new files (generated playlists' requested songs).
@@ -17,7 +19,7 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     current = { started: Date.now(), files: 0 };
     // The scan is "current" only while it walks the files; the enrichment it
     // kicks off afterwards can run for hours and must not block the next scan.
-    scanLibrary(db, { musicDir, dataDir, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
+    scanLibrary(db, { musicDir, dataDir, ...scanOpts, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
       .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } void runEnrich(); })
       .catch((e) => { app.log.error(`scan failed: ${e.message}`); current = null; });
     return current;
@@ -44,12 +46,13 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   const scanFolders = async (rel: string[]) => {
     const only = rel.map((r) => path.resolve(musicDir, r)).filter((p) => p.startsWith(path.resolve(musicDir) + path.sep));
     if (!only.length) throw new Error('no folders inside the library');
-    const r = await scanLibrary(db, { musicDir, dataDir, only, log: (m) => app.log.warn(m) });
+    const r = await scanLibrary(db, { musicDir, dataDir, heads: scanOpts.heads, only, log: (m) => app.log.warn(m) });
     app.log.info(`folder scan ${rel.join(', ')}: ${JSON.stringify(r)}`);
     for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } }
     return r;
   };
   app.decorate('runScan', runScan);
+  app.decorate('runAfterScan', () => { for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } });
   app.decorate('scanning', () => current);
   app.post('/api/admin/scan', admin, async (req: any, reply) => {
     const paths = req.body?.paths;

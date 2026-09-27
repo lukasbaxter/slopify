@@ -24,10 +24,13 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   });
   // A like on a track, or on an album (saved to Your Library).
   const isAlbum = (id: string) => !!db.prepare('SELECT 1 FROM albums WHERE id = ?').get(id);
+  // A "like" on an artist is a follow (the artist page's Follow button).
+  const isArtist = (id: string) => !!db.prepare('SELECT 1 FROM artists WHERE id = ?').get(id);
   app.put('/api/likes/:id', auth, async (req) => {
     const id = (req.params as any).id as string;
     const at = Number((req.body as any)?.at) || Date.now();
     if (isAlbum(id)) { db.prepare('INSERT INTO album_likes (user_id, album_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid(req), id, at); return { ok: true, at, album: true }; }
+    if (isArtist(id)) { db.prepare('INSERT INTO artist_follows (user_id, artist_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid(req), id, at); return { ok: true, at, artist: true }; }
     db.prepare('INSERT INTO likes (user_id, track_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid(req), id, at);
     (app as any).sessionLike?.(uid(req), id, true, at);
     return { ok: true, at };
@@ -35,7 +38,13 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   app.delete('/api/likes/:id', auth, async (req) => {
     const id = (req.params as any).id as string;
     if (isAlbum(id)) { db.prepare('DELETE FROM album_likes WHERE user_id = ? AND album_id = ?').run(uid(req), id); return { ok: true, album: true }; }
+    if (isArtist(id)) { db.prepare('DELETE FROM artist_follows WHERE user_id = ? AND artist_id = ?').run(uid(req), id); return { ok: true, artist: true }; }
     db.prepare('DELETE FROM likes WHERE user_id = ? AND track_id = ?').run(uid(req), id); (app as any).sessionLike?.(uid(req), id, false, Date.now()); return { ok: true };
+  });
+  // Artists followed (Your Library shows them beside saved albums and playlists).
+  app.get('/api/likes/artists', auth, async (req) => {
+    const rows = db.prepare('SELECT a.*, f.at FROM artist_follows f JOIN artists a ON a.id = f.artist_id WHERE f.user_id = ? ORDER BY f.at DESC').all(uid(req)) as any[];
+    return { items: rows.map((a) => ({ id: a.id, name: a.name, image: a.image_hash, trackCount: a.track_count, albumCount: a.album_count, followedAt: a.at })) };
   });
   // Albums saved to Your Library.
   app.get('/api/likes/albums', auth, async (req) => {

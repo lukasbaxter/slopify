@@ -405,7 +405,7 @@ export default function Library({
   const toggleFollow = async (artist) => {
     const cur = followed[artist.Id] ?? Boolean(artist.UserData?.IsFavorite);
     setFollowed((m) => ({ ...m, [artist.Id]: !cur }));
-    try { await jf.setFavorite(artist.Id, !cur); } catch (e) { setFollowed((m) => ({ ...m, [artist.Id]: cur })); setErr(e.message); }
+    try { await jf.setFavorite(artist.Id, !cur); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); } catch (e) { setFollowed((m) => ({ ...m, [artist.Id]: cur })); setErr(e.message); }
   };
   // Phone profile: top tracks capped at five behind "See all"; ⋯ sheet's "Change photo".
   const [profileAll, setProfileAll] = useState(false);

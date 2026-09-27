@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { DB } from './db.js';
 import { libraryVersion } from './db.js';
 import { artPath, nearestSize, SIZES } from './artwork.js';
+import { similarInLibrary } from './discover.js';
 
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
@@ -68,6 +69,40 @@ export function mixFor(db: DB, id: string, limit: number): TrackRow[] | null {
   return [t, ...rows.slice(0, limit - 1)];
 }
 
+// Home's Daily Mix for an artist, Spotify-style: the artist (what this
+// listener plays most first), artists like them that the library has (Deezer,
+// cached), then the artist's genres; interleaved so the artist recurs without
+// running back to back, one copy of each song.
+export async function artistMix(db: DB, artist: { id: string; name: string }, limit: number, uid?: string): Promise<TrackRow[]> {
+  const plays = new Map<string, number>();
+  if (uid) for (const r of db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]) plays.set(r.track_id, r.n);
+  const shuffle = <T>(xs: T[]) => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; } return xs; };
+  const byArtist = (aid: string) => db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ?`).all(`%"${aid}"%`) as TrackRow[];
+  // theirs: half the ones they play most, the rest at random
+  const all = shuffle(byArtist(artist.id));
+  const played = all.filter((t) => plays.has(t.id)).sort((a, b) => (plays.get(b.id) || 0) - (plays.get(a.id) || 0));
+  const own = [...played.slice(0, Math.ceil(limit * 0.2)), ...all.filter((t) => !played.slice(0, Math.ceil(limit * 0.2)).includes(t))].slice(0, Math.ceil(limit * 0.4));
+  const others: TrackRow[] = [];
+  let similar: { id: string; name: string }[] = [];
+  try { similar = await similarInLibrary(db, artist); } catch { /* offline: genres only */ }
+  for (const s of similar.slice(0, 10)) others.push(...shuffle(byArtist(s.id)).slice(0, 6));
+  if (others.length < limit - own.length) {
+    const genres = new Map<string, number>();
+    for (const t of all) for (const g of JSON.parse(t.genres) as string[]) genres.set(g, (genres.get(g) || 0) + 1);
+    for (const [g] of [...genres].sort((a, b) => b[1] - a[1]).slice(0, 3)) others.push(...db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.artist_ids NOT LIKE ? ORDER BY RANDOM() LIMIT 40`).all(`%${JSON.stringify(g)}%`, `%"${artist.id}"%`) as TrackRow[]);
+  }
+  shuffle(others);
+  const out: TrackRow[] = []; const seen = new Set<string>();
+  const key = (t: TrackRow) => `${t.artist.toLowerCase()}|${t.title.toLowerCase().replace(/\s*[([].*$/, '')}`;
+  const push = (t: TrackRow | undefined) => { if (t && !seen.has(key(t))) { seen.add(key(t)); out.push(t); } };
+  let i = 0, j = 0;
+  while (out.length < limit && (i < own.length || j < others.length)) {
+    push(own[i++]);                       // the artist, then two others
+    push(others[j++]); push(others[j++]);
+  }
+  return out.slice(0, limit);
+}
+
 export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   const auth = { preHandler: (app as any).requireUser };
 
@@ -103,7 +138,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const albums = (db.prepare('SELECT * FROM albums WHERE artist_id = ? ORDER BY year DESC, sort_name').all(id) as any[]).map(albumOut);
     const appearsOn = (db.prepare(`SELECT DISTINCT a.* FROM albums a JOIN tracks t ON t.album_id = a.id WHERE t.artist_ids LIKE ? AND a.artist_id != ? ORDER BY a.year DESC`).all(`%"${id}"%`, id) as any[]).map(albumOut);
     const tracks = (db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? ORDER BY t.title LIMIT 200`).all(`%"${id}"%`) as TrackRow[]).map(trackOut);
-    return { ...artistOut(a), albums, appearsOn, tracks };
+    const followed = !!db.prepare('SELECT 1 FROM artist_follows WHERE user_id = ? AND artist_id = ?').get((req as any).user?.id, id);
+    return { ...artistOut(a), followed, albums, appearsOn, tracks };
   });
   // Any id -> what it is (album, artist or track), for a page opened by id.
   app.get('/api/items/:id', auth, async (req, reply) => {
@@ -142,7 +178,11 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     return { tracks, albums, artists };
   });
   app.get('/api/tracks/:id/mix', auth, async (req, reply) => {
-    const items = mixFor(db, (req.params as any).id, Math.min(200, Number((req.query as any).limit) || 100));
+    const id = (req.params as any).id as string; const limit = Math.min(200, Number((req.query as any).limit) || 100);
+    // An artist seeds Home's Daily Mixes.
+    const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
+    if (artist) return { items: (await artistMix(db, artist, limit, (req as any).user?.id)).map(trackOut) };
+    const items = mixFor(db, id, limit);
     if (!items) return reply.code(404).send({ error: 'no such track' });
     return { items: items.map(trackOut) };
   });
@@ -184,7 +224,14 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     if (id.startsWith('pl_')) { const p = db.prepare('SELECT cover_hash FROM playlists WHERE id = ?').get(id) as any; if (!p) return null; return p.cover_hash ?? (db.prepare('SELECT a.cover_hash FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id JOIN albums a ON a.id = t.album_id WHERE x.playlist_id = ? AND a.cover_hash IS NOT NULL ORDER BY x.pos LIMIT 1').get(id) as any)?.cover_hash ?? null; }
     const al = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(id) as any; if (al) return al.cover_hash ?? null;
     const tr = db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?').get(id) as any; if (tr) return tr.cover_hash ?? null;
-    const ar = db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as any; if (ar) return ar.image_hash ? (kind === 'banner' ? `${ar.image_hash}/banner` : ar.image_hash) : null;
+    const ar = db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as any;
+    if (ar) {
+      if (ar.image_hash) return kind === 'banner' ? `${ar.image_hash}/banner` : ar.image_hash;
+      // No portrait yet: the cover of their biggest album (a broken image otherwise).
+      if (kind === 'banner') return null;
+      return (db.prepare('SELECT cover_hash FROM albums WHERE artist_id = ? AND cover_hash IS NOT NULL ORDER BY track_count DESC LIMIT 1').get(id) as any)?.cover_hash
+        ?? (db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.artist_ids LIKE ? AND a.cover_hash IS NOT NULL LIMIT 1').get(`%"${id}"%`) as any)?.cover_hash ?? null;
+    }
     return null;
   };
   // Own, larger bucket: one album grid is hundreds of covers, and every phone on

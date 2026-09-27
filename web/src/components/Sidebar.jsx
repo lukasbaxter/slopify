@@ -35,7 +35,7 @@ const Pin = () => (
 );
 
 export default function Sidebar({ view, onView, playlists, likedCount, onOpen, onOpenLiked, onCreate, jf, loading,
-  savedAlbums = [], onOpenAlbum, player, prefs, onUpdatePrefs, onEditPlaylist, onDeletePlaylist, onFollowAlbum, onOpenArtist, onGenerate }) {
+  savedAlbums = [], followedArtists = [], onOpenAlbum, player, prefs, onUpdatePrefs, onEditPlaylist, onDeletePlaylist, onFollowAlbum, onOpenArtist, onGenerate }) {
   const [menu, setMenu] = useState(null); // { x, y, entry }
   const [dragId, setDragId] = useState(null);
   const dragRef = useRef(null); // the drop handler must not depend on a re-render having happened
@@ -48,6 +48,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     const all = [
       ...playlists.map((p) => ({ id: p.Id, kind: 'playlist', item: p })),
       ...savedAlbums.map((a) => ({ id: a.Id, kind: 'album', item: a })),
+      ...followedArtists.map((a) => ({ id: a.Id, kind: 'artist', item: a })),
     ];
     const order = Array.isArray(prefs?.libraryOrder) ? prefs.libraryOrder : [];
     const pos = new Map(order.map((id, i) => [id, i]));
@@ -57,14 +58,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     const pinned = new Set(Array.isArray(prefs?.libraryPinned) ? prefs.libraryPinned : []);
     const list = [...fresh, ...known];
     return [...list.filter((e) => pinned.has(e.id)), ...list.filter((e) => !pinned.has(e.id))];
-  }, [playlists, savedAlbums, prefs?.libraryOrder, prefs?.libraryPinned]);
-  // Phone "Artists" chip: the artists behind the saved albums (Conduit has no
-  // separate follow list), one row each, like Spotify's followed artists.
-  const artistEntries = useMemo(() => {
-    const seen = new Map();
-    for (const a of savedAlbums) for (const ar of a.AlbumArtists || []) if (ar?.Id && !seen.has(ar.Id)) seen.set(ar.Id, { id: ar.Id, kind: 'artist', item: { Id: ar.Id, Name: ar.Name } });
-    return [...seen.values()].sort((x, y) => x.item.Name.localeCompare(y.item.Name));
-  }, [savedAlbums]);
+  }, [playlists, savedAlbums, followedArtists, prefs?.libraryOrder, prefs?.libraryPinned]);
   const pinned = new Set(Array.isArray(prefs?.libraryPinned) ? prefs.libraryPinned : []);
   const togglePin = (id) => {
     const next = pinned.has(id) ? [...pinned].filter((x) => x !== id) : [...pinned, id];
@@ -80,7 +74,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
   };
 
   const playEntry = async (e, enqueue = false) => {
-    const { items } = e.kind === 'album' ? await jf.tracks({ albumId: e.id }) : await jf.playlistTracks(e.id);
+    const { items } = e.kind === 'album' ? await jf.tracks({ albumId: e.id }) : e.kind === 'artist' ? { items: await jf.instantMix(e.id) } : await jf.playlistTracks(e.id);
     if (!items.length) return;
     if (enqueue) player.addToQueue(items); else player.playQueue(items, 0, e.id);
   };
@@ -94,6 +88,12 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     { label: pinned.has(e.id) ? 'Unpin album' : 'Pin album', onClick: () => togglePin(e.id) },
     e.item.AlbumArtists?.[0]?.Id ? { label: 'Go to artist', onClick: () => onOpenArtist?.(e.item.AlbumArtists[0].Id) } : null,
     { label: 'Remove from Your Library', onClick: () => onFollowAlbum?.(e.item, false) },
+  ] : e.kind === 'artist' ? [
+    { label: 'Play', onClick: () => playEntry(e) },
+    { label: 'Add to queue', onClick: () => playEntry(e, true) },
+    { sep: true },
+    { label: pinned.has(e.id) ? 'Unpin artist' : 'Pin artist', onClick: () => togglePin(e.id) },
+    { label: 'Unfollow', onClick: async () => { await jf.setFavorite(e.id, false).catch(() => {}); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); } },
   ] : [
     { label: 'Play', onClick: () => playEntry(e) },
     { label: 'Add to queue', onClick: () => playEntry(e, true) },
@@ -136,7 +136,6 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
   const q = libQuery.trim().toLowerCase();
   const matches = (n) => !q || (n || '').toLowerCase().includes(q);
   const showLiked = (!libFilter || libFilter === 'playlist') && matches('Liked Songs');
-  const shownArtists = libFilter === 'artist' ? artistEntries.filter((e) => matches(e.item.Name)) : [];
   const shownEntries = entries.filter((e) => (!libFilter || e.kind === libFilter) && matches(e.item.Name));
 
   const submit = (e) => {
@@ -219,26 +218,18 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
             </span>
           </button>}
 
-          {shownArtists.map((e) => (
-            <button key={e.id} className="libitem round" onClick={() => onOpenArtist?.(e.id)} title={e.item.Name}>
-              {jf.imageUrl(e.id, { maxHeight: 84 }) ? <img src={jf.imageUrl(e.id, { maxHeight: 84 })} alt="" loading="lazy" draggable={false} /> : <div className="ph" />}
-              <span className="libitem-text">
-                <span className="libitem-name">{e.item.Name}</span>
-                <span className="libitem-sub">Artist</span>
-              </span>
-            </button>
-          ))}
           {shownEntries.map((e) => {
             const it = e.item;
             const art = jf.imageUrl(it.Id, { maxHeight: 84 });
             const sub = e.kind === 'album'
               ? `Album • ${it.AlbumArtist || it.AlbumArtists?.[0]?.Name || ''}`
+              : e.kind === 'artist' ? 'Artist'
               : `Playlist${it.ChildCount ? ` • ${it.ChildCount} songs` : ''}`;
             return (
               <button
                 key={e.id}
-                className={`libitem ${overId === e.id && dragId && dragId !== e.id ? 'dropbefore' : ''} ${dragId === e.id ? 'dragging' : ''}`}
-                onClick={() => (e.kind === 'album' ? onOpenAlbum?.(it.Id) : onOpen(it))}
+                className={`libitem ${e.kind === 'artist' ? 'round' : ''} ${overId === e.id && dragId && dragId !== e.id ? 'dropbefore' : ''} ${dragId === e.id ? 'dragging' : ''}`}
+                onClick={() => (e.kind === 'album' ? onOpenAlbum?.(it.Id) : e.kind === 'artist' ? onOpenArtist?.(it.Id) : onOpen(it))}
                 onContextMenu={(ev) => openMenu(ev, e)}
                 title={it.Name}
                 draggable
@@ -285,16 +276,16 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
               Create your first playlist with the + button.
             </p>
           ))}
-          {q && !showLiked && !shownArtists.length && !shownEntries.length && (
+          {q && !showLiked && !shownEntries.length && (
             <div className="libempty">
               <b>Couldn&rsquo;t find &ldquo;{libQuery.trim()}&rdquo;</b>
               <p>Try a different playlist, album or artist name.</p>
             </div>
           )}
-          {!q && phone && libFilter === 'artist' && !shownArtists.length && !loading && (
+          {!q && phone && libFilter === 'artist' && !shownEntries.length && !loading && (
             <div className="libempty">
               <b>No artists yet</b>
-              <p>Save an album and its artist shows up here.</p>
+              <p>Follow an artist and they show up here.</p>
             </div>
           )}
           {!q && phone && libFilter === 'album' && !shownEntries.length && !loading && (

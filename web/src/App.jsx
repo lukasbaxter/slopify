@@ -113,6 +113,7 @@ export default function App() {
   const [view, setView] = useState('home');
   const [playlists, setPlaylists] = useState([]);
   const [savedAlbums, setSavedAlbums] = useState([]);
+  const [followedArtists, setFollowedArtists] = useState([]);
   // Liked Songs count follows the like store; likedCacheRef holds the fetched
   // rows by id so the page paints instantly and in the store's order.
   const likesVersion = useLikesVersion();
@@ -404,6 +405,7 @@ export default function App() {
     if (!fresh('artists')) jf.artists({ limit: 500 }).then((r) => { setArtists(r.items); jf._persist('artists', r.items); jf._persist('artistsAt', Date.now()); }).catch(() => {});
     jf.playlists().then((p) => { setPlaylists(p.items); jf._persist('playlists', p.items); }).catch(() => {});
     jf.favoriteAlbums().then((a) => { setSavedAlbums(a.items); jf._persist('savedAlbums', a.items); }).catch(() => {});
+    jf.followedArtists().then((a) => setFollowedArtists(a.items)).catch(() => {});
   }, [jf]);
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
@@ -412,6 +414,7 @@ export default function App() {
     try {
       const [p, n, a] = await Promise.all([jf.playlists(), jf.favoriteCount(), jf.favoriteAlbums()]);
       setPlaylists(p.items); setLikedCount(n); setSavedAlbums(a.items);
+      jf.followedArtists().then((f) => setFollowedArtists(f.items)).catch(() => {});
       jf._persist('playlists', p.items); jf._persist('likedCount', n); jf._persist('savedAlbums', a.items);
     } catch { /* ignore */ }
   };
@@ -1149,6 +1152,7 @@ export default function App() {
           onView={goView}
           playlists={playlists}
           savedAlbums={savedAlbums}
+          followedArtists={followedArtists}
           onOpenAlbum={openAlbumById}
           player={player}
           prefs={prefs}

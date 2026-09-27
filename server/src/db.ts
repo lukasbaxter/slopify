@@ -99,6 +99,12 @@ const MIGRATIONS: string[] = [
   CREATE TABLE song_cache (track_id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, last_used INTEGER NOT NULL, added INTEGER NOT NULL);
   CREATE INDEX song_cache_used ON song_cache(last_used);
   `,
+  `
+  CREATE TABLE artist_follows (user_id TEXT NOT NULL, artist_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user_id, artist_id));
+  -- Follow used to go through the like endpoint and land in likes as a "song".
+  INSERT OR IGNORE INTO artist_follows (user_id, artist_id, at) SELECT user_id, track_id, at FROM likes WHERE track_id IN (SELECT id FROM artists);
+  DELETE FROM likes WHERE track_id IN (SELECT id FROM artists);
+  `,
 ];
 
 export type DB = Database.Database;

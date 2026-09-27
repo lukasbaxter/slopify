@@ -23,6 +23,8 @@ function deviceId() {
 const ticks = (ms) => Math.round((ms || 0) * 10000);
 // Albums saved to Your Library, so any album row knows its heart state.
 const savedAlbums = new Set();
+// Artists this account follows, so any artist row knows its Follow state.
+const followedArtists = new Set();
 const people = (names, ids) => (names || []).map((n, i) => ({ Name: n, Id: (ids || [])[i] || null })).filter((a) => a.Id);
 export const rowTrack = (t) => ({
   Id: t.id, Name: t.title, Type: 'Audio',
@@ -37,7 +39,7 @@ export const rowAlbum = (a) => ({
   ProductionYear: a.year, ChildCount: a.trackCount, RunTimeTicks: ticks(a.durationMs), DateCreated: a.addedAt ? new Date(a.addedAt).toISOString() : undefined,
   ImageTags: a.cover ? { Primary: a.cover } : {}, UserData: { IsFavorite: !!a.likedAt || savedAlbums.has(a.id) },
 });
-export const rowArtist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ChildCount: a.albumCount, ImageTags: a.image ? { Primary: a.image } : {}, BackdropImageTags: a.image ? [a.image] : [], UserData: {} });
+export const rowArtist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ChildCount: a.albumCount, ImageTags: a.image ? { Primary: a.image } : {}, BackdropImageTags: a.image ? [a.image] : [], UserData: { IsFavorite: !!a.followed || followedArtists.has(a.id) } });
 export const rowPlaylist = (p) => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackCount, ImageTags: p.cover ? { Primary: p.cover } : {}, DateCreated: p.created ? new Date(p.created).toISOString() : undefined, UserData: {} });
 
 const isPlaylistId = (id) => /^pl_/.test(id || '');
@@ -367,7 +369,13 @@ export class Slopify {
     this._evict('favorites:'); this._evict('tracks:'); this._evict('playlist:');
     const r = await this._fetch(`/api/likes/${itemId}`, { method: liked ? 'PUT' : 'DELETE', retries: 2 });
     if (r?.album) { if (liked) savedAlbums.add(itemId); else savedAlbums.delete(itemId); }
+    if (r?.artist) { if (liked) followedArtists.add(itemId); else followedArtists.delete(itemId); this._evict(`artist:${itemId}`); }
     return r;
+  }
+  async followedArtists() {
+    const items = (await this._fetch('/api/likes/artists')).items || [];
+    followedArtists.clear(); for (const a of items) followedArtists.add(a.id);
+    return { items: items.map(rowArtist) };
   }
   async favoriteAlbums() {
     const items = (await this._fetch('/api/likes/albums')).items || [];

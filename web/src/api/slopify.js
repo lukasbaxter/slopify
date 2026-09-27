@@ -183,6 +183,9 @@ export class Slopify {
     return this.transcodeUrl(itemId, { codec: 'mp3', bitrate: { high: 320000, normal: 160000, low: 96000 }[this.quality], startAt });
   }
   streamUrl(itemId) { return this._url(`/api/stream/${itemId}`); }
+  // The whole song as one AAC file at the phone's quality (HLS mode only):
+  // what the player keeps in memory to ride out dead zones.
+  wholeUrl(itemId) { return this._url(`/api/stream/${itemId}/whole/${this._profile()}`); }
   transcodeUrl(itemId, { bitrate = 320000, startAt = 0 } = {}) {
     const q = { bitrate: String(bitrate) };
     if (startAt > 0) q.startAt = String(Math.round(startAt * 1000) / 1000);

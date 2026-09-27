@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive } from './keepalive.js';
+import { createTrackCache } from './trackCache.js';
 
 // The local device is always present and is not discovered over mDNS. Named
 // for the runtime: the desktop app IS the computer, the PWA is one web player
@@ -133,6 +134,22 @@ export function usePlayer(jf) {
     }
   }
   useEffect(() => { setActiveEl(audioRef.current); }, []);
+  // Whole songs in memory (HLS mode, i.e. phones and Safari): the playing
+  // track and the next, so a dead zone on the road does not stop the music.
+  // A track that starts, or restarts after a stall, plays from here when it
+  // is in. The spare is re-pointed at the in-memory copy when it arrives.
+  const trackCache = useMemo(() => (jf ? createTrackCache((id) => jf.wholeUrl(id), {
+    onReady: (id, url) => {
+      const spare = spareRef.current;
+      if (spare && spare.dataset.track === id && spare.paused && !document.hidden && spare.src !== url) {
+        spare.src = url;
+        try { spare.load(); } catch { /* not unlocked yet */ }
+      }
+    },
+  }) : null), [jf]);
+  useEffect(() => () => trackCache?.clear(), [trackCache]);
+  const wholeFor = (id) => (jf?.streamMode?.() === 'hls' ? trackCache?.get(id) || null : null);
+
   // iOS unlocks preload/play per element on a user gesture: the spare gets its
   // load() inside the first tap so it can buffer the next track unprompted.
   useEffect(() => {
@@ -400,7 +417,7 @@ export function usePlayer(jf) {
         // clock then runs from 0 and localBaseRef holds the offset.
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
         el.dataset.track = track.Id;
-        el.src = jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0 });
+        el.src = (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0 });
         el.volume = volume / 100;
         if (seekSeconds > 0 && !transcoded) {
           // The seek has to land BEFORE play(), otherwise playback audibly
@@ -444,7 +461,8 @@ export function usePlayer(jf) {
       const id = track.Id;
       setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
     },
-    [jf, metaFor, remote, volume]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jf, metaFor, remote, volume, trackCache]
   );
 
   const stopOn = useCallback(
@@ -1156,7 +1174,31 @@ export function usePlayer(jf) {
       if (sounding === playingRef.current) { disagree = 0; return; }
       if (++disagree >= 2) { disagree = 0; followSystem(sounding)(); }
     }, 1000);
+    // Stall watchdog: meant to be playing, not paused, and the clock has not
+    // moved for 3 s with the whole song in memory, 6 s without (the stream
+    // starved: a dead zone, or a connection that hung). Restart the same song at the same spot: from memory when the
+    // whole song is in, else on a fresh connection. iOS never recovers a
+    // hung HLS connection by itself; in the car that was minutes of silence.
+    let lastT = -1, stuckSince = 0, recovering = false;
+    const watchdog = setInterval(() => {
+      const t = el.currentTime;
+      if (recovering || deviceRef.current.kind !== 'local' || !playingRef.current || el !== audioRef.current || el.paused || el.ended
+        || !el.getAttribute('src') || transitionRef.current || Date.now() < ownUntilRef.current || jf?.transcoded?.()) { stuckSince = 0; lastT = t; return; }
+      if (t !== lastT) { lastT = t; stuckSince = 0; return; }
+      if (!stuckSince) { stuckSince = Date.now(); return; }
+      const id = el.dataset.track; if (!id) return;
+      if (Date.now() - stuckSince < (wholeFor(id) ? 3000 : 6000)) return; // from memory it cannot fail, so sooner
+      stuckSince = 0; recovering = true;
+      const url = wholeFor(id) || jf.playbackUrl(id);
+      ownUntilRef.current = Date.now() + 10000;
+      el.src = url;
+      new Promise((res) => { el.addEventListener('loadedmetadata', res, { once: true }); setTimeout(res, 8000); })
+        .then(() => { try { el.currentTime = t; } catch { /* not seekable yet */ } return el.play(); })
+        .catch(() => {})
+        .finally(() => { recovering = false; lastT = el.currentTime; });
+    }, 1000);
     return () => {
+      clearInterval(watchdog);
       clearInterval(reconcile);
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('ended', onEnded);
@@ -1347,6 +1389,11 @@ export function usePlayer(jf) {
       const q = queueRef.current, i = indexRef.current;
       const ahead = [q[i + 1], q[i + 2]].filter(Boolean).map((x) => x.Id);
       if (!ahead.length && repeatRef.current === 'all' && q[0]) ahead.push(q[0].Id);
+      if (jf.streamMode?.() === 'hls') {
+        const ms = (t) => (t?.RunTimeTicks ? t.RunTimeTicks / 10000 : 0);
+        const nextItem = q[i + 1] || (repeatRef.current === 'all' ? q[0] : null);
+        trackCache?.keep([{ id: current.Id, durationMs: ms(current) }, nextItem && { id: nextItem.Id, durationMs: ms(nextItem) }]);
+      }
       if (!ahead.length) return;
       jf.warm?.(ahead);
       jf.prewarm?.(ahead[0]);
@@ -1357,7 +1404,7 @@ export function usePlayer(jf) {
       const spare = spareRef.current;
       if (spare && !document.hidden && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
         spare.dataset.track = ahead[0];
-        spare.src = jf.playbackUrl(ahead[0]);
+        spare.src = wholeFor(ahead[0]) || jf.playbackUrl(ahead[0]);
         try { spare.load(); } catch { /* not unlocked yet */ }
       }
     }, 1500);

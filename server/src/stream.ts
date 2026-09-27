@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from './db.js';
 import { z } from 'zod';
 
@@ -121,6 +121,51 @@ function pumpWarm(dataDir: string, trackFile: (id: string) => string | undefined
   }
 }
 
+// A file with byte ranges: speakers seek in originals, and a phone resumes a
+// whole-song download where a dead zone cut it off.
+function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type: string, cache = 'private, max-age=3600') {
+  const st = fs.statSync(file);
+  reply.header('Accept-Ranges', 'bytes').header('Cache-Control', cache).type(type);
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (range) {
+    let start = range[1] ? Number(range[1]) : 0, end = range[2] ? Number(range[2]) : st.size - 1;
+    if (!range[1] && range[2]) { start = st.size - Number(range[2]); end = st.size - 1; }
+    // BluOS asks for bytes=N-SIZE (one past the end) when it seeks; RFC 9110
+    // says to clamp, and a 416 here killed every seek on the Node.
+    end = Math.min(end, st.size - 1);
+    if (start >= st.size || start > end) return reply.code(416).header('Content-Range', `bytes */${st.size}`).send();
+    reply.code(206).header('Content-Range', `bytes ${start}-${end}/${st.size}`).header('Content-Length', end - start + 1);
+    return reply.send(fs.createReadStream(file, { start, end }));
+  }
+  reply.header('Content-Length', st.size);
+  return reply.send(fs.createReadStream(file));
+}
+
+// The finished HLS segments of one profile joined into one .m4a: no
+// re-encode (a stream copy, ~0.1 s), the same AAC frames, so a position in
+// one is the same position in the other. What a phone downloads whole, to
+// play through dead zones on the road.
+const joining = new Map<string, Promise<void>>();
+async function joinSegments(dir: string) {
+  const out = path.join(dir, 'whole.m4a');
+  if (fs.existsSync(out)) return out;
+  if (!joining.has(dir)) {
+    joining.set(dir, (async () => {
+      const segs = ((await fsp.readFile(path.join(dir, 'index.m3u8'), 'utf8')).match(/^s\d+\.ts$/gm) || []);
+      if (!segs.length) throw new Error('no segments');
+      const tmp = path.join(dir, 'whole.tmp.m4a');
+      await new Promise<void>((resolve, reject) => {
+        const ff = spawn('ffmpeg', ['-v', 'error', '-nostdin', '-y', '-i', `concat:${segs.join('|')}`, '-map', '0:a:0', '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart', '-f', 'mp4', tmp], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
+        let err = ''; ff.stderr.on('data', (d) => { err += d; });
+        ff.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`join ${code}: ${err.slice(0, 200)}`)))); ff.on('error', reject);
+      });
+      await fsp.rename(tmp, out);
+    })().finally(() => joining.delete(dir)));
+  }
+  await joining.get(dir);
+  return out;
+}
+
 export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
   const auth = { preHandler: (app as any).requireUser };
   const trackFile = (id: string) => (db.prepare('SELECT path FROM tracks WHERE id = ?').get(id) as any)?.path as string | undefined;
@@ -143,22 +188,7 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     const id = (req.params as any).id as string;
     const file = trackFile(id);
     if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
-    const st = fs.statSync(file);
-    const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
-    reply.header('Accept-Ranges', 'bytes').header('Cache-Control', 'private, max-age=3600').type(type);
-    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
-    if (range) {
-      let start = range[1] ? Number(range[1]) : 0, end = range[2] ? Number(range[2]) : st.size - 1;
-      if (!range[1] && range[2]) { start = st.size - Number(range[2]); end = st.size - 1; }
-      // BluOS asks for bytes=N-SIZE (one past the end) when it seeks; RFC 9110
-      // says to clamp, and a 416 here killed every seek on the Node.
-      end = Math.min(end, st.size - 1);
-      if (start >= st.size || start > end) return reply.code(416).header('Content-Range', `bytes */${st.size}`).send();
-      reply.code(206).header('Content-Range', `bytes ${start}-${end}/${st.size}`).header('Content-Length', end - start + 1);
-      return reply.send(fs.createReadStream(file, { start, end }));
-    }
-    reply.header('Content-Length', st.size);
-    return reply.send(fs.createReadStream(file));
+    return sendRanged(req, reply, file, MIME[path.extname(file).toLowerCase()] || 'application/octet-stream');
   });
 
   // One progressive transcode, started at `startAt` seconds: what a browser
@@ -225,6 +255,26 @@ export function registerStream(app: FastifyInstance, db: DB, dataDir: string) {
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return lines.join('\n') + '\n';
   });
+  // The whole song as one AAC file (see joinSegments). Waits for the
+  // transcode to finish; a phone asks for it while the song before plays.
+  app.get('/api/stream/:id/whole/:profile', hls, async (req, reply) => {
+    const { id, profile } = req.params as any;
+    if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });
+    const file = trackFile(id);
+    if (!file || !fs.existsSync(file)) return reply.code(404).send({ error: 'no such track' });
+    const dir = transcodeDir(dataDir, id, profile);
+    let out = path.join(dir, 'whole.m4a');
+    if (!fs.existsSync(out)) {
+      try {
+        await ensureHls(dataDir, id, file, profile, log);
+        await finishing.get(`${id}:${profile}`);
+        if (!fs.existsSync(path.join(dir, 'done'))) return reply.code(503).send({ error: 'transcode failed' });
+        out = await joinSegments(dir);
+      } catch (e: any) { return reply.code(503).send({ error: e.message }); }
+    }
+    return sendRanged(req, reply, out, 'audio/mp4', 'private, max-age=86400, immutable');
+  });
+
   app.get('/api/stream/:id/hls/:profile/index.m3u8', hls, async (req, reply) => {
     const { id, profile } = req.params as any;
     if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });

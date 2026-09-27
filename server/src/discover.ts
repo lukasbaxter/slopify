@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DB } from './db.js';
+import { recordRequest } from './downloads.js';
 
 export type DiscoverOptions = { musicRequestsUrl?: string; log?: (m: string) => void; fetcher?: typeof fetch };
 
@@ -123,6 +124,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     if (!body.success) return reply.code(400).send({ error: 'album_id required' });
     const r = await json(`${MR}/api/request`, 30000, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: body.data.album_id }) });
     cache.delete('requests');
+    recordRequest(db, (req as any).user.id, { ...r, album_id: body.data.album_id }, 'request');
     log(`request ${body.data.album_id}: ${r.status}${r.artist ? ` ${r.artist} - ${r.title}` : ''}`);
     return r;
   });

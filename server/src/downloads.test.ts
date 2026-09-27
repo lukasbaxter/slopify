@@ -1,0 +1,43 @@
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import Fastify from 'fastify';
+import { openDb } from './db.js';
+import { downloadOut, recordRequest, registerDownloads, STUCK_MS } from './downloads.js';
+
+const row = (o: any) => ({ id: 1, album_id: 'a1', artist: 'A', title: 'T', rtype: 'Album', year: '2020', image: null, total_tracks: 10, status: 'queued', tracks_added: 0, tracks_done: 0, created: 1000, updated: 1000, started: null, progress_at: null, log: '', queue_pos: 3, ...o });
+
+describe('downloads', () => {
+  it('state: downloading with a recent song is downloading, silent too long is stuck; failed carries the reason', () => {
+    const now = 10_000_000_000;
+    expect(downloadOut(row({ status: 'downloading', tracks_done: 4, started: (now - 60000) / 1000, progress_at: (now - 5000) / 1000 }), now)).toMatchObject({ state: 'downloading', done: 4, total: 10 });
+    expect(downloadOut(row({ status: 'downloading', started: (now - STUCK_MS - 60000) / 1000, progress_at: (now - STUCK_MS - 1000) / 1000 }), now).state).toBe('stuck');
+    expect(downloadOut(row({ status: 'failed', log: 'failed: No search results' }), now)).toMatchObject({ state: 'failed', reason: 'No search results' });
+    expect(downloadOut(row({ status: 'done', tracks_added: 9 }), now)).toMatchObject({ state: 'done', done: 9 });
+    expect(downloadOut(row({}), now)).toMatchObject({ state: 'queued', queuePos: 3 });
+  });
+
+  it('lists only this account\'s requests, and a retry of a failed one records the new request in its place', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl-')));
+    recordRequest(db, 'u1', { id: 7, album_id: 'a7', artist: 'A', title: 'T' }, 'ai', '"Song" for Mix');
+    recordRequest(db, 'u2', { id: 8, album_id: 'a8' }, 'request');
+    const calls: string[] = [];
+    const fetcher: any = async (url: string, init?: any) => {
+      calls.push(`${init?.method || 'GET'} ${url.replace('http://mr', '')}`);
+      if (url.includes('/api/requests?ids=7')) return { ok: true, json: async () => ({ requests: [row({ id: 7, album_id: 'a7', status: 'failed', log: 'failed: No search results' })] }) };
+      if (url.endsWith('/api/request')) return { ok: true, json: async () => ({ status: 'queued', id: 9 }) };
+      throw new Error(`unexpected ${url}`);
+    };
+    const app = Fastify();
+    app.decorateRequest('user', undefined);
+    app.addHook('onRequest', async (req: any) => { req.user = { id: 'u1' }; });
+    app.decorate('requireUser', async () => {});
+    registerDownloads(app, db, { musicRequestsUrl: 'http://mr', fetcher });
+    const list = (await app.inject({ method: 'GET', url: '/api/downloads' })).json();
+    expect(list.items.map((x: any) => [x.id, x.state, x.note])).toEqual([[7, 'failed', '"Song" for Mix']]);
+    expect(calls[0]).toBe('GET /api/requests?ids=7');
+    const r = (await app.inject({ method: 'POST', url: '/api/downloads/7/retry' })).json();
+    expect(r).toEqual({ ok: true, id: 9 });
+    expect((db.prepare("SELECT mr_id, source, note FROM my_requests WHERE user_id = 'u1'").all() as any[])).toEqual([{ mr_id: 9, source: 'ai', note: '"Song" for Mix' }]);
+    await app.close();
+  });
+});

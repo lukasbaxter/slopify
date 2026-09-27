@@ -22,6 +22,7 @@ import { playlistId } from './ids.js';
 import { matchTrack } from './explore.js';
 import { similarInLibrary } from './discover.js';
 import { startJob, jobOut, type Job } from './jobs.js';
+import { recordRequest } from './downloads.js';
 
 export type AiOptions = {
   apiKey?: string;
@@ -383,12 +384,14 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
     app.log.info(`ai request: ${songs.length} suggested songs to fetch${MR ? '' : ' (no MUSIC_REQUESTS_URL)'}`);
     if (!MR) return 0;
     let n = 0;
+    const pl = db.prepare('SELECT user_id, name FROM playlists WHERE id = ?').get(playlistId) as { user_id: string; name: string } | undefined;
     await Promise.all(songs.slice(0, 8).map(async (s) => {
       try {
         const t = await (await fetch(`${MR}/api/track?${new URLSearchParams({ artist: s.artist, title: s.title })}`, { signal: AbortSignal.timeout(15000) })).json() as any;
         if (!t.release?.album_id) return;
         const r = await (await fetch(`${MR}/api/request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: t.release.album_id }), signal: AbortSignal.timeout(30000) })).json() as any;
         db.prepare('INSERT OR IGNORE INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(playlistId, s.artist, s.title, `${t.release.artist} - ${t.release.title}`, Date.now());
+        if (pl) recordRequest(db, pl.user_id, { id: r.id, album_id: t.release.album_id, artist: t.release.artist, title: t.release.title }, 'ai', `"${s.title}" for ${pl.name}`);
         n++; app.log.info(`ai request: ${s.artist} - ${s.title} -> ${t.release.artist} - ${t.release.title} (${r.status})`);
       } catch (e: any) { log(`ai request ${s.artist} - ${s.title}: ${e.message}`); }
     }));

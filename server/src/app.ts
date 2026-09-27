@@ -21,6 +21,7 @@ import { registerDiscover } from './discover.js';
 import { registerJobs } from './jobs.js';
 import { registerAi } from './ai.js';
 import { registerSpotifyImport } from './spotifyImport.js';
+import { registerDownloads } from './downloads.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerJobs(app);
   app.decorate('ai', registerAi(app, db, { ...config.ai, musicRequestsUrl: config.musicRequestsUrl }));
   registerSpotifyImport(app, db, dataDir);
+  registerDownloads(app, db, { musicRequestsUrl: config.musicRequestsUrl });
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

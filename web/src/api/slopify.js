@@ -297,6 +297,10 @@ export class Slopify {
     return this.setPrefs({ dislikes: cur });
   }
 
+  // --- downloads (albums requested through Music Requests) ------------------
+  downloads(scope = 'mine') { return this._fetch(`/api/downloads?scope=${scope}`, { timeoutMs: 35000 }); }
+  retryDownload(id) { return this._fetch(`/api/downloads/${id}/retry`, { method: 'POST' }); }
+
   // --- generated playlists + Spotify import (server jobs, polled) -----------
   aiStatus() { return this._fetch('/api/ai/status'); }
   generatePlaylist(prompt) { return this._fetch('/api/ai/playlists', { method: 'POST', body: JSON.stringify({ prompt }) }); }

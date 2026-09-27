@@ -86,6 +86,12 @@ const MIGRATIONS: string[] = [
     release TEXT, requested INTEGER NOT NULL, PRIMARY KEY (playlist_id, artist, title)
   );
   `,
+  `
+  CREATE TABLE my_requests (
+    user_id TEXT NOT NULL, mr_id INTEGER NOT NULL, album_id TEXT, artist TEXT, title TEXT,
+    source TEXT NOT NULL, note TEXT, created INTEGER NOT NULL, PRIMARY KEY (user_id, mr_id)
+  );
+  `,
 ];
 
 export type DB = Database.Database;

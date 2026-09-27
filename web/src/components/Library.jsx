@@ -7,6 +7,7 @@ import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals } from '../api/pre
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
 import Home from './Home.jsx';
 import History from './History.jsx';
+import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
 import SpotifyImport from './SpotifyImport.jsx';
 import FittedTitle from './FittedTitle.jsx';
@@ -603,6 +604,7 @@ export default function Library({
       );
     }
 
+    if (kind === 'Downloads') return <Downloads jf={jf} notify={notify} />;
     if (kind === 'History') {
       return <History jf={jf} player={player} me={me} onOpenArtist={onOpenArtistById} onOpenAlbum={onOpenAlbumById} onOpenSettings={onOpenSettings} />;
     }

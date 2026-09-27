@@ -643,6 +643,10 @@ export default function App() {
     } catch { setDetail((d) => (d && d.item?.Id === 'profile' ? { ...d, loading: false } : d)); }
   };
 
+  const openDownloads = () => {
+    setView('home');
+    setDetail({ item: { Id: 'downloads', Name: 'Downloads', Type: 'Downloads' }, tracks: [], kind: 'Downloads', loading: false });
+  };
   const openHistory = () => {
     setView('home');
     setDetail({ item: { Id: 'history', Name: 'Listening history', Type: 'History' }, tracks: [], kind: 'History', loading: false });
@@ -1126,6 +1130,7 @@ export default function App() {
                 <div className="sub">{jf.baseUrl.replace(/^https?:\/\//, '')}</div>
                 <button className="desktop-only" onClick={() => { setUserMenu(false); openProfile(); }}><MenuIco d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8a7 7 0 0 1 14 0" />Profile</button>
                 <button onClick={() => { setUserMenu(false); openHistory(); }}><MenuIco d="M12 8v4l3 2M21 12a9 9 0 1 1-3-6.7M21 3v5h-5" /><span className="phone-only">Listening history</span><span className="desktop-only">History</span></button>
+                <button onClick={() => { setUserMenu(false); openDownloads(); }}><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />Downloads</button>
                 <button onClick={() => { setUserMenu(false); openSettings(); }}><MenuIco d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />Settings</button>
                 <button onClick={signOut}><MenuIco d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />Log out</button>
               </div>

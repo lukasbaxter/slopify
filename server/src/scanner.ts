@@ -178,6 +178,7 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   let removed = 0;
   if (!opts.files) for (const [p, r] of known) if (inScope(p) && !seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
   if (opts.heads) { const n = await reconcileHeads(db, opts.heads.cacheDir, opts.heads.seconds, log); if (n) log(`recut ${n} heads that belonged to a duplicate`); }
+  splitCollabCredits(db);
   recount(db);
   canonicalArtistNames(db);
   bumpLibraryVersion(db);
@@ -208,6 +209,71 @@ export function recount(db: DB) {
     UPDATE artists SET track_count = COALESCE((SELECT n FROM artist_counts c WHERE c.id = artists.id), 0), album_count = (SELECT COUNT(*) FROM albums a WHERE a.artist_id = artists.id);
     DELETE FROM artists WHERE track_count = 0 AND album_count = 0;
   `);
+}
+
+// "A & B" credits are two artists, not a third one: tags and file names
+// credit collaborations with "&" ("Tiesto & Dyro", "Tiësto & Ava Max"), and
+// the library filled with combined "artists". "&" is not split in
+// splitArtists because bands use it too, so this runs over the library after
+// each scan, where it can see who else is an artist: a credit is split when
+// at least one part is an artist on its own here (accents and case ignored,
+// the part then taking that artist's spelling). Bands stay whole: the keep
+// list, a part starting with "The" (Kool & The Gang), a generic part (Mumford
+// & Sons, Sly & the Family Stone). An album credited "A & B" lists under A
+// (B has it under Appears On); album ids do not change, so saved albums hold.
+const fold = (s: string) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const BAND_PART = /^(the\b|his |her |their |sons$|daughters$|friends$|co\.?$|company$|family$|brothers$|sisters$|orchestra$|band$|crew$|gang$)/i;
+export type ArtistStats = { known: Map<string, string>; solo: Map<string, number>; alone: Map<string, number> };
+export function splitAmpersand(credit: string, st: ArtistStats): string[] {
+  if (!/ & /.test(credit) || KEEP.has(credit.toLowerCase())) return [credit];
+  const parts = credit.split(/\s+&\s+/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2 || parts.slice(1).some((x) => BAND_PART.test(x))) return [credit];
+  const name = (x: string) => st.known.get(fold(x)) ?? x;
+  // every name has songs of its own here: a joint work of established artists
+  if (parts.every((x) => (st.solo.get(fold(x)) ?? 0) >= 3)) return parts.map(name);
+  // one of them is a major artist here (50+ songs of their own): a collaboration, not a duo
+  if (parts.some((x) => (st.solo.get(fold(x)) ?? 0) >= 50)) return parts.map(name);
+  // one of them is an artist here and the pair is not an act of its own (a duo credited alone on many songs)
+  if (parts.some((x) => st.known.has(fold(x))) && (st.alone.get(credit) ?? 0) < 8) return parts.map(name);
+  return [credit];
+}
+export function splitCollabCredits(db: DB) {
+  // Who is an artist on their own: credited alone somewhere, or listed apart in a multi-artist tag.
+  const tally = new Map<string, Map<string, number>>();
+  const rows = db.prepare('SELECT id, artists, album_artist, album_id FROM tracks').all() as { id: string; artists: string; album_artist: string; album_id: string }[];
+  for (const r of rows) for (const a of JSON.parse(r.artists) as string[]) {
+    if (/ & /.test(a)) continue;
+    const k = fold(a); let m = tally.get(k); if (!m) tally.set(k, (m = new Map())); m.set(a, (m.get(a) ?? 0) + 1);
+  }
+  const known = new Map([...tally].map(([k, m]) => [k, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
+  const solo = new Map([...tally].map(([k, m]) => [k, [...m.values()].reduce((x, y) => x + y, 0)]));
+  const alone = new Map<string, number>();
+  for (const r of rows) { const as = JSON.parse(r.artists) as string[]; if (as.length === 1 && / & /.test(as[0])) alone.set(as[0], (alone.get(as[0]) ?? 0) + 1); }
+  const stats: ArtistStats = { known, solo, alone };
+  const setTrack = db.prepare('UPDATE tracks SET artist = ?, artists = ?, artist_ids = ?, album_artist = ? WHERE id = ?');
+  const setAlbum = db.prepare('UPDATE albums SET artist = ?, artist_id = ? WHERE id = ?');
+  const upsertArtist = db.prepare('INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING');
+  const moveFollows = db.prepare('INSERT OR IGNORE INTO artist_follows (user_id, artist_id, at) SELECT user_id, ?, at FROM artist_follows WHERE artist_id = ?');
+  let fixed = 0; const combined = new Map<string, string[]>();
+  db.transaction(() => {
+    for (const r of rows) {
+      const old = JSON.parse(r.artists) as string[];
+      const next: string[] = [];
+      for (const a of old) for (const x of splitAmpersand(a, stats)) if (!next.includes(x)) next.push(x);
+      // the album artist tag may mix separators ("A; B, C & D"): the first artist of all of them
+      const aa = splitArtists(undefined, r.album_artist).flatMap((x) => splitAmpersand(x, stats));
+      if (next.length === old.length && next.every((x, i) => x === old[i]) && aa.length === 1) continue;
+      for (const a of old) { const sp = splitAmpersand(a, stats); if (sp.length > 1) combined.set(artistId(a), sp); }
+      if (aa.length > 1) combined.set(artistId(r.album_artist), aa);
+      for (const x of [...next, aa[0]]) upsertArtist.run(artistId(x), x, sortName(x));
+      setTrack.run(next.join(', '), JSON.stringify(next), JSON.stringify(next.map(artistId)), aa[0], r.id);
+      if (aa.length > 1) setAlbum.run(aa[0], artistId(aa[0]), r.album_id);
+      fixed++;
+    }
+    // follows of a combined artist carry over to each of its artists
+    for (const [cid, parts] of combined) for (const x of parts) moveFollows.run(artistId(x), cid);
+  })();
+  return fixed;
 }
 
 // One spelling per artist. Ids already fold case ("JMSN" and "Jmsn" are one

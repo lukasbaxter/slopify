@@ -54,3 +54,20 @@ describe('heads of duplicate recordings', () => {
     expect(headOf(db, DATA, t.id, t.size)).not.toBeNull();
   });
 });
+
+describe('"A & B" credits', () => {
+  it('splits collaborations, keeps bands and duos', async () => {
+    const { splitAmpersand } = await import('./scanner.js');
+    const known = new Map([['tiesto', 'Tiësto'], ['ava max', 'Ava Max'], ['elton john', 'Elton John'], ['camo', 'Camo'], ['kool', 'Kool']]);
+    const solo = new Map([['tiesto', 200], ['ava max', 60], ['elton john', 445], ['camo', 2], ['kool', 1]]);
+    const alone = new Map([['Camo & Krooked', 166], ['Elton John & Leon Russell', 16]]);
+    const st = { known, solo, alone };
+    expect(splitAmpersand('Tiesto & Ava Max', st)).toEqual(['Tiësto', 'Ava Max']);
+    expect(splitAmpersand('Elton John & Leon Russell', st)).toEqual(['Elton John', 'Leon Russell']);
+    expect(splitAmpersand('Camo & Krooked', st)).toEqual(['Camo & Krooked']);
+    expect(splitAmpersand('Kool & The Gang', st)).toEqual(['Kool & The Gang']);
+    expect(splitAmpersand('Mumford & Sons', st)).toEqual(['Mumford & Sons']);
+    expect(splitAmpersand('Above & Beyond', st)).toEqual(['Above & Beyond']);
+    expect(splitAmpersand('Simon & Garfunkel', st)).toEqual(['Simon & Garfunkel']);
+  });
+});

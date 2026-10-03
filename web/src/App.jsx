@@ -258,14 +258,35 @@ export default function App() {
   // streaming its tracks in) updates the current entry instead of pushing.
   const histRef = useRef({ stack: [{ view: 'home', detail: null, seeAll: null }], idx: 0 });
   const [histTick, setHistTick] = useState(0);
+  // Each history entry remembers how far down its page was scrolled, so Back
+  // lands where you left instead of at the top. The page's lists can still be
+  // filling in when we return, so the restore retries briefly until the
+  // container is tall enough to hold the saved position.
+  const scrollEl = () => document.querySelector('.main .content') || document.querySelector('.content');
+  const saveScroll = () => {
+    const el = scrollEl(); const h = histRef.current; const cur = h.stack[h.idx];
+    if (el && cur) cur.scroll = el.scrollTop;
+  };
+  const restoreScroll = (want) => {
+    let tries = 0;
+    const go = () => {
+      const el = scrollEl(); if (!el) return;
+      el.scrollTop = want;
+      if (want && el.scrollTop + 1 < want && tries++ < 12) setTimeout(go, 80);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(go));
+  };
   const applyEntry = (e) => {
     setView(e.view); setDetailRaw(e.detail); setSeeAllRaw(e.seeAll);
+    restoreScroll(e.scroll || 0);
     // The tab this page was opened from stays lit (per-tab stacks).
     if (e.tab) { setMobileTab(e.tab); const lib = e.tab === 'library' && !e.detail && !e.seeAll; if (lib) restoringRef.current = true; setMobileLib(lib); }
   };
   const pushEntry = (e) => {
     const h = histRef.current;
+    saveScroll(); // the page we are leaving keeps its place for Back
     h.stack = h.stack.slice(0, h.idx + 1); h.stack.push({ tab: mobileTabRef.current, ...e }); h.idx = h.stack.length - 1;
+    restoreScroll(0); // the new page starts at the top even when the DOM node is reused
     setHistTick((t) => t + 1);
     // Mirror into the browser's history so the phone's back gesture / Android
     // back / browser Back walk the in-app stack instead of leaving the app.
@@ -283,6 +304,7 @@ export default function App() {
       if (ev.state?.np && !fullScreenRef.current) { setFullScreen(true); fullScreenRef.current = true; }
       const to = ev.state && typeof ev.state.conduit === 'number' ? ev.state.conduit : 0;
       if (to === h.idx || to < 0 || to >= h.stack.length) return;
+      saveScroll(); // the DOM still shows the page we are leaving
       h.idx = to; applyEntry(h.stack[to]); setHistTick((t) => t + 1);
     };
     window.addEventListener('popstate', onPop);
@@ -305,8 +327,8 @@ export default function App() {
   // When the browser history is in step with ours, let it drive (so its own
   // Back/Forward and ours stay consistent); otherwise walk the stack directly.
   const inStep = () => { try { return window.history.state?.conduit === histRef.current.idx; } catch { return false; } };
-  const goBack = () => { const h = histRef.current; if (h.idx <= 0) return; if (inStep()) { window.history.back(); return; } h.idx -= 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
-  const goForward = () => { const h = histRef.current; if (h.idx >= h.stack.length - 1) return; if (inStep()) { window.history.forward(); return; } h.idx += 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
+  const goBack = () => { const h = histRef.current; if (h.idx <= 0) return; if (inStep()) { window.history.back(); return; } saveScroll(); h.idx -= 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
+  const goForward = () => { const h = histRef.current; if (h.idx >= h.stack.length - 1) return; if (inStep()) { window.history.forward(); return; } saveScroll(); h.idx += 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
   const canBack = histRef.current.idx > 0;
   // Mouse back / forward buttons (buttons 3 and 4) drive the in-app history in
   // the browser and on the desktop; the browser's own navigation is suppressed.

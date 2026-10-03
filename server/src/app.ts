@@ -52,11 +52,11 @@ export async function buildServer(opts: BuildOptions = {}) {
   // A song the library lists on the NAS but the ingest has not copied yet is read from the SSD drop folder.
   const incoming = config.ingest.incomingDir ? path.resolve(config.ingest.incomingDir) : null;
   const altOf = incoming && incoming !== path.resolve(musicDir) ? (f: string) => (f.startsWith(path.resolve(musicDir) + path.sep) ? path.join(incoming, path.relative(path.resolve(musicDir), f)) : null) : undefined;
-  registerStream(app, db, cacheDir, songCache, altOf);
+  registerStream(app, db, cacheDir, songCache, altOf, config.headsEnabled);
   registerSocial(app, db, dataDir, cacheDir);
-  const heads = { cacheDir, seconds: config.headSeconds };
+  const heads = config.headsEnabled ? { cacheDir, seconds: config.headSeconds } : undefined;
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs });
-  app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds }));
+  app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
   registerExplore(app, db, { slskdUrl: config.slskdUrl, slskdKey: config.slskdKey });
   registerDiscover(app, db, { musicRequestsUrl: config.musicRequestsUrl, log: (m) => app.log.info(m) });

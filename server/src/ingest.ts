@@ -28,6 +28,7 @@ import { bumpLibraryVersion } from './db.js';
 
 export type IngestOptions = {
   incomingDir: string; nasDir: string; musicDir: string; cacheDir: string; headSeconds: number;
+  headsEnabled?: boolean; // false: no heads cut while indexing, and none required before deleting
   settleMs: number; deleteAfter: boolean; batchDirs?: number; log?: (m: string) => void;
   // Copying early is harmless; deleting a folder a download is still writing to
   // is not (a stalled Soulseek album looks settled after 10 min): deletion waits longer.
@@ -89,6 +90,7 @@ export class Ingest {
   private log(m: string) { this.o.log?.(m); }
   private nasPath(f: string) { return path.join(this.o.nasDir, path.relative(this.o.incomingDir, f)); }
   private finalPath(f: string) { return path.join(this.o.musicDir, path.relative(this.o.incomingDir, f)); }
+  private heads() { return this.o.headsEnabled === false ? undefined : { cacheDir: this.o.cacheDir, seconds: this.o.headSeconds }; }
 
   // One sweep at a time. only: folders (relative to INCOMING_DIR) to take now,
   // settled or not; settleMs: a shorter settle time for this sweep.
@@ -139,7 +141,7 @@ export class Ingest {
       if (toIndex.length) {
         const r = await scanLibrary(this.db, {
           musicDir: this.o.incomingDir, dataDir: this.o.cacheDir, files: toIndex,
-          recordAs: (f) => this.finalPath(f), heads: { cacheDir: this.o.cacheDir, seconds: this.o.headSeconds },
+          recordAs: (f) => this.finalPath(f), heads: this.heads(),
           log: (m) => this.log(m),
         });
         st.indexed += r.added + r.changed;
@@ -229,7 +231,7 @@ export class Ingest {
     const t = this.db.prepare('SELECT id, size FROM tracks WHERE path = ?').get(this.finalPath(f)) as { id: string; size: number } | undefined;
     if (!t) return true;
     const size = (await fsp.stat(f)).size;
-    return t.size !== size || !headOf(this.db, this.o.cacheDir, t.id, t.size);
+    return t.size !== size || (!!this.heads() && !headOf(this.db, this.o.cacheDir, t.id, t.size));
   }
 
   // Delete the SSD folder only when every file is on the NAS and every song is indexed at its NAS path with a head.
@@ -257,7 +259,7 @@ export class Ingest {
       if (!isAudio(f)) continue;
       const s = await fsp.stat(f);
       const t = this.db.prepare('SELECT id, size FROM tracks WHERE path = ?').get(this.finalPath(f)) as { id: string; size: number } | undefined;
-      if (!t || t.size !== s.size || !headOf(this.db, this.o.cacheDir, t.id, t.size)) { st.kept++; this.log(`ingest: keeping ${rel} on the SSD (${path.basename(f)} is not in the library with a head)`); return; }
+      if (!t || t.size !== s.size || (this.heads() && !headOf(this.db, this.o.cacheDir, t.id, t.size))) { st.kept++; this.log(`ingest: keeping ${rel} on the SSD (${path.basename(f)} is not in the library${this.heads() ? ' with a head' : ''})`); return; }
     }
     for (const f of files) await fsp.unlink(f);
     // empty folders up to (not including) the incoming root
@@ -272,9 +274,9 @@ export class Ingest {
 
 export type IngestConfig = { incomingDir: string; nasDir: string; everyMin: number; settleMin: number; deleteAfter: boolean; deleteSettleMin: number };
 
-export function registerIngest(app: FastifyInstance, db: DB, o: IngestConfig & { musicDir: string; cacheDir: string; headSeconds: number }) {
+export function registerIngest(app: FastifyInstance, db: DB, o: IngestConfig & { musicDir: string; cacheDir: string; headSeconds: number; headsEnabled?: boolean }) {
   if (!o.incomingDir) return null;
-  const ing = new Ingest(db, { incomingDir: path.resolve(o.incomingDir), nasDir: path.resolve(o.nasDir), musicDir: path.resolve(o.musicDir), cacheDir: o.cacheDir, headSeconds: o.headSeconds, settleMs: o.settleMin * 60000, deleteAfter: o.deleteAfter, deleteSettleMs: o.deleteSettleMin * 60000, log: (m) => app.log.info(m) });
+  const ing = new Ingest(db, { incomingDir: path.resolve(o.incomingDir), nasDir: path.resolve(o.nasDir), musicDir: path.resolve(o.musicDir), cacheDir: o.cacheDir, headSeconds: o.headSeconds, headsEnabled: o.headsEnabled, settleMs: o.settleMin * 60000, deleteAfter: o.deleteAfter, deleteSettleMs: o.deleteSettleMin * 60000, log: (m) => app.log.info(m) });
   const admin = { preHandler: (app as any).requireAdmin };
   const after = () => (app as any).runAfterScan?.();
   // Music Requests: {dirs: [relative folders]} when an album has landed (awaited);

@@ -13,7 +13,14 @@ export const config = {
   // and the music itself (MUSIC_DIR, may be a NAS).
   dataDir: path.resolve(env('CONFIG_DIR', env('DATA_DIR', '/data'))),
   cacheDir: path.resolve(env('CACHE_DIR', env('CONFIG_DIR', env('DATA_DIR', '/data')))),
+  // Heads (the first HEAD_SECONDS of every song mirrored to the cache so
+  // playback starts at SSD speed while a NAS wakes). HEADS=0 turns the whole
+  // machinery off: no cutting at scan, every byte read from MUSIC_DIR.
+  headsEnabled: env('HEADS', '1') !== '0',
   headSeconds: Number(env('HEAD_SECONDS', '5')),
+  // HLS transcodes under CACHE_DIR/transcodes; the nightly trim drops the
+  // oldest-used past this size.
+  transcodeCacheGb: Number(env('TRANSCODE_CACHE_GB', '60')),
   // Whole songs copied from the NAS to the cache when they are about to play,
   // least recently played dropped first past this size (0 = off).
   songCacheGb: Number(env('SONG_CACHE_GB', '0')),

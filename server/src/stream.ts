@@ -26,6 +26,7 @@ import { z } from 'zod';
 import type { Readable } from 'node:stream';
 import { headOf, openBytes } from './heads.js';
 import type { SongCache } from './songcache.js';
+import { config } from './config.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
 const MIME: Record<string, string> = { '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.aiff': 'audio/aiff', '.aif': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.ape': 'audio/x-ape', '.wv': 'audio/x-wavpack' };
@@ -36,7 +37,6 @@ const SEG = 4;             // -hls_time
 const RUNWAY = 1;          // segments written before the (synthetic) playlist is answered
 const RUNWAY_WAIT = 1500;  // ms cap on waiting for them
 const SEG_WAIT_MS = 30000; // how long a segment request waits for ffmpeg
-const CACHE_CAP_GB = 60;   // /data/transcodes, oldest-used dirs go first
 
 function transcodeDir(dataDir: string, id: string, profile: string) { return path.join(dataDir, 'transcodes', id, profile); }
 const segmentCount = (txt: string) => (txt.match(/^s\d+\.ts\s*$/gm) || []).length;
@@ -196,7 +196,7 @@ async function joinSegments(dir: string) {
   return out;
 }
 
-export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, songs?: SongCache, altOf?: (file: string) => string | null) {
+export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, songs?: SongCache, altOf?: (file: string) => string | null, headsEnabled = true) {
   const dataDir = cacheDir; // transcodes live in the cache
   const auth = { preHandler: (app as any).requireUser };
   // Every caller is about to play the song (or warm it as next in a queue):
@@ -208,7 +208,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const local = songs?.get(id, t.size);
     if (local) return { file: local, name: t.path, size: t.size, head: null };
     songs?.want(id, t.path, t.size);
-    return { file: t.path, name: t.path, size: t.size, head: headOf(db, cacheDir, id, t.size), alt: altOf?.(t.path) ?? null };
+    return { file: t.path, name: t.path, size: t.size, head: headsEnabled ? headOf(db, cacheDir, id, t.size) : null, alt: altOf?.(t.path) ?? null };
   };
   app.get('/api/admin/cache', { preHandler: (app as any).requireAdmin }, async () => ({
     songs: songs?.stats() ?? null,
@@ -401,7 +401,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
         dirs.push({ dir, used, size }); total += size;
       }
     }
-    const cap = CACHE_CAP_GB * 1024 ** 3;
+    const cap = config.transcodeCacheGb * 1024 ** 3;
     let removed = 0;
     for (const d of dirs.sort((a, b) => a.used - b.used)) {
       if (total <= cap) break;

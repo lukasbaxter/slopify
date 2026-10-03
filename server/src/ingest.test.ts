@@ -69,6 +69,18 @@ describe('ingest', () => {
     expect(n).toBeGreaterThan(0);
   });
 
+  it('with heads off, indexes without cutting any and deletion does not wait for them', async () => {
+    const { incoming, nas, cache, db } = setup();
+    const ing = new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, headsEnabled: false, settleMs: 0, deleteAfter: true, deleteSettleMs: 0 });
+    const st = await ing.sweep();
+    expect(st.errors).toEqual([]);
+    expect(st.deletedDirs).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(incoming, 'The Fixture Band'))).toBe(false);
+    const tracks = db.prepare('SELECT id, size FROM tracks').all() as any[];
+    expect(tracks.length).toBeGreaterThan(0);
+    for (const t of tracks) expect(headOf(db, cache, t.id, t.size)).toBeNull();
+  });
+
   // Only where the disk tells case apart (the server's SSD; not a Mac's APFS).
   it('names that differ only in case: the second song is renamed apart, a duplicate picture keeps its largest copy', async (ctx) => {
     const { incoming, nas, cache, db } = setup();

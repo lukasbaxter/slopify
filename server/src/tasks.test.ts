@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { registerTasks, builtinTasks, isStudio, type TaskDef } from './tasks.js';
+import { registerTasks, builtinTasks, isStudio, isDue, prevPoint, parseSchedule, type TaskDef, type Schedule } from './tasks.js';
 
 const adminApp = () => {
   const app = Fastify();
@@ -15,7 +15,7 @@ describe('tasks framework', () => {
   it('lists tasks, runs one by hand, remembers the run across the API, and refuses a double start', async () => {
     const db = tmpdb('tasks');
     let resolve!: (v: string) => void;
-    const def: TaskDef = { id: 't1', name: 'T1', description: 'd', everyH: 0, run: () => new Promise((r) => { resolve = r; }) };
+    const def: TaskDef = { id: 't1', name: 'T1', description: 'd', schedule: { mode: 'off' }, run: () => new Promise((r) => { resolve = r; }) };
     const app = adminApp();
     registerTasks(app, db, [def]);
     expect((await app.inject({ url: '/api/admin/tasks' })).json().tasks).toMatchObject([{ id: 't1', last: null, running: null }]);
@@ -35,9 +35,9 @@ describe('tasks framework', () => {
     const db = tmpdb('tick');
     const ran: string[] = [];
     const defs: TaskDef[] = [
-      { id: 'a', name: 'A', description: '', everyH: 1, run: async () => { ran.push('a'); return 'ok'; } },
-      { id: 'b', name: 'B', description: '', everyH: 1, run: async () => { ran.push('b'); throw new Error('boom'); } },
-      { id: 'c', name: 'C', description: '', everyH: 0, run: async () => { ran.push('c'); return 'ok'; } },
+      { id: 'a', name: 'A', description: '', schedule: { mode: 'interval', hours: 1 }, run: async () => { ran.push('a'); return 'ok'; } },
+      { id: 'b', name: 'B', description: '', schedule: { mode: 'interval', hours: 1 }, run: async () => { ran.push('b'); throw new Error('boom'); } },
+      { id: 'c', name: 'C', description: '', schedule: { mode: 'off' }, run: async () => { ran.push('c'); return 'ok'; } },
     ];
     const app = adminApp();
     const { tick } = registerTasks(app, db, defs);
@@ -53,6 +53,49 @@ describe('tasks framework', () => {
   });
 });
 
+describe('schedules', () => {
+  it('daily and weekly fire once per point, catching up a point missed while down', () => {
+    const daily: Schedule = { mode: 'daily', at: '04:00' };
+    const at = (d: string) => new Date(d).getTime();
+    const now = at('2026-10-03T13:00:00');
+    expect(prevPoint(daily, now)).toBe(at('2026-10-03T04:00:00'));
+    expect(prevPoint(daily, at('2026-10-03T02:00:00'))).toBe(at('2026-10-02T04:00:00'));
+    expect(isDue(daily, null, now)).toBe(true); // never run: catch up
+    expect(isDue(daily, { started: at('2026-10-03T04:01:00'), ended: 0, ok: true }, now)).toBe(false);
+    expect(isDue(daily, { started: at('2026-10-02T04:01:00'), ended: 0, ok: true }, now)).toBe(true); // missed today's point
+    const weekly: Schedule = { mode: 'weekly', day: 0, at: '06:00' }; // Sunday
+    expect(new Date(prevPoint(weekly, now)!).getDay()).toBe(0);
+    expect(isDue({ mode: 'interval', hours: 2 }, { started: now - 3 * 3600e3, ended: 0, ok: true }, now)).toBe(true);
+    expect(isDue({ mode: 'interval', hours: 2 }, { started: now - 1 * 3600e3, ended: 0, ok: true }, now)).toBe(false);
+    expect(isDue({ mode: 'off' }, null, now)).toBe(false);
+    expect(isDue({ mode: 'watch' }, null, now)).toBe(false);
+  });
+
+  it('parseSchedule takes only real schedules, and watch only where a folder is watched', () => {
+    expect(parseSchedule({ mode: 'daily', at: '23:30' }, false)).toEqual({ mode: 'daily', at: '23:30' });
+    expect(parseSchedule({ mode: 'daily', at: '25:00' }, false)).toBeNull();
+    expect(parseSchedule({ mode: 'interval', hours: 0.1 }, false)).toBeNull();
+    expect(parseSchedule({ mode: 'weekly', day: 7, at: '04:00' }, false)).toBeNull();
+    expect(parseSchedule({ mode: 'watch' }, true)).toEqual({ mode: 'watch' });
+    expect(parseSchedule({ mode: 'watch' }, false)).toBeNull();
+  });
+
+  it('the schedule endpoint persists a change and reports it with the next run', async () => {
+    const db = tmpdb('sched');
+    const def: TaskDef = { id: 's1', name: 'S1', description: '', schedule: { mode: 'interval', hours: 6 }, watchDir: '/tmp', run: async () => 'ok' };
+    const app = adminApp();
+    registerTasks(app, db, [def]);
+    let t = (await app.inject({ url: '/api/admin/tasks' })).json().tasks[0];
+    expect(t).toMatchObject({ schedule: { mode: 'interval', hours: 6 }, canWatch: true });
+    expect((await app.inject({ method: 'PUT', url: '/api/admin/tasks/s1/schedule', payload: { schedule: { mode: 'daily', at: '03:15' } } })).json().schedule).toEqual({ mode: 'daily', at: '03:15' });
+    t = (await app.inject({ url: '/api/admin/tasks' })).json().tasks[0];
+    expect(t.schedule).toEqual({ mode: 'daily', at: '03:15' }); // survives via kv
+    expect(typeof t.next).toBe('number');
+    expect((await app.inject({ method: 'PUT', url: '/api/admin/tasks/s1/schedule', payload: { schedule: { mode: 'nope' } } })).statusCode).toBe(400);
+    await app.close();
+  });
+});
+
 describe('built-in chores', () => {
   const seed = (db: any) => {
     db.prepare("INSERT INTO users (id, name, pass_hash, role, created) VALUES ('u1', 'u', 'x', 'user', 0)").run();
@@ -63,9 +106,8 @@ describe('built-in chores', () => {
     db.prepare("INSERT INTO plays (user_id, track_id, at) VALUES ('u1', 't1', ?)").run(Date.now());
   };
   const opts = (db: any, lidarr: any) => ({
-    db, lidarr, cacheDir: '/tmp', headsEnabled: false, headSeconds: 3, pauseMs: 0,
-    scanEveryH: 168, enrichEveryH: 1, wantedTarget: 25,
-    discoveryEveryH: 168, discoveryPerRun: 5, backlogEveryH: 6, backlogPerRun: 10, backlogArtistsPerRun: 5, headsEveryH: 24,
+    db, lidarr, cacheDir: '/tmp', musicDir: '/tmp', headsEnabled: false, headSeconds: 3, pauseMs: 0,
+    enrichEveryH: 1, wantedTarget: 25, discoveryPerRun: 5, backlogEveryH: 6, backlogPerRun: 10, backlogArtistsPerRun: 5,
   });
   const ctx = { step: () => {}, log: () => {} };
 

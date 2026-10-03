@@ -73,9 +73,9 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerDownloads(app, db, { lidarr });
   registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
   registerTasks(app, db, builtinTasks(app, {
-    db, lidarr, cacheDir,
+    db, lidarr, cacheDir, musicDir,
     headsEnabled: config.headsEnabled, headSeconds: config.headSeconds, pauseMs: config.scanPauseMs,
-    scanEveryH: config.scanEveryH, ...config.tasks,
+    ...config.tasks,
   }));
 
   const health = async () => ({ ok: true, version: VERSION });

@@ -1518,6 +1518,23 @@ button:disabled { cursor: default; }
 .admin-list li > span { color: var(--fg-dim); }
 .admin-list-actions { margin-left: auto; display: flex; gap: 8px; }
 .admin-list-actions .btn-secondary { padding: 6px 12px; font-size: 13px; }
+
+/* Tasks: one slim line per chore - icon in a circle, name, what happened
+   last, its schedule, Run now. The accent color says "running". */
+.task-list { gap: 6px; }
+.admin-list li.task-row { flex-wrap: nowrap; padding: 6px 10px; gap: 10px; }
+.task-ico { flex: none; width: 30px; height: 30px; border-radius: 50%; background: rgba(255, 255, 255, .08); color: var(--fg-dim); display: flex; align-items: center; justify-content: center; }
+.task-ico svg { width: 15px; height: 15px; }
+.task-row.running .task-ico { background: var(--accent); color: #000; }
+.task-row.running .task-name, .task-row.running .task-meta { color: var(--accent); }
+.task-name { flex: none; white-space: nowrap; }
+.task-meta { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-sched { flex: none; display: flex; align-items: center; gap: 6px; }
+.task-sched select, .task-sched input { background: rgba(255, 255, 255, .08); color: var(--fg); border: 0; border-radius: 4px; padding: 5px 6px; font-size: 12px; font-family: inherit; color-scheme: dark; }
+.task-sched select:hover, .task-sched input:hover { background: rgba(255, 255, 255, .14); }
+.task-run { flex: none; white-space: nowrap; }
+.settings-phone .admin-list li.task-row { flex-wrap: wrap; }
+.settings-phone .task-meta { flex-basis: 100%; order: 5; }
 .settings-phone .admin-stats { grid-template-columns: 1fr; gap: 2px; }
 .settings-phone .admin-stat span { font-size: 12px; }
 .settings-phone .admin-list li { padding: 10px 12px; }

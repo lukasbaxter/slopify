@@ -4,7 +4,12 @@ import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
 import { enrichPass, enrichStatus, artistImagesPass, albumCoversPass, artistDirOf, type Fetcher } from './enrich.js';
 
-const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
+// saveToLibrary writes artist.jpg/cover.jpg INTO the library, so these tests
+// run on their own copy of the fixtures: the shared ones stay pristine for
+// the next run (this used to fail every second `vitest run`).
+const FIXTURES = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
+const MUSIC = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-enrich-lib-'));
+fs.cpSync(FIXTURES, MUSIC, { recursive: true });
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-enrich-'));
 
 // A fake LrcLib: exact get answers for "River" titles with synced lyrics,

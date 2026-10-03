@@ -21,12 +21,61 @@ export function useAdminStatus(jf, every = 5000) {
   return [status, err];
 }
 
+// One small stroke icon per chore, sitting in a circle; the circle turns
+// the accent color while the task runs.
+const TASK_ICONS = {
+  scan: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>,
+  enrich: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-4.5-4.5L5 22" /></svg>,
+  heads: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" /></svg>,
+  discovery: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5 5-2z" /></svg>,
+  backlog: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" /></svg>,
+};
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HOURS = [[0.25, '15 min'], [0.5, '30 min'], [1, 'hour'], [2, '2 h'], [3, '3 h'], [6, '6 h'], [12, '12 h'], [24, '24 h']];
+
+// The schedule, editable in place: every N hours, daily or weekly at a
+// time, on file change (tasks that watch a folder), or off.
+function TaskSchedule({ jf, t, onSaved, notify }) {
+  const save = (schedule) => jf._fetch(`/api/admin/tasks/${t.id}/schedule`, { method: 'PUT', body: JSON.stringify({ schedule }) })
+    .then(onSaved).catch((e) => notify?.(`Could not change the schedule: ${e.message}`));
+  const s = t.schedule;
+  return (
+    <span className="task-sched">
+      <select value={s.mode} aria-label={`${t.name} schedule`} onChange={(e) => {
+        const m = e.target.value;
+        save(m === 'interval' ? { mode: 'interval', hours: 6 } : m === 'daily' ? { mode: 'daily', at: '04:00' } : m === 'weekly' ? { mode: 'weekly', day: 0, at: '04:00' } : { mode: m });
+      }}>
+        <option value="interval">Every…</option>
+        <option value="daily">Daily at…</option>
+        <option value="weekly">Weekly…</option>
+        {t.canWatch && <option value="watch">On file change</option>}
+        <option value="off">Off</option>
+      </select>
+      {s.mode === 'interval' && (
+        <select value={s.hours} aria-label="interval" onChange={(e) => save({ mode: 'interval', hours: Number(e.target.value) })}>
+          {HOURS.map(([h, label]) => <option key={h} value={h}>{label}</option>)}
+          {!HOURS.some(([h]) => h === s.hours) && <option value={s.hours}>{s.hours} h</option>}
+        </select>
+      )}
+      {s.mode === 'weekly' && (
+        <select value={s.day} aria-label="day" onChange={(e) => save({ ...s, day: Number(e.target.value) })}>
+          {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+        </select>
+      )}
+      {(s.mode === 'daily' || s.mode === 'weekly') && (
+        <input type="time" value={s.at} aria-label="time" onChange={(e) => e.target.value && save({ ...s, at: e.target.value })} />
+      )}
+    </span>
+  );
+}
+
 export function AdminSettings({ jf, me, notify, phone = false }) {
   const [status, err] = useAdminStatus(jf);
   const [tasks, setTasks] = useState(null);
   const [users, setUsers] = useState(null);
   const [invite, setInvite] = useState(null);
   const [busy, setBusy] = useState('');
+  const loadTasks = () => jf._fetch('/api/admin/tasks').then((r) => setTasks(r.tasks || [])).catch(() => {});
   useEffect(() => {
     if (!jf) return undefined;
     let alive = true;
@@ -34,7 +83,7 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
     tick();
     const t = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(t); };
-  }, [jf]);
+  }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadUsers = () => jf.users().then((r) => setUsers(r.users || [])).catch(() => setUsers([]));
   useEffect(() => { loadUsers(); }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -75,21 +124,18 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
       {tasks && (
         <section className="settings-section admin">
           <h2>Tasks</h2>
-          <ul className="admin-list">
+          <ul className="admin-list task-list">
             {tasks.map((t) => (
-              <li key={t.id}>
-                <b>{t.name}</b>
-                <span>
-                  {t.description}
-                  {' · '}
-                  {t.running ? `running — ${t.running.step}${t.running.progress != null ? ` (${Math.round(t.running.progress * 100)}%)` : ''}`
-                    : t.last ? `${t.last.ok ? '' : 'failed '}${ago(t.last.started)}${t.last.summary ? ` · ${t.last.summary}` : ''}${t.last.error ? ` · ${t.last.error}` : ''}`
+              <li key={t.id} className={`task-row ${t.running ? 'running' : ''}`} title={t.description}>
+                <span className="task-ico" aria-hidden="true">{TASK_ICONS[t.id] || TASK_ICONS.scan}</span>
+                <b className="task-name">{t.name}</b>
+                <span className="task-meta">
+                  {t.running ? `${t.running.step}${t.running.progress != null ? ` · ${Math.round(t.running.progress * 100)}%` : ''}`
+                    : t.last ? `${t.last.ok ? '' : 'failed · '}${ago(t.last.started)}${t.last.summary ? ` · ${t.last.summary}` : ''}${t.last.error ? ` · ${t.last.error}` : ''}`
                     : 'never run'}
-                  {t.everyH ? ` · every ${t.everyH >= 24 && t.everyH % 24 === 0 ? `${t.everyH / 24} d` : `${t.everyH} h`}` : ' · manual'}
                 </span>
-                <span className="admin-list-actions">
-                  <button type="button" className="btn-secondary" disabled={!!t.running} onClick={() => run(`run ${t.name}`, () => jf._fetch(`/api/admin/tasks/${t.id}/run`, { method: 'POST' }), `${t.name} started`)}>{t.running ? 'Running…' : 'Run now'}</button>
-                </span>
+                <TaskSchedule jf={jf} t={t} notify={notify} onSaved={loadTasks} />
+                <button type="button" className="btn-secondary task-run" disabled={!!t.running} onClick={() => run(`run ${t.name}`, () => jf._fetch(`/api/admin/tasks/${t.id}/run`, { method: 'POST' }).then(loadTasks), `${t.name} started`)}>{t.running ? 'Running…' : 'Run now'}</button>
               </li>
             ))}
           </ul>

@@ -29,10 +29,10 @@ export const config = {
   // Whole songs copied from the NAS to the cache when they are about to play,
   // least recently played dropped first past this size (0 = off).
   songCacheGb: Number(env('SONG_CACHE_GB', '0')),
-  // A full walk of MUSIC_DIR at boot and every SCAN_EVERY_H hours (0 = never);
-  // SCAN_PAUSE_MS between files keeps a walk over a NAS gentle.
+  // A full walk of MUSIC_DIR at boot if asked; recurring scans are the
+  // "Scan library" task (daily 04:00 by default, changeable in the admin
+  // dashboard). SCAN_PAUSE_MS between files keeps a walk over a NAS gentle.
   scanOnBoot: env('SCAN_ON_BOOT', '1') !== '0',
-  scanEveryH: Number(env('SCAN_EVERY_H', '6')),
   scanPauseMs: Number(env('SCAN_PAUSE_MS', '0')),
   // New music lands in INCOMING_DIR (SSD) and is moved to NAS_DIR (see ingest.ts).
   ingest: {
@@ -80,15 +80,14 @@ export const config = {
     // watches Lidarr's wanted list, Retry on the Downloads page searches.
     searchOnRequest: env('LIDARR_SEARCH_ON_REQUEST', '0') === '1',
   },
-  // Scheduled tasks (the admin dashboard's Tasks section). Hours between
-  // runs; 0 turns a schedule off (Run now still works). The wanted target
-  // caps how far background chores (discovery, backlog) fill Lidarr's
-  // wanted list, so a person's own request never waits behind them.
+  // Scheduled tasks (the admin dashboard's Tasks section). Schedules ship
+  // with each task and are changed in the dashboard (persisted in the
+  // database); these envs seed the interval defaults and cap how much the
+  // background chores (discovery, backlog) put on Lidarr's wanted list,
+  // so a person's own request never waits behind them.
   tasks: {
     enrichEveryH: Number(env('ENRICH_EVERY_H', '1')),
-    headsEveryH: Number(env('HEADS_EVERY_H', '24')),
     wantedTarget: Number(env('TASKS_WANTED_TARGET', '25')),
-    discoveryEveryH: Number(env('DISCOVERY_EVERY_H', '168')),
     discoveryPerRun: Number(env('DISCOVERY_PER_RUN', '10')),
     backlogEveryH: Number(env('BACKLOG_EVERY_H', '6')),
     backlogPerRun: Number(env('BACKLOG_PER_RUN', '10')),

@@ -62,16 +62,19 @@ Request monitors an album.
 ## Tasks
 
 Settings → Admin has a Tasks list, Jellyfin-style: every recurring chore
-with its last run, live progress and a Run now button. Built in: **Scan
-library** (`SCAN_EVERY_H`), **Fetch lyrics & artwork** (`ENRICH_EVERY_H`),
-**Cut song heads** (`HEADS_EVERY_H`, when `HEADS=1`), **Discover new music**
-(`DISCOVERY_EVERY_H`/`DISCOVERY_PER_RUN` — an album each from artists
-similar to your most played, via Deezer + Lidarr), and **Fill in
-discographies** (`BACKLOG_EVERY_H`/`BACKLOG_PER_RUN`/`BACKLOG_ARTISTS_PER_RUN`
-— missing studio albums and EPs of the artists you actually play). The
-background chores never fill Lidarr's wanted list past `TASKS_WANTED_TARGET`
-(default 25), so a person's own request is always near the front of the
-line. Any interval set to 0 turns that schedule off; Run now always works.
+on one line with its last run, live progress, a Run now button and its
+schedule, editable in place — every N hours, daily at a time, weekly on a
+day, on file change (tasks that watch the music folder), or off. Built in,
+with their defaults: **Scan library** (daily 04:00; can also watch the
+folder and scan two minutes after files change), **Fetch lyrics & artwork**
+(hourly, `ENRICH_EVERY_H`), **Cut song heads** (daily 05:00, when
+`HEADS=1`), **Discover new music** (Sundays 06:00 — an album each from
+artists similar to your most played, via Deezer + Lidarr,
+`DISCOVERY_PER_RUN`), and **Fill in discographies** (every 6 h,
+`BACKLOG_EVERY_H`/`BACKLOG_PER_RUN`/`BACKLOG_ARTISTS_PER_RUN` — missing
+studio albums and EPs of the artists you actually play). The background
+chores never fill Lidarr's wanted list past `TASKS_WANTED_TARGET` (default
+25), so a person's own request is always near the front of the line.
 
 ## What works today
 

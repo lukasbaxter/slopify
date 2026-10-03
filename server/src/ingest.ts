@@ -1,4 +1,4 @@
-// Ingest: music arrives on the SSD (INCOMING_DIR: Music Requests downloads,
+// Ingest: music arrives on the SSD (INCOMING_DIR: downloader drops,
 // slskd, anything copied in) and lives for good on the NAS (NAS_DIR, the same
 // share MUSIC_DIR points at once the library is moved). A sweep, every
 // INGEST_EVERY_MIN minutes and on demand (POST /api/admin/ingest), takes the
@@ -279,7 +279,7 @@ export function registerIngest(app: FastifyInstance, db: DB, o: IngestConfig & {
   const ing = new Ingest(db, { incomingDir: path.resolve(o.incomingDir), nasDir: path.resolve(o.nasDir), musicDir: path.resolve(o.musicDir), cacheDir: o.cacheDir, headSeconds: o.headSeconds, headsEnabled: o.headsEnabled, settleMs: o.settleMin * 60000, deleteAfter: o.deleteAfter, deleteSettleMs: o.deleteSettleMin * 60000, log: (m) => app.log.info(m) });
   const admin = { preHandler: (app as any).requireAdmin };
   const after = () => (app as any).runAfterScan?.();
-  // Music Requests: {dirs: [relative folders]} when an album has landed (awaited);
+  // Downloaders: {dirs: [relative folders]} when an album has landed (awaited);
   // without dirs, a sweep of everything settled (started, not awaited).
   app.post('/api/admin/ingest', admin, async (req: any) => {
     const dirs = Array.isArray(req.body?.dirs) ? req.body.dirs.map(String) : null;

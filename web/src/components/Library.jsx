@@ -52,7 +52,7 @@ function Shelf({ title, items, jf, round, onOpen, onPlay, onSeeAll, subtitle }) 
   );
 }
 
-// "Everywhere" searches all of Spotify's catalogue (through Music Requests)
+// "Everywhere" searches the whole catalog (through Lidarr's metadata)
 // and offers a Request button for what the library does not have.
 const SEARCH_TYPES = ['All', 'Songs', 'Artists', 'Albums', 'Playlists', 'Everywhere'];
 

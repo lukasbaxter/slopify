@@ -19,13 +19,45 @@ services:
       PUBLIC_URL: http://192.168.1.10:8080   # what speakers fetch audio from (LAN address)
       ADMIN_USER: admin
       ADMIN_PASS: admin   # you are asked to change it on first login
-      SLSKD_URL: http://127.0.0.1:5030      # optional: slskd, for the Weekly Exploration downloads
-      SLSKD_API_KEY: ...
 ```
 
 `docker compose up -d`, open http://host:8080, log in, it scans. Music gets
 into `/music` however you like (Lidarr, slskd, rsync); Slopify only reads it
 (and writes covers/lyrics next to files if you let it).
+
+## Downloads: plug in your own arr stack (optional)
+
+Slopify speaks Lidarr and slskd natively — no glue services. With a Lidarr
+that manages the same music folder, the artist pages grow full
+discographies with Request buttons, search gets an "Everywhere" shelf, the
+Release Radar fills, generated playlists can fetch what the library lacks,
+and a Downloads page shows where everything is. Requests simply monitor the
+album in Lidarr; whatever you have watching Lidarr does the fetching — its
+own indexers, [Soularr](https://github.com/mrusse/soularr) bridging slskd
+for Soulseek, or both.
+
+```yaml
+    environment:
+      # Lidarr: catalog + download queue
+      LIDARR_URL: http://127.0.0.1:8686
+      LIDARR_API_KEY: ...
+      LIDARR_ROOT: /music              # the library as LIDARR's container sees it
+      LIDARR_QUALITY_PROFILE: ""       # profile (name or id) for artists Slopify adds; blank = Lidarr's first
+      LIDARR_METADATA_PROFILE: ""
+      LIDARR_SEARCH_ON_REQUEST: "0"    # "1": every request also fires Lidarr's indexer search immediately
+      # slskd: Weekly Exploration fetches single missing tracks directly
+      SLSKD_URL: http://127.0.0.1:5030
+      SLSKD_API_KEY: ...
+      SLSKD_DOWNLOADS_DIR: /slskd-downloads  # slskd's finished-downloads folder, mounted here,
+                                             # so fetched tracks move into the library and scan at once
+```
+
+In Lidarr add a Webhook notification (Settings → Connect → Webhook, on
+Release Import + on Upgrade) pointed at
+`http://<slopify>:8080/api/hooks/lidarr?key=<LIDARR_API_KEY>` — imported
+albums become playable seconds later instead of at the next library scan.
+Artists Slopify adds to Lidarr while browsing stay unmonitored; only a
+Request monitors an album.
 
 ## What works today
 

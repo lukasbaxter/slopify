@@ -12,7 +12,7 @@
 //      which suggested songs the library lacks are worth fetching.
 // Whatever it gets wrong (a bad number, the wrong mix) is fixed from the
 // pool, so the answer is always 25 real tracks. Suggested songs the library
-// lacks are requested on Music Requests and join the playlist when they
+// lacks are requested through Lidarr and join the playlist when they
 // download.
 import type { FastifyInstance } from 'fastify';
 import Anthropic from '@anthropic-ai/sdk';
@@ -23,11 +23,12 @@ import { matchTrack } from './explore.js';
 import { similarInLibrary } from './discover.js';
 import { startJob, jobOut, type Job } from './jobs.js';
 import { recordRequest } from './downloads.js';
+import type { Lidarr } from './lidarr.js';
 
 export type AiOptions = {
   apiKey?: string;
   model: string;
-  musicRequestsUrl?: string; // songs it suggests that the library lacks are requested here
+  lidarr?: Lidarr; // songs it suggests that the library lacks are requested here
   log?: (m: string) => void;
 };
 
@@ -361,7 +362,7 @@ export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: st
     tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.row.id, now));
   })();
   // Missing songs it judged worth fetching: requested in the background, 2 per
-  // artist at most; the playlist does not wait for Music Requests.
+  // artist at most; the playlist does not wait for the downloads.
   const per = new Map<string, number>();
   const good = [...new Set(pick.request || [])].map((n) => miss[n - 1]).filter(Boolean)
     .filter((m) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; }).slice(0, 8);
@@ -377,22 +378,23 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   const ask = opts.apiKey ? claudeAsk(opts.apiKey, opts.model, (m) => app.log.info(m)) : null;
 
   // Songs the model suggested that the library lacks: their releases are
-  // requested on Music Requests (Soulseek), remembered in ai_pending, and
-  // appended to the playlist by the scan that brings them in.
-  const MR = opts.musicRequestsUrl;
+  // monitored in Lidarr (whatever watches its wanted list fetches them),
+  // remembered in ai_pending, and appended to the playlist by the scan that
+  // brings them in.
+  const lidarr = opts.lidarr?.enabled ? opts.lidarr : null;
   const requestMissing = async (playlistId: string, songs: { artist: string; title: string }[]) => {
-    app.log.info(`ai request: ${songs.length} suggested songs to fetch${MR ? '' : ' (no MUSIC_REQUESTS_URL)'}`);
-    if (!MR) return 0;
+    app.log.info(`ai request: ${songs.length} suggested songs to fetch${lidarr ? '' : ' (no LIDARR_URL)'}`);
+    if (!lidarr) return 0;
     let n = 0;
     const pl = db.prepare('SELECT user_id, name FROM playlists WHERE id = ?').get(playlistId) as { user_id: string; name: string } | undefined;
     await Promise.all(songs.slice(0, 8).map(async (s) => {
       try {
-        const t = await (await fetch(`${MR}/api/track?${new URLSearchParams({ artist: s.artist, title: s.title })}`, { signal: AbortSignal.timeout(15000) })).json() as any;
-        if (!t.release?.album_id) return;
-        const r = await (await fetch(`${MR}/api/request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: t.release.album_id }), signal: AbortSignal.timeout(30000) })).json() as any;
-        db.prepare('INSERT OR IGNORE INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(playlistId, s.artist, s.title, `${t.release.artist} - ${t.release.title}`, Date.now());
-        if (pl) recordRequest(db, pl.user_id, { id: r.id, album_id: t.release.album_id, artist: t.release.artist, title: t.release.title }, 'ai', `"${s.title}" for ${pl.name}`);
-        n++; app.log.info(`ai request: ${s.artist} - ${s.title} -> ${t.release.artist} - ${t.release.title} (${r.status})`);
+        const release = await lidarr.releaseForTrack(s.artist, s.title);
+        if (!release) return;
+        const r = await lidarr.request(release.album_id);
+        db.prepare('INSERT OR IGNORE INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(playlistId, s.artist, s.title, `${release.artist} - ${release.title}`, Date.now());
+        if (pl) recordRequest(db, pl.user_id, r, 'ai', `"${s.title}" for ${pl.name}`);
+        n++; app.log.info(`ai request: ${s.artist} - ${s.title} -> ${release.artist} - ${release.title} (${r.status})`);
       } catch (e: any) { log(`ai request ${s.artist} - ${s.title}: ${e.message}`); }
     }));
     return n;

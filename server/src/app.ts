@@ -22,6 +22,7 @@ import { registerJobs } from './jobs.js';
 import { registerAi } from './ai.js';
 import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
+import { lidarrClient, registerLidarrHook } from './lidarr.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 
@@ -58,12 +59,18 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
-  registerExplore(app, db, { slskdUrl: config.slskdUrl, slskdKey: config.slskdKey });
-  registerDiscover(app, db, { musicRequestsUrl: config.musicRequestsUrl, log: (m) => app.log.info(m) });
+  registerExplore(app, db, {
+    slskdUrl: config.slskdUrl, slskdKey: config.slskdKey,
+    slskdDownloadsDir: config.slskdDownloadsDir || undefined, musicDir,
+    scanFolders: (rels) => (app as any).scanFolders(rels),
+  });
+  const lidarr = lidarrClient({ ...config.lidarr, log: (m) => app.log.info(m) });
+  registerDiscover(app, db, { lidarr, log: (m) => app.log.info(m) });
   registerJobs(app);
-  app.decorate('ai', registerAi(app, db, { ...config.ai, musicRequestsUrl: config.musicRequestsUrl }));
+  app.decorate('ai', registerAi(app, db, { ...config.ai, lidarr }));
   registerSpotifyImport(app, db, dataDir);
-  registerDownloads(app, db, { musicRequestsUrl: config.musicRequestsUrl });
+  registerDownloads(app, db, { lidarr });
+  registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

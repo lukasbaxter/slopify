@@ -3,71 +3,89 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import Fastify from 'fastify';
 import { openDb } from './db.js';
 import { downloadOut, recordRequest, registerDownloads, STUCK_MS } from './downloads.js';
+import type { AlbumState } from './lidarr.js';
 
-const row = (o: any) => ({ id: 1, album_id: 'a1', artist: 'A', title: 'T', rtype: 'Album', year: '2020', image: null, total_tracks: 10, status: 'queued', tracks_added: 0, tracks_done: 0, created: 1000, updated: 1000, started: null, progress_at: null, log: '', queue_pos: 3, ...o });
+const album = (o: Partial<AlbumState>): AlbumState => ({
+  id: 1, album_id: 'mb1', artist: 'A', title: 'T', rtype: 'Album', year: '2020', image: null,
+  total: 10, done: 0, monitored: true, hasFiles: false, queue: null, ...o,
+});
+const meta = (o: any = {}) => ({ source: 'request', note: null, created: Date.now(), mine: true, ...o });
+
+const appWith = (db: any, lidarr: any, uid = 'u1') => {
+  const app = Fastify();
+  app.decorateRequest('user', undefined);
+  app.addHook('onRequest', async (req: any) => { req.user = { id: uid }; });
+  app.decorate('requireUser', async () => {});
+  registerDownloads(app, db, { lidarr });
+  return app;
+};
 
 describe('downloads', () => {
-  it('state: downloading with a recent song is downloading, silent too long is stuck; failed carries the reason', () => {
+  it('states: torrent queue wins, files without a library album are adding, quiet too long is stuck', () => {
     const now = 10_000_000_000;
-    expect(downloadOut(row({ status: 'downloading', tracks_done: 4, started: (now - 60000) / 1000, progress_at: (now - 5000) / 1000 }), now)).toMatchObject({ state: 'downloading', done: 4, total: 10 });
-    expect(downloadOut(row({ status: 'downloading', started: (now - STUCK_MS - 60000) / 1000, progress_at: (now - STUCK_MS - 1000) / 1000 }), now).state).toBe('stuck');
-    expect(downloadOut(row({ status: 'failed', log: 'failed: No search results' }), now)).toMatchObject({ state: 'failed', reason: 'No search results' });
-    expect(downloadOut(row({ status: 'done', tracks_added: 9 }), now)).toMatchObject({ state: 'done', done: 9 });
-    expect(downloadOut(row({}), now)).toMatchObject({ state: 'queued', queuePos: 3 });
+    const m = meta({ created: now - 60000 });
+    expect(downloadOut(album({ queue: { state: 'downloading', detail: 'downloading' } }), m, null, now)).toMatchObject({ state: 'downloading', via: 'torrent' });
+    expect(downloadOut(album({ queue: { state: 'failed', detail: 'no space' } }), m, null, now)).toMatchObject({ state: 'failed', reason: 'no space' });
+    expect(downloadOut(album({ done: 10, hasFiles: true }), m, { id: 'al1' }, now)).toMatchObject({ state: 'done', libraryAlbumId: 'al1' });
+    expect(downloadOut(album({ done: 10, hasFiles: true }), m, null, now).state).toBe('adding');
+    expect(downloadOut(album({ done: 4, hasFiles: true }), m, null, now)).toMatchObject({ state: 'downloading', done: 4, total: 10 });
+    expect(downloadOut(album({}), m, null, now).state).toBe('queued');
+    expect(downloadOut(album({}), meta({ created: now - STUCK_MS - 1000 }), null, now).state).toBe('stuck');
+    expect(downloadOut(album({ monitored: false }), m, null, now)).toMatchObject({ state: 'failed', reason: 'no longer monitored in Lidarr' });
   });
 
-  it('lists only this account\'s requests, and a retry of a failed one records the new request in its place', async () => {
+  it('lists only this account\'s requests; retry of a stuck one fires a Lidarr search under the same id', async () => {
     const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl-')));
-    recordRequest(db, 'u1', { id: 7, album_id: 'a7', artist: 'A', title: 'T' }, 'ai', '"Song" for Mix');
-    recordRequest(db, 'u2', { id: 8, album_id: 'a8' }, 'request');
+    const old = Date.now() - STUCK_MS - 60000;
+    db.prepare('INSERT INTO my_requests (user_id, lidarr_id, album_id, artist, title, source, note, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run('u1', 7, 'mb7', 'A', 'T', 'ai', '"Song" for Mix', old);
+    recordRequest(db, 'u2', { id: 8, album_id: 'mb8' }, 'request');
     const calls: string[] = [];
-    const fetcher: any = async (url: string, init?: any) => {
-      calls.push(`${init?.method || 'GET'} ${url.replace('http://mr', '')}`);
-      if (url.includes('/api/requests?ids=7')) return { ok: true, json: async () => ({ requests: [row({ id: 7, album_id: 'a7', status: 'failed', log: 'failed: No search results' })] }) };
-      if (url.endsWith('/api/request')) return { ok: true, json: async () => ({ status: 'queued', id: 9 }) };
-      throw new Error(`unexpected ${url}`);
+    const lidarr: any = {
+      enabled: true,
+      albums: async (ids: number[]) => { calls.push(`albums ${ids.join(',')}`); return ids.filter((i) => i === 7).map((i) => album({ id: i, album_id: 'mb7' })); },
+      retry: async (id: number) => { calls.push(`retry ${id}`); },
     };
-    const app = Fastify();
-    app.decorateRequest('user', undefined);
-    app.addHook('onRequest', async (req: any) => { req.user = { id: 'u1' }; });
-    app.decorate('requireUser', async () => {});
-    registerDownloads(app, db, { musicRequestsUrl: 'http://mr', fetcher });
+    const app = appWith(db, lidarr);
     const list = (await app.inject({ method: 'GET', url: '/api/downloads' })).json();
-    expect(list.items.map((x: any) => [x.id, x.state, x.note])).toEqual([[7, 'failed', '"Song" for Mix']]);
-    expect(calls[0]).toBe('GET /api/requests?ids=7');
+    expect(list.items.map((x: any) => [x.id, x.state, x.note, x.mine])).toEqual([[7, 'stuck', '"Song" for Mix', true]]);
     const r = (await app.inject({ method: 'POST', url: '/api/downloads/7/retry' })).json();
-    expect(r).toEqual({ ok: true, id: 9 });
-    expect((db.prepare("SELECT mr_id, source, note FROM my_requests WHERE user_id = 'u1'").all() as any[])).toEqual([{ mr_id: 9, source: 'ai', note: '"Song" for Mix' }]);
+    expect(r).toEqual({ ok: true, id: 7 });
+    expect(calls).toContain('retry 7');
+    expect((db.prepare("SELECT lidarr_id, source, note FROM my_requests WHERE user_id = 'u1'").all() as any[])).toEqual([{ lidarr_id: 7, source: 'ai', note: '"Song" for Mix' }]);
     await app.close();
   });
 
-  it('a finished download links its library album; not there yet is "adding", long after is done-but-missing', async () => {
+  it('a finished download links its library album; files Lidarr has that the library has not shown yet are "adding"', async () => {
     const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl2-')));
     db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('ar', 'Porter Robinson', 'porter robinson')").run();
     db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al', 'Language', 'ar', 'Porter Robinson', '/m', 1, 0, 'language')").run();
-    for (const id of [1, 2, 3]) recordRequest(db, 'u1', { id, album_id: `a${id}` }, 'request');
-    const now = Date.now() / 1000;
-    const fetcher: any = async () => ({ ok: true, json: async () => ({ requests: [
-      row({ id: 1, album_id: 'a1', artist: 'Porter Robinson', title: 'Language', status: 'done', tracks_added: 1, updated: now - 30 }),
-      row({ id: 2, album_id: 'a2', artist: 'Porter Robinson', title: 'Worlds', status: 'done', updated: now - 30 }),
-      row({ id: 3, album_id: 'a3', artist: 'Porter Robinson', title: 'Nurture', status: 'done', updated: now - 3600 }),
-    ] }) });
-    const app = Fastify();
-    app.decorateRequest('user', undefined);
-    app.addHook('onRequest', async (req: any) => { req.user = { id: 'u1' }; });
-    app.decorate('requireUser', async () => {});
-    registerDownloads(app, db, { musicRequestsUrl: 'http://mr', fetcher });
+    for (const [id, mb] of [[1, 'mb1'], [2, 'mb2']] as const) recordRequest(db, 'u1', { id, album_id: mb, artist: 'Porter Robinson', title: id === 1 ? 'Language' : 'Worlds' }, 'request');
+    const lidarr: any = {
+      enabled: true,
+      albums: async () => [
+        album({ id: 1, album_id: 'mb1', artist: 'Porter Robinson', title: 'Language', total: 1, done: 1, hasFiles: true }),
+        album({ id: 2, album_id: 'mb2', artist: 'Porter Robinson', title: 'Worlds', total: 12, done: 12, hasFiles: true }),
+      ],
+    };
+    const app = appWith(db, lidarr);
     const items = (await app.inject({ url: '/api/downloads' })).json().items;
-    const by = Object.fromEntries(items.map((x: any) => [x.title, [x.state, x.libraryAlbumId]]));
-    expect(by).toEqual({ Language: ['done', 'al'], Worlds: ['adding', null], Nurture: ['done', null] });
+    const by = Object.fromEntries(items.map((x: any) => [x.id, [x.state, x.libraryAlbumId]]));
+    expect(by).toEqual({ 1: ['done', 'al'], 2: ['adding', null] });
+    await app.close();
   });
-});
 
-describe('downloads via torrent', () => {
-  it('a torrent request shows as downloading with where it is, never stuck', () => {
-    const now = 10_000_000_000;
-    const d = downloadOut(row({ status: 'torrent', log: 'torrent: downloading 45% (2 peers)', started: (now - STUCK_MS * 3) / 1000, progress_at: (now - STUCK_MS * 2) / 1000 }), now);
-    expect(d).toMatchObject({ state: 'downloading', via: 'torrent', detail: 'downloading 45% (2 peers)' });
-    expect(downloadOut(row({ status: 'torrent', log: '' }), now).detail).toBe('searching torrents');
+  it('scope=all keeps this account\'s finished requests visible beside the live wanted list', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl3-')));
+    recordRequest(db, 'u1', { id: 5, album_id: 'mb5', artist: 'X', title: 'Done one' }, 'request');
+    const lidarr: any = {
+      enabled: true,
+      all: async () => [album({ id: 9, album_id: 'mb9', artist: 'Y', title: 'Someone elses' })],
+      albums: async (ids: number[]) => ids.filter((i) => i === 5).map(() => album({ id: 5, album_id: 'mb5', artist: 'X', title: 'Done one', total: 3, done: 3, hasFiles: true })),
+    };
+    const app = appWith(db, lidarr);
+    const items = (await app.inject({ url: '/api/downloads?scope=all' })).json().items;
+    expect(items.map((x: any) => [x.id, x.state, x.mine]).sort()).toEqual([[5, 'adding', true], [9, 'queued', false]]);
+    await app.close();
   });
 });

@@ -50,12 +50,36 @@ export const config = {
   loginRateMax: Number(env('LOGIN_RATE_MAX', '10')), // per IP per minute; raised for the E2E suite
   // Find and drive Chromecast / BluOS speakers on the server's network (needs host networking in Docker).
   speakers: env('SPEAKERS', '1') !== '0',
-  // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library lacks are fetched through it.
+  // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library
+  // lacks are fetched through it. If slskd's finished-downloads folder is
+  // also mounted into this container (SLSKD_DOWNLOADS_DIR), fetched tracks
+  // are moved into the library and scanned right away; without it they stay
+  // wherever slskd put them until something else brings them in.
   slskdUrl: env('SLSKD_URL', '').replace(/\/+$/, ''),
   slskdKey: env('SLSKD_API_KEY', ''),
-  // Music Requests (Spotify lookups + the album download queue) for the artist
-  // page's full discography, "Request" buttons, Release Radar and global search.
-  musicRequestsUrl: env('MUSIC_REQUESTS_URL', '').replace(/\/+$/, ''),
+  slskdDownloadsDir: env('SLSKD_DOWNLOADS_DIR', ''),
+  // Lidarr runs acquisition: the artist page's full discography, "Request"
+  // buttons, Release Radar, global search and the Downloads page all speak
+  // its API directly. Point it at the same library this server scans and
+  // add a Webhook notification in Lidarr to
+  //   POST <slopify>/api/hooks/lidarr?key=<LIDARR_API_KEY>
+  // so imported albums are playable seconds later. Anything that actually
+  // fetches music (an indexer in Lidarr, Soularr bridging slskd, ...) is
+  // configured in Lidarr itself, not here.
+  lidarr: {
+    url: env('LIDARR_URL', '').replace(/\/+$/, ''),
+    apiKey: env('LIDARR_API_KEY', ''),
+    // the library's path as LIDARR's container sees it (webhook paths and
+    // added artists are translated from/to this root)
+    root: env('LIDARR_ROOT', '/music'),
+    // profile for artists this server adds: a name or an id; blank = Lidarr's first
+    qualityProfile: env('LIDARR_QUALITY_PROFILE', ''),
+    metadataProfile: env('LIDARR_METADATA_PROFILE', ''),
+    // '1': a Request also fires Lidarr's own indexer search immediately
+    // (for setups without Soularr); default leaves the first try to whatever
+    // watches Lidarr's wanted list, Retry on the Downloads page searches.
+    searchOnRequest: env('LIDARR_SEARCH_ON_REQUEST', '0') === '1',
+  },
   // Generated playlists: Claude through the Anthropic API.
   ai: {
     apiKey: env('ANTHROPIC_API_KEY', '') || undefined,

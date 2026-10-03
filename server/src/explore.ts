@@ -7,6 +7,8 @@
 //
 // Everything runs inside this process on a minute tick with last-run stamps
 // in kv, so a restart never skips or doubles a week.
+import fs from 'node:fs';
+import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { ftsQuery, tracksByIds } from './library.js';
@@ -21,7 +23,16 @@ const KINDS = {
 } as const;
 type Kind = keyof typeof KINDS;
 
-export type ExploreOptions = { slskdUrl?: string; slskdKey?: string; log?: (m: string) => void; fetcher?: typeof fetch; runScan?: () => Promise<unknown>; now?: () => number };
+export type ExploreOptions = {
+  slskdUrl?: string; slskdKey?: string;
+  // slskd's finished-downloads folder as THIS container sees it: fetched
+  // tracks are moved from there into musicDir and scanned right away.
+  // Without it, downloads stay in slskd's folder for the rest of the stack
+  // (an ingest, a manual import) to bring in.
+  slskdDownloadsDir?: string; musicDir?: string;
+  scanFolders?: (rels: string[]) => Promise<unknown>;
+  log?: (m: string) => void; fetcher?: typeof fetch; runScan?: () => Promise<unknown>; now?: () => number;
+};
 type LbTrack = { title: string; artist: string; album?: string; mbid?: string };
 
 const norm = (s: string) => (s || '').normalize('NFKC').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -97,6 +108,38 @@ export async function slskdDownload(opts: ExploreOptions, file: SlskdFile): Prom
   const r = await f(`${opts.slskdUrl}/api/v0/transfers/downloads/${encodeURIComponent(file.username)}`, { method: 'POST', headers: H, body: JSON.stringify([{ filename: file.filename, size: file.size }]) });
   return r.ok;
 }
+// Move the tracks slskd finished into the library: each goes to
+// <artist>/<album or title>/<original file name>, reusing an existing artist
+// folder whatever its case (a case-insensitive share cannot hold two). The
+// scanner reads tags, so the folder names only need to be sane.
+export function collectFetched(pairs: { file: SlskdFile; t: LbTrack }[], o: { downloadsDir: string; musicDir: string; log?: (m: string) => void }): string[] {
+  const log = o.log ?? (() => {});
+  const safe = (x: string) => String(x || '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').replace(/^\.+/, '').trim() || 'Unknown';
+  let entries: string[] = [];
+  try { entries = (fs.readdirSync(o.downloadsDir, { recursive: true }) as unknown as string[]).map(String); } catch (e: any) { log(`explore: reading ${o.downloadsDir}: ${e.message}`); return []; }
+  const byBase = new Map<string, string[]>();
+  for (const e of entries) { const b = path.basename(e); if (!byBase.has(b)) byBase.set(b, []); byBase.get(b)!.push(path.join(o.downloadsDir, e)); }
+  let artistDirs = new Map<string, string>();
+  try { artistDirs = new Map(fs.readdirSync(o.musicDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => [norm(d.name), d.name])); } catch { /* new library */ }
+  const rels = new Set<string>();
+  for (const { file, t } of pairs) {
+    const base = String(file.filename).split(/[\\/]/).pop()!;
+    const src = (byBase.get(base) || []).find((p) => { try { return fs.statSync(p).size === file.size; } catch { return false; } });
+    if (!src) continue; // not downloaded after all
+    const artist = artistDirs.get(norm(t.artist)) || safe(t.artist);
+    const folder = path.join(artist, safe(t.album || t.title));
+    try {
+      fs.mkdirSync(path.join(o.musicDir, folder), { recursive: true });
+      const dest = path.join(o.musicDir, folder, safe(base));
+      if (!fs.existsSync(dest)) fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL); // copy+rm: the library may be another filesystem
+      fs.rmSync(src);
+      rels.add(folder);
+      log(`explore: ${t.artist} - ${t.title} -> ${path.join(folder, safe(base))}`);
+    } catch (e: any) { log(`explore: moving ${base}: ${e.message}`); }
+  }
+  return [...rels];
+}
+
 // Wait until every started download has finished (or failed), up to `ms`.
 export async function slskdWait(opts: ExploreOptions, files: SlskdFile[], ms: number) {
   const f = opts.fetcher ?? fetch;
@@ -154,14 +197,17 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
   let fetched = 0;
   if (KINDS[kind].download && opts.slskdUrl && opts.slskdKey) {
     const missing = tracks.filter((_, i) => !ids[i]);
-    const started: SlskdFile[] = [];
+    const started: { file: SlskdFile; t: LbTrack }[] = [];
     for (const t of missing) {
-      try { const file = await slskdFind(opts, t); if (file && await slskdDownload(opts, file)) { started.push(file); log(`explore: fetching ${t.artist} - ${t.title} from ${file.username}`); } }
+      try { const file = await slskdFind(opts, t); if (file && await slskdDownload(opts, file)) { started.push({ file, t }); log(`explore: fetching ${t.artist} - ${t.title} from ${file.username}`); } }
       catch (e: any) { log(`explore: ${t.artist} - ${t.title}: ${e.message}`); }
     }
     if (started.length) {
-      fetched = await slskdWait(opts, started, 25 * 60 * 1000);
-      await opts.runScan?.();
+      fetched = await slskdWait(opts, started.map((s) => s.file), 25 * 60 * 1000);
+      if (opts.slskdDownloadsDir && opts.musicDir) {
+        const rels = collectFetched(started, { downloadsDir: opts.slskdDownloadsDir, musicDir: opts.musicDir, log });
+        if (rels.length) await (opts.scanFolders ? opts.scanFolders(rels) : opts.runScan?.());
+      } else await opts.runScan?.();
       tracks.forEach((t, i) => { if (!ids[i]) ids[i] = matchTrack(db, t); });
     }
   }

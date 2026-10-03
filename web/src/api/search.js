@@ -49,7 +49,7 @@ export async function browse(jf) {
   return (r.tiles || []).map((t) => ({ ...t, filter: `genre = "${t.name.replace(/"/g, '')}"` }));
 }
 
-// Beyond the library (the server asks Music Requests / Deezer and flags what
+// Beyond the library (the server asks Lidarr / Deezer and flags what
 // is here): the artist page's full discography with "Request" for the rest,
 // similar artists, the Release Radar and the search page's "Everywhere" shelf.
 export const globalSearch = (jf, q, signal) => jf._fetch(`/api/gsearch?q=${encodeURIComponent(q)}`, { timeoutMs: 20000, signal });

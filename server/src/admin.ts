@@ -42,9 +42,9 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   };
   app.decorate('runEnrich', runEnrich);
   app.post('/api/admin/enrich', admin, async () => { void runEnrich(); return { started: true }; });
-  // Just these folders (relative to the library), awaited: Music Requests
-  // calls it when an album lands so the album is playable seconds later
-  // instead of after the next full walk. Safe beside a running full scan:
+  // Just these folders (relative to the library), awaited: the Lidarr
+  // import webhook calls it when an album lands so the album is playable
+  // seconds later instead of after the next full walk. Safe beside a running full scan:
   // every write is an upsert and neither removes the other's files.
   const scanFolders = async (rel: string[]) => {
     const only = rel.map((r) => path.resolve(musicDir, r)).filter((p) => p.startsWith(path.resolve(musicDir) + path.sep));
@@ -55,6 +55,7 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     return r;
   };
   app.decorate('runScan', runScan);
+  app.decorate('scanFolders', scanFolders);
   app.decorate('runAfterScan', () => { for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } });
   app.decorate('scanning', () => current);
   app.post('/api/admin/scan', admin, async (req: any, reply) => {

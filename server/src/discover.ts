@@ -2,30 +2,31 @@
 // can be requested), "Fans also like", the Release Radar and the search
 // page's "Everywhere" shelf.
 //
-// Music Requests (the Soulseek pipeline at :8732) owns the Spotify
-// credentials and the download queue: /api/artist lists every release for a
-// name, /api/search every album for a query, /api/request queues an album
-// (it lands in this library and nudges a scan). This module matches those
-// releases against the albums table so the page can open what is here and
-// offer the rest. Similar artists come from Deezer's related list, kept only
-// when the library has them, so every card opens a real page.
+// Lidarr owns the catalog and the download queue (lidarr.ts): a discography
+// is every release group its metadata knows for a name, a request monitors
+// the album there, and whatever watches Lidarr's wanted list fetches it into
+// this library. This module matches those releases against the albums table
+// so the page can open what is here and offer the rest. Similar artists come
+// from Deezer's related list, kept only when the library has them, so every
+// card opens a real page.
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DB } from './db.js';
-import { recordRequest, ADDING_MS } from './downloads.js';
+import { recordRequest } from './downloads.js';
+import type { Lidarr } from './lidarr.js';
 
-export type DiscoverOptions = { musicRequestsUrl?: string; log?: (m: string) => void; fetcher?: typeof fetch };
+export type DiscoverOptions = { lidarr?: Lidarr; log?: (m: string) => void; fetcher?: typeof fetch };
 
 type Release = { album_id: string | null; title: string; rtype: string; year: string; date: string; image: string | null; total_tracks: number; group?: string; artists?: string[]; inLibrary: string | null; localName: string | null; requestStatus: string | null };
 
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-// A library "Deluxe" satisfies a plain Spotify title, but a Spotify
+// A library "Deluxe" satisfies a plain catalog title, but a catalog
 // "(Drumless Edition)" is only present if that exact edition is.
 const normTitle = (t: string) => norm(String(t || '').replace(/\s*[([](deluxe|expanded|remaster(ed)?|edition|version|bonus|anniversary|explicit|clean|drumless|feat\.?|ft\.?)[^)\]]*[)\]]/gi, '').replace(/\s*-\s*(single|ep)$/i, ''));
 const qualified = (t: string) => normTitle(t) !== norm(t);
 
-// One in-memory cache for everything here: the sources are slow (Spotify
-// through Music Requests takes seconds per artist) and change rarely.
+// One in-memory cache for everything here: the sources are slow (Lidarr's
+// metadata proxy takes seconds per artist) and change rarely.
 const cache = new Map<string, { at: number; v: any }>();
 const cached = (k: string, ttl: number) => { const e = cache.get(k); return e && Date.now() - e.at < ttl ? e.v : null; };
 const remember = <T>(k: string, v: T): T => { cache.set(k, { at: Date.now(), v }); return v; };
@@ -49,7 +50,7 @@ const matcher = (albums: { id: string; name: string }[]) => {
 const firstArtist = (artist: string) => String(artist || '').split(',')[0].trim();
 const artistByName = (db: DB, name: string) => db.prepare('SELECT id, name FROM artists WHERE name = ? COLLATE NOCASE').get(name) as { id: string; name: string } | undefined;
 
-// The library album a Spotify release is, if the library has it (matched
+// The library album a catalog release is, if the library has it (matched
 // through its first credited artist, as everywhere on these pages).
 export function releaseInLibrary(db: DB, artist: string, title: string): { id: string; name: string } | null {
   const a = artistByName(db, firstArtist(artist));
@@ -83,42 +84,32 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   const auth = { preHandler: (app as any).requireUser };
   const log = opts.log || (() => {});
   const fetcher = opts.fetcher || fetch;
-  const MR = (opts.musicRequestsUrl || '').replace(/\/+$/, '');
-  const json = (url: string, ms: number, init?: RequestInit) => fetcher(url, { ...init, signal: AbortSignal.timeout(ms) }).then(async (r) => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.json(); });
-  const requestStatuses = async (): Promise<Map<string, { status: string; updated: number }>> => {
-    if (!MR) return new Map();
-    const hit = cached('requests', 5 * 1000); if (hit) return hit;
-    const r = await json(`${MR}/api/requests?limit=5000`, 8000).catch(() => ({ requests: [] }));
-    return remember('requests', new Map((r.requests || []).map((x: any) => [x.album_id, { status: x.status, updated: Math.round((x.updated || 0) * 1000) }])));
-  };
-  // A finished request the library does not show yet is still being added
-  // for a few minutes (the folder scan), after that it went missing and can
-  // be asked for again; once the library has it, it is simply done.
-  const stateOf = (e: { status: string; updated: number } | undefined, inLibrary: boolean) => {
-    if (!e) return null;
-    if (e.status !== 'done' || inLibrary) return e.status;
-    return Date.now() - e.updated < ADDING_MS ? 'adding' : 'missing';
-  };
+  const lidarr = opts.lidarr?.enabled ? opts.lidarr : null;
+  const requestStatuses = async (): Promise<Map<string, { status: string; updated: number }>> =>
+    lidarr ? lidarr.statuses().catch(() => new Map()) : new Map();
+  // 'queued' | 'downloading' | 'failed' from Lidarr; an album with files is
+  // simply in the library (or seconds from it, through the import webhook).
+  const stateOf = (e: { status: string; updated: number } | undefined) => e?.status ?? null;
   async function discography(artistId: string, name: string): Promise<{ artist: any; releases: Release[] }> {
-    // Only Spotify's answer is cached: what the library has and each request's
+    // Only Lidarr's answer is cached: what the library has and each request's
     // state are read fresh, so an album that just landed turns playable.
     const upstream = async () => {
       const hit = cached(`discog:${artistId}`, 30 * 60 * 1000); if (hit) return hit;
-      const r = MR ? await json(`${MR}/api/artist?name=${encodeURIComponent(name)}`, 25000).catch((e) => { log(`discography ${name}: ${e.message}`); return { artist: null, releases: [] }; }) : { artist: null, releases: [] };
+      const r = lidarr ? await lidarr.discography(name).catch((e) => { log(`discography ${name}: ${e.message}`); return { artist: null, releases: [] }; }) : { artist: null, releases: [] };
       // Nothing from upstream is not worth remembering for half an hour.
       return r.releases?.length ? remember(`discog:${artistId}`, r) : r;
     };
     const lib = libraryAlbums(db, artistId);
-    const [mr, status] = await Promise.all([upstream(), requestStatuses()]);
+    const [known, status] = await Promise.all([upstream(), requestStatuses()]);
     const have = matcher(creditedAlbums(db, artistId));
-    const releases: Release[] = (mr.releases || []).map((r: any) => {
+    const releases: Release[] = (known.releases || []).map((r: any) => {
       const local = have(r.title);
-      return { ...r, inLibrary: local ? local.id : null, localName: local?.name || null, requestStatus: stateOf(status.get(r.album_id), Boolean(local)) };
+      return { ...r, inLibrary: local ? local.id : null, localName: local?.name || null, requestStatus: stateOf(status.get(r.album_id)) };
     });
-    // Library albums Spotify does not list (bootlegs, compilations) still belong on the page.
+    // Library albums the catalog does not list (bootlegs, compilations) still belong on the page.
     const listed = new Set(releases.filter((r) => r.inLibrary).map((r) => r.inLibrary));
     const extra: Release[] = lib.filter((a) => !listed.has(a.id)).map((a) => ({ album_id: null, title: a.name, rtype: 'Album', year: a.year ? String(a.year) : '', date: a.year ? String(a.year) : '', image: null, total_tracks: a.track_count, inLibrary: a.id, localName: a.name, requestStatus: null }));
-    return { artist: mr.artist || null, releases: [...releases, ...extra] };
+    return { artist: known.artist || null, releases: [...releases, ...extra] };
   }
 
   app.get('/api/discography/:id', auth, async (req, reply) => {
@@ -136,27 +127,30 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     return { artists: (await similarInLibrary(db, a, { fetcher, log })).slice(0, 12) };
   });
 
-  // Queue an album with Music Requests; it downloads into this library.
+  // Request an album: monitor it in Lidarr; whatever watches the wanted
+  // list downloads it into this library.
   const Request = z.object({ album_id: z.string().min(1) });
   app.post('/api/requests', auth, async (req, reply) => {
-    if (!MR) return reply.code(503).send({ error: 'Requests are not set up on this server' });
+    if (!lidarr) return reply.code(503).send({ error: 'Requests are not set up on this server (LIDARR_URL / LIDARR_API_KEY)' });
     const body = Request.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'album_id required' });
-    const r = await json(`${MR}/api/request`, 30000, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ album_id: body.data.album_id }) });
-    cache.delete('requests');
-    recordRequest(db, (req as any).user.id, { ...r, album_id: body.data.album_id }, 'request');
+    let r;
+    try { r = await lidarr.request(body.data.album_id); }
+    catch (e: any) { return reply.code(502).send({ error: e.message }); }
+    recordRequest(db, (req as any).user.id, r, 'request');
     log(`request ${body.data.album_id}: ${r.status}${r.artist ? ` ${r.artist} - ${r.title}` : ''}`);
     return r;
   });
 
-  // Every album Spotify knows for a query, each flagged with the library album
-  // it matches (so the app opens it) or its request state (so it offers "Request").
+  // Every album Lidarr's metadata knows for a query, each flagged with the
+  // library album it matches (so the app opens it) or its request state (so
+  // it offers "Request").
   app.get('/api/gsearch', auth, async (req) => {
     const q = String((req.query as any).q || '').trim();
-    if (!q || !MR) return { albums: [], artists: [] };
-    // Only Spotify's results are cached; library and request flags are fresh.
+    if (!q || !lidarr) return { albums: [], artists: [] };
+    // Only Lidarr's results are cached; library and request flags are fresh.
     const key = `gsearch:${norm(q)}`;
-    const upstream = async () => cached(key, 10 * 60 * 1000) || remember(key, (await json(`${MR}/api/search?q=${encodeURIComponent(q)}`, 15000).catch(() => ({ results: [] }))).results || []);
+    const upstream = async () => cached(key, 10 * 60 * 1000) || remember(key, await lidarr.search(q));
     const [results, status] = await Promise.all([upstream() as Promise<any[]>, requestStatuses()]);
     const first = (r: any) => firstArtist(r.artist);
     const byArtist = new Map<string, { artist: any; have: (t: string) => { id: string; name: string } | null }>();
@@ -167,7 +161,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     const albums = results.map((r) => {
       const lib = byArtist.get(norm(first(r)));
       const have = lib?.have(r.title)?.id || null;
-      return { ...r, inLibrary: have, artistId: lib?.artist?.id || null, requestStatus: stateOf(status.get(r.album_id), Boolean(have)) };
+      return { ...r, inLibrary: have, artistId: lib?.artist?.id || null, requestStatus: stateOf(status.get(r.album_id)) };
     });
     const artists = [...byArtist.entries()].map(([k, v]) => ({ name: results.find((r) => norm(first(r)) === k) ? first(results.find((r) => norm(first(r)) === k)) : null, id: v.artist?.id || null })).filter((a) => a.name);
     return { albums, artists };
@@ -176,12 +170,12 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   // The library's most played artists; their releases from the last 90 days.
   app.get('/api/radar', auth, async () => {
     const hit = cached('radar', 6 * 60 * 60 * 1000); if (hit) return hit;
-    if (!MR) return { releases: [] };
+    if (!lidarr) return { releases: [] };
     const top = db.prepare(`SELECT a.id, a.name, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
       WHERE p.at > ? GROUP BY a.id ORDER BY n DESC LIMIT 40`).all(Date.now() - 180 * 86400000) as { id: string; name: string }[];
     const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
     const out: any[] = [];
-    // A few at a time: each is a Spotify round trip through Music Requests.
+    // A few at a time: each discography is a round trip through Lidarr.
     const queue = [...top];
     await Promise.all(Array.from({ length: 4 }, async () => {
       while (queue.length) {

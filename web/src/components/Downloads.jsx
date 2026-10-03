@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 // Profile menu › Downloads: albums requested through Slopify (artist page
 // Request buttons, generated playlists' missing songs) and where each one is.
-// "Everyone" shows the whole Music Requests queue. Refreshes every 5 s while
+// "Everyone" shows everything wanted or moving in Lidarr. Refreshes every 5 s while
 // open; stuck = downloading with no finished song for the server's limit.
 // adding = downloaded, the library scan has not shown it yet (seconds).
 const SECTIONS = [

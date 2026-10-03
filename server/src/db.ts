@@ -111,6 +111,12 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE albums ADD COLUMN cover_tries INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Requests now live in Lidarr; the old rows pointed into the retired
+  -- Music Requests queue, whose ids mean nothing (and would collide) here.
+  DELETE FROM my_requests;
+  ALTER TABLE my_requests RENAME COLUMN mr_id TO lidarr_id;
+  `,
 ];
 
 export type DB = Database.Database;

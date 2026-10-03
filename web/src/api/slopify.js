@@ -299,7 +299,7 @@ export class Slopify {
     return this.setPrefs({ dislikes: cur });
   }
 
-  // --- downloads (albums requested through Music Requests) ------------------
+  // --- downloads (albums requested through Lidarr) ---------------------------
   downloads(scope = 'mine') { return this._fetch(`/api/downloads?scope=${scope}`, { timeoutMs: 35000 }); }
   retryDownload(id) { return this._fetch(`/api/downloads/${id}/retry`, { method: 'POST' }); }
 

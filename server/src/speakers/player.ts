@@ -20,7 +20,7 @@ export type PlayerDeps = {
 export class ServerPlayer {
   queue: Row[] = []; index = -1; original: Row[] = [];
   device: Speaker | null = null; transport: Transport | null = null;
-  playing = false; anchor = { pos: 0, at: Date.now() }; duration = 0; volume: number | null = null;
+  playing = false; anchor = { pos: 0, at: Date.now() }; duration = 0; volume: number | null = null; private volumeHeldUntil = 0;
   repeat: 'off' | 'all' | 'one' = 'off'; shuffle: 'off' | 'on' = 'off';
   private timer: NodeJS.Timeout | null = null; private starting = false; private ticking = false; private lastTick = 0;
   private lastRead: { pos: number; at: number } | null = null;
@@ -154,7 +154,12 @@ export class ServerPlayer {
     this.setPos(pos); this.report();
   }
   async setVolume(level: number) {
-    this.volume = Math.max(0, Math.min(100, Math.round(level))); this.report();
+    this.volume = Math.max(0, Math.min(100, Math.round(level)));
+    // The 250 ms poll must not fight the value just set: ignore what the
+    // speaker reports back for a moment (the device also takes a beat to
+    // settle, and BluOS briefly reads 0 mid-change).
+    this.volumeHeldUntil = Date.now() + 2000;
+    this.report();
     if (this.transport) await this.transport.setVolume(this.volume);
   }
   async next(auto: boolean) {
@@ -220,7 +225,9 @@ export class ServerPlayer {
     const t0 = Date.now();
     const s = await this.transport.status();
     const readAt = (t0 + Date.now()) / 2;
-    if (typeof s.volume === 'number') this.volume = s.volume;
+    // Mirror the speaker's own volume (someone used the dial or the BluOS
+    // app), but never a muted reading and never right after we set it.
+    if (typeof s.volume === 'number' && !s.muted && Date.now() > this.volumeHeldUntil) this.volume = s.volume;
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
     // does not always know a stream's length).

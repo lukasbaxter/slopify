@@ -241,7 +241,7 @@ function LineChart({ title, points, cumulative = false }) {
   );
 }
 
-export default function History({ jf, player, me, onOpenArtist, onOpenAlbum, onOpenSettings }) {
+export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSettings }) {
   const name = me?.Name || 'You';
   const [range, setRange] = useState(() => localStorage.getItem('conduit.histRange2') || '4w');
   const phone = usePhone();
@@ -286,13 +286,6 @@ export default function History({ jf, player, me, onOpenArtist, onOpenAlbum, onO
   // Own profile: stats.fm says "Your top tracks from the past 4 weeks".
   const desc = (what) => `Your ${what}${suffix ? ` ${suffix}` : ''}`;
 
-  const playRow = async (rows, idx) => {
-    const ids = rows.filter((r) => r.id).map((r) => r.id);
-    if (!rows[idx].id) return;
-    const items = await jf.itemsByIds(ids.slice(0, 100));
-    const at = items.findIndex((t) => t.Id === rows[idx].id);
-    if (at >= 0) player.playQueue(items, at, null);
-  };
   const cover = (r, size = 320) => (r.albumId || r.id ? jf.imageUrl(r.albumId || r.id, { maxHeight: size }) : null);
   const minutes = (secs) => fmtN(Math.floor(secs / 60));
   const streams = (n) => `${fmtN(n)} stream${n === 1 ? '' : 's'}`;
@@ -300,7 +293,7 @@ export default function History({ jf, player, me, onOpenArtist, onOpenAlbum, onO
   // Cards, class for class from stats.fm's TrackCard / ArtistCard / AlbumCard.
   const trackCard = (t, i) => (
     <div className="sf-track-card">
-      <a role="button" tabIndex={0} onClick={() => playRow(st.topTracks, i)} title={t.id ? 'Play' : 'Not in your library'}>
+      <a role="button" tabIndex={0} onClick={() => t.albumId && onOpenAlbum(t.albumId)} title={t.albumId ? 'Open album' : 'Not in your library'}>
         <div className="sf-square">{cover(t) ? <img src={cover(t)} alt="" loading="lazy" width={160} height={160} /> : <div className="sf-ph" />}</div>
         <h4 className="sf-clamp2">{i + 1}. {t.name}</h4>
       </a>
@@ -456,7 +449,7 @@ export default function History({ jf, player, me, onOpenArtist, onOpenAlbum, onO
                     <React.Fragment key={g.day}>
                       <p className="sf-day">{g.day}</p>
                       {g.rows.map((r, i) => (
-                        <a key={`${r.ts}-${i}`} role="button" tabIndex={0} className="sf-stream" onClick={() => r.id && playRow(recent.map((x) => ({ ...x, name: x.track })), recent.indexOf(r))} title={r.id ? 'Play' : 'Not in your library'}>
+                        <a key={`${r.ts}-${i}`} role="button" tabIndex={0} className="sf-stream" onClick={() => r.albumId && onOpenAlbum(r.albumId)} title={r.albumId ? 'Open album' : 'Not in your library'}>
                           <div className="sf-stream-row">
                             <div className="sf-stream-main">
                               <div className="sf-stream-img">{cover(r, 96) ? <img src={cover(r, 96)} alt="" loading="lazy" width={48} height={48} /> : <div className="sf-ph" />}</div>

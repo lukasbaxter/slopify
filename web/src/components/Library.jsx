@@ -1370,9 +1370,11 @@ export default function Library({
       : kind === 'Playlist' ? 'Playlist'
       : ['Song', item.Artists?.join(', ') || item.AlbumArtist || ''].filter(Boolean).join(' • ');
     const hit = (kind, item) => ({ kind, item, sub: subOf(kind, item) });
-    const actOn = (kind, item, i) => {
+    const actOn = (kind, item) => {
       remember(query, hit(kind, item));
-      if (kind === 'Song') player.playQueue(r.tracks, Math.max(0, i), null);
+      // A song opens its album (its single's page): playing stays on the
+      // explicit play affordances, like the top result card.
+      if (kind === 'Song') openAlbum({ Id: item.AlbumId, Name: item.Album });
       else if (kind === 'Playlist') onOpenPlaylist(item);
       else open(item);
     };
@@ -1380,6 +1382,7 @@ export default function Library({
     const searchRow = (i, extra = {}) => rowProps(r.tracks, i, {
       showArt: true,
       onPlay: () => { remember(query, hit('Song', r.tracks[i])); player.playQueue(r.tracks, i, null); },
+      onRowOpen: () => { remember(query, hit('Song', r.tracks[i])); openAlbum({ Id: r.tracks[i].AlbumId, Name: r.tracks[i].Album }); },
       onPlayAt: (t, at) => { remember(query, hit('Song', r.tracks[i])); player.playQueue(r.tracks, i, null, at); },
       ...extra,
     });
@@ -1409,13 +1412,14 @@ export default function Library({
       songs.forEach((x, i) => push('Song', x, i)); ars.forEach((x) => push('Artist', x)); als.forEach((x) => push('Album', x)); pls.forEach((x) => push('Playlist', x));
       return rows;
     })();
-    const actOnPhone = (kind, item, i) => {
+    const actOnPhone = (kind, item) => {
       remember(query, hit(kind, item));
-      if (kind === 'Song') { if (i >= 0) player.playQueue(r.tracks, i, null); else player.playQueue([item], 0, null); }
+      if (kind === 'Song') openAlbum({ Id: item.AlbumId, Name: item.Album });
       else if (kind === 'Playlist') onOpenPlaylist(item);
       else open(item);
     };
-    // A tapped recent search: reopen the artist / album / playlist, replay the song.
+    // A tapped recent search: reopen the artist / album / playlist; a song
+    // opens its album (the play button on its card still replays it).
     const recentItem = (x) => ({ Id: x.id, Name: x.name, AlbumId: x.art, Type: x.kind === 'Artist' ? 'MusicArtist' : x.kind === 'Playlist' ? 'Playlist' : x.kind === 'Album' ? 'MusicAlbum' : 'Audio' });
     const playRecent = async (x) => {
       if (x.kind === 'Song') { try { const t = await jf.itemById(x.id); if (t) player.playQueue([t], 0, null); } catch (e) { setErr(e.message); } }
@@ -1423,7 +1427,8 @@ export default function Library({
     };
     const openRecent = async (x) => {
       if (x.kind === 'Song') {
-        try { const t = await jf.itemById(x.id); if (t) player.playQueue([t], 0, null); } catch (e) { setErr(e.message); }
+        if (x.art) openAlbum({ Id: x.art, Name: '' });
+        else try { const t = await jf.itemById(x.id); if (t?.AlbumId) openAlbum({ Id: t.AlbumId, Name: t.Album }); } catch (e) { setErr(e.message); }
       } else if (x.kind === 'Artist') openArtist({ Id: x.id, Name: x.name, Type: 'MusicArtist' });
       else if (x.kind === 'Playlist') onOpenPlaylist({ Id: x.id, Name: x.name, Type: 'Playlist' });
       else openAlbum({ Id: x.id, Name: x.name, Type: 'MusicAlbum' });
@@ -1524,7 +1529,7 @@ export default function Library({
           {!query.trim() && !phone && (
             <section>
               <div className="shelf-head"><h2>Tips</h2></div>
-              <p className="placeholder-note">Type a lyric you remember. Narrow with <code>artist:</code>, <code>album:</code>, <code>year:2013</code>, <code>year:2010-2015</code>, <code>genre:house</code> or <code>liked:</code>. Typos are fine. Press <code>/</code> anywhere to get here, arrows and Enter to play.</p>
+              <p className="placeholder-note">Type a lyric you remember. Narrow with <code>artist:</code>, <code>album:</code>, <code>year:2013</code>, <code>year:2010-2015</code>, <code>genre:house</code> or <code>liked:</code>. Typos are fine. Press <code>/</code> anywhere to get here, arrows and Enter to open.</p>
             </section>
           )}
           {r?.chips?.length > 0 && (

@@ -161,7 +161,7 @@ function fmtDur(ticks) {
  * inside a user playlist. `onRemove` shows "Remove from this playlist".
  */
 export default function TrackRow({
-  track, n, active, isPlaying = false, onPlay, onToggle, onLike, playlists = [], onAddTo, onNewPlaylist,
+  track, n, active, isPlaying = false, onPlay, onRowOpen, onToggle, onLike, playlists = [], onAddTo, onNewPlaylist,
   onRemove, draggable = false, onDragStart, onDragOver, onDrop, showArt = false, jf,
   onOpenArtist, onOpenAlbum, hideArtists = false, subtitle = null,
   onAddToQueue, onExclude, onRadio, onDownload, hideAlbum = false, snippet = null, snippetAt = null, onPlayAt, highlight = false,
@@ -206,7 +206,9 @@ export default function TrackRow({
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      onDoubleClick={onPlay}
+      // onRowOpen (search rows): the row itself navigates (the song's album);
+      // playing stays on the number / play button and the card's own play.
+      onDoubleClick={onRowOpen || onPlay}
       onContextMenu={openMenuAt}
       // Phone: the number / play button is hidden, so a tap on the row itself
       // plays (Spotify); the same on any touch screen (iPad), where there is
@@ -214,7 +216,7 @@ export default function TrackRow({
       // keep their own taps. Mouse stays double-click.
       // Touch: warm the stream while the finger is still down (HLS only, no-op elsewhere).
       onTouchStart={phone || touch ? () => jf?.prewarm?.(track.Id) : undefined}
-      onClick={phone || touch ? (e) => { if (e.target.closest?.('button, .rowlink, .trackrow-art, .lyric-snippet, .ctxmenu')) return; (active && onToggle ? onToggle : onPlay)?.(); } : undefined}
+      onClick={phone || touch ? (e) => { if (e.target.closest?.('button, .rowlink, .trackrow-art, .lyric-snippet, .ctxmenu')) return; (active && onToggle ? onToggle : onRowOpen || onPlay)?.(); } : undefined}
     >
       <button
         className="trackrow-n"

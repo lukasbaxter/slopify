@@ -83,7 +83,14 @@ export class SessionLink {
       else if (m.type === 'like') this.onLike(m);
       else if (m.type === 'offset') this.onOffsets({ [m.id]: m.offset });
       else if (m.type === 'session') this.onSession({ nowPlaying: m.nowPlaying, queue: m.queue || [], at: m.at || 0 });
-      else if (m.type === 'roster') this.onRoster({ players: m.players || [], lanDevices: m.lanDevices || [], activeClientId: m.activeClientId || null });
+      else if (m.type === 'roster') {
+        // The sender stamps nowPlaying.at with ITS wall clock; a mirror must
+        // never do clock math across devices (a skewed machine showed every
+        // track 41s in). rxAt is OUR receipt time: same clock as the display.
+        const rx = Date.now();
+        for (const p of m.players || []) if (p.nowPlaying) p.nowPlaying.rxAt = rx;
+        this.onRoster({ players: m.players || [], lanDevices: m.lanDevices || [], activeClientId: m.activeClientId || null });
+      }
       else if (m.type === 'command') {
         // A yield means another client took over: we no longer hold the claim,
         // so a later reconnect must NOT re-assert it.

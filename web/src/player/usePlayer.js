@@ -983,7 +983,7 @@ export function usePlayer(jf) {
             const qi = typeof np.queueIndex === 'number' && rq[np.queueIndex]?.Id === np.itemId ? np.queueIndex : -1;
             if (qi >= 0) { trackIds = rq.map((t) => t.Id); index = qi; }
             else if (np.itemId) { trackIds = [np.itemId]; index = 0; }
-            pos = np.playing ? (np.position || 0) + (Date.now() - (np.at || Date.now())) / 1000 : (np.position || 0);
+            pos = np.playing ? (np.position || 0) + Math.max(0, Date.now() - (np.rxAt || np.at || Date.now())) / 1000 : (np.position || 0);
             wasPlaying = np.playing !== false;
           }
         } else {
@@ -1808,7 +1808,7 @@ export function usePlayer(jf) {
 
   // Interpolate the active player's playhead so the mirrored bar moves smoothly.
   const shownPosition = relayTarget
-    ? (relayTarget.playing ? (relayTarget.position || 0) + (Date.now() - (relayTarget.at || Date.now())) / 1000 : (relayTarget.position || 0))
+    ? (relayTarget.playing ? (relayTarget.position || 0) + Math.max(0, Date.now() - (relayTarget.rxAt || relayTarget.at || Date.now())) / 1000 : (relayTarget.position || 0))
     : position;
   const shownDuration = relayTarget ? (relayTarget.duration || 0) : duration;
   const shownPlaying = relayTarget ? Boolean(relayTarget.playing) : playing;

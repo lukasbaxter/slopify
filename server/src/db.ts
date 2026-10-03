@@ -117,6 +117,11 @@ const MIGRATIONS: string[] = [
   DELETE FROM my_requests;
   ALTER TABLE my_requests RENAME COLUMN mr_id TO lidarr_id;
   `,
+  `
+  -- One canonical genre per album (genres.ts settles it: Deezer, then the
+  -- file tags' vote, then the artist's other albums).
+  ALTER TABLE albums ADD COLUMN genre TEXT;
+  `,
 ];
 
 export type DB = Database.Database;

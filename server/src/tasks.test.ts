@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { registerTasks, builtinTasks, isStudio, isDue, prevPoint, parseSchedule, type TaskDef, type Schedule } from './tasks.js';
+import { registerTasks, builtinTasks, isStudio, isDue, prevPoint, parseSchedule, remapTrackId, type TaskDef, type Schedule } from './tasks.js';
 
 const adminApp = () => {
   const app = Fastify();
@@ -107,7 +107,7 @@ describe('built-in chores', () => {
   };
   const opts = (db: any, lidarr: any) => ({
     db, lidarr, cacheDir: '/tmp', musicDir: '/tmp', headsEnabled: false, headSeconds: 3, pauseMs: 0,
-    enrichEveryH: 1, wantedTarget: 25, discoveryPerRun: 5, backlogEveryH: 6, backlogPerRun: 10, backlogArtistsPerRun: 5,
+    enrichEveryH: 1, wantedTarget: 25, discoveryPerRun: 5, backlogEveryH: 6, backlogPerRun: 10, backlogArtistsPerRun: 5, flacPerRun: 40,
   });
   const ctx = { step: () => {}, log: () => {} };
 
@@ -151,6 +151,30 @@ describe('built-in chores', () => {
     expect(await tasks.find((t) => t.id === 'discovery')!.run(ctx)).toContain('full');
     const none = builtinTasks(adminApp() as any, opts(db, { enabled: false }));
     expect(await none.find((t) => t.id === 'discovery')!.run(ctx)).toContain('not configured');
+  });
+
+  it('a replaced file keeps the listener\'s traces: likes, playlists, plays and lyrics move to the new id', () => {
+    const db = tmpdb('remap');
+    seed(db);
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES ('t-new', '/m/01-new.flac', 0, 0, 'A Walk', 'Tycho', '["Tycho"]', '["ar"]', 'al', 'Dive', 'Tycho', 0)`).run();
+    db.prepare("INSERT INTO likes (user_id, track_id, at) VALUES ('u1', 't1', 1)").run();
+    db.prepare("INSERT INTO playlists (id, user_id, name, created, updated) VALUES ('pl1', 'u1', 'P', 0, 0)").run();
+    db.prepare("INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES ('pl1', 0, 't1', 0)").run();
+    db.prepare("INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES ('t1', 'synced', '[]', 'lrclib', 0)").run();
+    db.prepare("INSERT INTO heads (track_id, bytes, size, created) VALUES ('t1', 10, 100, 0)").run();
+    remapTrackId(db, 't1', 't-new');
+    expect((db.prepare("SELECT track_id FROM likes WHERE user_id='u1'").get() as any).track_id).toBe('t-new');
+    expect((db.prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id='pl1'").get() as any).track_id).toBe('t-new');
+    expect((db.prepare("SELECT COUNT(*) n FROM plays WHERE track_id='t-new'").get() as any).n).toBe(1);
+    expect((db.prepare("SELECT track_id FROM lyrics").get() as any).track_id).toBe('t-new');
+    expect((db.prepare("SELECT COUNT(*) n FROM heads WHERE track_id='t1'").get() as any).n).toBe(0);
+  });
+
+  it('the flac chore stands down without slskd', async () => {
+    const db = tmpdb('flacoff');
+    const flac = builtinTasks(adminApp() as any, opts(db, { enabled: false })).find((t) => t.id === 'flac')!;
+    expect(await flac.run(ctx)).toContain('slskd is not configured');
   });
 
   it('the heads chore says so when heads are off', async () => {

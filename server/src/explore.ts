@@ -73,8 +73,9 @@ export function matchTrack(db: DB, t: LbTrack): string | null {
 
 // --- slskd: find and fetch one track ----------------------------------------
 type SlskdFile = { username: string; filename: string; size: number; bitRate?: number; extension?: string; hasFreeUploadSlot: boolean; queueLength: number };
-export async function slskdFind(opts: ExploreOptions, t: LbTrack): Promise<SlskdFile | null> {
+export async function slskdFind(opts: ExploreOptions, t: LbTrack, pick: { formats?: string[]; durationS?: number } = {}): Promise<SlskdFile | null> {
   if (!opts.slskdUrl || !opts.slskdKey) return null;
+  const formats = pick.formats ?? ['flac', 'mp3'];
   const f = opts.fetcher ?? fetch;
   const H = { 'X-API-Key': opts.slskdKey, 'Content-Type': 'application/json' };
   const r = await f(`${opts.slskdUrl}/api/v0/searches`, { method: 'POST', headers: H, body: JSON.stringify({ searchText: `${t.artist} ${t.title}`, filterResponses: true, fileLimit: 2000, responseLimit: 100, searchTimeout: 8000 }) });
@@ -91,7 +92,8 @@ export async function slskdFind(opts: ExploreOptions, t: LbTrack): Promise<Slskd
   for (const resp of responses || []) for (const file of resp.files || []) {
     const name = String(file.filename || ''); const base = norm(name.split(/[\\/]/).pop() || ''); const full = norm(name);
     const ext = (name.split('.').pop() || '').toLowerCase();
-    if (!['flac', 'mp3'].includes(ext)) continue;
+    if (!formats.includes(ext)) continue;
+    if (pick.durationS && file.length && Math.abs(Number(file.length) - pick.durationS) > 4) continue;
     const kbps = Number(file.bitRate) || (ext === 'flac' ? 1000 : 0);
     if (ext === 'mp3' && kbps && kbps < 256) continue;
     if (!base.includes(nt) || !(full.includes(na) || base.includes(na))) continue;

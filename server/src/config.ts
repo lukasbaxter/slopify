@@ -92,6 +92,7 @@ export const config = {
     backlogEveryH: Number(env('BACKLOG_EVERY_H', '6')),
     backlogPerRun: Number(env('BACKLOG_PER_RUN', '10')),
     backlogArtistsPerRun: Number(env('BACKLOG_ARTISTS_PER_RUN', '5')),
+    flacPerRun: Number(env('FLAC_PER_RUN', '40')),
   },
   // Generated playlists: Claude through the Anthropic API.
   ai: {

@@ -12,10 +12,14 @@
 // The scheduler is a minute tick, and scheduled runs go one at a time -
 // most of these walk the same NAS - while Run now starts at once.
 import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { parseFile } from 'music-metadata';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
-import { buildHead } from './heads.js';
+import { buildHead, headPath } from './heads.js';
 import { releaseInLibrary } from './discover.js';
+import { slskdFind, slskdDownload, slskdWait } from './explore.js';
 import type { Lidarr } from './lidarr.js';
 
 export type Schedule =
@@ -166,8 +170,38 @@ export type ChoreOptions = {
   wantedTarget: number;
   discoveryPerRun: number;
   backlogEveryH: number; backlogPerRun: number; backlogArtistsPerRun: number;
+  flacPerRun: number;
+  slskdUrl?: string; slskdKey?: string; slskdDownloadsDir?: string;
   fetcher?: typeof fetch;
 };
+
+// A file replaced is a new track id (ids are the audio's own hash): carry
+// the listener's traces over and drop what belonged to the old bytes.
+export function remapTrackId(db: DB, oldId: string, newId: string, cacheDir?: string) {
+  if (!newId || oldId === newId) return;
+  for (const t of ['likes', 'playlist_tracks', 'plays', 'lyrics']) db.prepare(`UPDATE OR IGNORE ${t} SET track_id = ? WHERE track_id = ?`).run(newId, oldId);
+  for (const t of ['likes', 'playlist_tracks', 'plays', 'lyrics', 'heads', 'song_cache']) db.prepare(`DELETE FROM ${t} WHERE track_id = ?`).run(oldId);
+  if (cacheDir) { try { fs.rmSync(headPath(cacheDir, oldId), { force: true }); } catch { /* cache orphan */ } }
+}
+
+const ff = (args: string[]) => new Promise<boolean>((resolve) => {
+  const p = spawn('ffmpeg', ['-nostdin', '-v', 'error', ...args]);
+  let err = '';
+  p.stderr.on('data', (d) => { err += d; });
+  p.on('close', (code) => resolve(code === 0 && !err.trim()));
+  p.on('error', () => resolve(false));
+});
+
+// A candidate FLAC is only a replacement once it IS a flac, runs the same
+// length as what it replaces, and decodes front to back without an error.
+export async function verifyFlac(file: string, durationMs: number): Promise<boolean> {
+  try {
+    const m = await parseFile(file, { duration: true });
+    if (!/flac/i.test(m.format.codec || m.format.container || '')) return false;
+    if (Math.abs((m.format.duration ?? 0) * 1000 - durationMs) > 3000) return false;
+  } catch { return false; }
+  return ff(['-i', file, '-f', 'null', '-']);
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -310,5 +344,73 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     },
   };
 
-  return [scan, enrich, heads, discovery, backlog];
+  // Lossy tracks replaced with verified FLAC from Soulseek, most played
+  // first. Searches are paced (the Soulseek server allows roughly nine a
+  // minute per account) and every candidate must prove itself before the
+  // old file goes: same length, full decode, retagged with the library's
+  // own tags so the album stays whole.
+  const flac: TaskDef = {
+    id: 'flac', name: 'Upgrade to FLAC', schedule: { mode: 'interval', hours: 1 },
+    description: 'Replace lossy tracks with a verified FLAC from Soulseek, most played first',
+    run: async (ctx) => {
+      if (!o.slskdUrl || !o.slskdKey || !o.slskdDownloadsDir) return 'slskd is not configured (SLSKD_URL / SLSKD_API_KEY / SLSKD_DOWNLOADS_DIR)';
+      const sopts = { slskdUrl: o.slskdUrl, slskdKey: o.slskdKey };
+      const skip = JSON.parse(kvGet(db, 'task:flac:skip') || '{}') as Record<string, number>;
+      for (const k of Object.keys(skip)) if (Date.now() - skip[k] > 30 * 86400000) delete skip[k];
+      const rows = db.prepare(`SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no, t.disc_no, t.year, t.duration_ms,
+          COALESCE(p.n, 0) + 5 * COALESCE(l.n, 0) AS score
+        FROM tracks t
+        LEFT JOIN (SELECT track_id, COUNT(*) n FROM plays GROUP BY track_id) p ON p.track_id = t.id
+        LEFT JOIN (SELECT track_id, COUNT(*) n FROM likes GROUP BY track_id) l ON l.track_id = t.id
+        WHERE t.codec LIKE 'MPEG%' OR t.codec LIKE '%AAC%' OR t.codec LIKE '%Opus%'
+        ORDER BY score DESC, t.added_at DESC LIMIT 3000`).all() as any[];
+      if (!rows.length) return 'nothing lossy left';
+      let done = 0, failed = 0, tried = 0;
+      const rels = new Set<string>();
+      const replaced: { oldId: string; newPath: string }[] = [];
+      for (const t of rows) {
+        if (done >= o.flacPerRun || tried >= o.flacPerRun * 2) break;
+        const key = `${t.artist} | ${t.title}`.toLowerCase();
+        if (skip[key]) continue;
+        if (tried) await sleep(8000); // stay under the account's search budget
+        tried++;
+        ctx.step(`${t.artist} - ${t.title}`, done / o.flacPerRun);
+        try {
+          const file = await slskdFind(sopts, { artist: t.artist, title: t.title }, { formats: ['flac'], durationS: Math.round(t.duration_ms / 1000) });
+          if (!file || !(await slskdDownload(sopts, file))) { skip[key] = Date.now(); failed++; continue; }
+          await slskdWait(sopts, [file], 10 * 60 * 1000);
+          const base = String(file.filename).split(/[\\/]/).pop()!;
+          const src = (fs.readdirSync(o.slskdDownloadsDir, { recursive: true }) as unknown as string[])
+            .map((e) => path.join(o.slskdDownloadsDir!, String(e)))
+            .find((p) => path.basename(p) === base && (() => { try { return fs.statSync(p).size === file.size; } catch { return false; } })());
+          if (!src || !(await verifyFlac(src, t.duration_ms))) { if (src) fs.rmSync(src, { force: true }); skip[key] = Date.now(); failed++; continue; }
+          const dest = t.path.replace(/\.[^.]+$/, '.flac');
+          const tmp = `${dest}.up.flac`;
+          const meta = ['-metadata', `title=${t.title}`, '-metadata', `artist=${t.artist}`, '-metadata', `album=${t.album}`, '-metadata', `albumartist=${t.album_artist}`];
+          if (t.track_no) meta.push('-metadata', `track=${t.track_no}`);
+          if (t.disc_no) meta.push('-metadata', `disc=${t.disc_no}`);
+          if (t.year) meta.push('-metadata', `date=${t.year}`);
+          if (!(await ff(['-y', '-i', src, '-map', '0:a:0', '-c:a', 'copy', '-map_metadata', '-1', ...meta, tmp]))) { fs.rmSync(src, { force: true }); fs.rmSync(tmp, { force: true }); skip[key] = Date.now(); failed++; continue; }
+          fs.renameSync(tmp, dest);
+          fs.rmSync(src, { force: true });
+          if (dest !== t.path) fs.rmSync(t.path, { force: true }); // the verified FLAC stands in its place
+          rels.add(path.relative(o.musicDir, path.dirname(dest)));
+          replaced.push({ oldId: t.id, newPath: dest });
+          done++;
+          ctx.log(`${t.artist} - ${t.title}: FLAC from ${file.username}`);
+        } catch (e: any) { ctx.log(`${t.artist} - ${t.title}: ${e.message}`); skip[key] = Date.now(); failed++; }
+      }
+      kvSet(db, 'task:flac:skip', JSON.stringify(skip));
+      if (rels.size) {
+        await (app as any).scanFolders?.([...rels]).catch((e: any) => ctx.log(`scan: ${e.message}`));
+        for (const r of replaced) {
+          const row = db.prepare('SELECT id FROM tracks WHERE path = ?').get(r.newPath) as any;
+          if (row) remapTrackId(db, r.oldId, row.id, o.cacheDir);
+        }
+      }
+      return `${done} upgraded, ${failed} of ${tried} tried had no good FLAC`;
+    },
+  };
+
+  return [scan, enrich, heads, discovery, backlog, flac];
 }

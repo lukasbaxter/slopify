@@ -75,6 +75,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerTasks(app, db, builtinTasks(app, {
     db, lidarr, cacheDir, musicDir,
     headsEnabled: config.headsEnabled, headSeconds: config.headSeconds, pauseMs: config.scanPauseMs,
+    slskdUrl: config.slskdUrl || undefined, slskdKey: config.slskdKey || undefined, slskdDownloadsDir: config.slskdDownloadsDir || undefined,
     ...config.tasks,
   }));
 

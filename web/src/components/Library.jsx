@@ -229,10 +229,16 @@ export default function Library({
     } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === 'radar' ? { ...d, releases: [] } : d)); }
   };
   const openBrowse = async (tile) => {
-    setDetail({ item: { Id: `browse:${tile.id}`, Name: tile.name, Type: 'Browse', _color: tile.color, _filter: tile.filter }, tracks: [], kind: 'Browse', loading: true });
+    const genre = tile.kind === 'genre' || String(tile.id || '').startsWith('genre:') ? tile.name : null;
+    setDetail({ item: { Id: `browse:${tile.id}`, Name: tile.name, Type: 'Browse', _color: tile.color, _filter: tile.filter, _genre: genre }, tracks: [], hub: null, kind: 'Browse', loading: true });
     try {
-      const r = await relaySearch(jf, '', { filter: tile.filter, limit: 50 });
-      setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, tracks: r.tracks, loading: false } : d));
+      if (genre) {
+        const [hub, tr] = await Promise.all([jf.genreHub(genre), jf.genreTracks(genre)]);
+        setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, hub, tracks: tr.slice(0, 30), loading: false } : d));
+      } else {
+        const r = await relaySearch(jf, '', { filter: tile.filter, limit: 50 });
+        setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, tracks: r.tracks, loading: false } : d));
+      }
     } catch { setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, loading: false } : d)); }
   };
   const TILE_COLORS = ['#e13300', '#1e3264', '#8d67ab', '#e8115b', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07', '#477d95', '#503750', '#27856a', '#d84000', '#e1118c', '#a56752', '#4b7d9b', '#e61e32'];
@@ -588,8 +594,16 @@ export default function Library({
     }
 
     if (kind === 'Browse') {
+      const hub = detail.hub;
       const byAlbum = new Map();
       for (const t of tracks) if (t.AlbumId && !byAlbum.has(t.AlbumId)) byAlbum.set(t.AlbumId, { Id: t.AlbumId, Name: t.Album || 'Unknown album', AlbumArtist: t.AlbumArtist || (t.Artists || [])[0] });
+      // A genre mix: everything in the genre, leaning toward plays and likes.
+      const playMix = async (shuffleFirst) => {
+        const mix = item._genre ? await jf.genreMix(item._genre).catch(() => tracks) : tracks;
+        if (!mix.length) return;
+        if (shuffleFirst) player.setShuffle('on');
+        player.playQueue(mix, shuffleFirst ? Math.floor(Math.random() * mix.length) : 0, item.Id);
+      };
       return (
         <div className="content" style={{ '--hero': phone ? phoneHero(item._color || '#3d3c3c') : item._color || '#3d3c3c' }}>
 
@@ -597,20 +611,42 @@ export default function Library({
             <div style={{ minWidth: 0 }}>
               <div className="kind">Genre</div>
               <FittedTitle text={item.Name} maxLines={2} />
-              <p className="hero-meta">{tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : 'Nothing here yet'}</p>
+              <p className="hero-meta">{hub ? `${(hub.trackCount || 0).toLocaleString()} songs • ${(hub.albumCount || 0).toLocaleString()} albums` : tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : 'Nothing here yet'}</p>
             </div>
           </header>
           <div className="actions">
-            <button className="iconbtn shuffle" onClick={() => tracks.length && player.setShuffle('on') & player.playQueue(tracks, Math.floor(Math.random() * tracks.length), item.Id)} title="Shuffle"><Shuffle /></button>
-            <button className="bigplay" onClick={() => tracks.length && player.playQueue(tracks, 0, item.Id)} title="Play"><PlayGlyph size={24} /></button>
+            <button className="iconbtn shuffle" onClick={() => playMix(true)} title="Shuffle"><Shuffle /></button>
+            <button className="bigplay" onClick={() => playMix(false)} title="Play"><PlayGlyph size={24} /></button>
           </div>
           <div className="pad">
-            {byAlbum.size > 0 && (
+            {hub?.topArtists?.length > 0 && (
+              <section>
+                <div className="shelf-head"><h2>Top artists</h2></div>
+                <div className="shelf">
+                  {hub.topArtists.map((a) => (
+                    <Card key={a.id} title={a.name} subtitle="Artist" round image={jf.imageUrl(a.id, { maxHeight: 320 })} onOpen={() => onOpenArtistById(a.id)} onPlay={() => playItem({ Id: a.id, Type: 'MusicArtist', Name: a.name })} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {(hub?.albums?.length || byAlbum.size) > 0 && (
               <section>
                 <div className="shelf-head"><h2>Albums</h2></div>
+                <div className="grid">
+                  {(hub?.albums || [...byAlbum.values()].map((a) => ({ id: a.Id, name: a.Name, artist: a.AlbumArtist }))).slice(0, 18).map((a) => (
+                    <Card key={a.id} title={a.name} subtitle={`${a.artist}${a.year ? ` • ${a.year}` : ''}`} image={jf.imageUrl(a.id, { maxHeight: 320 })}
+                      onOpen={() => openAlbum({ Id: a.id, Name: a.name })} onPlay={() => playItem({ Id: a.id, Type: 'MusicAlbum', Name: a.name })} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {hub?.recent?.length > 0 && (
+              <section>
+                <div className="shelf-head"><h2>New additions</h2></div>
                 <div className="shelf">
-                  {[...byAlbum.values()].slice(0, 12).map((a) => (
-                    <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist} image={jf.imageUrl(a.Id, { maxHeight: 320 })} onOpen={() => openAlbum(a)} onPlay={() => playItem(a)} />
+                  {hub.recent.slice(0, 12).map((a) => (
+                    <Card key={a.id} title={a.name} subtitle={a.artist} image={jf.imageUrl(a.id, { maxHeight: 320 })}
+                      onOpen={() => openAlbum({ Id: a.id, Name: a.name })} onPlay={() => playItem({ Id: a.id, Type: 'MusicAlbum', Name: a.name })} />
                   ))}
                 </div>
               </section>

@@ -7,6 +7,7 @@ import type { DB } from './db.js';
 import { libraryVersion } from './db.js';
 import { artPath, nearestSize, SIZES } from './artwork.js';
 import { similarInLibrary } from './discover.js';
+import { albumGenreMap } from './genres.js';
 
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
@@ -186,17 +187,84 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     if (!items) return reply.code(404).send({ error: 'no such track' });
     return { items: items.map(trackOut) };
   });
-  // Search page tiles: genres with a cover, most tracks first.
+  // Search page tiles: one per canonical genre (genres.ts), covers from the
+  // genre's most played albums, biggest shelves first.
+  const albumPlays = () => new Map<string, number>((db.prepare('SELECT t.album_id a, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id GROUP BY t.album_id').all() as any[]).map((r) => [r.a, r.n]));
+  const genreAlbums = (name: string) => {
+    const genreOf = albumGenreMap(db);
+    return (db.prepare('SELECT id, name, artist, artist_id, year, track_count, added_at, cover_hash FROM albums').all() as any[]).filter((a) => genreOf.get(a.id) === name);
+  };
   app.get('/api/browse', auth, async () => {
-    const rows = db.prepare('SELECT t.genres, a.cover_hash, t.album_id FROM tracks t JOIN albums a ON a.id = t.album_id').all() as any[];
-    const g = new Map<string, { n: number; cover: string | null; albumId: string }>();
-    for (const r of rows) for (const name of JSON.parse(r.genres || '[]') as string[]) { const k = name.trim(); if (!k) continue; const e = g.get(k) || { n: 0, cover: null, albumId: r.album_id }; e.n++; if (!e.cover && r.cover_hash) e.cover = r.cover_hash; g.set(k, e); }
-    return { tiles: [...g.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 40).map(([name, e]) => ({ id: `genre:${name}`, name, count: e.n, coverId: e.albumId, cover: e.cover, kind: 'genre' })) };
+    const genreOf = albumGenreMap(db);
+    const plays = albumPlays();
+    const g = new Map<string, { n: number; albums: { id: string; plays: number; cover: string | null }[] }>();
+    for (const a of db.prepare('SELECT id, track_count, cover_hash FROM albums').all() as any[]) {
+      const name = genreOf.get(a.id) || 'Other';
+      const e = g.get(name) || { n: 0, albums: [] };
+      e.n += a.track_count; e.albums.push({ id: a.id, plays: plays.get(a.id) || 0, cover: a.cover_hash });
+      g.set(name, e);
+    }
+    const tiles = [...g.entries()]
+      .filter(([name, e]) => e.n >= 10 && name !== 'Other').concat(g.has('Other') ? [['Other', g.get('Other')!] as [string, any]] : [])
+      .sort((x, y) => (x[0] === 'Other' ? 1 : y[0] === 'Other' ? -1 : y[1].n - x[1].n))
+      .slice(0, 24)
+      .map(([name, e]) => {
+        const top = e.albums.filter((a) => a.cover).sort((x, y) => y.plays - x.plays);
+        return { id: `genre:${name}`, name, count: e.n, coverId: top[0]?.id ?? null, cover: top[0]?.cover ?? null, covers: top.slice(0, 4).map((a) => a.id), kind: 'genre' };
+      });
+    return { tiles };
   });
+  // A genre's hub: how big it is, its most played artists and albums, what
+  // just arrived. The page builds its sections from this one answer.
+  app.get('/api/genres/:name', auth, async (req) => {
+    const name = String((req.params as any).name || '').slice(0, 40);
+    const albums = genreAlbums(name);
+    const plays = albumPlays();
+    const byPlays = [...albums].sort((x, y) => (plays.get(y.id) || 0) - (plays.get(x.id) || 0));
+    const artists = new Map<string, { id: string; name: string; plays: number; albums: number }>();
+    for (const a of albums) {
+      if (!a.artist_id || /^various/i.test(a.artist || '')) continue;
+      const e = artists.get(a.artist_id) || { id: a.artist_id, name: a.artist, plays: 0, albums: 0 };
+      e.plays += plays.get(a.id) || 0; e.albums++;
+      artists.set(a.artist_id, e);
+    }
+    return {
+      name,
+      trackCount: albums.reduce((n, a) => n + a.track_count, 0),
+      albumCount: albums.length,
+      topArtists: [...artists.values()].sort((x, y) => y.plays - x.plays || y.albums - x.albums).slice(0, 12),
+      albums: byPlays.slice(0, 60).map(albumOut),
+      recent: [...albums].sort((x, y) => y.added_at - x.added_at).slice(0, 18).map(albumOut),
+    };
+  });
+  // The genre's tracks, most played first (the hub's Popular list and the
+  // search page's scoped search).
+  const genreTracks = (name: string, limit: number): TrackRow[] => {
+    const ids = genreAlbums(name).map((a) => a.id);
+    const out: (TrackRow & { _n: number })[] = [];
+    for (let i = 0; i < ids.length; i += 400) {
+      const chunk = ids.slice(i, i + 400);
+      out.push(...db.prepare(`${TRACK_SELECT} LEFT JOIN (SELECT track_id, COUNT(*) n FROM plays GROUP BY track_id) p ON p.track_id = t.id
+        WHERE t.album_id IN (${chunk.map(() => '?').join(',')})`.replace('SELECT t.*, a.cover_hash', 'SELECT t.*, a.cover_hash, COALESCE(p.n, 0) AS _n')).all(...chunk) as any[]);
+    }
+    return out.sort((x, y) => y._n - x._n).slice(0, limit);
+  };
   app.get('/api/genres/:name/tracks', auth, async (req) => {
-    const name = String((req.params as any).name || '').slice(0, 100);
-    const rows = db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? ORDER BY t.album_artist, t.album, t.disc_no, t.track_no LIMIT 500`).all(`%${JSON.stringify(name)}%`) as TrackRow[];
-    return { items: rows.map(trackOut) };
+    const name = String((req.params as any).name || '').slice(0, 40);
+    return { items: genreTracks(name, 100).map(trackOut) };
+  });
+  // A shuffled sitting of the genre, leaning toward what gets played and liked.
+  app.get('/api/genres/:name/mix', auth, async (req) => {
+    const name = String((req.params as any).name || '').slice(0, 40);
+    const liked = new Set((db.prepare('SELECT DISTINCT track_id FROM likes').all() as any[]).map((r) => r.track_id));
+    const pool = genreTracks(name, 4000).map((t: any) => ({ t, w: 1 + Math.min(t._n || 0, 20) + (liked.has(t.id) ? 5 : 0) }));
+    const picked: TrackRow[] = [];
+    while (picked.length < 50 && pool.length) {
+      let r = Math.random() * pool.reduce((s, x) => s + x.w, 0);
+      const i = pool.findIndex((x) => (r -= x.w) <= 0);
+      picked.push(...pool.splice(i < 0 ? pool.length - 1 : i, 1).map((x) => x.t));
+    }
+    return { items: picked.map(trackOut) };
   });
   app.get('/api/lyrics/:id', auth, async (req, reply) => {
     const r = db.prepare('SELECT kind, lines, source FROM lyrics WHERE track_id = ?').get((req.params as any).id) as any;

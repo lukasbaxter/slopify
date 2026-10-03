@@ -237,6 +237,8 @@ export class Slopify {
     return { items: [], total: 0 };
   }
   async genreTracks(name) { return ((await this._fetch(`/api/genres/${encodeURIComponent(name)}/tracks`)).items || []).map(rowTrack); }
+  async genreHub(name) { return this._fetch(`/api/genres/${encodeURIComponent(name)}`); }
+  async genreMix(name) { return ((await this._fetch(`/api/genres/${encodeURIComponent(name)}/mix`)).items || []).map(rowTrack); }
 
   async playlists() { const items = ((await this._fetch('/api/playlists')).items || []).map(rowPlaylist); return { items, total: items.length }; }
   playlistTracks(playlistId, opts = {}) {

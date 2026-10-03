@@ -23,6 +23,7 @@ import { registerAi } from './ai.js';
 import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
+import { registerTasks, builtinTasks } from './tasks.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 
@@ -71,6 +72,11 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerSpotifyImport(app, db, dataDir);
   registerDownloads(app, db, { lidarr });
   registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
+  registerTasks(app, db, builtinTasks(app, {
+    db, lidarr, cacheDir,
+    headsEnabled: config.headsEnabled, headSeconds: config.headSeconds, pauseMs: config.scanPauseMs,
+    scanEveryH: config.scanEveryH, ...config.tasks,
+  }));
 
   const health = async () => ({ ok: true, version: VERSION });
   app.get('/healthz', health);

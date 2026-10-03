@@ -23,9 +23,18 @@ export function useAdminStatus(jf, every = 5000) {
 
 export function AdminSettings({ jf, me, notify, phone = false }) {
   const [status, err] = useAdminStatus(jf);
+  const [tasks, setTasks] = useState(null);
   const [users, setUsers] = useState(null);
   const [invite, setInvite] = useState(null);
   const [busy, setBusy] = useState('');
+  useEffect(() => {
+    if (!jf) return undefined;
+    let alive = true;
+    const tick = () => jf._fetch('/api/admin/tasks').then((r) => { if (alive) setTasks(r.tasks || []); }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, [jf]);
   const loadUsers = () => jf.users().then((r) => setUsers(r.users || [])).catch(() => setUsers([]));
   useEffect(() => { loadUsers(); }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -60,8 +69,32 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
           <button type="button" className="primary" disabled={!!busy || !!status?.scanning} onClick={() => run('scan', () => jf.adminScan(), 'Scan started')}>{status?.scanning ? 'Scanning…' : 'Scan library now'}</button>
           <button type="button" className="btn-secondary" disabled={!!busy || !!status?.enriching} onClick={() => run('fetch', () => jf.adminEnrich(), 'Fetching lyrics and artwork')}>{status?.enriching ? 'Fetching…' : 'Fetch lyrics & artwork now'}</button>
         </div>
-        <div className="settings-hint">The music folder is scanned at start and every 6 hours; lyrics and artist pictures are fetched hourly for whatever is still missing.</div>
+        <div className="settings-hint">Recurring work runs from the Tasks list below; these buttons are the same two chores, started by hand.</div>
       </section>
+
+      {tasks && (
+        <section className="settings-section admin">
+          <h2>Tasks</h2>
+          <ul className="admin-list">
+            {tasks.map((t) => (
+              <li key={t.id}>
+                <b>{t.name}</b>
+                <span>
+                  {t.description}
+                  {' · '}
+                  {t.running ? `running — ${t.running.step}${t.running.progress != null ? ` (${Math.round(t.running.progress * 100)}%)` : ''}`
+                    : t.last ? `${t.last.ok ? '' : 'failed '}${ago(t.last.started)}${t.last.summary ? ` · ${t.last.summary}` : ''}${t.last.error ? ` · ${t.last.error}` : ''}`
+                    : 'never run'}
+                  {t.everyH ? ` · every ${t.everyH >= 24 && t.everyH % 24 === 0 ? `${t.everyH / 24} d` : `${t.everyH} h`}` : ' · manual'}
+                </span>
+                <span className="admin-list-actions">
+                  <button type="button" className="btn-secondary" disabled={!!t.running} onClick={() => run(`run ${t.name}`, () => jf._fetch(`/api/admin/tasks/${t.id}/run`, { method: 'POST' }), `${t.name} started`)}>{t.running ? 'Running…' : 'Run now'}</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {status?.speakers && (
         <section className="settings-section admin">

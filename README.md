@@ -59,6 +59,20 @@ albums become playable seconds later instead of at the next library scan.
 Artists Slopify adds to Lidarr while browsing stay unmonitored; only a
 Request monitors an album.
 
+## Tasks
+
+Settings → Admin has a Tasks list, Jellyfin-style: every recurring chore
+with its last run, live progress and a Run now button. Built in: **Scan
+library** (`SCAN_EVERY_H`), **Fetch lyrics & artwork** (`ENRICH_EVERY_H`),
+**Cut song heads** (`HEADS_EVERY_H`, when `HEADS=1`), **Discover new music**
+(`DISCOVERY_EVERY_H`/`DISCOVERY_PER_RUN` — an album each from artists
+similar to your most played, via Deezer + Lidarr), and **Fill in
+discographies** (`BACKLOG_EVERY_H`/`BACKLOG_PER_RUN`/`BACKLOG_ARTISTS_PER_RUN`
+— missing studio albums and EPs of the artists you actually play). The
+background chores never fill Lidarr's wanted list past `TASKS_WANTED_TARGET`
+(default 25), so a person's own request is always near the front of the
+line. Any interval set to 0 turns that schedule off; Run now always works.
+
 ## What works today
 
 See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (originals or HLS transcodes), lyrics (sidecars + LrcLib), artist pictures, likes, playlists, Home and history from your own plays, several devices sharing one session (mirror, control, hand over), Chromecast and BluOS speakers at home driven by the server so any phone or browser can pick them, accounts with invites and admin roles. Desktop app, phone shell and Soulseek are next.

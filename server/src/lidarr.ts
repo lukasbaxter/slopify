@@ -22,7 +22,7 @@ export type LidarrOptions = {
 };
 
 // A release as the discover/search/radar pages show it.
-export type Release = { album_id: string; artist: string; title: string; rtype: string; year: string; date: string; image: string | null; total_tracks: number };
+export type Release = { album_id: string; artist: string; title: string; rtype: string; year: string; date: string; image: string | null; total_tracks: number; secondary: string[] };
 
 // An album's live state for the Downloads page.
 export type AlbumState = {
@@ -48,6 +48,7 @@ const releaseOf = (a: any): Release => ({
   date: String(a.releaseDate || '').slice(0, 10),
   image: webImage(a.images, 'cover'),
   total_tracks: a.statistics?.totalTrackCount ?? 0,
+  secondary: a.secondaryTypes || [],
 });
 
 const stateOf = (a: any, queue: Map<number, { state: 'downloading' | 'failed'; detail: string | null }>): AlbumState => ({
@@ -193,6 +194,12 @@ export function lidarrClient(opts: LidarrOptions) {
       if (opts.searchOnRequest) await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [album.id] }) }).catch((e: any) => log(`lidarr search cmd: ${e.message}`));
       cache.delete('activity');
       return { ...out, status: 'queued' };
+    },
+
+    // How long the line is (albums monitored and still missing).
+    async wantedCount(): Promise<number> {
+      if (!this.enabled) return 0;
+      return (await activity()).wanted.size;
     },
 
     // release-group id -> request state, for flagging discographies and search

@@ -80,6 +80,20 @@ export const config = {
     // watches Lidarr's wanted list, Retry on the Downloads page searches.
     searchOnRequest: env('LIDARR_SEARCH_ON_REQUEST', '0') === '1',
   },
+  // Scheduled tasks (the admin dashboard's Tasks section). Hours between
+  // runs; 0 turns a schedule off (Run now still works). The wanted target
+  // caps how far background chores (discovery, backlog) fill Lidarr's
+  // wanted list, so a person's own request never waits behind them.
+  tasks: {
+    enrichEveryH: Number(env('ENRICH_EVERY_H', '1')),
+    headsEveryH: Number(env('HEADS_EVERY_H', '24')),
+    wantedTarget: Number(env('TASKS_WANTED_TARGET', '25')),
+    discoveryEveryH: Number(env('DISCOVERY_EVERY_H', '168')),
+    discoveryPerRun: Number(env('DISCOVERY_PER_RUN', '10')),
+    backlogEveryH: Number(env('BACKLOG_EVERY_H', '6')),
+    backlogPerRun: Number(env('BACKLOG_PER_RUN', '10')),
+    backlogArtistsPerRun: Number(env('BACKLOG_ARTISTS_PER_RUN', '5')),
+  },
   // Generated playlists: Claude through the Anthropic API.
   ai: {
     apiKey: env('ANTHROPIC_API_KEY', '') || undefined,

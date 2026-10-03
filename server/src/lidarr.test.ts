@@ -55,7 +55,7 @@ describe('lidarr client', () => {
     const l = client(fetcher);
     const d = await l.discography('Porter Robinson');
     expect(state.artists[0]).toMatchObject({ monitored: false, rootFolderPath: '/music', qualityProfileId: 3, metadataProfileId: 2, addOptions: { monitor: 'none', searchForMissingAlbums: false } });
-    expect(d.releases).toEqual([{ album_id: 'mb-worlds', artist: 'Porter Robinson', title: 'Worlds', rtype: 'Album', year: '2014', date: '2014-08-12', image: 'http://img/worlds', total_tracks: 12 }]);
+    expect(d.releases).toEqual([{ album_id: 'mb-worlds', artist: 'Porter Robinson', title: 'Worlds', rtype: 'Album', year: '2014', date: '2014-08-12', image: 'http://img/worlds', total_tracks: 12, secondary: [] }]);
   });
 
   it('request monitors the album AND its artist (the wanted list needs both), and reports what is already on disk as exists', async () => {

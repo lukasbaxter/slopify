@@ -15,14 +15,16 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   // Work that waits on new files (generated playlists' requested songs).
   const afterScan: (() => void)[] = [];
   app.decorate('afterScan', (fn: () => void) => { afterScan.push(fn); });
-  const runScan = async () => {
+  let lastScan: Promise<any> | null = null;
+  const runScan = () => {
     if (current) return current;
     current = { started: Date.now(), files: 0 };
     // The scan is "current" only while it walks the files; the enrichment it
     // kicks off afterwards can run for hours and must not block the next scan.
-    scanLibrary(db, { musicDir, dataDir, ...scanOpts, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
-      .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } void runEnrich(); })
-      .catch((e) => { app.log.error(`scan failed: ${e.message}`); current = null; });
+    lastScan = scanLibrary(db, { musicDir, dataDir, ...scanOpts, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
+      .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } void runEnrich(); return r; },
+        (e) => { app.log.error(`scan failed: ${e.message}`); current = null; throw e; });
+    lastScan.catch(() => {}); // awaited by whoever asked; never unhandled
     return current;
   };
   // Lyrics/identity for whatever the scan left unresolved; also on a timer for retries.
@@ -55,6 +57,9 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     return r;
   };
   app.decorate('runScan', runScan);
+  // The Tasks dashboard runs a scan to completion and reports its result.
+  app.decorate('runScanAwaited', () => { runScan(); return lastScan; });
+  app.decorate('enrichRunning', () => enriching);
   app.decorate('scanFolders', scanFolders);
   app.decorate('runAfterScan', () => { for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } });
   app.decorate('scanning', () => current);

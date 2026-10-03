@@ -108,6 +108,9 @@ const MIGRATIONS: string[] = [
   `
   CREATE TABLE ingested (rel TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, at INTEGER NOT NULL);
   `,
+  `
+  ALTER TABLE albums ADD COLUMN cover_tries INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export type DB = Database.Database;

@@ -17,7 +17,7 @@ const ICONS = {
 };
 
 // Phone sheet: Spotify's device glyphs by kind (this phone, a TV for Cast, a
-// speaker for Bluesound, a laptop for another Conduit).
+// speaker for Bluesound, a laptop for another Slopify).
 const PHONE_ICONS = {
   local: 'M16 1H8a3 3 0 0 0-3 3v16a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V4a3 3 0 0 0-3-3zm1.5 19a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V4A1.5 1.5 0 0 1 8 2.5h8A1.5 1.5 0 0 1 17.5 4v16zM12 17.25a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5z',
   cast: 'M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v-1.5H3a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5h18a.5.5 0 0 1 .5.5v12a.5.5 0 0 1-.5.5h-5V19h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8 21.5h8V23H8v-1.5z',
@@ -128,7 +128,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
 
   const remoteCount = visible.length;
   const isBrowser = typeof window !== 'undefined' && !window.conduit;
-  const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : 'Conduit');
+  const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : 'Slopify');
   const others = all.filter((d) => d.id !== active.id);
 
   return (
@@ -172,7 +172,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
           ))}
           <p className="dm-note">
             {isBrowser
-              ? 'Speakers and TVs show up in the Conduit app. In the browser, playback stays on this device.'
+              ? 'Speakers and TVs show up in the Slopify app. In the browser, playback stays on this device.'
               : 'Chromecast and Bluesound players on this network appear here automatically once they are awake.'}
           </p>
           {active.kind !== 'local' && onVolume && typeof volume === 'number' && <SheetVolume volume={volume} onChange={onVolume} />}
@@ -209,7 +209,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
 
           {!remoteCount && isBrowser && (
             <p className="devicemenu-empty">
-              Speaker control lives in the Conduit desktop app for now. In your
+              Speaker control lives in the Slopify desktop app for now. In your
               browser you can play through this device.
             </p>
           )}

@@ -1,4 +1,4 @@
-// Passthrough service worker. Its only job is to make Conduit installable as a
+// Passthrough service worker. Its only job is to make Slopify installable as a
 // PWA -- it deliberately caches NOTHING. Shell caching was serving stale app
 // bundles after a redeploy (old JS hash, blank or outdated app), so the app is
 // always fetched fresh from the network instead. On activation it purges any

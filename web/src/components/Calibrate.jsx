@@ -7,7 +7,7 @@ import { solveLag } from '../api/tapSync.js';
 // coming out of it; the gap is its output buffer and neither Cast nor BluOS
 // reports it. The person listening can measure it, so this asks them to tap:
 //
-//   1. Conduit pauses, jumps ahead and plays. Tap when the music comes back.
+//   1. Slopify pauses, jumps ahead and plays. Tap when the music comes back.
 //      That is a reaction, so it lands a little after the truth, but it pins
 //      the delay to within a fraction of a second (the coarse estimate).
 //   2. Tap along to the beat for a while. Taps to a beat are anticipatory and
@@ -164,7 +164,7 @@ export default function Calibrate({ player, device, shadow, reported, onDone, on
           <>
             <p className="cal-text">Speakers play a little behind what they report, so the bars can run ahead of the sound. Two quick steps measure {name}'s delay so the visualizer lines up.</p>
             <ol className="cal-steps">
-              <li>Conduit pauses and jumps ahead. <b>Tap the moment you hear the music.</b> (Twice.)</li>
+              <li>Slopify pauses and jumps ahead. <b>Tap the moment you hear the music.</b> (Twice.)</li>
               <li><b>Tap along to the beat</b> for {BEAT_SECONDS} seconds.</li>
             </ol>
             <p className="cal-text muted">Tap anywhere, or press Space. No microphone is used.</p>

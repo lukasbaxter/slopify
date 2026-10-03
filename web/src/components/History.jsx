@@ -6,7 +6,7 @@ import { usePhone } from './TrackRow.jsx';
 // Tailwind tokens (background #111111, foreground #181818, primary #1ed760,
 // grey #a3a3a3 / #727272), its Container widths, the same sections in the
 // same order with the same class recipes (see HANDOFF.md "History tab").
-// Every number comes from ListenBrainz through the relay (Conduit plays, the
+// Every number comes from ListenBrainz through the relay (Slopify plays, the
 // Jellyfin backfill and LB's Spotify import all land there), matched to the
 // library for art and playback where the song exists here.
 

@@ -165,7 +165,7 @@ export function sessionDeviceOf(player, devices) {
         // The other client is driving a speaker: the session is ON the speaker.
         ? (devices.find((d) => d.id === activeSpeaker.id) || { ...activeSpeaker, model: '' })
         : devices.find((d) => d.kind === 'relay' && d.relayClientId === activeId)
-          || { id: `relay:${activeId}`, kind: 'relay', name: (roster.players || []).find((p) => p.id === activeId)?.name || 'Conduit' })
+          || { id: `relay:${activeId}`, kind: 'relay', name: (roster.players || []).find((p) => p.id === activeId)?.name || 'Slopify' })
     : device;
 }
 

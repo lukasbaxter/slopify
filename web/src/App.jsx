@@ -58,7 +58,7 @@ function Login({ onConnected }) {
         <div className="login-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.6 14.4a.62.62 0 0 1-.86.2c-2.35-1.43-5.3-1.76-8.78-.96a.62.62 0 1 1-.28-1.22c3.8-.87 7.07-.5 9.7 1.12.3.18.4.57.22.86zm1.23-2.73a.78.78 0 0 1-1.07.26c-2.69-1.65-6.79-2.13-9.97-1.17a.78.78 0 1 1-.45-1.5c3.64-1.1 8.16-.57 11.24 1.33.37.23.48.71.25 1.08zm.1-2.85C14.7 9.16 9.4 8.98 6.32 9.92a.94.94 0 1 1-.55-1.8c3.54-1.07 9.41-.87 13.13 1.34a.94.94 0 0 1-.96 1.62z" /></svg>
         </div>
-        <h1>Conduit</h1>
+        <h1>Slopify</h1>
         <p className="login-sub">Your library, on any speaker in the house.</p>
         {IS_DESKTOP && (
           <label>
@@ -1064,7 +1064,7 @@ export default function App() {
     return () => { window.removeEventListener('touchstart', down); window.removeEventListener('touchend', up); };
   }, [isMobile, fullScreen, panel]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (booting) return <div className="boot">Starting Conduit...</div>;
+  if (booting) return <div className="boot">Starting Slopify...</div>;
   if (!jf) return <Login onConnected={setJf} />;
 
   // Phone chrome: root tabs show avatar + page title (Spotify's Home/Search/

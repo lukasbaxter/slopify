@@ -712,12 +712,12 @@ export default function Library({
             <button className="setrow" onClick={() => onUpdatePrefs({ theme: DEFAULT_THEME })} disabled={themeEquals(theme, DEFAULT_THEME)}>
               <span className="setrow-text"><b>Reset to default</b></span>
             </button>
-            <p className="settings-caption">Saved to your account and applied to every Conduit you have open.</p>
+            <p className="settings-caption">Saved to your account and applied to every Slopify you have open.</p>
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} phone />}
 
             {settingsMenu && (
               <ContextMenu x={settingsMenu.x} y={settingsMenu.y} onClose={() => setSettingsMenu(null)}
-                header={settingsMenu.kind === 'phoneQuality' ? { icon: MI.play, title: 'Streaming quality on phones', sub: 'Applies from the next track on every phone signed in as you.' } : settingsMenu.kind === 'quality' ? { icon: MI.play, title: 'Streaming quality elsewhere', sub: 'Desktop and tablet. Applies from the next track. Speakers always get the original file.' } : { icon: MI.photo, title: 'Theme', sub: 'Applied to every Conduit you have open, instantly.' }}
+                header={settingsMenu.kind === 'phoneQuality' ? { icon: MI.play, title: 'Streaming quality on phones', sub: 'Applies from the next track on every phone signed in as you.' } : settingsMenu.kind === 'quality' ? { icon: MI.play, title: 'Streaming quality elsewhere', sub: 'Desktop and tablet. Applies from the next track. Speakers always get the original file.' } : { icon: MI.photo, title: 'Theme', sub: 'Applied to every Slopify you have open, instantly.' }}
                 items={settingsMenu.kind === 'phoneQuality'
                   ? QUALITIES.map((q) => ({ key: q.id, label: q.label, icon: q.id === phoneQuality.id ? MI.check : null, onClick: () => onUpdatePrefs({ phoneQuality: q.id }) }))
                   : settingsMenu.kind === 'quality'
@@ -800,7 +800,7 @@ export default function Library({
 
             <section className="settings-section">
               <h2>Appearance</h2>
-              <div className="settings-hint" style={{ marginBottom: 12 }}>Saved to your account and applied to every Conduit you have open, instantly.</div>
+              <div className="settings-hint" style={{ marginBottom: 12 }}>Saved to your account and applied to every Slopify you have open, instantly.</div>
               <div className="theme-presets">
                 {THEME_PRESETS.map((p) => (
                   <button key={p.name} className={`theme-preset ${themeEquals(p.theme, theme) ? 'on' : ''}`} onClick={() => onUpdatePrefs({ theme: p.theme })} style={{ '--p-bg': p.theme.bg, '--p-surface': p.theme.surface, '--p-accent': p.theme.accent, '--p-fg': p.theme.fg }}>

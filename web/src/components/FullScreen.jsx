@@ -324,7 +324,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
           </div>
         </div>
         {/* Phone-only bottom row (Spotify: devices bottom-left, share / queue
-            bottom-right; Conduit adds lyrics and the visualizer beside them). */}
+            bottom-right; Slopify adds lyrics and the visualizer beside them). */}
         {phone && (
           <div className="fs-phone-row">
             <div className="fs-phone-device">

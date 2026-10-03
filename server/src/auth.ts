@@ -13,6 +13,10 @@ declare module 'fastify' { interface FastifyRequest { user?: User; tokenId?: str
 
 const INVITE_TTL = 7 * 86400000;
 
+// Verified against when the username does not exist, so a login attempt costs
+// one argon2 either way and response time does not reveal which names exist.
+const DUMMY_HASH = argon2.hash('slopify-timing-dummy', { type: argon2.argon2id });
+
 export async function ensureAdmin(db: DB, name: string, pass: string) {
   const n = (db.prepare('SELECT COUNT(*) n FROM users').get() as any).n;
   if (n > 0) return;
@@ -47,15 +51,27 @@ export function registerAuth(app: FastifyInstance, db: DB) {
     const t = tokenFromRequest(req);
     if (t) { const u = userByToken(db, t); if (u) { req.user = u; req.tokenId = t; } }
   });
-  app.decorate('requireUser', async (req: FastifyRequest, reply: FastifyReply) => { if (!req.user) return reply.code(401).send({ error: 'unauthorized' }); });
-  app.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => { if (!req.user) return reply.code(401).send({ error: 'unauthorized' }); if (req.user.role !== 'admin') return reply.code(403).send({ error: 'admin only' }); });
+  // While a password change is forced, the account can only change it, see
+  // itself and log out — everything else is refused server-side, not just
+  // hidden by the UI.
+  const PW_EXEMPT = ['/api/auth/password', '/api/auth/me', '/api/auth/logout'];
+  const pwBlocked = (req: FastifyRequest) => !!req.user?.must_change_pw && !PW_EXEMPT.includes(req.url.split('?')[0]);
+  app.decorate('requireUser', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' });
+    if (pwBlocked(req)) return reply.code(403).send({ error: 'password change required' });
+  });
+  app.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.user) return reply.code(401).send({ error: 'unauthorized' });
+    if (pwBlocked(req)) return reply.code(403).send({ error: 'password change required' });
+    if (req.user.role !== 'admin') return reply.code(403).send({ error: 'admin only' });
+  });
 
   const Login = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(256), device: z.string().max(80).default('web'), kind: z.enum(['web', 'desktop', 'phone', 'service']).default('web') });
   app.post('/api/auth/login', { config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = Login.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad request', issues: body.error.issues });
     const u = db.prepare('SELECT id, name, role, must_change_pw, pass_hash FROM users WHERE name = ?').get(body.data.username) as (User & { pass_hash: string }) | undefined;
-    if (!u || !(await argon2.verify(u.pass_hash, body.data.password))) return reply.code(401).send({ error: 'wrong username or password' });
+    if (!(await argon2.verify(u ? u.pass_hash : await DUMMY_HASH, body.data.password)) || !u) return reply.code(401).send({ error: 'wrong username or password' });
     const t = newToken();
     db.prepare('INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)').run(t, u.id, body.data.device, body.data.kind, Date.now(), Date.now());
     db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').run(Date.now(), u.id);

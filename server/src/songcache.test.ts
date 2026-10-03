@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { openDb } from './db.js';
 import { SongCache, songPath } from './songcache.js';
 
@@ -29,5 +30,18 @@ describe('song cache', () => {
     const cache = tmp('slopify-sc3c-'); const f = path.join(tmp('slopify-sc3n-'), 'a.mp3'); fs.writeFileSync(f, 'abcd');
     const c = new SongCache(db, cache, 1e6); c.want('dd4', f, 4); await settle(c);
     expect(c.get('dd4', 5)).toBeNull(); expect(c.get('dd4', 4)).not.toBeNull();
+  });
+  it('a hung copy (a wedged NAS mount) times out and gives the fetch slot back', async () => {
+    const db = openDb(tmp('slopify-sc5-')); const cache = tmp('slopify-sc5c-');
+    const fifo = path.join(tmp('slopify-sc5n-'), 'pipe');
+    execFileSync('mkfifo', [fifo]); // a read of it blocks forever: no writer
+    const c = new SongCache(db, cache, 1e6, () => {}, 2, 200); // 200 ms copy timeout
+    c.want('ee5', fifo, 10);
+    expect(c.stats().fetching).toBe(1);
+    await settle(c);
+    expect(c.stats().fetching).toBe(0); // the slot came back
+    expect(c.get('ee5', 10)).toBeNull();
+    // unwedge the blocked open so the worker can exit cleanly
+    try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); } catch { /* reader already gone */ }
   });
 });

@@ -21,18 +21,19 @@ const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().repl
 // specific ("k pop", "latin trap"?) must sit above the generic ("pop", "trap").
 const RULES: [RegExp, string][] = [
   [/k ?pop|korean/, 'K-Pop'],
-  [/afro/, 'Afrobeats'],
+  // Jazz and Latin sit above /afro/: "Afro-Cuban Jazz" is Jazz, "Afro-Brazilian" is Latin.
+  [/jazz|bebop|swing/, 'Jazz'],
   [/reggaeton|latin|salsa|bachata|cumbia|bossa|brazil|mpb|flamenco/, 'Latin'],
+  [/afro/, 'Afrobeats'],
   [/reggae|dancehall|ska|\bdub\b/, 'Reggae'],
-  [/hip ?hop|\brap\b|trap|drill|grime|phonk|boom bap/, 'Hip-Hop'],
+  [/hip ?hop|\brap\b|\btrap\b|drill|grime|phonk|boom bap/, 'Hip-Hop'],
   [/r ?(and|n) ?b|r b\b|rnb|neo soul/, 'R&B'],
-  [/soul|funk|motown|gospel|disco/, 'Soul & Funk'],
+  [/soul|funk|motown|gospel/, 'Soul & Funk'],
   [/metal|deathcore|djent/, 'Metal'],
   [/punk|grunge|rock|psychedel/, 'Rock'],
   [/alternative|indie|shoegaze|emo|dream pop|slowcore/, 'Alternative'],
-  [/house|techno|trance|eurodance|big room|club|\bedm\b|dance/, 'Dance'],
+  [/house|techno|trance|eurodance|big room|club|\bedm\b|dance|disco/, 'Dance'],
   [/electro|synth|ambient|downtempo|chill|idm|dubstep|drum ?((and|n) ?)?bass|dnb|breakbeat|garage|future|wave\b|lo ?fi/, 'Electronic'],
-  [/jazz|bebop|swing/, 'Jazz'],
   [/classical|orchestr|opera|baroque|symphon|piano|composer/, 'Classical'],
   [/country|bluegrass|americana/, 'Country'],
   [/folk|singer ?songwriter|acoustic/, 'Folk'],
@@ -91,31 +92,47 @@ export const dropGenreCache = () => { mapCache = null; };
 // matched album, the file tags' vote, the artist's other albums, 'Other'.
 // Paced like the other enrich passes; results are permanent (a re-run never
 // second-guesses a settled album).
-export async function albumGenresPass(db: DB, opts: { fetcher?: (url: string) => Promise<{ status: number; json: () => Promise<any> }>; log?: (m: string) => void; max?: number } = {}): Promise<{ settled: number; deezer: number }> {
+export async function albumGenresPass(db: DB, opts: { fetcher?: (url: string) => Promise<{ status: number; json: () => Promise<any> }>; log?: (m: string) => void; max?: number; pauseMs?: number } = {}): Promise<{ settled: number; deezer: number }> {
   const f = opts.fetcher ?? ((url: string) => fetch(url, { headers: { 'User-Agent': 'slopify/0.1 (https://github.com/lukasbaxter/slopify)' } }));
   const log = opts.log ?? (() => {});
+  const pauseMs = opts.pauseMs ?? 500; // ~2 req/s: Deezer rate-limits by IP, and this pass shares it with enrich
   const normName = (s: string) => s.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
   const due = db.prepare('SELECT id, name, artist, artist_id FROM albums WHERE genre IS NULL ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 300) as any[];
   const byArtist = db.prepare('SELECT genre, COUNT(*) n FROM albums WHERE artist_id = ? AND genre IS NOT NULL GROUP BY genre ORDER BY n DESC LIMIT 1');
   const trackTags = db.prepare("SELECT genres FROM tracks WHERE album_id = ? AND genres != '[]'");
   const set = db.prepare('UPDATE albums SET genre = ? WHERE id = ?');
-  let deezer = 0;
+  let deezer = 0, settled = 0, failStreak = 0, first = true;
   for (const al of due) {
+    if (!first) await new Promise((r) => setTimeout(r, pauseMs));
+    first = false;
     let g: string | null = null;
+    // A Deezer failure (non-200, an error body, a thrown fetch) is not
+    // "Deezer has no genre": settling now would be permanent, so the album
+    // stays NULL and a later pass retries. Only a real empty answer falls
+    // through to the tags/artist/'Other' chain.
+    let failed = false;
     try {
       const r = await f(`https://api.deezer.com/search/album?q=${encodeURIComponent(`${al.artist} ${al.name}`)}&limit=10`);
-      if (r.status === 200) {
-        const hit = (((await r.json()).data || []) as any[]).find((d) => normName(d.title) === normName(al.name) && normName(d.artist?.name ?? '') === normName(al.artist));
+      const body = r.status === 200 ? await r.json() : null;
+      if (r.status !== 200 || body?.error) { failed = true; log(`deezer genre ${al.artist} - ${al.name}: ${r.status !== 200 ? `http ${r.status}` : JSON.stringify(body.error)}`); }
+      else {
+        const hit = ((body.data || []) as any[]).find((d: any) => normName(d.title) === normName(al.name) && normName(d.artist?.name ?? '') === normName(al.artist));
         const mapped = hit ? DEEZER_GENRES[Number(hit.genre_id)] : null;
         if (mapped && mapped !== 'Other') { g = mapped; deezer++; }
       }
-    } catch (e: any) { log(`deezer genre ${al.artist} - ${al.name}: ${e.message}`); }
+    } catch (e: any) { failed = true; log(`deezer genre ${al.artist} - ${al.name}: ${e.message}`); }
+    if (failed) {
+      if (++failStreak >= 3) { log('deezer genre: 3 failures in a row, stopping the pass'); break; }
+      continue;
+    }
+    failStreak = 0;
     g = g
       ?? voteFromTags((trackTags.all(al.id) as any[]).map((t) => { try { return JSON.parse(t.genres); } catch { return []; } }))
       ?? (byArtist.get(al.artist_id) as any)?.genre
       ?? 'Other';
     set.run(g, al.id);
+    settled++;
   }
-  if (due.length) dropGenreCache();
-  return { settled: due.length, deezer };
+  if (settled) dropGenreCache();
+  return { settled, deezer };
 }

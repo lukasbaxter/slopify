@@ -170,7 +170,10 @@ export class Ingest {
       list.push(group[0]);
       for (let k = 1; k < group.length; k++) {
         const f = group[k]; const ext = path.extname(f);
-        const to = path.join(dir, `${path.basename(f, ext)} (${k + 1})${ext}`);
+        // Probe for a free "(2)", "(3)", ... — never rename onto a name that
+        // is already taken (an earlier run's rename, or the folder's own file).
+        let n = k + 1; let to = path.join(dir, `${path.basename(f, ext)} (${n})${ext}`);
+        while (fs.existsSync(to)) { n++; to = path.join(dir, `${path.basename(f, ext)} (${n})${ext}`); }
         await fsp.rename(f, to); st.renamed++; list.push(to);
         this.log(`ingest: renamed ${path.relative(this.o.incomingDir, f)} -> ${path.basename(to)} (case clash on the NAS)`);
       }

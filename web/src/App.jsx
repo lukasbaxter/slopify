@@ -557,7 +557,7 @@ export default function App() {
     try {
       const [meta, trackList] = await Promise.all([jf.itemById(albumId), jf.tracks({ albumId })]);
       setDetail((d) => (d && d.item?.Id === albumId ? { ...d, item: meta || d.item, tracks: trackList.items, loading: false } : d));
-    } catch { setDetail((d) => (d && d.item?.Id === albumId ? { ...d, loading: false } : d)); }
+    } catch { setDetail((d) => (d && d.item?.Id === albumId ? { ...d, loading: false, loadFailed: true } : d)); }
   };
 
   const openArtistById = async (artistId, known = null) => {

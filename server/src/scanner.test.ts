@@ -76,6 +76,24 @@ describe('folder scan (a download landing)', () => {
   }, 120000);
 });
 
+describe('removal guard', () => {
+  it('a walk that cannot read the share deletes nothing and records the skip', async () => {
+    const lib = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-gone-'));
+    fs.cpSync(MUSIC, lib, { recursive: true });
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-guard-'));
+    const db = openDb(data);
+    await scanLibrary(db, { musicDir: lib, dataDir: data });
+    const count = () => (db.prepare('SELECT COUNT(*) n FROM tracks').get() as any).n;
+    expect(count()).toBe(30);
+    fs.rmSync(lib, { recursive: true }); // the NAS mount drops out from under the walk
+    const r = await scanLibrary(db, { musicDir: lib, dataDir: data });
+    expect(r.removed).toBe(0);
+    expect(r.removalSkipped).toMatch(/removal pass skipped/);
+    expect(count()).toBe(30);
+    expect((db.prepare('SELECT error FROM scans ORDER BY id DESC LIMIT 1').get() as any).error).toMatch(/removal pass skipped/);
+  }, 120000);
+});
+
 describe('artist spelling', () => {
   it('keeps the artist\'s own spelling ("INZO") over the most common one, and never renames to another artist', () => {
     const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-names-')));
@@ -103,9 +121,13 @@ describe('helpers', () => {
     expect(splitArtists(undefined, 'AC/DC')).toEqual(['AC/DC']);
     expect(splitArtists(['A', 'B'], 'A; B')).toEqual(['A', 'B']);
   });
+  it('the " x " splitter only fires before a capital', () => {
+    expect(splitArtists(undefined, 'salem x bones')).toEqual(['salem x bones']);
+    expect(splitArtists(undefined, 'KAYTRANADA x Anderson .Paak')).toEqual(['KAYTRANADA', 'Anderson .Paak']);
+  });
   it('parses LRC with repeated timestamps and offsets', () => {
     const l = parseLrc('[offset:+500]\n[ar:x]\n[00:01.00][00:03.00] hi\nplain');
-    expect(l.map((x) => x.start)).toEqual([null, 1500, 3500]);
+    expect(l.map((x) => x.start)).toEqual([1500, 3500, null]); // the plain line keeps its file position (after the timed ones)
   });
 });
 

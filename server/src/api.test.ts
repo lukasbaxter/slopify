@@ -14,6 +14,8 @@ beforeAll(async () => {
   app = await buildServer({ dataDir: DATA, musicDir: MUSIC });
   await scanLibrary((app as any).db, { musicDir: MUSIC, dataDir: DATA });
   tok = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin' } })).json().token;
+  // the seeded admin/admin is locked to the password-change route until it changes
+  await app.inject({ method: 'POST', url: '/api/auth/password', payload: { password: 'admin test password' }, headers: { authorization: `Bearer ${tok}` } });
 }, 120000);
 afterAll(async () => { await app.close(); });
 
@@ -44,6 +46,20 @@ describe('library API', () => {
     expect((await app.inject({ method: 'GET', url: `/api/art/${cover}/999.jpg` })).statusCode).toBe(200); // nearest size
   });
   it('requires a login', async () => { expect((await app.inject({ method: 'GET', url: '/api/albums' })).statusCode).toBe(401); });
+  it('browse tiles and a genre hub keep their shapes (and the tracks answer is cached)', async () => {
+    const b = (await get('/api/browse')).json();
+    expect(Array.isArray(b.tiles)).toBe(true); expect(b.tiles.length).toBeGreaterThan(0);
+    const name = b.tiles[0].name;
+    const hub = (await get(`/api/genres/${encodeURIComponent(name)}`)).json();
+    expect(hub.name).toBe(name); expect(hub.albumCount).toBeGreaterThan(0); expect(Array.isArray(hub.topArtists)).toBe(true);
+    const t = (await get(`/api/genres/${encodeURIComponent(name)}/tracks`)).json();
+    expect(t.items.length).toBeGreaterThan(0);
+    expect(Object.keys(t.items[0])).toContain('albumId');
+    expect((t.items[0] as any)._n).toBeUndefined(); // the play-count helper never leaks
+    expect((await get(`/api/genres/${encodeURIComponent(name)}/tracks`)).json()).toEqual(t); // cached answer, same shape
+    const mix = (await get(`/api/genres/${encodeURIComponent(name)}/mix`)).json();
+    expect(mix.items.length).toBeGreaterThan(0);
+  });
 });
 
 describe('streaming', () => {
@@ -58,6 +74,9 @@ describe('streaming', () => {
     const size = Number(full.headers['content-length']);
     const blu = await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: `bytes=${size - 50}-${size}` } });
     expect(blu.statusCode).toBe(206); expect(blu.headers['content-range']).toBe(`bytes ${size - 50}-${size - 1}/${size}`);
+    // a suffix longer than the file (bytes=-N, N > size): the whole thing, not a 500
+    const suf = await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: 'bytes=-999999999' } });
+    expect(suf.statusCode).toBe(206); expect(suf.headers['content-range']).toBe(`bytes 0-${size - 1}/${size}`); expect(suf.headers['content-length']).toBe(String(size));
   });
   it('transcodes to HLS, once, and serves segments', async () => {
     const id = (await get('/api/albums?limit=1')).json().items[0];

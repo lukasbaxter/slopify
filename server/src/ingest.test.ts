@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
 import { buildHead, headOf, headLength, openBytes } from './heads.js';
@@ -26,6 +26,35 @@ describe('heads', () => {
     }
     // the file changed size since: the head no longer counts
     expect(headOf(db, cache, 'abc123', size + 1)).toBeNull();
+  });
+
+  it('destroying the joined stream destroys both inner file streams (a client abort must close fds)', async () => {
+    const dir = tmp('slopify-tear-');
+    const data = Buffer.alloc(400000, 7);
+    const full = path.join(dir, 'full'); fs.writeFileSync(full, data);
+    const headFile = path.join(dir, 'head'); fs.writeFileSync(headFile, data.subarray(0, 100000));
+    const spy = vi.spyOn(fs, 'createReadStream');
+    const out = openBytes(full, { path: headFile, bytes: 100000 }, 0, data.length - 1);
+    // read until the rest stream (second fd) is open, then abort like a client would
+    await new Promise<void>((resolve) => { out.on('data', () => { if (spy.mock.results.length >= 2) resolve(); }); });
+    out.destroy();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(spy.mock.results.length).toBeGreaterThanOrEqual(2);
+    for (const res of spy.mock.results) expect((res.value as any).destroyed).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('destroying the alt-fallback wrapper destroys the inner stream', async () => {
+    const dir = tmp('slopify-tear2-');
+    const alt = path.join(dir, 'alt'); fs.writeFileSync(alt, Buffer.alloc(300000, 3));
+    const spy = vi.spyOn(fs, 'createReadStream');
+    const out = openBytes(path.join(dir, 'missing'), null, 0, 299999, alt);
+    await new Promise<void>((resolve) => out.once('data', () => resolve()));
+    out.destroy();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(spy.mock.results.length).toBeGreaterThanOrEqual(1);
+    for (const res of spy.mock.results) expect((res.value as any).destroyed).toBe(true);
+    spy.mockRestore();
   });
 });
 
@@ -89,12 +118,14 @@ describe('ingest', () => {
     const before = fs.readdirSync(album).length;
     fs.copyFileSync(path.join(album, song), path.join(album, song.toUpperCase().replace('.MP3', '.mp3')));
     if (fs.readdirSync(album).length === before) ctx.skip();
+    // the "(2)" name is already taken: the rename must probe on to "(3)" instead of landing on it
+    fs.copyFileSync(path.join(album, song), path.join(album, `${song.slice(0, -4)} (2).mp3`));
     fs.writeFileSync(path.join(album, 'COVER.PNG'), 'x');
     const ing = new Ingest(db, { incomingDir: incoming, nasDir: nas, musicDir: nas, cacheDir: cache, headSeconds: 1, settleMs: 0, deleteAfter: false });
     const st = await ing.sweep();
     expect(st.errors).toEqual([]);
     expect(st.renamed).toBe(1);
-    expect(fs.readdirSync(album).some((f) => / \(2\)\.mp3$/.test(f))).toBe(true);
+    expect(fs.readdirSync(album).some((f) => / \(3\)\.mp3$/.test(f))).toBe(true);
     expect(fs.statSync(path.join(nas, 'The Fixture Band', 'Second Wind', 'cover.png')).size).toBeGreaterThan(1);
   });
 });

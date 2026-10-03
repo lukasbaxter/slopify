@@ -16,6 +16,29 @@ import { PassThrough, Readable } from 'node:stream';
 import type { DB } from './db.js';
 
 export const HEAD_MARGIN = { flac: 32768, mp3: 4096 } as const;
+// Whole-file "heads" (m4a & co) are capped: past this the SSD win is gone and
+// the cut would hold the file in memory or churn the cache.
+export const HEAD_MAX_BYTES = 64 * 1024 * 1024;
+let bigHeadWarned = false;
+
+// Orphaned .tmp files (a crash mid-cut/mid-copy): swept once per directory,
+// async and best-effort, only files older than a day (a cut may be running).
+const sweptDirs = new Set<string>();
+export function sweepTmp(dir: string, log: (m: string) => void = () => {}) {
+  if (sweptDirs.has(dir)) return;
+  sweptDirs.add(dir);
+  (async () => {
+    const cutoff = Date.now() - 86400000;
+    const walk = async (d: string) => {
+      for (const ent of await fsp.readdir(d, { withFileTypes: true }).catch(() => [])) {
+        const p = path.join(d, ent.name);
+        if (ent.isDirectory()) await walk(p);
+        else if (ent.name.endsWith('.tmp') && ((await fsp.stat(p).catch(() => null))?.mtimeMs ?? Infinity) < cutoff) await fsp.rm(p, { force: true }).catch(() => {});
+      }
+    };
+    await walk(dir);
+  })().catch((e: any) => log(`tmp sweep ${dir}: ${e.message}`));
+}
 
 export function headsDir(cacheDir: string) { return path.join(cacheDir, 'heads'); }
 export function headPath(cacheDir: string, id: string) { return path.join(headsDir(cacheDir), id.slice(0, 2), id); }
@@ -56,18 +79,30 @@ export async function headLength(file: string, size: number, durationMs: number,
 
 // Cut the head of `src` (a local copy is fastest) for track `id`. Idempotent.
 export async function buildHead(db: DB, cacheDir: string, id: string, src: string, size: number, durationMs: number, seconds: number) {
+  sweepTmp(headsDir(cacheDir));
   const len = await headLength(src, size, durationMs, seconds);
+  if (len > HEAD_MAX_BYTES) {
+    if (!bigHeadWarned) { bigHeadWarned = true; console.warn(`heads: skipping heads over ${HEAD_MAX_BYTES / 1024 / 1024} MB (first: ${src}, ${len} bytes); further skips are silent`); }
+    return 0;
+  }
   const dst = headPath(cacheDir, id);
   await fsp.mkdir(path.dirname(dst), { recursive: true });
   const tmp = `${dst}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`; // two scans may cut the same head
   const fh = await fsp.open(src, 'r');
   try {
-    const buf = Buffer.alloc(len);
-    let got = 0;
-    while (got < len) { const { bytesRead } = await fh.read(buf, got, len - got, got); if (!bytesRead) break; got += bytesRead; }
-    if (got !== len) throw new Error(`short read ${got}/${len}`);
-    await fsp.writeFile(tmp, buf);
-  } finally { await fh.close(); }
+    const out = await fsp.open(tmp, 'w');
+    try {
+      const buf = Buffer.alloc(Math.min(len, 1 << 20)); // 1 MB chunks: a whole-file head never sits in RAM
+      let got = 0;
+      while (got < len) {
+        const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, len - got), got);
+        if (!bytesRead) break;
+        await out.write(buf, 0, bytesRead);
+        got += bytesRead;
+      }
+      if (got !== len) throw new Error(`short read ${got}/${len}`);
+    } finally { await out.close(); }
+  } catch (e) { await fsp.rm(tmp, { force: true }).catch(() => {}); throw e; } finally { await fh.close(); }
   await fsp.rename(tmp, dst);
   db.prepare('INSERT INTO heads (track_id, bytes, size, created) VALUES (?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET bytes = excluded.bytes, size = excluded.size, created = excluded.created')
     .run(id, len, size, Date.now());
@@ -88,6 +123,7 @@ export async function reconcileHeads(db: DB, cacheDir: string, seconds: number, 
 
 // The head for this track, if it matches the file the database knows.
 export function headOf(db: DB, cacheDir: string, id: string, size: number): { path: string; bytes: number } | null {
+  sweepTmp(headsDir(cacheDir)); // once per process: crash-orphaned .tmp cuts
   const h = db.prepare('SELECT bytes, size FROM heads WHERE track_id = ?').get(id) as { bytes: number; size: number } | undefined;
   if (!h || h.size !== size) return null;
   const p = headPath(cacheDir, id);
@@ -100,14 +136,15 @@ export function headOf(db: DB, cacheDir: string, id: string, size: number): { pa
 function openFile(file: string, start: number, end: number, alt?: string | null): Readable {
   if (!alt) return fs.createReadStream(file, { start, end });
   const out = new PassThrough();
-  const first = fs.createReadStream(file, { start, end });
-  first.on('error', (e: any) => {
+  let inner = fs.createReadStream(file, { start, end });
+  inner.on('error', (e: any) => {
     if (e?.code !== 'ENOENT') { out.destroy(e); return; }
-    const second = fs.createReadStream(alt, { start, end });
-    second.on('error', (e2) => out.destroy(e2));
-    second.pipe(out);
+    inner = fs.createReadStream(alt, { start, end });
+    inner.on('error', (e2) => out.destroy(e2));
+    inner.pipe(out);
   });
-  first.pipe(out);
+  inner.pipe(out);
+  out.on('close', () => inner.destroy()); // a client abort must close the file, not just the wrapper
   return out;
 }
 
@@ -118,12 +155,15 @@ export function openBytes(file: string, head: { path: string; bytes: number } | 
   if (end < head.bytes) return fs.createReadStream(head.path, { start, end });
   const out = new PassThrough();
   const first = fs.createReadStream(head.path, { start, end: head.bytes - 1 });
+  let rest: Readable | null = null;
   first.on('error', (e) => out.destroy(e));
   first.on('end', () => {
-    const rest = openFile(file, head.bytes, end, alt);
+    if (out.destroyed) return;
+    rest = openFile(file, head.bytes, end, alt);
     rest.on('error', (e) => out.destroy(e));
     rest.pipe(out);
   });
   first.pipe(out, { end: false });
+  out.on('close', () => { first.destroy(); rest?.destroy(); }); // a client abort must close both files
   return out;
 }

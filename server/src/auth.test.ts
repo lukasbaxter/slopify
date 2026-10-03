@@ -19,15 +19,26 @@ describe('auth', () => {
     const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${admin}` } });
     expect(me.json().role).toBe('admin');
   });
-  it('rejects wrong passwords and missing tokens', async () => {
+  it('rejects wrong passwords, unknown users and missing tokens', async () => {
     expect((await login('admin', 'nope')).statusCode).toBe(401);
+    expect((await login('nobody-here', 'whatever password')).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/auth/me' })).statusCode).toBe(401);
+  });
+  it('blocks everything but me/password/logout while the change is forced', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/albums', headers: { authorization: `Bearer ${admin}` } });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toBe('password change required');
+    // admin routes inherit the block
+    expect((await app.inject({ method: 'POST', url: '/api/invites', headers: { authorization: `Bearer ${admin}` } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${admin}` } })).statusCode).toBe(200);
   });
   it('changes the password (no current needed while forced) and keeps this session', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/auth/password', headers: { authorization: `Bearer ${admin}` }, payload: { password: 'correct horse battery' } });
     expect(r.statusCode).toBe(200);
     expect((await login('admin', 'admin')).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${admin}` } })).json().mustChangePassword).toBe(false);
+    // the block lifts once the password is changed
+    expect((await app.inject({ method: 'GET', url: '/api/albums', headers: { authorization: `Bearer ${admin}` } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/auth/password', headers: { authorization: `Bearer ${admin}` }, payload: { password: 'short' } })).statusCode).toBe(400);
   });
   let user = '', userIdv = '';

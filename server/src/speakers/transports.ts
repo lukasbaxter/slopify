@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { Client, DefaultMediaReceiver } = require('castv2-client');
 
 export type PlayMeta = { title?: string; artist?: string; album?: string; artwork?: string; artworkFallback?: string; contentType?: string };
-export type Status = { playing: boolean; state: string | null; title?: string | null; artist?: string | null; album?: string | null; position: number; duration: number; volume: number | null; muted?: boolean; streamUrl?: string | null; ended?: boolean; canSeek?: boolean; coarse?: boolean };
+export type Status = { playing: boolean; state: string | null; title?: string | null; artist?: string | null; album?: string | null; position: number; duration: number; volume: number | null; muted?: boolean; streamUrl?: string | null; ended?: boolean; gone?: boolean; canSeek?: boolean; coarse?: boolean };
 export interface Transport {
   play(url: string, meta?: PlayMeta, startAt?: number): Promise<unknown>;
   resume(): Promise<unknown>; pause(): Promise<unknown>; stop(): Promise<unknown>;
@@ -27,19 +27,23 @@ export class CastTransport implements Transport {
   private player: any = null;
   private loading: Promise<any> | null = null;
   private lastState: string | null = null;
+  // The connection died under us (socket error, receiver closed it): the
+  // tick must read that as "gone", never as the track having ended.
+  private gone = false;
   constructor(private device: Speaker) {}
 
   private async connect() {
     if (this.player) return this.player;
     const client = new Client();
     this.client = client;
+    this.gone = false;
     await new Promise<void>((resolve, reject) => {
       const onError = (err: any) => { client.removeListener('error', onError); reject(err); };
       client.once('error', onError);
       client.connect(this.device.host, () => { client.removeListener('error', onError); resolve(); });
     });
-    client.on('error', () => this.close());
-    client.on('close', () => { this.player = null; });
+    client.on('error', () => { this.gone = true; this.close(); });
+    client.on('close', () => { this.player = null; this.gone = true; });
     this.player = await promisify(client.launch, client)(DefaultMediaReceiver);
     return this.player;
   }
@@ -104,9 +108,9 @@ export class CastTransport implements Transport {
     catch { return { level: null, muted: false }; }
   }
   async status(): Promise<Status> {
-    if (!this.player) { const v = await this.receiverVolume(); return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: v.level, muted: v.muted }; }
+    if (!this.player) { const v = await this.receiverVolume(); return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: v.level, muted: v.muted, gone: this.gone }; }
     const s = await this.withPlayer('getStatus');
-    if (!s) { const v = await this.receiverVolume(); return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: v.level, muted: v.muted, ended: this.lastState === 'PLAYING' }; }
+    if (!s) { const v = await this.receiverVolume(); return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: v.level, muted: v.muted, ended: !this.gone && this.lastState === 'PLAYING', gone: this.gone }; }
     const md = s.media?.metadata || {};
     const ended = s.playerState === 'IDLE' && s.idleReason === 'FINISHED';
     this.lastState = s.playerState;
@@ -149,7 +153,7 @@ function tag(xml: string, name: string): string | null {
 }
 
 export class BluOSTransport implements Transport {
-  private metaSafe: boolean | undefined;
+  private metaSafe: { ok: boolean; probed: boolean; at: number } | null = null;
   private lastVolume: number | undefined;
   private wasPlaying = false;
   constructor(private device: Speaker) {}
@@ -166,17 +170,18 @@ export class BluOSTransport implements Transport {
     return false;
   }
   // Firmware before 4.16 makes the stream unseekable when metadata rides along with the URL.
+  // A probe that answered is final; one that failed (a dropped /SyncStatus)
+  // is retried after 10 minutes, not held against the speaker forever.
   private async metadataIsSafe() {
-    if (this.metaSafe !== undefined) return this.metaSafe;
+    if (this.metaSafe && (this.metaSafe.probed || Date.now() - this.metaSafe.at < 10 * 60 * 1000)) return this.metaSafe.ok;
     try {
       const xml = await this.get('/SyncStatus');
       const versions = [...xml.matchAll(/version="([0-9]+(?:\.[0-9]+)+)"/g)].map((m) => m[1]);
       const bluos = versions.find((v) => v.split('.').length >= 3) || versions[0];
-      if (!bluos) { this.metaSafe = false; return false; }
-      const [maj, min] = bluos.split('.').map(Number);
-      this.metaSafe = maj > 4 || (maj === 4 && min >= 16);
-    } catch { this.metaSafe = false; }
-    return this.metaSafe;
+      const [maj, min] = (bluos || '0.0').split('.').map(Number);
+      this.metaSafe = { ok: !!bluos && (maj > 4 || (maj === 4 && min >= 16)), probed: true, at: Date.now() };
+    } catch { this.metaSafe = { ok: false, probed: false, at: Date.now() }; }
+    return this.metaSafe.ok;
   }
   // BluOS cannot open a stream at an offset: play from zero muted, seek, unmute.
   async play(url: string, meta: PlayMeta = {}, startAt = 0) {

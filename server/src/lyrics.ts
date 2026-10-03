@@ -23,7 +23,12 @@ export function parseLrc(text: string): LyricLine[] {
     if (!starts.length) out.push({ start: null, text: t });
     else for (const s of starts) out.push({ start: Math.max(0, s + offset), text: t });
   }
-  return out.sort((a, b) => (a.start ?? -1) - (b.start ?? -1));
+  // Only the timed lines sort by time; an untimestamped line in a mixed file
+  // keeps its original place instead of the whole plain block piling up at
+  // the front.
+  const timed = out.filter((l) => l.start != null).sort((a, b) => a.start! - b.start!);
+  let i = 0;
+  return out.map((l) => (l.start == null ? l : timed[i++]));
 }
 
 export const isSynced = (lines: LyricLine[]) => lines.some((l) => l.start != null);

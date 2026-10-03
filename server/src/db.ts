@@ -122,6 +122,11 @@ const MIGRATIONS: string[] = [
   -- file tags' vote, then the artist's other albums).
   ALTER TABLE albums ADD COLUMN genre TEXT;
   `,
+  `
+  -- The genre hubs and browse tiles count plays per track on every request;
+  -- without this each count walked the whole plays table.
+  CREATE INDEX plays_track ON plays(track_id);
+  `,
 ];
 
 export type DB = Database.Database;
@@ -135,8 +140,11 @@ export function openDb(dataDir: string): DB {
   db.pragma('busy_timeout = 5000');
   const v = db.pragma('user_version', { simple: true }) as number;
   for (let i = v; i < MIGRATIONS.length; i++) {
-    db.exec(MIGRATIONS[i]);
-    db.pragma(`user_version = ${i + 1}`);
+    // Each step lands with its version bump or not at all: a crash between
+    // exec and the bump used to re-run the half-applied step on the next
+    // start ("table already exists") and brick startup. DDL is transactional
+    // in SQLite, so db.exec inside the transaction is fine.
+    db.transaction(() => { db.exec(MIGRATIONS[i]); db.pragma(`user_version = ${i + 1}`); })();
   }
   return db;
 }

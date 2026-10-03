@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { applyEvent, emptySession, positionNow } from './session.js';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import Fastify from 'fastify';
+import websocket from '@fastify/websocket';
+import WebSocket from 'ws';
+import { applyEvent, emptySession, positionNow, registerSession } from './session.js';
 
 describe('session reconciliation', () => {
   it('newest event wins; older ones are rejected', () => {
@@ -38,5 +41,38 @@ describe('session reconciliation', () => {
     applyEvent(s, { type: 'next', ts: 3 }, 'c1', 3); expect(s.trackId).toBe('a'); // wraps
     applyEvent(s, { type: 'previous', ts: 4, positionMs: 5000 }, 'c1', 4); expect(s.trackId).toBe('a'); expect(s.positionMs).toBe(0);
     applyEvent(s, { type: 'previous', ts: 5, positionMs: 1000 }, 'c1', 5); expect(s.trackId).toBe('a'); // at index 0: stays
+  });
+});
+
+describe('ws client ids across accounts', () => {
+  // Two accounts, no library: just enough db for userByToken and the kv reads.
+  const users: Record<string, any> = { tokA: { id: 'uA', name: 'A', role: 'user' }, tokB: { id: 'uB', name: 'B', role: 'user' } };
+  const db = { prepare: (sql: string) => ({ get: (...args: any[]) => (sql.includes('FROM tokens t JOIN users') ? users[args[0] as string] : undefined), all: () => [], run: () => {} }) } as any;
+  let app: any; let port = 0;
+  beforeAll(async () => {
+    app = Fastify();
+    app.decorate('requireUser', (_req: any, _reply: any, done: any) => done());
+    await app.register(websocket);
+    registerSession(app, db);
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    port = (app.server.address() as any).port;
+  });
+  afterAll(async () => { await app.close(); });
+  const hello = async (token: string, clientId: string) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const got = new Promise<any>((resolve) => ws.on('message', (d: any) => { const m = JSON.parse(String(d)); if (m.type === 'hello-ok') resolve(m); }));
+    let closed = false; ws.on('close', () => { closed = true; });
+    ws.send(JSON.stringify({ type: 'hello', token, clientId, instance: `i_${token}`, kind: 'web' }));
+    return { ws, ok: await got, closed: () => closed };
+  };
+  it('another account cannot take over a connected client id', async () => {
+    const a = await hello('tokA', 'c_crossacct1');
+    const b = await hello('tokB', 'c_crossacct1');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(a.ok.clientId).toBe('c_crossacct1');
+    expect(b.ok.clientId).not.toBe('c_crossacct1'); // the id was taken: suffixed instead
+    expect(a.closed()).toBe(false);                 // and the holder was not evicted
+    a.ws.terminate(); b.ws.terminate();
   });
 });

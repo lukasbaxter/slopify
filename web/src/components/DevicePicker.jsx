@@ -47,11 +47,12 @@ const ConnectIcon = () => (
 // PWA never sees them, so this is the one place a phone can set a speaker's
 // level. The bar follows the finger locally and sends at most one level every
 // 120 ms (plus the final one), so a drag is not a command per pixel.
-function SheetVolume({ volume, onChange }) {
+export function useThrottledVolume(volume, onChange, throttled = true) {
   const [drag, setDrag] = useState(null);
   const timer = useRef(null); const pending = useRef(null); const last = useRef(0);
   const send = (v) => { last.current = Date.now(); pending.current = null; onChange(v); };
   const move = (v) => {
+    if (!throttled) { send(v); return; } // a local device takes every step at once
     setDrag(v);
     if (Date.now() - last.current >= 120) { send(v); return; }
     pending.current = v;
@@ -59,7 +60,10 @@ function SheetVolume({ volume, onChange }) {
   };
   const end = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } if (pending.current != null) send(pending.current); setDrag(null); };
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  const shown = drag != null ? drag : volume;
+  return [drag != null ? drag : volume, move, end];
+}
+function SheetVolume({ volume, onChange }) {
+  const [shown, move, end] = useThrottledVolume(volume, onChange);
   return (
     <div className="dm-volume" title={`Volume ${shown}%`}>
       <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.642 3.642 0 0 1-1.33-4.967 3.639 3.639 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.139 2.139 0 0 0 0 3.7l5.8 3.35V2.8l-5.8 3.35z" /></svg>

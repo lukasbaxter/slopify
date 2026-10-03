@@ -47,21 +47,34 @@ jobs:
           if-no-files-found: error
   android:
     runs-on: ubuntu-latest
+    # Skips cleanly (every step guarded) when the keystore secret isn't set,
+    # e.g. on forks, so publish isn't held up by a build that can't sign.
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
     steps:
+      - name: Keystore secret present?
+        run: echo "ANDROID_KEYSTORE_B64 set:" "$HAS_KEYSTORE"
       - uses: actions/checkout@v4
+        if: env.HAS_KEYSTORE == 'true'
       - uses: actions/setup-node@v4
+        if: env.HAS_KEYSTORE == 'true'
         with: { node-version: 22 }
       - uses: actions/setup-java@v4
+        if: env.HAS_KEYSTORE == 'true'
         with: { distribution: temurin, java-version: '17' }
       # ubuntu-latest ships the Android SDK; only the licences need accepting so
       # Gradle can pull the platform/build-tools Expo asks for.
       - run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
+        if: env.HAS_KEYSTORE == 'true'
       - run: npm ci
+        if: env.HAS_KEYSTORE == 'true'
         working-directory: mobile
       - run: npx expo prebuild --platform android --no-install
+        if: env.HAS_KEYSTORE == 'true'
         working-directory: mobile
         env: { CI: '1' }
       - name: Signing config
+        if: env.HAS_KEYSTORE == 'true'
         working-directory: mobile/android
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -89,19 +102,24 @@ jobs:
           }
           EOG
       - run: ./gradlew assembleRelease --no-daemon
+        if: env.HAS_KEYSTORE == 'true'
         working-directory: mobile/android
         env:
           CONDUIT_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
       - run: cp mobile/android/app/build/outputs/apk/release/app-release.apk Slopify-${GITHUB_REF_NAME#v}.apk
+        if: env.HAS_KEYSTORE == 'true'
       - uses: actions/upload-artifact@v4
+        if: env.HAS_KEYSTORE == 'true'
         with:
           name: android
           path: Slopify-*.apk
           if-no-files-found: error
   publish:
+    # always() so a broken/skipped android job never blocks the desktop
+    # artifacts from reaching the release; desktop itself must have passed.
     needs: [desktop, android]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.desktop.result == 'success'
     steps:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }

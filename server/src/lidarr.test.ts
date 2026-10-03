@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
 
@@ -8,8 +8,15 @@ function fakeLidarr() {
   const state = {
     artists: [] as any[],
     albums: [] as any[],
+    queue: [] as any[],          // raw /queue records
+    lookup: null as any[] | null, // overrides /artist/lookup when set
     calls: [] as string[],
     nextId: 1,
+  };
+  // /queue and /wanted/missing page like the real thing.
+  const paged = (all: any[], u: URL) => {
+    const page = Number(u.searchParams.get('page') || 1), size = Number(u.searchParams.get('pageSize') || 1000);
+    return { records: all.slice((page - 1) * size, page * size), totalRecords: all.length };
   };
   const fetcher: any = async (url: string, init?: any) => {
     const u = new URL(url);
@@ -26,7 +33,7 @@ function fakeLidarr() {
       state.albums.push({ id: state.nextId++, foreignAlbumId: 'mb-worlds', title: 'Worlds', albumType: 'Album', releaseDate: '2014-08-12', secondaryTypes: [], images: [{ coverType: 'cover', remoteUrl: 'http://img/worlds' }], monitored: false, statistics: { totalTrackCount: 12, trackFileCount: 0 }, artist: a });
       return json(a);
     }
-    if (p.startsWith('/artist/lookup')) return json([{ artistName: u.searchParams.get('term'), foreignArtistId: 'fa-1', images: [] }]);
+    if (p.startsWith('/artist/lookup')) return json(state.lookup ?? [{ artistName: u.searchParams.get('term'), foreignArtistId: 'fa-1', images: [] }]);
     if (p.startsWith('/artist/') && method === 'PUT') { const id = Number(p.split('/')[2]); const a = state.artists.find((x) => x.id === id); Object.assign(a, JSON.parse(init.body)); return json(a); }
     if (p === '/album' && method === 'GET') {
       const fid = u.searchParams.get('foreignAlbumId');
@@ -36,16 +43,21 @@ function fakeLidarr() {
       const ids = u.searchParams.getAll('albumIds').map(Number);
       return json(state.albums.filter((a) => ids.includes(a.id)));
     }
-    if (p.startsWith('/album/lookup')) return json(state.albums);
+    if (p.startsWith('/album/lookup')) return json(state.albums.length ? state.albums : [{ foreignAlbumId: 'mb-worlds', title: 'Worlds', artist: { artistName: 'Porter Robinson', foreignArtistId: 'fa-1', images: [] } }]);
     if (p === '/album/monitor') { const b = JSON.parse(init.body); for (const a of state.albums) if (b.albumIds.includes(a.id)) a.monitored = b.monitored; return json({}); }
-    if (p === '/queue') return json({ records: [] });
-    if (p === '/wanted/missing') return json({ records: state.albums.filter((a) => a.monitored && !a.statistics.trackFileCount).map((a) => ({ id: a.id, foreignAlbumId: a.foreignAlbumId })) });
+    if (p === '/queue') return json(paged(state.queue, u));
+    if (p === '/wanted/missing') return json(paged(state.albums.filter((a) => a.monitored && !a.statistics.trackFileCount).map((a) => ({ id: a.id, foreignAlbumId: a.foreignAlbumId })), u));
     if (p === '/command') return json({ id: 99 });
     if (p.startsWith('/album/')) return json(state.albums.find((a) => a.id === Number(p.split('/')[2])));
     throw new Error(`unexpected ${method} ${p}`);
   };
   return { state, fetcher };
 }
+
+const fakeAlbum = (id: number, extra: any = {}) => ({
+  id, foreignAlbumId: `mb-${id}`, title: `Album ${id}`, albumType: 'Album', releaseDate: '2020-01-01', secondaryTypes: [], images: [],
+  monitored: false, statistics: { totalTrackCount: 10, trackFileCount: 0 }, artist: { id: 10000, artistName: 'Someone' }, ...extra,
+});
 
 const client = (f: any) => lidarrClient({ url: 'http://lidarr', apiKey: 'k', root: '/music', qualityProfile: 'Strict', metadataProfile: 'All releases', fetcher: f });
 
@@ -82,6 +94,77 @@ describe('lidarr client', () => {
     await l.retry(state.albums[0].id);
     expect(state.calls.some((c) => c.startsWith('POST /command'))).toBe(true);
   });
+
+  it('albums() fetches ids in chunks of 100 (Lidarr\'s request line tops out near 8KB) and merges', async () => {
+    const { state, fetcher } = fakeLidarr();
+    for (let i = 1; i <= 160; i++) state.albums.push(fakeAlbum(i));
+    const l = client(fetcher);
+    const out = await l.albums(state.albums.map((a) => a.id));
+    expect(out.length).toBe(160);
+    const chunked = state.calls.filter((c) => c.includes('albumIds='));
+    expect(chunked.length).toBe(2);
+    for (const c of chunked) expect(c.split('albumIds=').length - 1).toBeLessThanOrEqual(100);
+  });
+
+  it('follows wanted/queue pages past 1000 records', async () => {
+    const { state, fetcher } = fakeLidarr();
+    for (let i = 1; i <= 1500; i++) state.albums.push(fakeAlbum(i, { monitored: true }));
+    const l = client(fetcher);
+    expect(await l.wantedCount()).toBe(1500);
+    expect(state.calls.filter((c) => c.startsWith('GET /wanted/missing')).length).toBe(2);
+  });
+
+  it('statuses resolves queue album ids in one chunked batch and remembers deleted albums so a 404 is not refetched', async () => {
+    vi.useFakeTimers();
+    try {
+      const { state, fetcher } = fakeLidarr();
+      state.albums.push(fakeAlbum(1), fakeAlbum(2));
+      state.queue = [
+        { albumId: 1, status: 'downloading' },
+        { albumId: 2, trackedDownloadStatus: 'error' }, // Lidarr's other spelling of broken
+        { albumId: 999 },                               // deleted in Lidarr since it queued
+      ];
+      const l = client(fetcher);
+      const s = await l.statuses();
+      expect(s.get('mb-1')).toMatchObject({ status: 'downloading' });
+      expect(s.get('mb-2')).toMatchObject({ status: 'failed' });
+      expect([...s.keys()]).not.toContain('mb-999');
+      const batches = () => state.calls.filter((c) => c.includes('albumIds=')).length;
+      const perId = () => state.calls.filter((c) => /GET \/album\/\d/.test(c)).length;
+      expect(batches()).toBe(1); // one batch, not one GET /album/{id} per queue row
+      expect(perId()).toBe(0);
+      vi.advanceTimersByTime(6000); // past the activity cache, inside the fid cache
+      await l.statuses();
+      expect(batches()).toBe(1); // the missing 999 is a sentinel now, not a refetch
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('refuses the lookup fallback when the first result is a different artist, accepts a close one', async () => {
+    const { state, fetcher } = fakeLidarr();
+    state.lookup = [{ artistName: 'Completely Other Band', foreignArtistId: 'fa-9', images: [] }];
+    const l = client(fetcher);
+    expect(await l.discography('Porter Robinson')).toEqual({ artist: null, releases: [] });
+    expect(state.artists.length).toBe(0);
+    state.lookup = [{ artistName: 'Porter Robinson Band', foreignArtistId: 'fa-2', images: [] }];
+    await l.discography('Porter Robinson'); // name containment is close enough
+    expect(state.artists.map((a) => a.foreignArtistId)).toEqual(['fa-2']);
+  });
+
+  it('a request for a brand-new artist adds it even when a namesake with another foreignArtistId exists', async () => {
+    const { state, fetcher } = fakeLidarr();
+    state.artists.push({ id: 500, artistName: 'Porter Robinson', foreignArtistId: 'fa-other', monitored: true });
+    const l = client(fetcher);
+    await l.request('mb-worlds'); // album lookup hands over the fa-1 artist
+    expect(state.artists.map((a) => a.foreignArtistId).sort()).toEqual(['fa-1', 'fa-other']);
+  });
+
+  it('two concurrent requests for the same new artist share one POST /artist', async () => {
+    const { state, fetcher } = fakeLidarr();
+    const l = client(fetcher);
+    await Promise.all([l.discography('Porter Robinson'), l.discography('Porter Robinson')]);
+    expect(state.calls.filter((c) => c.startsWith('POST /artist')).length).toBe(1);
+    expect(state.artists.length).toBe(1);
+  });
 });
 
 describe('lidarr import webhook', () => {
@@ -96,6 +179,9 @@ describe('lidarr import webhook', () => {
     expect(ok.json()).toEqual({ ok: true, scanned: ['Tycho/Dive'] });
     expect(scanned).toEqual([['Tycho/Dive']]);
     expect((await app.inject({ method: 'POST', url: '/api/hooks/lidarr?key=sekret', payload: { eventType: 'Test' } })).json()).toEqual({ ok: true });
+    // the key is also taken as a header, so it can move out of the URL
+    expect((await app.inject({ method: 'POST', url: '/api/hooks/lidarr', headers: { 'x-api-key': 'sekret' }, payload: { eventType: 'Test' } })).json()).toEqual({ ok: true });
+    expect((await app.inject({ method: 'POST', url: '/api/hooks/lidarr', headers: { 'x-api-key': 'wrong' }, payload: { eventType: 'Test' } })).statusCode).toBe(401);
     await app.close();
   });
 });

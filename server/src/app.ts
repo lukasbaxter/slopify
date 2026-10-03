@@ -34,18 +34,44 @@ export const repoRoot = path.resolve(here, '..', '..');
 
 export type BuildOptions = { dataDir?: string; cacheDir?: string; musicDir?: string; db?: DB; speakers?: boolean };
 
+// Tokens ride in URLs (?token=, ?api_key=, ?key= — media elements cannot send
+// headers), so mask their values before a request line reaches the log.
+const maskUrl = (u: string) => u.replace(/([?&](?:token|api_key|key)=)[^&#]*/gi, '$1***');
+
 export async function buildServer(opts: BuildOptions = {}) {
   // Behind nginx: rate limits per real client, not one bucket for the proxy.
-  const app = Fastify({ logger: { level: config.logLevel }, trustProxy: true });
+  // TRUST_PROXY (default 1 hop = nginx) keeps clients from minting rate-limit
+  // buckets via a forged X-Forwarded-For; Cloudflare-fronted routes still show
+  // CF's edge IP unless nginx passes CF-Connecting-IP (out of scope here).
+  // Fastify 5 fails closed on a numeric trustProxy, so a hop count becomes a
+  // trust function: trust hops 0..N-1, making req.ip the address hop N saw.
+  const tp = config.trustProxy;
+  const trustProxy = typeof tp === 'number' ? (_addr: string, hop: number) => hop < tp : tp;
+  const app = Fastify({
+    logger: {
+      level: config.logLevel,
+      serializers: { req: (req: any) => ({ method: req.method, url: maskUrl(req.url), remoteAddress: req.ip }) },
+    },
+    trustProxy,
+  });
   const dataDir = opts.dataDir ?? config.dataDir;
   const cacheDir = opts.cacheDir ?? (opts.dataDir ? opts.dataDir : config.cacheDir);
   const db = opts.db ?? openDb(dataDir);
   await ensureAdmin(db, config.adminUser, config.adminPass);
   app.decorate('db', db);
   app.addHook('onClose', async () => { if (!opts.db) db.close(); });
+  // CORS wide open is acceptable here: auth is bearer tokens the browser only
+  // sends when the app's own JS attaches them — no cookies, so a foreign
+  // origin's request arrives unauthenticated, same as curl.
   await app.register(cors, { origin: true });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute' });
   await app.register(websocket);
+  // Light security headers. CSP is deliberately skipped: the SPA relies on
+  // inline scripts/styles and a workable policy would break it.
+  app.addHook('onSend', async (_req, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'no-referrer');
+  });
 
   const musicDir = opts.musicDir ?? config.musicDir;
   registerAuth(app, db);
@@ -79,7 +105,9 @@ export async function buildServer(opts: BuildOptions = {}) {
     ...config.tasks,
   }));
 
-  const health = async () => ({ ok: true, version: VERSION });
+  // No version on the unauthenticated health checks (don't hand scanners a
+  // fingerprint); nothing in web/src consumes it.
+  const health = async () => ({ ok: true });
   app.get('/healthz', health);
   app.get('/api/healthz', health);
 

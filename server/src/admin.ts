@@ -51,7 +51,11 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   // seconds later instead of after the next full walk. Safe beside a running full scan:
   // every write is an upsert and neither removes the other's files.
   const scanFolders = async (rel: string[]) => {
-    const only = rel.map((r) => path.resolve(musicDir, r)).filter((p) => p.startsWith(path.resolve(musicDir) + path.sep));
+    // '' (or '.') is the library root itself: a track that lives directly in
+    // MUSIC_DIR resolves there, and the FLAC upgrade task scans by the
+    // replaced file's folder, whatever that is.
+    const root = path.resolve(musicDir);
+    const only = rel.map((r) => path.resolve(musicDir, r)).filter((p) => p === root || p.startsWith(root + path.sep));
     if (!only.length) throw new Error('no folders inside the library');
     const r = await scanLibrary(db, { musicDir, dataDir, heads: scanOpts.heads, only, log: (m) => app.log.warn(m) });
     app.log.info(`folder scan ${rel.join(', ')}: ${JSON.stringify(r)}`);

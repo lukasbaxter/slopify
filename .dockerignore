@@ -1,0 +1,18 @@
+# Keep the build context small; the image runs npm ci itself.
+node_modules
+**/node_modules
+.git
+web/dist
+server/dist
+data
+*.env
+.env*
+fixtures/music
+e2e
+desktop
+mobile
+*.db
+test-results
+playwright-report
+*.log
+.DS_Store

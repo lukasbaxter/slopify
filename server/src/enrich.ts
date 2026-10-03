@@ -40,14 +40,22 @@ async function cached<T>(db: DB, key: string, ttlMs: number, load: () => Promise
 export async function lrclibLookup(db: DB, fetcher: Fetcher, t: { title: string; artist: string; album: string; durationMs: number }): Promise<LrclibRecord | null> {
   const dur = Math.round(t.durationMs / 1000);
   const q = (o: Record<string, string>) => new URLSearchParams(o).toString();
+  // Only real answers are cached: 200 and 404 (LrcLib's genuine "no lyrics
+  // here"). Anything else is an outage or throttle — the loader throws, so
+  // `cached` stores nothing and the next pass simply asks again instead of
+  // sitting on a 30-day poisoned miss.
   const get = await cached(db, `lrclib:get:${t.artist}|${t.title}|${t.album}|${dur}`, 30 * DAY, async () => {
     const r = await fetcher(`https://lrclib.net/api/get?${q({ track_name: t.title, artist_name: t.artist, album_name: t.album, duration: String(dur) })}`);
-    return r.status === 200 ? await r.json() : null;
+    if (r.status === 200) return await r.json();
+    if (r.status === 404) return null;
+    throw new Error(`lrclib get ${r.status}`);
   });
   if (get) return get as LrclibRecord;
   const list = await cached(db, `lrclib:search:${t.artist}|${t.title}`, 7 * DAY, async () => {
     const r = await fetcher(`https://lrclib.net/api/search?${q({ track_name: t.title, artist_name: t.artist })}`);
-    return r.status === 200 ? await r.json() : [];
+    if (r.status === 200) return await r.json();
+    if (r.status === 404) return [];
+    throw new Error(`lrclib search ${r.status}`);
   }) as LrclibRecord[];
   const fit = list.filter((c) => Math.abs((c.duration || 0) - dur) <= 3).sort((a, b) => (b.syncedLyrics ? 1 : 0) - (a.syncedLyrics ? 1 : 0) || Math.abs((a.duration || 0) - dur) - Math.abs((b.duration || 0) - dur));
   return fit[0] ?? null;
@@ -70,10 +78,20 @@ export type EnrichOptions = {
   musicDir?: string; saveToLibrary?: boolean;
 };
 
-// Never clobbers: an existing file wins, whatever is in it.
+// Never clobbers: an existing non-empty file wins, whatever is in it. Returns
+// true when the file on disk now holds (or already held) data of this size,
+// so the caller may point the artwork's src at the file; false means a
+// different file lives there and the caller keeps the URL as src.
 async function writeNew(file: string, data: Buffer | string, log: (m: string) => void): Promise<boolean> {
   try { await fsp.writeFile(file, data, { flag: 'wx' }); return true; }
-  catch (e: any) { if (e.code === 'EEXIST') return true; log(`library write ${file}: ${e.message}`); return false; }
+  catch (e: any) {
+    if (e.code !== 'EEXIST') { log(`library write ${file}: ${e.message}`); return false; }
+    try {
+      const st = await fsp.stat(file);
+      if (st.size === 0) { await fsp.writeFile(file, data); return true; } // a zero-byte leftover is no file at all
+      return st.size === Buffer.byteLength(data as any);
+    } catch (e2: any) { log(`library write ${file}: ${e2.message}`); return false; }
+  }
 }
 
 // One pass: every track without resolved lyrics whose retry time has come.
@@ -139,6 +157,7 @@ export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promis
   const dataDir = opts.dataDir; if (!dataDir) return { found: 0, missing: 0 };
   const due = db.prepare('SELECT id, name, image_tries FROM artists WHERE image_hash IS NULL AND image_tries < 4 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 300) as any[];
   const stats = { found: 0, missing: 0 };
+  let consecFails = 0; // network failures in a row: an outage ends the pass, it must not burn the whole queue's tries
   for (const a of due) {
     const dir = opts.musicDir ? artistDirOf(db, a.id, opts.musicDir) : null;
     let stored = false;
@@ -155,20 +174,27 @@ export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promis
       } catch (e: any) { log(`artist pic ${a.name}: ${e.message}`); }
     }
     let url: string | null = null;
+    let failed = false; // a fetch failure, not Deezer saying "no such artist"
     if (!stored) {
       try {
         const list = await cached(db, `deezer:artist:${normName(a.name)}`, 30 * DAY, async () => {
           const r = await fetcher(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=10`);
-          return r.status === 200 ? ((await r.json()).data || []).map((d: any) => ({ name: d.name, picture: d.picture_xl || d.picture_big || null })) : [];
+          const j = r.status === 200 ? await r.json() : null;
+          // Deezer reports quota/outage as HTTP 200 with an {error} body:
+          // a failure too, never a cacheable "unknown artist". Throwing here
+          // keeps `cached` from storing a 30-day miss.
+          if (!j || j.error) throw new Error(`deezer ${j?.error ? JSON.stringify(j.error).slice(0, 80) : r.status}`);
+          return (j.data || []).map((d: any) => ({ name: d.name, picture: d.picture_xl || d.picture_big || null }));
         }) as { name: string; picture: string | null }[];
         const hit = list.find((d) => normName(d.name) === normName(a.name) && d.picture && !/artist\/\/?\d*x\d*/.test(d.picture) && !/\/artist\/(1000x1000|500x500)-/.test(d.picture));
         url = hit?.picture ?? null;
-      } catch (e: any) { log(`deezer ${a.name}: ${e.message}`); }
+      } catch (e: any) { failed = true; log(`deezer ${a.name}: ${e.message}`); }
     }
     if (!stored && url) {
       try {
         const buf = await bytes(url);
-        if (buf && buf.length > 2000) {
+        if (buf === null) failed = true; // the download itself failed
+        else if (buf.length > 2000) {
           const { hash, width, height } = await storeArtwork(dataDir, buf, { banner: true });
           // Into the library too, so the next pass (or install) never asks Deezer.
           let src = url;
@@ -177,9 +203,11 @@ export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promis
           db.prepare('UPDATE artists SET image_hash = ? WHERE id = ?').run(hash, a.id);
           stored = true;
         }
-      } catch (e: any) { log(`artist image ${a.name}: ${e.message}`); }
+      } catch (e: any) { failed = true; log(`artist image ${a.name}: ${e.message}`); }
     }
-    if (stored) stats.found++; else { db.prepare('UPDATE artists SET image_tries = image_tries + 1 WHERE id = ?').run(a.id); stats.missing++; }
+    if (stored) { stats.found++; consecFails = 0; }
+    else if (failed) { stats.missing++; if (++consecFails >= 3) return stats; } // a try is only burned on a real empty answer
+    else { consecFails = 0; db.prepare('UPDATE artists SET image_tries = image_tries + 1 WHERE id = ?').run(a.id); stats.missing++; }
     await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 120));
   }
   return stats;
@@ -197,21 +225,27 @@ export async function albumCoversPass(db: DB, opts: EnrichOptions = {}): Promise
   const due = db.prepare('SELECT id, name, artist, dir, cover_tries FROM albums WHERE cover_hash IS NULL AND cover_tries < 4 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 300) as any[];
   const stats = { found: 0, missing: 0 };
   const root = opts.musicDir ? path.resolve(opts.musicDir) : null;
+  let consecFails = 0; // as in artistImagesPass: an outage ends the pass early and burns no tries
   for (const al of due) {
     let url: string | null = null;
+    let failed = false;
     try {
       const list = await cached(db, `deezer:album:${normName(al.artist)}|${normName(al.name)}`, 30 * DAY, async () => {
         const r = await fetcher(`https://api.deezer.com/search/album?q=${encodeURIComponent(`${al.artist} ${al.name}`)}&limit=10`);
-        return r.status === 200 ? ((await r.json()).data || []).map((d: any) => ({ title: d.title, artist: d.artist?.name ?? '', cover: d.cover_xl || d.cover_big || null })) : [];
+        const j = r.status === 200 ? await r.json() : null;
+        // 200-with-{error} (quota) is a failure like any non-200: throw so nothing is cached for 30 days.
+        if (!j || j.error) throw new Error(`deezer ${j?.error ? JSON.stringify(j.error).slice(0, 80) : r.status}`);
+        return (j.data || []).map((d: any) => ({ title: d.title, artist: d.artist?.name ?? '', cover: d.cover_xl || d.cover_big || null }));
       }) as { title: string; artist: string; cover: string | null }[];
       const hit = list.find((d) => normName(d.title) === normName(al.name) && normName(d.artist) === normName(al.artist) && d.cover);
       url = hit?.cover ?? null;
-    } catch (e: any) { log(`deezer album ${al.artist} - ${al.name}: ${e.message}`); }
+    } catch (e: any) { failed = true; log(`deezer album ${al.artist} - ${al.name}: ${e.message}`); }
     let stored = false;
     if (url) {
       try {
         const buf = await bytes(url);
-        if (buf && buf.length > 2000) {
+        if (buf === null) failed = true; // the download itself failed
+        else if (buf.length > 2000) {
           const { hash, width, height } = await storeArtwork(dataDir, buf);
           let src = url;
           if (opts.saveToLibrary && root && path.resolve(al.dir).startsWith(root + path.sep)) {
@@ -222,9 +256,11 @@ export async function albumCoversPass(db: DB, opts: EnrichOptions = {}): Promise
           db.prepare('UPDATE albums SET cover_hash = ? WHERE id = ?').run(hash, al.id);
           stored = true;
         }
-      } catch (e: any) { log(`album cover ${al.artist} - ${al.name}: ${e.message}`); }
+      } catch (e: any) { failed = true; log(`album cover ${al.artist} - ${al.name}: ${e.message}`); }
     }
-    if (stored) stats.found++; else { db.prepare('UPDATE albums SET cover_tries = cover_tries + 1 WHERE id = ?').run(al.id); stats.missing++; }
+    if (stored) { stats.found++; consecFails = 0; }
+    else if (failed) { stats.missing++; if (++consecFails >= 3) return stats; } // a try is only burned on a real empty answer
+    else { consecFails = 0; db.prepare('UPDATE albums SET cover_tries = cover_tries + 1 WHERE id = ?').run(al.id); stats.missing++; }
     await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 120));
   }
   return stats;

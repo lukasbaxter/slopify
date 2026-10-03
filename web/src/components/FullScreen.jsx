@@ -3,7 +3,7 @@ import { Lyrics } from './RightPanel.jsx';
 import Visualizer, { EQ_STYLES, GRADIENTS, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
-import DevicePicker from './DevicePicker.jsx';
+import DevicePicker, { useThrottledVolume } from './DevicePicker.jsx';
 import { seekHover } from '../api/seekHover.js';
 import { useLiked } from '../api/likes.js';
 import { useOffset } from '../api/offsets.js';
@@ -158,6 +158,10 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
     ] : []),
   ];
   const { nowPlaying, playing, position, duration, shuffle, repeat, volume } = player;
+  // Same 120 ms throttle as SheetVolume when the session is on a speaker;
+  // the local device keeps its instant slider.
+  const remoteVol = Boolean(sessionDevice?.kind && sessionDevice.kind !== 'local');
+  const [volShown, volMove, volEnd] = useThrottledVolume(volume, player.setVolume, remoteVol);
   const liked = useLiked(nowPlaying?.itemId);
   const quality = useQuality(player, jf);
   // The big cover paints from the small copy the lists already fetched (it is
@@ -320,7 +324,9 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
                 )}
               </svg>
             </button>
-            <input type="range" min="0" max="100" value={volume} onChange={(e) => player.setVolume(Number(e.target.value))} style={{ '--pct': `${volume}%` }} />
+            <input type="range" min="0" max="100" value={volShown} onChange={(e) => volMove(Number(e.target.value))}
+              onPointerUp={volEnd} onPointerCancel={volEnd} onTouchEnd={volEnd} onTouchCancel={volEnd} onKeyUp={volEnd}
+              style={{ '--pct': `${volShown}%` }} />
           </div>
         </div>
         {/* Phone-only bottom row (Spotify: devices bottom-left, share / queue

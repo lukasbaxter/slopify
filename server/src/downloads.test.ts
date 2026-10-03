@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { downloadOut, recordRequest, registerDownloads, STUCK_MS } from './downloads.js';
+import { ADDING_GRACE_MS, downloadOut, recordRequest, registerDownloads, STUCK_MS } from './downloads.js';
 import type { AlbumState } from './lidarr.js';
 
 const album = (o: Partial<AlbumState>): AlbumState => ({
@@ -24,11 +24,15 @@ describe('downloads', () => {
   it('states: torrent queue wins, files without a library album are adding, quiet too long is stuck', () => {
     const now = 10_000_000_000;
     const m = meta({ created: now - 60000 });
-    expect(downloadOut(album({ queue: { state: 'downloading', detail: 'downloading' } }), m, null, now)).toMatchObject({ state: 'downloading', via: 'torrent' });
-    expect(downloadOut(album({ queue: { state: 'failed', detail: 'no space' } }), m, null, now)).toMatchObject({ state: 'failed', reason: 'no space' });
+    expect(downloadOut(album({ queue: { state: 'downloading', detail: 'downloading', protocol: 'torrent' } }), m, null, now)).toMatchObject({ state: 'downloading', via: 'torrent' });
+    expect(downloadOut(album({ queue: { state: 'failed', detail: 'no space' } }), m, null, now)).toMatchObject({ state: 'failed', reason: 'no space', via: 'download' });
     expect(downloadOut(album({ done: 10, hasFiles: true }), m, { id: 'al1' }, now)).toMatchObject({ state: 'done', libraryAlbumId: 'al1' });
     expect(downloadOut(album({ done: 10, hasFiles: true }), m, null, now).state).toBe('adding');
+    // all files down but never matched to a library album: done after the
+    // grace day, not "adding" forever
+    expect(downloadOut(album({ done: 10, hasFiles: true }), meta({ created: now - ADDING_GRACE_MS - 1000 }), null, now)).toMatchObject({ state: 'done', libraryAlbumId: null });
     expect(downloadOut(album({ done: 4, hasFiles: true }), m, null, now)).toMatchObject({ state: 'downloading', done: 4, total: 10 });
+    expect(downloadOut(album({ done: 4, hasFiles: true, monitored: false }), m, null, now)).toMatchObject({ state: 'failed', reason: 'no longer monitored in Lidarr' });
     expect(downloadOut(album({}), m, null, now).state).toBe('queued');
     expect(downloadOut(album({}), meta({ created: now - STUCK_MS - 1000 }), null, now).state).toBe('stuck');
     expect(downloadOut(album({ monitored: false }), m, null, now)).toMatchObject({ state: 'failed', reason: 'no longer monitored in Lidarr' });
@@ -53,6 +57,24 @@ describe('downloads', () => {
     expect(r).toEqual({ ok: true, id: 7 });
     expect(calls).toContain('retry 7');
     expect((db.prepare("SELECT lidarr_id, source, note FROM my_requests WHERE user_id = 'u1'").all() as any[])).toEqual([{ lidarr_id: 7, source: 'ai', note: '"Song" for Mix' }]);
+    // the retry restarted the stuck clock: created is fresh, so it shows queued again
+    expect((db.prepare('SELECT created FROM my_requests WHERE lidarr_id = 7').get() as any).created).toBeGreaterThan(old);
+    const after = (await app.inject({ method: 'GET', url: '/api/downloads' })).json();
+    expect(after.items.map((x: any) => [x.id, x.state])).toEqual([[7, 'queued']]);
+    await app.close();
+  });
+
+  it('meta survives past 2000 requests: the newest rows are kept, the first requester still wins', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl4-')));
+    const ins = db.prepare('INSERT INTO my_requests (user_id, lidarr_id, album_id, artist, title, source, note, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const t0 = Date.now() - 10_000_000;
+    for (let i = 0; i < 2100; i++) ins.run('u1', i, `mb${i}`, 'A', 'T', 'request', null, t0 + i * 1000);
+    // another account asked for the newest album a bit earlier: its source and time win
+    ins.run('u2', 2099, 'mb2099', 'A', 'T', 'ai', null, t0 + 2099 * 1000 - 500);
+    const lidarr: any = { enabled: true, albums: async (ids: number[]) => ids.filter((i) => i === 2099).map(() => album({ id: 2099, album_id: 'mb2099' })) };
+    const app = appWith(db, lidarr);
+    const items = (await app.inject({ url: '/api/downloads' })).json().items;
+    expect(items.find((x: any) => x.id === 2099)).toMatchObject({ source: 'ai', requested: t0 + 2099 * 1000 - 500, mine: true });
     await app.close();
   });
 

@@ -21,6 +21,9 @@ export const config = {
   // HLS transcodes under CACHE_DIR/transcodes; the nightly trim drops the
   // oldest-used past this size.
   transcodeCacheGb: Number(env('TRANSCODE_CACHE_GB', '60')),
+  // Foreground (someone pressed play) HLS transcodes running at once; excess
+  // requests wait their turn. Warms have their own, lower cap.
+  transcodeConcurrency: Math.max(1, Number(env('TRANSCODE_CONCURRENCY', '4')) || 4),
   // Fetched extras live in the library too: lyrics as .lrc sidecars, artist
   // pictures as <artist>/artist.jpg, found covers as <album>/cover.jpg - so
   // nothing external is ever fetched twice. Needs MUSIC_DIR writable;
@@ -43,6 +46,13 @@ export const config = {
     deleteAfter: env('INGEST_DELETE', '0') === '1',
     deleteSettleMin: Number(env('INGEST_DELETE_SETTLE_MIN', '60')), // nothing written in a folder this long before it is deleted
   },
+  // How many proxy hops to trust for X-Forwarded-For. Default '1': exactly the
+  // nginx in front of this container, so req.ip is the address nginx saw and a
+  // client cannot mint rate-limit buckets by sending its own XFF. 'true' (only
+  // when set explicitly) trusts every hop; 'false' trusts none; an integer is a
+  // hop count. Caveat: routes that come through Cloudflare see CF's edge IP
+  // unless nginx forwards CF-Connecting-IP — out of scope here.
+  trustProxy: ((v: string): boolean | number => v === 'true' ? true : v === 'false' ? false : Number.isInteger(Number(v)) && Number(v) >= 0 ? Number(v) : 1)(env('TRUST_PROXY', '1')),
   publicUrl: env('PUBLIC_URL', '').replace(/\/+$/, ''),
   adminUser: env('ADMIN_USER', 'admin'),
   adminPass: env('ADMIN_PASS', 'admin'),

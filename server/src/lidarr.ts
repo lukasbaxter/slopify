@@ -9,6 +9,7 @@
 // a Webhook notification in Lidarr pointed at
 //   POST <slopify>/api/hooks/lidarr?key=<api key>
 // scans just the folders an import touched.
+import crypto from 'node:crypto';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 
@@ -28,8 +29,10 @@ export type Release = { album_id: string; artist: string; title: string; rtype: 
 export type AlbumState = {
   id: number; album_id: string; artist: string; title: string; rtype: string; year: string; image: string | null;
   total: number; done: number; monitored: boolean; hasFiles: boolean;
-  queue: { state: 'downloading' | 'failed'; detail: string | null } | null;
+  queue: { state: 'downloading' | 'failed'; detail: string | null; protocol?: string | null } | null;
 };
+
+type QueueEntry = { state: 'downloading' | 'failed'; detail: string | null; protocol?: string | null };
 
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 // Only real URLs leave this module: Lidarr swaps an added artist's remote
@@ -51,7 +54,7 @@ const releaseOf = (a: any): Release => ({
   secondary: a.secondaryTypes || [],
 });
 
-const stateOf = (a: any, queue: Map<number, { state: 'downloading' | 'failed'; detail: string | null }>): AlbumState => ({
+const stateOf = (a: any, queue: Map<number, QueueEntry>): AlbumState => ({
   id: a.id, ...releaseOf(a),
   total: a.statistics?.totalTrackCount ?? 0, done: a.statistics?.trackFileCount ?? 0,
   monitored: Boolean(a.monitored), hasFiles: (a.statistics?.trackFileCount ?? 0) > 0,
@@ -92,12 +95,31 @@ export function lidarrClient(opts: LidarrOptions) {
   // The artist in Lidarr, added (unmonitored) from a lookup result when it
   // is not there yet. `from` skips the lookup when a caller already has the
   // full lookup artist (a request for an album of a brand-new artist).
-  const ensureArtist = async (name: string, from?: any) => {
-    const have = (await allArtists()).find((a: any) =>
-      (from?.foreignArtistId && a.foreignArtistId === from.foreignArtistId) || norm(a.artistName) === norm(name));
+  // Two concurrent calls for the same artist share one run: Lidarr answers
+  // the second POST /artist with a 400 for the duplicate.
+  const addingArtist = new Map<string, Promise<any>>();
+  const ensureArtist = (name: string, from?: any): Promise<any> => {
+    const key = String(from?.foreignArtistId || norm(name));
+    let p = addingArtist.get(key);
+    if (!p) {
+      p = ensureArtistNow(name, from).finally(() => addingArtist.delete(key));
+      addingArtist.set(key, p);
+    }
+    return p;
+  };
+  const ensureArtistNow = async (name: string, from?: any) => {
+    // With `from` in hand the foreignArtistId decides: a namesake already in
+    // Lidarr is a different artist, and the `from` one still gets added.
+    const have = (await allArtists()).find((a: any) => from?.foreignArtistId
+      ? a.foreignArtistId === from.foreignArtistId || (norm(a.artistName) === norm(name) && !a.foreignArtistId)
+      : norm(a.artistName) === norm(name));
     if (have) return have;
+    // The lookup's first result is only trusted when its name at least
+    // contains (or is contained by) the requested one; anything farther off
+    // would add a stranger to the library.
+    const close = (a: any) => { const c = norm(a?.artistName), w = norm(name); return Boolean(c && w && (c.includes(w) || w.includes(c))); };
     const cand = from ?? await api(`/artist/lookup?term=${encodeURIComponent(name)}`, { timeoutMs: 30000 })
-      .then((r: any[]) => (r || []).find((a) => norm(a.artistName) === norm(name)) || (r || [])[0]);
+      .then((r: any[]) => (r || []).find((a) => norm(a.artistName) === norm(name)) || (r || []).find(close) || null);
     if (!cand) return null;
     if (cand.id) return cand; // the lookup already knew it
     const added = await api('/artist', {
@@ -129,21 +151,49 @@ export function lidarrClient(opts: LidarrOptions) {
 
   const albumByForeign = async (fid: string) => ((await api(`/album?foreignAlbumId=${encodeURIComponent(fid)}`)) || [])[0] || null;
 
+  // Albums by Lidarr id, in chunks: the ids ride the query string and
+  // Lidarr's request line tops out near 8KB (~550 ids), so 100 per GET,
+  // a few in flight at once.
+  const albumsByIds = async (ids: number[]): Promise<any[]> => {
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+    const out: any[] = [];
+    await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, async () => {
+      for (let c = chunks.shift(); c; c = chunks.shift()) out.push(...(((await api(`/album?${c.map((i) => `albumIds=${i}`).join('&')}`)) || []) as any[]));
+    }));
+    return out;
+  };
+
+  // Every record of a paged endpoint: page 1 was a silent cap, so follow
+  // pages until totalRecords is in hand - 5000 at most, past that the maps
+  // below stop meaning anything anyway.
+  const allRecords = async (p: string, max = 5000): Promise<any[]> => {
+    const sep = p.includes('?') ? '&' : '?';
+    const records: any[] = [];
+    for (let page = 1; records.length < max; page++) {
+      const r = await api(`${p}${sep}page=${page}&pageSize=1000`);
+      records.push(...(r?.records || []));
+      if (!r?.records?.length || records.length >= (r?.totalRecords ?? 0)) break;
+    }
+    return records;
+  };
+
   // What is on the way or waiting, keyed by Lidarr's album id and by
   // release-group id. Cached a few seconds: every open page polls this.
-  const activity = async (): Promise<{ queue: Map<number, { state: 'downloading' | 'failed'; detail: string | null }>; wanted: Map<string, number> }> => {
+  const activity = async (): Promise<{ queue: Map<number, QueueEntry>; wanted: Map<string, number> }> => {
     const hit = cached('activity', 5 * 1000); if (hit) return hit;
     const [q, w] = await Promise.all([
-      api('/queue?pageSize=1000&includeAlbum=true').catch(() => ({ records: [] })),
-      api('/wanted/missing?pageSize=1000').catch(() => ({ records: [] })),
+      allRecords('/queue?includeAlbum=true').catch(() => []),
+      allRecords('/wanted/missing').catch(() => []),
     ]);
-    const queue = new Map<number, { state: 'downloading' | 'failed'; detail: string | null }>();
-    for (const r of q.records || []) {
+    const queue = new Map<number, QueueEntry>();
+    for (const r of q) {
       if (!r.albumId) continue;
-      const bad = r.trackedDownloadStatus === 'warning' || r.status === 'failed';
-      queue.set(r.albumId, { state: bad ? 'failed' : 'downloading', detail: r.errorMessage || r.status || null });
+      const bad = r.trackedDownloadStatus === 'warning' || r.trackedDownloadStatus === 'error'
+        || r.trackedDownloadState === 'importFailed' || r.trackedDownloadState === 'failedPending' || r.status === 'failed';
+      queue.set(r.albumId, { state: bad ? 'failed' : 'downloading', detail: r.errorMessage || r.status || null, protocol: r.protocol || null });
     }
-    const wanted = new Map<string, number>((w.records || []).map((r: any) => [r.foreignAlbumId, r.id]));
+    const wanted = new Map<string, number>(w.map((r: any) => [r.foreignAlbumId, r.id]));
     return remember('activity', { queue, wanted });
   };
 
@@ -209,8 +259,21 @@ export function lidarrClient(opts: LidarrOptions) {
       const { queue, wanted } = await activity();
       const out = new Map<string, { status: string; updated: number }>();
       for (const fid of wanted.keys()) out.set(fid, { status: 'queued', updated: 0 });
+      // Queue records carry only Lidarr's album id: the unknown ones are
+      // resolved in one chunked batch, and an id Lidarr no longer knows (a
+      // deleted album) is remembered as a missing sentinel so it is not
+      // refetched on every poll.
+      const fidTtl = 10 * 60 * 1000;
+      const unknown = [...queue.keys()].filter((id) => !cached(`fid:${id}`, fidTtl));
+      if (unknown.length) {
+        const got = await albumsByIds(unknown).catch(() => null);
+        if (got) {
+          const byId = new Map(got.map((a: any) => [a.id, a]));
+          for (const id of unknown) remember(`fid:${id}`, byId.get(id) ?? { missing: true });
+        }
+      }
       for (const [albumId, s] of queue) {
-        const a = cached(`fid:${albumId}`, 10 * 60 * 1000) || remember(`fid:${albumId}`, await api(`/album/${albumId}`).catch(() => null));
+        const a = cached(`fid:${albumId}`, fidTtl);
         if (a?.foreignAlbumId) out.set(a.foreignAlbumId, { status: s.state === 'failed' ? 'failed' : 'downloading', updated: 0 });
       }
       return out;
@@ -220,8 +283,7 @@ export function lidarrClient(opts: LidarrOptions) {
     async albums(ids: number[]): Promise<AlbumState[]> {
       if (!ids.length) return [];
       const { queue } = await activity();
-      const q = ids.map((i) => `albumIds=${i}`).join('&');
-      return (((await api(`/album?${q}`)) || []) as any[]).map((a) => stateOf(a, queue));
+      return (await albumsByIds(ids)).map((a) => stateOf(a, queue));
     },
 
     // Everything wanted or moving, whoever asked (the Downloads page's "Everyone").
@@ -263,8 +325,16 @@ export type Lidarr = ReturnType<typeof lidarrClient>;
 // album is playable seconds later. Point a Lidarr Webhook notification
 // (on Release Import + on Upgrade) at /api/hooks/lidarr?key=<LIDARR_API_KEY>.
 export function registerLidarrHook(app: FastifyInstance, opts: { apiKey: string; musicDir: string; lidarrRoot: string }) {
+  // Constant-time compare (hashed first so lengths always match); the key
+  // may come as an X-Api-Key header - preferred, keeps it out of access
+  // logs - or in the query string for notifications set up before that.
+  const keyOk = (given: string) => {
+    if (!opts.apiKey || !given) return false;
+    const h = (s: string) => crypto.createHash('sha256').update(s).digest();
+    return crypto.timingSafeEqual(h(given), h(opts.apiKey));
+  };
   app.post('/api/hooks/lidarr', async (req: any, reply) => {
-    if (!opts.apiKey || String(req.query?.key || '') !== opts.apiKey) return reply.code(401).send({ error: 'bad key' });
+    if (!keyOk(String(req.headers['x-api-key'] || req.query?.key || ''))) return reply.code(401).send({ error: 'bad key' });
     const b = req.body || {};
     if (b.eventType === 'Test') return { ok: true };
     const root = path.posix.resolve(opts.lidarrRoot || '/music');

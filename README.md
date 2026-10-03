@@ -11,8 +11,8 @@ services:
   slopify:
     image: ghcr.io/lukasbaxter/slopify:latest
     network_mode: host   # so it can find Chromecast / BluOS speakers; PORT picks the port
-    volumes:
-      - /path/to/music:/music
+    volumes:                # bridge mode (ports: ["8080:8080"]) works too, but
+      - /path/to/music:/music   # disables speaker discovery (set SPEAKERS=0)
       - ./data:/data
     environment:
       PORT: "8080"
@@ -22,8 +22,22 @@ services:
 ```
 
 `docker compose up -d`, open http://host:8080, log in, it scans. Music gets
-into `/music` however you like (Lidarr, slskd, rsync); Slopify only reads it
-(and writes covers/lyrics next to files if you let it).
+into `/music` however you like (Lidarr, slskd, rsync).
+
+Two defaults to know about before pointing it at a library you care about:
+
+- `SAVE_TO_LIBRARY=1` (default) **writes into the mounted library**: lyrics
+  as `.lrc` sidecars, found covers as `<album>/cover.jpg`, artist pictures
+  as `<artist>/artist.jpg`. Set `SAVE_TO_LIBRARY=0` to keep it untouched
+  (then mounting `/music` read-only is fine).
+- `HEADS=1` (default) copies the first seconds of every track into
+  `CACHE_DIR` (which defaults to `CONFIG_DIR`/`/data`) at scan, so playback
+  starts at SSD speed while a NAS wakes. Set `HEADS=0` to disable.
+
+The container runs as the non-root `node` user (uid 1000). The volumes are
+host mounts, so make sure `./data` — and `/path/to/music` when
+`SAVE_TO_LIBRARY=1` — are writable by uid 1000 (`chown -R 1000` or matching
+group permissions).
 
 ## Downloads: plug in your own arr stack (optional)
 
@@ -76,6 +90,58 @@ studio albums and EPs of the artists you actually play). The background
 chores never fill Lidarr's wanted list past `TASKS_WANTED_TARGET` (default
 25), so a person's own request is always near the front of the line.
 
+There is also **Upgrade to FLAC** (`FLAC_PER_RUN` per run). **Warning:**
+setting the three slskd envs (`SLSKD_URL`, `SLSKD_API_KEY`,
+`SLSKD_DOWNLOADS_DIR`) enables it, hourly by default, and it **replaces
+lossy files in your library** with lossless ones as it finds them. If you
+want slskd for Weekly Exploration but not that, set the task to Off in the
+Tasks UI.
+
+## All configuration
+
+Everything comes from the environment (`server/src/config.ts`). Defaults
+are the homelab defaults: music at `/music`, state in `/data`.
+
+| Env | Default | What it does |
+| --- | --- | --- |
+| `HOST` | `0.0.0.0` | Listen address |
+| `PORT` | `8080` | Listen port |
+| `MUSIC_DIR` | `/music` | The library (may be a NAS mount) |
+| `CONFIG_DIR` / `DATA_DIR` | `/data` | Database, avatars, imports — small, precious. `CONFIG_DIR` wins if both set |
+| `CACHE_DIR` | = `CONFIG_DIR` | Song heads, transcodes, artwork sizes — rebuildable, put it on an SSD |
+| `HEADS` | `1` | Copy the first seconds of every track into the cache at scan; `0` disables |
+| `HEAD_SECONDS` | `5` | Length of those heads |
+| `TRANSCODE_CONCURRENCY` | `4` | Foreground HLS transcodes allowed at once; extra requests wait. |
+| `TRANSCODE_CACHE_GB` | `60` | HLS transcode cache cap; nightly trim drops oldest-used |
+| `SAVE_TO_LIBRARY` | `1` | Write `.lrc` / `cover.jpg` / `artist.jpg` into `MUSIC_DIR`; `0` keeps the library untouched |
+| `SONG_CACHE_GB` | `0` | Whole songs copied to cache before playing; `0` = off |
+| `SCAN_ON_BOOT` | `1` | Full library walk at boot |
+| `SCAN_PAUSE_MS` | `0` | Pause between files during a scan (gentle on a NAS) |
+| `INCOMING_DIR` | (unset) | Ingest: new music lands here (SSD) and is moved to `NAS_DIR` |
+| `NAS_DIR` | = `MUSIC_DIR` | Ingest destination |
+| `INGEST_EVERY_MIN` | `10` | Ingest sweep interval |
+| `INGEST_SETTLE_MIN` | `10` | A file must be this old before it moves |
+| `INGEST_DELETE` | `0` | Delete emptied incoming folders |
+| `INGEST_DELETE_SETTLE_MIN` | `60` | Folder quiet this long before deletion |
+| `PUBLIC_URL` | (unset) | URL speakers fetch audio from (LAN address) |
+| `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin` | First account; password change forced on first login |
+| `LOG_LEVEL` | `info` | Fastify log level |
+| `TRUST_PROXY` | `1` | How many proxy hops to trust for the client IP (`true`/`false`/hop count). Keep `1` behind a single nginx; rate limits key on the resulting IP. |
+| `LOGIN_RATE_MAX` | `10` | Login attempts per IP per minute |
+| `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
+| `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
+| `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
+| `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |
+| `LIDARR_QUALITY_PROFILE` / `LIDARR_METADATA_PROFILE` | (blank) | Profiles for artists Slopify adds; blank = Lidarr's first |
+| `LIDARR_SEARCH_ON_REQUEST` | `0` | `1`: a request also fires Lidarr's indexer search immediately |
+| `ENRICH_EVERY_H` | `1` | Fetch lyrics & artwork interval |
+| `TASKS_WANTED_TARGET` | `25` | Cap on what background chores put on Lidarr's wanted list |
+| `DISCOVERY_PER_RUN` | `10` | Albums per Discover run |
+| `BACKLOG_EVERY_H` / `BACKLOG_PER_RUN` / `BACKLOG_ARTISTS_PER_RUN` | `6` / `10` / `5` | Fill-in-discographies pace |
+| `FLAC_PER_RUN` | `40` | Upgrade-to-FLAC tracks per run |
+| `ANTHROPIC_API_KEY` | (unset) | Powers Generated playlists (Claude) |
+| `AI_MODEL` | `claude-opus-5` | Model for Generated playlists |
+
 ## What works today
 
 See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (originals or HLS transcodes), lyrics (sidecars + LrcLib), artist pictures, likes, playlists, Home and history from your own plays, several devices sharing one session (mirror, control, hand over), Chromecast and BluOS speakers at home driven by the server so any phone or browser can pick them, accounts with invites and admin roles. Desktop app, phone shell and Soulseek are next.
@@ -85,7 +151,8 @@ See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (orig
 ```
 npm install
 npm run fixtures        # generates a 30-track fake library in fixtures/music (needs ffmpeg)
-MUSIC_DIR=fixtures/music DATA_DIR=./data npm run dev      # server on :8080
+MUSIC_DIR=$PWD/fixtures/music CONFIG_DIR=$PWD/data npm run dev   # server on :8080
+# (absolute paths: npm runs the dev script with server/ as its cwd)
 npm run dev -w web      # web on :5180, proxies /api to the server
 npm test                # unit (vitest)
 npm run e2e             # Playwright against the fixture library

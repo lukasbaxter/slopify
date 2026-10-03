@@ -168,9 +168,10 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   });
 
   // The library's most played artists; their releases from the last 90 days.
-  app.get('/api/radar', auth, async () => {
+  // Only the raw releases are cached: library presence and request state
+  // change by the minute, so they are flagged fresh on every look.
+  const radarRaw = async (): Promise<any[]> => {
     const hit = cached('radar', 6 * 60 * 60 * 1000); if (hit) return hit;
-    if (!lidarr) return { releases: [] };
     const top = db.prepare(`SELECT a.id, a.name, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
       WHERE p.at > ? GROUP BY a.id ORDER BY n DESC LIMIT 40`).all(Date.now() - 180 * 86400000) as { id: string; name: string }[];
     const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
@@ -182,11 +183,29 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
         const a = queue.shift()!;
         try {
           const d = await discography(a.id, a.name);
-          for (const r of d.releases) if (r.album_id && r.date && r.date >= since && r.group !== 'appears_on') out.push({ ...r, artistId: a.id, artistName: a.name });
+          for (const rel of d.releases) {
+            if (!rel.album_id || !rel.date || rel.date < since) continue;
+            // cache only the raw release: the per-render flags are re-applied fresh on every GET
+            const r: any = { ...rel, artistId: a.id, artistName: a.name };
+            delete r.inLibrary; delete r.localName; delete r.requestStatus;
+            out.push(r);
+          }
         } catch { /* one artist failing must not sink the radar */ }
       }
     }));
     out.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-    return remember('radar', { releases: out });
+    return remember('radar', out);
+  };
+  app.get('/api/radar', auth, async () => {
+    if (!lidarr) return { releases: [] };
+    const [raw, status] = await Promise.all([radarRaw(), requestStatuses()]);
+    const have = new Map<string, (t: string) => { id: string; name: string } | null>();
+    const releases = raw.map((r) => {
+      let h = have.get(r.artistId);
+      if (!h) { h = matcher(creditedAlbums(db, r.artistId)); have.set(r.artistId, h); }
+      const local = h(r.title);
+      return { ...r, inLibrary: local?.id ?? null, localName: local?.name ?? null, requestStatus: stateOf(status.get(r.album_id)) };
+    });
+    return { releases };
   });
 }

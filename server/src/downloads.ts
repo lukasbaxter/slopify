@@ -15,6 +15,12 @@ import type { Lidarr, AlbumState } from './lidarr.js';
 // nobody found anything).
 export const STUCK_MS = 30 * 60 * 1000;
 
+// All files down but no library album under this name for a day = the
+// names simply do not line up with the library's tags (a retagged import,
+// a renamed artist): show it done rather than "adding" forever. Lidarr
+// keeps no import timestamp we can read, so the request time stands in.
+export const ADDING_GRACE_MS = 24 * 60 * 60 * 1000;
+
 export function recordRequest(db: DB, uid: string, r: { id?: number; album_id?: string; artist?: string; title?: string }, source: 'request' | 'ai' | 'retry', note: string | null = null) {
   if (!r?.id) return;
   db.prepare(`INSERT OR IGNORE INTO my_requests (user_id, lidarr_id, album_id, artist, title, source, note, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -26,11 +32,11 @@ type Meta = { source: string | null; note: string | null; created: number | null
 // One album's row as the page shows it.
 export function downloadOut(a: AlbumState, meta: Meta | undefined, inLibrary: { id: string } | null, now = Date.now()) {
   let state: string; let via = 'soulseek'; let detail: string | null = null; let reason: string | null = null;
-  if (a.queue) { state = a.queue.state; via = 'torrent'; detail = a.queue.detail; reason = state === 'failed' ? a.queue.detail : null; }
-  else if (a.total > 0 && a.done >= a.total) state = inLibrary ? 'done' : 'adding';
+  if (a.queue) { state = a.queue.state; via = a.queue.protocol || 'download'; detail = a.queue.detail; reason = state === 'failed' ? a.queue.detail : null; }
+  else if (a.total > 0 && a.done >= a.total) state = inLibrary || (meta?.created && now - meta.created > ADDING_GRACE_MS) ? 'done' : 'adding';
+  else if (!a.monitored) { state = 'failed'; reason = 'no longer monitored in Lidarr'; }
   else if (a.done > 0) state = 'downloading';
-  else if (a.monitored) state = meta?.created && now - meta.created > STUCK_MS ? 'stuck' : 'queued';
-  else { state = 'failed'; reason = 'no longer monitored in Lidarr'; }
+  else state = meta?.created && now - meta.created > STUCK_MS ? 'stuck' : 'queued';
   return {
     id: a.id, albumId: a.album_id, artist: a.artist, title: a.title, type: a.rtype, year: a.year, image: a.image,
     state, total: a.total, done: a.done, queuePos: null,
@@ -46,7 +52,9 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?:
   const ready = lidarr?.enabled;
 
   const metaFor = (uid: string): Map<number, Meta> => {
-    const rows = db.prepare('SELECT user_id, lidarr_id, source, note, created FROM my_requests ORDER BY created ASC LIMIT 2000').all() as any[];
+    // The newest 2000 rows (old ones may fall off), merged oldest-first so
+    // the first requester's source/time still wins below.
+    const rows = (db.prepare('SELECT user_id, lidarr_id, source, note, created FROM my_requests ORDER BY created DESC LIMIT 2000').all() as any[]).reverse();
     const m = new Map<number, Meta>();
     for (const r of rows) {
       const prev = m.get(r.lidarr_id);
@@ -99,6 +107,10 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?:
     try { await lidarr!.retry(id); } catch (e: any) { return reply.code(502).send({ error: e.message }); }
     const old = db.prepare('SELECT * FROM my_requests WHERE user_id = ? AND lidarr_id = ?').get(req.user.id, id) as any;
     recordRequest(db, req.user.id, { id, album_id: a.album_id, artist: a.artist, title: a.title }, old?.source ?? 'retry', old?.note ?? null);
+    // The stuck clock runs from `created`: a retry restarts it (every row for
+    // the album, whoever asked first - the clock is the album's), else the
+    // album is back to "stuck" on the next poll no matter what the retry did.
+    db.prepare('UPDATE my_requests SET created = ? WHERE lidarr_id = ?').run(Date.now(), id);
     app.log.info(`download retry #${id} (${a.artist} - ${a.title})`);
     return { ok: true, id };
   });

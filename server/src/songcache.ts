@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { DB } from './db.js';
+import { sweepTmp } from './heads.js';
 
 export function songPath(cacheDir: string, id: string) { return path.join(cacheDir, 'songs', id.slice(0, 2), id); }
 
@@ -16,7 +17,9 @@ export class SongCache {
   private queue: { id: string; file: string; size: number }[] = [];
   private active = 0;
   private touched = new Map<string, number>();
-  constructor(private db: DB, private cacheDir: string, private capBytes: number, private log: (m: string) => void = () => {}, private parallel = 2) {}
+  constructor(private db: DB, private cacheDir: string, private capBytes: number, private log: (m: string) => void = () => {}, private parallel = 2, private copyTimeoutMs = 120000) {
+    if (this.enabled) sweepTmp(path.join(cacheDir, 'songs'), log); // crash-orphaned .tmp copies
+  }
   get enabled() { return this.capBytes > 0; }
 
   // The local copy of this song, if it is complete; counts as a play for the order.
@@ -50,13 +53,34 @@ export class SongCache {
     }
   }
 
+  // A stream copy with a hard timeout: a wedged NAS mount must give the fetch
+  // slot back (fs.promises.copyFile cannot be aborted). The timer rejects even
+  // if the underlying read is stuck in the kernel; the streams are destroyed
+  // best-effort and the .tmp cleaned up by the caller.
+  private copy(from: string, to: string) {
+    return new Promise<void>((resolve, reject) => {
+      const rs = fs.createReadStream(from);
+      const ws = fs.createWriteStream(to);
+      const timer = setTimeout(() => {
+        const e = new Error(`copy timed out after ${Math.round(this.copyTimeoutMs / 1000)}s`);
+        rs.destroy(e); ws.destroy(); reject(e);
+      }, this.copyTimeoutMs);
+      ws.on('finish', () => { clearTimeout(timer); resolve(); });
+      rs.on('error', (e) => { clearTimeout(timer); ws.destroy(); reject(e); });
+      ws.on('error', (e) => { clearTimeout(timer); rs.destroy(); reject(e); });
+      rs.pipe(ws);
+    });
+  }
+
   private async fetch({ id, file, size }: { id: string; file: string; size: number }) {
     const dst = songPath(this.cacheDir, id);
     await fsp.mkdir(path.dirname(dst), { recursive: true });
     const tmp = `${dst}.tmp`;
-    await fsp.copyFile(file, tmp);
-    const got = (await fsp.stat(tmp)).size;
-    if (got !== size) { await fsp.rm(tmp, { force: true }); throw new Error(`copied ${got} of ${size} bytes`); }
+    try {
+      await this.copy(file, tmp);
+      const got = (await fsp.stat(tmp)).size;
+      if (got !== size) throw new Error(`copied ${got} of ${size} bytes`);
+    } catch (e) { fsp.rm(tmp, { force: true }).catch(() => {}); throw e; } // best effort: a wedged mount may hold the handle
     await fsp.rename(tmp, dst);
     const now = Date.now();
     this.db.prepare('INSERT INTO song_cache (track_id, bytes, last_used, added) VALUES (?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET bytes = excluded.bytes, last_used = excluded.last_used').run(id, size, now, now);

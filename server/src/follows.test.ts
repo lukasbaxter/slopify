@@ -13,6 +13,8 @@ beforeAll(async () => {
   db = (app as any).db;
   await scanLibrary(db, { musicDir: MUSIC, dataDir: DATA });
   tok = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin' } })).json().token;
+  // the seeded admin/admin is locked to the password-change route until it changes
+  await app.inject({ method: 'POST', url: '/api/auth/password', payload: { password: 'admin test password' }, headers: { authorization: `Bearer ${tok}` } });
 }, 120000);
 afterAll(async () => { await app.close(); });
 

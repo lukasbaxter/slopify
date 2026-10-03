@@ -12,12 +12,14 @@
 // The scheduler is a minute tick, and scheduled runs go one at a time -
 // most of these walk the same NAS - while Run now starts at once.
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseFile } from 'music-metadata';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { buildHead, headPath } from './heads.js';
+import { songPath } from './songcache.js';
 import { releaseInLibrary } from './discover.js';
 import { slskdFind, slskdDownload, slskdWait } from './explore.js';
 import type { Lidarr } from './lidarr.js';
@@ -63,7 +65,10 @@ export function prevPoint(s: Schedule, now: number): number | null {
 }
 
 export function isDue(s: Schedule, last: LastRun | null, now: number): boolean {
-  if (s.mode === 'interval') return !last || now - last.started >= s.hours * 3600 * 1000;
+  // Interval counts from when the last run ENDED (when known): a chore that
+  // runs longer than its interval would otherwise be due again the moment
+  // it finishes, and nothing else would ever get a turn.
+  if (s.mode === 'interval') return !last || now - (last.ended || last.started) >= s.hours * 3600 * 1000;
   if (s.mode === 'daily' || s.mode === 'weekly') { const p = prevPoint(s, now)!; return !last || last.started < p; }
   return false; // off and watch never fire from the clock
 }
@@ -71,7 +76,7 @@ export function isDue(s: Schedule, last: LastRun | null, now: number): boolean {
 const nextRun = (s: Schedule, last: LastRun | null, now: number): number | null => {
   if (s.mode === 'off' || s.mode === 'watch') return null;
   if (isDue(s, last, now)) return now;
-  if (s.mode === 'interval') return last!.started + s.hours * 3600 * 1000;
+  if (s.mode === 'interval') return (last!.ended || last!.started) + s.hours * 3600 * 1000;
   return prevPoint(s, now)! + (s.mode === 'weekly' ? 7 : 1) * 86400000;
 };
 
@@ -79,8 +84,15 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   const admin = { preHandler: (app as any).requireAdmin };
   const now = opts.now ?? Date.now;
   const running = new Map<string, { started: number; step: string; progress: number | null }>();
-  const last = (id: string): LastRun | null => JSON.parse(kvGet(db, `task:${id}`) || 'null');
-  const schedOf = (d: TaskDef): Schedule => parseSchedule(JSON.parse(kvGet(db, `task:${d.id}:sched`) || 'null'), Boolean(d.watchDir)) ?? d.schedule;
+  // kv holds JSON this process wrote, but a corrupt row (a crashed write, a
+  // hand edit) must degrade to "never ran" / "default schedule", not take the
+  // whole tick - and the task list API - down with it.
+  const last = (id: string): LastRun | null => { try { return JSON.parse(kvGet(db, `task:${id}`) || 'null'); } catch { return null; } };
+  const schedOf = (d: TaskDef): Schedule => {
+    let raw: any = null;
+    try { raw = JSON.parse(kvGet(db, `task:${d.id}:sched`) || 'null'); } catch { /* fall back to the default */ }
+    return parseSchedule(raw, Boolean(d.watchDir)) ?? d.schedule;
+  };
 
   const start = (def: TaskDef): boolean => {
     if (running.has(def.id)) return false;
@@ -109,10 +121,28 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
       if (want && !have) {
         try {
           const w = fs.watch(def.watchDir!, { recursive: true }, () => {
+            // Our own chores write into the watched folder too - enrich's
+            // save-to-library drops .lrc sidecars and cover images there -
+            // so events that arrive while a scan or enrich (or any task) is
+            // busy are its own footsteps, not new music: ignore them, or
+            // watch mode retriggers itself forever.
+            if (running.size || (app as any).enrichRunning?.() || (app as any).scanning?.()) return;
             if (debounce.has(def.id)) return;
-            debounce.set(def.id, setTimeout(() => { debounce.delete(def.id); start(def); }, 2 * 60 * 1000).unref());
+            debounce.set(def.id, setTimeout(() => {
+              debounce.delete(def.id);
+              // Same one-at-a-time gate as the clock: with something already
+              // running, stand down - the next change re-arms the debounce.
+              if (!running.size) start(def);
+            }, 2 * 60 * 1000).unref());
           });
-          w.on('error', (e) => app.log.error(`task ${def.id} watch: ${e.message}`));
+          w.on('error', (e) => {
+            // A dead watcher (share unmounted, folder replaced) kept in the
+            // map would block recreation forever: drop it so the next tick's
+            // syncWatchers can try again.
+            app.log.error(`task ${def.id} watch: ${e.message}; watcher dropped, will retry`);
+            try { w.close(); } catch { /* already dead */ }
+            watchers.delete(def.id);
+          });
           watchers.set(def.id, w);
           app.log.info(`task ${def.id}: watching ${def.watchDir} for changes`);
         } catch (e: any) { app.log.error(`task ${def.id}: cannot watch ${def.watchDir}: ${e.message}`); }
@@ -123,11 +153,19 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   if (process.env.NODE_ENV !== 'test') syncWatchers();
   app.addHook('onClose', async () => { for (const w of watchers.values()) w.close(); });
 
-  // Scheduled runs: one task at a time. First tick a minute after boot, not in it.
+  // Scheduled runs: one task at a time. First tick a minute after boot, not
+  // in it. The scan is round-robin from just past the last task started, so
+  // a chore that takes longer than its interval cannot starve the ones
+  // listed after it.
+  let rr = -1;
   const tick = () => {
-    if (running.size) return;
-    for (const def of defs) {
+    if (process.env.NODE_ENV !== 'test') syncWatchers(); // recreate any watcher dropped by an error
+    if (running.size || !defs.length) return;
+    for (let i = 1; i <= defs.length; i++) {
+      const idx = (rr + i) % defs.length;
+      const def = defs[idx];
       if (!isDue(schedOf(def), last(def.id), now())) continue;
+      rr = idx;
       start(def);
       return;
     }
@@ -181,7 +219,12 @@ export function remapTrackId(db: DB, oldId: string, newId: string, cacheDir?: st
   if (!newId || oldId === newId) return;
   for (const t of ['likes', 'playlist_tracks', 'plays', 'lyrics']) db.prepare(`UPDATE OR IGNORE ${t} SET track_id = ? WHERE track_id = ?`).run(newId, oldId);
   for (const t of ['likes', 'playlist_tracks', 'plays', 'lyrics', 'heads', 'song_cache']) db.prepare(`DELETE FROM ${t} WHERE track_id = ?`).run(oldId);
-  if (cacheDir) { try { fs.rmSync(headPath(cacheDir, oldId), { force: true }); } catch { /* cache orphan */ } }
+  // The head AND the whole-song copy belong to the old bytes: dropping only
+  // their rows would leave the files stranded on the SSD forever.
+  if (cacheDir) {
+    try { fs.rmSync(headPath(cacheDir, oldId), { force: true }); } catch { /* cache orphan */ }
+    try { fs.rmSync(songPath(cacheDir, oldId), { force: true }); } catch { /* cache orphan */ }
+  }
 }
 
 const ff = (args: string[]) => new Promise<boolean>((resolve) => {
@@ -213,7 +256,10 @@ export const isStudio = (r: { rtype: string; secondary?: string[]; total_tracks:
   !(r.secondary || []).length && (r.rtype === 'Album' || (r.rtype === 'EP' && r.total_tracks >= 4));
 
 // How many more albums the wanted list can take before background chores
-// would make a person's own request wait in line.
+// would make a person's own request wait in line. Two runs that check this
+// at once (a manual Run now beside a scheduled one) can each see the same
+// headroom and jointly overshoot wantedTarget; the loops re-check every few
+// requests to keep that overshoot small rather than lock around Lidarr.
 async function room(lidarr: Lidarr, target: number): Promise<number> {
   return target - (await lidarr.wantedCount());
 }
@@ -221,7 +267,26 @@ async function room(lidarr: Lidarr, target: number): Promise<number> {
 export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const db = o.db;
   const f = o.fetcher ?? fetch;
-  const deezer = (p: string) => f(`https://api.deezer.com${p}`, { signal: AbortSignal.timeout(10000) }).then(async (r) => { if (!r.ok) throw new Error(`deezer ${r.status}`); return r.json() as any; });
+  // Deezer answers rate limits with a 200 whose body is {error: ...}; read
+  // as data that looks like an empty result and the run quietly does
+  // nothing. Surface it as the failure it is (flagged, so the caller can
+  // abort the whole run instead of grinding through more refusals), and
+  // space calls out to stay under their quota in the first place.
+  let deezerLast = 0;
+  const deezer = async (p: string) => {
+    const wait = deezerLast + 500 - Date.now();
+    if (wait > 0) await sleep(wait);
+    deezerLast = Date.now();
+    const r = await f(`https://api.deezer.com${p}`, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error(`deezer ${r.status}`);
+    const j = await r.json() as any;
+    if (j && typeof j === 'object' && j.error) {
+      const e: any = new Error(`deezer refused: ${j.error.message || j.error.type || j.error.code || 'error body'}`);
+      e.deezer = true;
+      throw e;
+    }
+    return j;
+  };
   const topPlayedArtists = (sinceMs: number, limit: number) => db.prepare(`
     SELECT a.id, a.name, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id
     JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
@@ -253,16 +318,24 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     description: 'Mirror the first seconds of every song to the cache so playback starts at SSD speed',
     run: async (ctx) => {
       if (!o.headsEnabled) return 'heads are off (HEADS=0)';
+      // A file ffmpeg cannot cut today cannot cut it tomorrow either (a
+      // truncated rip, an unreadable codec): remember failures for a week
+      // so the daily pass is not mostly re-failing the same files.
+      const bad = (() => { try { return JSON.parse(kvGet(db, 'task:heads:failed') || '{}') as Record<string, number>; } catch { return {}; } })();
+      for (const k of Object.keys(bad)) if (Date.now() - bad[k] > 7 * 86400000) delete bad[k];
       const rows = db.prepare('SELECT t.id, t.path, t.size, t.duration_ms FROM tracks t LEFT JOIN heads h ON h.track_id = t.id WHERE h.track_id IS NULL').all() as any[];
       if (!rows.length) return 'every song has one';
-      let done = 0, failed = 0;
+      let done = 0, failed = 0, skipped = 0;
+      const samples: string[] = [];
       for (const r of rows) {
+        if (bad[r.path]) { skipped++; continue; }
         try { await buildHead(db, o.cacheDir, r.id, r.path, r.size, r.duration_ms, o.headSeconds); done++; }
-        catch (e: any) { failed++; if (failed <= 5) ctx.log(`${r.path}: ${e.message}`); }
-        if ((done + failed) % 50 === 0) ctx.step(`${(done + failed).toLocaleString()} of ${rows.length.toLocaleString()}`, (done + failed) / rows.length);
+        catch (e: any) { failed++; bad[r.path] = Date.now(); if (samples.length < 3) samples.push(r.path); if (failed <= 5) ctx.log(`${r.path}: ${e.message}`); }
+        if ((done + failed) % 50 === 0) { ctx.step(`${(done + failed).toLocaleString()} of ${rows.length.toLocaleString()}`, (done + failed) / rows.length); kvSet(db, 'task:heads:failed', JSON.stringify(bad)); }
         if (o.pauseMs) await sleep(o.pauseMs);
       }
-      return `${done.toLocaleString()} heads cut${failed ? `, ${failed} failed` : ''}`;
+      kvSet(db, 'task:heads:failed', JSON.stringify(bad));
+      return `${done.toLocaleString()} heads cut${failed ? `, ${failed} failed (e.g. ${samples.join(', ')})` : ''}${skipped ? `, ${skipped} skipped as recently failed` : ''}`;
     },
   };
 
@@ -279,9 +352,9 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       const seen = new Map<string, number>(Object.entries(JSON.parse(kvGet(db, 'task:discovery:seen') || '{}')));
       for (const [k, t] of seen) if (Date.now() - t > 90 * 86400000) seen.delete(k);
       const haveArtist = db.prepare('SELECT 1 FROM artists WHERE name = ? COLLATE NOCASE');
-      let n = 0;
+      let n = 0, full = false;
       for (const top of topPlayedArtists(180 * 86400000, 30)) {
-        if (n >= cap) break;
+        if (n >= cap || full) break;
         ctx.step(`Around ${top.name}`, n / cap);
         try {
           const s = await deezer(`/search/artist?q=${encodeURIComponent(top.name)}&limit=3`);
@@ -291,17 +364,27 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
           for (const cand of rel.data || []) {
             if (n >= cap) break;
             if (haveArtist.get(cand.name) || seen.has(norm(cand.name))) continue;
-            seen.set(norm(cand.name), Date.now());
             const albums = await deezer(`/artist/${cand.id}/albums?limit=15`);
             const best = (albums.data || []).find((a: any) => a.record_type === 'album');
-            if (!best) continue;
+            if (!best) { seen.set(norm(cand.name), Date.now()); continue; }
             const found = await lidarr.search(`${cand.name} ${best.title}`);
+            // Only now was the candidate really evaluated: marked seen any
+            // earlier, a thrown Deezer/Lidarr call would bury it for 90 days
+            // without it ever having had its chance.
+            seen.set(norm(cand.name), Date.now());
             const hit = found.find((r) => norm(r.artist) === norm(cand.name) && norm(r.title) === norm(best.title)) || found.find((r) => norm(r.artist) === norm(cand.name));
             if (!hit || releaseInLibrary(db, hit.artist, hit.title)) continue;
             const req = await lidarr.request(hit.album_id);
-            if (req.status === 'queued') { n++; ctx.log(`${hit.artist} - ${hit.title} (similar to ${top.name})`); }
+            if (req.status === 'queued') {
+              n++; ctx.log(`${hit.artist} - ${hit.title} (similar to ${top.name})`);
+              // See room(): a concurrent run may be filling the list too.
+              if (n % 5 === 0 && (await room(lidarr, o.wantedTarget)) <= 0) { full = true; break; }
+            }
           }
-        } catch (e: any) { ctx.log(`${top.name}: ${e.message}`); }
+        } catch (e: any) {
+          if (e.deezer) { kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen))); throw new Error(`${e.message}; stopped after ${n} queued`); }
+          ctx.log(`${top.name}: ${e.message}`);
+        }
       }
       kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen)));
       return n ? `${n} albums queued from artists similar to what gets played` : 'nothing new worth queueing';
@@ -321,9 +404,9 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const done = JSON.parse(kvGet(db, 'task:backlog:done') || '{}') as Record<string, number>;
       const pending = await lidarr.statuses();
-      let n = 0, artists = 0;
+      let n = 0, artists = 0, full = false;
       for (const a of topPlayedArtists(10 * 365 * 86400000, 500)) {
-        if (artists >= o.backlogArtistsPerRun || n >= cap) break;
+        if (artists >= o.backlogArtistsPerRun || n >= cap || full) break;
         if (done[a.id] && Date.now() - done[a.id] < 14 * 86400000) continue;
         ctx.step(a.name, n / cap);
         let complete = true;
@@ -331,9 +414,13 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
           const d = await lidarr.discography(a.name);
           for (const r of d.releases) {
             if (!isStudio(r) || pending.has(r.album_id) || releaseInLibrary(db, r.artist || a.name, r.title)) continue;
-            if (n >= cap) { complete = false; break; } // resume this artist next run
+            if (n >= cap || full) { complete = false; break; } // resume this artist next run
             const req = await lidarr.request(r.album_id);
-            if (req.status === 'queued') { n++; ctx.log(`${a.name} - ${r.title}`); }
+            if (req.status === 'queued') {
+              n++; ctx.log(`${a.name} - ${r.title}`);
+              // See room(): a concurrent run may be filling the list too.
+              if (n % 5 === 0 && (await room(lidarr, o.wantedTarget)) <= 0) full = true;
+            }
           }
         } catch (e: any) { ctx.log(`${a.name}: ${e.message}`); complete = false; }
         artists++;
@@ -355,8 +442,48 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     run: async (ctx) => {
       if (!o.slskdUrl || !o.slskdKey || !o.slskdDownloadsDir) return 'slskd is not configured (SLSKD_URL / SLSKD_API_KEY / SLSKD_DOWNLOADS_DIR)';
       const sopts = { slskdUrl: o.slskdUrl, slskdKey: o.slskdKey };
-      const skip = JSON.parse(kvGet(db, 'task:flac:skip') || '{}') as Record<string, number>;
+      const exists = (p: string) => fsp.stat(p).then(() => true, () => false);
+      // Each replacement is journaled in kv BEFORE the library changes: a
+      // crash between "new file in place" and "listener's traces remapped"
+      // leaves an entry behind, and the next run settles it first. The
+      // lyrics row rides along because the folder scan deletes the old
+      // track row (the lyrics cascade with it) before the remap can move it.
+      type JEntry = { oldId: string; newPath: string; rel: string; lyrics: { kind: string; lines: string; source: string; fetched_at: number } | null };
+      const journal: JEntry[] = (() => { try { return JSON.parse(kvGet(db, 'task:flac:journal') || '[]'); } catch { return []; } })();
+      const saveJournal = () => kvSet(db, 'task:flac:journal', JSON.stringify(journal));
+      let scanFailed = 0;
+      // Scan the entry's folder (one retry: the NAS drops a beat sometimes),
+      // then remap the old id's traces onto whatever id now owns the path.
+      // False means the entry stays journaled for the next run; it is never
+      // silently dropped while the old file is already gone.
+      const settle = async (e: JEntry): Promise<boolean> => {
+        const scanFolders = (app as any).scanFolders as ((rel: string[]) => Promise<any>) | undefined;
+        if (!scanFolders) return false;
+        let scanned = false;
+        for (let attempt = 0; attempt < 2 && !scanned; attempt++) {
+          try { await scanFolders([e.rel]); scanned = true; }
+          catch (err: any) { ctx.log(`scan ${e.rel || '(library root)'}: ${err.message}`); if (!attempt) await sleep(2000); }
+        }
+        if (!scanned) return false;
+        const row = db.prepare('SELECT id FROM tracks WHERE path = ?').get(e.newPath) as any;
+        if (row) {
+          remapTrackId(db, e.oldId, row.id, o.cacheDir);
+          if (e.lyrics && !db.prepare('SELECT 1 FROM lyrics WHERE track_id = ?').get(row.id))
+            db.prepare('INSERT OR IGNORE INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES (?, ?, ?, ?, ?)').run(row.id, e.lyrics.kind, e.lyrics.lines, e.lyrics.source, e.lyrics.fetched_at);
+        } else ctx.log(`${e.newPath}: scanned but not in the library; dropping its journal entry`);
+        return true;
+      };
+      // First, anything a crashed run left half-done.
+      let recovered = 0;
+      for (let i = journal.length - 1; i >= 0; i--) {
+        if (await settle(journal[i])) { journal.splice(i, 1); recovered++; } else scanFailed++;
+      }
+      saveJournal();
+      const skip: Record<string, number> = (() => { try { return JSON.parse(kvGet(db, 'task:flac:skip') || '{}'); } catch { return {}; } })();
       for (const k of Object.keys(skip)) if (Date.now() - skip[k] > 30 * 86400000) delete skip[k];
+      // Persisted after every failure, not at the end: a crash mid-run must
+      // not re-spend the search budget on the same dead ends tomorrow.
+      const noteSkip = (key: string) => { skip[key] = Date.now(); kvSet(db, 'task:flac:skip', JSON.stringify(skip)); };
       const rows = db.prepare(`SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no, t.disc_no, t.year, t.duration_ms,
           COALESCE(p.n, 0) + 5 * COALESCE(l.n, 0) AS score
         FROM tracks t
@@ -364,51 +491,85 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         LEFT JOIN (SELECT track_id, COUNT(*) n FROM likes GROUP BY track_id) l ON l.track_id = t.id
         WHERE t.codec LIKE 'MPEG%' OR t.codec LIKE '%AAC%' OR t.codec LIKE '%Opus%'
         ORDER BY score DESC, t.added_at DESC LIMIT 3000`).all() as any[];
-      if (!rows.length) return 'nothing lossy left';
-      let done = 0, failed = 0, tried = 0;
-      const rels = new Set<string>();
-      const replaced: { oldId: string; newPath: string }[] = [];
+      const note = `${recovered ? `; ${recovered} recovered from the journal` : ''}${scanFailed ? `; ${scanFailed} folder scans failed, kept journaled for recovery` : ''}`;
+      if (!rows.length) return `nothing lossy left${note}`;
+      let done = 0, failed = 0, tried = 0, blocked = 0;
+      const plannedDests = new Set<string>();
       for (const t of rows) {
         if (done >= o.flacPerRun || tried >= o.flacPerRun * 2) break;
-        const key = `${t.artist} | ${t.title}`.toLowerCase();
+        // The duration is part of the key: a failed search for the radio
+        // edit must not block the album version (same artist and title)
+        // for the next 30 days.
+        const key = `${t.artist} | ${t.title} | ${Math.round(t.duration_ms / 1000)}`.toLowerCase();
         if (skip[key]) continue;
+        const dest = t.path.replace(/\.[^.]+$/, '.flac');
+        // Never overwrite a library file: a dest that exists (or that an
+        // earlier row of this very run claims - 01.mp3 and 01.m4a both map
+        // to 01.flac) is someone's music, not this task's to replace.
+        if (plannedDests.has(dest)) continue;
+        plannedDests.add(dest);
+        if (dest !== t.path && await exists(dest)) { ctx.log(`${dest}: already exists, not overwriting`); noteSkip(key); blocked++; continue; }
         if (tried) await sleep(8000); // stay under the account's search budget
         tried++;
         ctx.step(`${t.artist} - ${t.title}`, done / o.flacPerRun);
+        let src: string | undefined, tmp: string | undefined;
         try {
+          const dlStart = Date.now();
           const file = await slskdFind(sopts, { artist: t.artist, title: t.title }, { formats: ['flac'], durationS: Math.round(t.duration_ms / 1000) });
-          if (!file || !(await slskdDownload(sopts, file))) { skip[key] = Date.now(); failed++; continue; }
+          if (!file || !(await slskdDownload(sopts, file))) { noteSkip(key); failed++; continue; }
           await slskdWait(sopts, [file], 10 * 60 * 1000);
-          const base = String(file.filename).split(/[\\/]/).pop()!;
-          const src = (fs.readdirSync(o.slskdDownloadsDir, { recursive: true }) as unknown as string[])
-            .map((e) => path.join(o.slskdDownloadsDir!, String(e)))
-            .find((p) => path.basename(p) === base && (() => { try { return fs.statSync(p).size === file.size; } catch { return false; } })());
-          if (!src || !(await verifyFlac(src, t.duration_ms))) { if (src) fs.rmSync(src, { force: true }); skip[key] = Date.now(); failed++; continue; }
-          const dest = t.path.replace(/\.[^.]+$/, '.flac');
-          const tmp = `${dest}.up.flac`;
+          // Find the download in slskd's staging folder. Basename+size alone
+          // could pick up a file Soularr just fetched for Lidarr, so only
+          // files written since this download started count, and a candidate
+          // sitting under the remote share's own folder name wins. Residual
+          // risk: a same-named, same-sized file landing in that window is
+          // still stolen - small, and it would verify as the same audio.
+          const parts = String(file.filename).split(/[\\/]/);
+          const base = parts.pop()!;
+          const remoteDir = parts.pop() ?? '';
+          const cands: string[] = [];
+          for (const e of await fsp.readdir(o.slskdDownloadsDir, { recursive: true }) as unknown as string[]) {
+            const p = path.join(o.slskdDownloadsDir, String(e));
+            if (path.basename(p) !== base) continue;
+            try {
+              const st = await fsp.stat(p);
+              if (!st.isFile() || st.size !== file.size || st.mtimeMs < dlStart - 60000) continue;
+              cands.push(p);
+            } catch { /* raced away */ }
+          }
+          src = cands.find((p) => path.basename(path.dirname(p)) === remoteDir) ?? cands[0];
+          if (!src || !(await verifyFlac(src, t.duration_ms))) { noteSkip(key); failed++; continue; }
+          // The tmp lives beside dest (same filesystem for the rename) as a
+          // dotfile with a non-audio extension, so a scan that catches the
+          // folder mid-upgrade cannot admit it as a ghost track.
+          tmp = path.join(path.dirname(dest), `.up-${path.basename(dest)}.tmp`);
           const meta = ['-metadata', `title=${t.title}`, '-metadata', `artist=${t.artist}`, '-metadata', `album=${t.album}`, '-metadata', `albumartist=${t.album_artist}`];
           if (t.track_no) meta.push('-metadata', `track=${t.track_no}`);
           if (t.disc_no) meta.push('-metadata', `disc=${t.disc_no}`);
           if (t.year) meta.push('-metadata', `date=${t.year}`);
-          if (!(await ff(['-y', '-i', src, '-map', '0:a:0', '-c:a', 'copy', '-map_metadata', '-1', ...meta, tmp]))) { fs.rmSync(src, { force: true }); fs.rmSync(tmp, { force: true }); skip[key] = Date.now(); failed++; continue; }
-          fs.renameSync(tmp, dest);
-          fs.rmSync(src, { force: true });
-          if (dest !== t.path) fs.rmSync(t.path, { force: true }); // the verified FLAC stands in its place
-          rels.add(path.relative(o.musicDir, path.dirname(dest)));
-          replaced.push({ oldId: t.id, newPath: dest });
+          if (!(await ff(['-y', '-i', src, '-map', '0:a:0', '-c:a', 'copy', '-map_metadata', '-1', ...meta, tmp]))) { noteSkip(key); failed++; continue; }
+          if (dest !== t.path && await exists(dest)) { ctx.log(`${dest}: appeared mid-upgrade, not overwriting`); noteSkip(key); blocked++; continue; }
+          const lyr = db.prepare('SELECT kind, lines, source, fetched_at FROM lyrics WHERE track_id = ?').get(t.id) as JEntry['lyrics'] ?? null;
+          const entry: JEntry = { oldId: t.id, newPath: dest, rel: path.relative(o.musicDir, path.dirname(dest)), lyrics: lyr };
+          journal.push(entry); saveJournal(); // durable before the library changes
+          await fsp.rename(tmp, dest);
+          tmp = undefined;
+          if (dest !== t.path) await fsp.rm(t.path, { force: true }); // the verified FLAC stands in its place
           done++;
           ctx.log(`${t.artist} - ${t.title}: FLAC from ${file.username}`);
-        } catch (e: any) { ctx.log(`${t.artist} - ${t.title}: ${e.message}`); skip[key] = Date.now(); failed++; }
-      }
-      kvSet(db, 'task:flac:skip', JSON.stringify(skip));
-      if (rels.size) {
-        await (app as any).scanFolders?.([...rels]).catch((e: any) => ctx.log(`scan: ${e.message}`));
-        for (const r of replaced) {
-          const row = db.prepare('SELECT id FROM tracks WHERE path = ?').get(r.newPath) as any;
-          if (row) remapTrackId(db, r.oldId, row.id, o.cacheDir);
+          // Settle right away - scan the folder, remap the traces - so a
+          // crash loses at most the one journaled replacement in flight,
+          // not a whole run's worth deferred to the end.
+          if (await settle(entry)) { const i = journal.indexOf(entry); if (i >= 0) journal.splice(i, 1); saveJournal(); }
+          else { scanFailed++; saveJournal(); }
+        } catch (e: any) { ctx.log(`${t.artist} - ${t.title}: ${e.message}`); noteSkip(key); failed++; }
+        finally {
+          if (tmp) await fsp.rm(tmp, { force: true }).catch(() => { /* never leave a tmp behind */ });
+          if (src) await fsp.rm(src, { force: true }).catch(() => { /* staging copy is spent either way */ });
         }
       }
-      return `${done} upgraded, ${failed} of ${tried} tried had no good FLAC`;
+      kvSet(db, 'task:flac:skip', JSON.stringify(skip));
+      return `${done} upgraded, ${failed} of ${tried} tried had no good FLAC${blocked ? `, ${blocked} blocked by an existing file` : ''}${recovered ? `, ${recovered} recovered from the journal` : ''}${scanFailed ? `, ${scanFailed} folder scans failed, kept journaled for recovery` : ''}`;
     },
   };
 

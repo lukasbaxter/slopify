@@ -76,7 +76,15 @@ export type Src = { file: string; name: string; size: number; head: { path: stri
 // the joined head + NAS stream on stdin otherwise, the file itself without a head.
 function ffIn(src: Src): { args: string[]; feed: (() => Readable) | null } {
   if (src.head && src.head.bytes >= src.size) return { args: ['-i', src.head.path], feed: null };
-  if (src.head || src.alt) return { args: ['-i', 'pipe:0'], feed: () => openBytes(src.file, src.head, 0, src.size - 1, src.alt) };
+  if (src.head) return { args: ['-i', 'pipe:0'], feed: () => openBytes(src.file, src.head, 0, src.size - 1, src.alt) };
+  if (src.alt) {
+    // alt is only a fallback for a file not on the NAS yet: feed ffmpeg a real
+    // path when either copy is there (stdin breaks non-faststart m4a), and
+    // only pipe when neither stat answers (openBytes sorts it out at read time).
+    try { if (fs.existsSync(src.file)) return { args: ['-i', src.file], feed: null }; } catch { /* wedged mount */ }
+    try { if (fs.existsSync(src.alt)) return { args: ['-i', src.alt], feed: null }; } catch { /* unlikely: alt is SSD */ }
+    return { args: ['-i', 'pipe:0'], feed: () => openBytes(src.file, src.head, 0, src.size - 1, src.alt) };
+  }
   return { args: ['-i', src.file], feed: null };
 }
 function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | 'ignore', nice = false) {
@@ -88,9 +96,22 @@ function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | 'ignore'
     const r = inp.feed();
     r.on('error', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
     ff.stdin!.on('error', () => { r.destroy(); }); // ffmpeg done or killed: stop reading
+    ff.on('close', () => r.destroy()); // killed without a write in flight: still close the files
     r.pipe(ff.stdin!);
   }
   return ff;
+}
+
+// Foreground transcodes running at once (warms have their own cap below): a
+// burst of plays must not fork one ffmpeg per request. Waiters re-check in a
+// loop, so a wake-up race can never oversubscribe.
+let fgActive = 0;
+const fgWaiters: (() => void)[] = [];
+async function fgAcquire(): Promise<() => void> {
+  while (fgActive >= config.transcodeConcurrency) await new Promise<void>((r) => fgWaiters.push(r));
+  fgActive++;
+  let released = false;
+  return () => { if (released) return; released = true; fgActive--; fgWaiters.splice(0).forEach((w) => w()); };
 }
 
 // Starts (or joins) the transcode and resolves once the playlist is startable.
@@ -102,16 +123,25 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
   if (fs.existsSync(done)) return index;
   const key = `${id}:${profile}`;
   if (!running.has(key)) {
-    const p = (async () => {
-      await fsp.rm(dir, { recursive: true, force: true });
-      await fsp.mkdir(dir, { recursive: true });
-      const ff = spawnFf([], src, ['-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', PROFILES[profile].bitrate, '-ac', '2',
-        '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
+    /* eslint-disable prefer-const -- the closure reads p before the assignment line runs */
+    let p: Promise<void> | undefined; // the closure compares against it: only the run that owns the entry may delete it
+    p = (async () => {
+      /* eslint-enable prefer-const */
+      const release = nice ? null : await fgAcquire(); // held until ffmpeg exits
+      let ff;
+      try {
+        await fsp.rm(dir, { recursive: true, force: true });
+        await fsp.mkdir(dir, { recursive: true });
+        ff = spawnFf([], src, ['-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', PROFILES[profile].bitrate, '-ac', '2',
+          '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
+      } catch (e) { release?.(); throw e; }
       let err = '';
       ff.stderr!.on('data', (d) => { err += d; });
       const exit = new Promise<void>((resolve, reject) => { ff.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.slice(0, 300)}`)))); ff.on('error', reject); });
       let finished = false;
-      finishing.set(key, exit.then(() => { finished = true; return fsp.writeFile(done, '1'); }).catch((e) => { finished = true; log(`hls ${key}: ${e.message}`); }).finally(() => { running.delete(key); finishing.delete(key); }));
+      const fin = exit.then(() => { finished = true; return fsp.writeFile(done, '1'); }).catch((e) => { finished = true; log(`hls ${key}: ${e.message}`); })
+        .finally(() => { release?.(); if (running.get(key) === p) running.delete(key); if (finishing.get(key) === fin) finishing.delete(key); });
+      finishing.set(key, fin);
       const t0 = Date.now();
       let first = 0;
       while (Date.now() - t0 < 30000) {
@@ -123,6 +153,10 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
         } catch { /* not yet */ }
         await new Promise((r) => setTimeout(r, 50));
       }
+      // Stalled (a wedged NAS read, usually): kill it and let a later request
+      // retry instead of pinning this rejection in `running` until it exits.
+      try { ff.kill('SIGKILL'); } catch { /* gone */ }
+      if (running.get(key) === p) running.delete(key);
       throw new Error('transcode did not start');
     })();
     running.set(key, p);
@@ -159,7 +193,9 @@ function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
   if (range) {
     let start = range[1] ? Number(range[1]) : 0, end = range[2] ? Number(range[2]) : st.size - 1;
-    if (!range[1] && range[2]) { start = st.size - Number(range[2]); end = st.size - 1; }
+    // Suffix longer than the file (bytes=-N, N > size): RFC 9110 says the
+    // whole representation, not a negative offset.
+    if (!range[1] && range[2]) { start = Math.max(0, st.size - Number(range[2])); end = st.size - 1; }
     // BluOS asks for bytes=N-SIZE (one past the end) when it seeks; RFC 9110
     // says to clamp, and a 416 here killed every seek on the Node.
     end = Math.min(end, st.size - 1);
@@ -248,6 +284,8 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const startAt = Math.max(0, Number(q.startAt) || 0);
     const ff = spawnFf(startAt ? ['-ss', String(startAt)] : [], src, ['-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-ac', '2', '-f', 'mp3', '-id3v2_version', '0', '-write_xing', '0', 'pipe:1'], 'pipe');
     ff.stderr!.resume();
+    // Without a handler a failed spawn is an uncaught 'error' and kills the process.
+    ff.on('error', (e) => { log(`mp3 ${id}: ffmpeg: ${e.message}`); if (!reply.raw.headersSent) reply.code(503); ff.stdout?.destroy(e); });
     reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
     reply.header('Cache-Control', 'no-store').header('Accept-Ranges', 'none').type('audio/mpeg');
     return reply.send(ff.stdout);
@@ -278,6 +316,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const d = DL[fmt];
     const ff = spawnFf([], src, ['-map', '0:a:0', '-vn', ...d.args, ...(d.args.includes('-f') ? [] : ['-f', d.ext]), 'pipe:1'], 'pipe');
     ff.stderr!.resume();
+    ff.on('error', (e) => { log(`download ${id}: ffmpeg: ${e.message}`); if (!reply.raw.headersSent) reply.code(503); ff.stdout?.destroy(e); });
     reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
     reply.header('Content-Disposition', disposition(`${base}.${d.ext}`)).type(d.mime);
     return reply.send(ff.stdout);
@@ -347,19 +386,24 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return body;
   });
+  const segTouched = new Map<string, number>(); // dir -> last done-mtime refresh
   app.get('/api/stream/:id/hls/:profile/:seg', hls, async (req, reply) => {
     const { id, profile, seg } = req.params as any;
-    if (!PROFILES[profile] || !/^s\d{4}\.ts$/.test(seg)) return reply.code(404).send();
+    if (!/^[0-9a-f]{32}$/.test(id) || !PROFILES[profile] || !/^s\d{4}\.ts$/.test(seg)) return reply.code(404).send();
     const p = path.join(transcodeDir(dataDir, id, profile), seg);
     // A segment ffmpeg has not written yet: wait for it rather than 404 (the
-    // synthetic playlist lists every segment from the start). Once ffmpeg is
-    // done, a missing segment is missing for good.
+    // synthetic playlist lists every segment from the start). No transcode
+    // running and no done marker (a crash leftover): nothing will write it.
     const dir = path.dirname(p);
     for (let i = 0; i < SEG_WAIT_MS / 50 && !fs.existsSync(p); i++) {
-      if (fs.existsSync(path.join(dir, 'done')) || !running.has(`${id}:${profile}`) && !fs.existsSync(path.join(dir, 'index.m3u8'))) break;
+      if (fs.existsSync(path.join(dir, 'done')) || !running.has(`${id}:${profile}`)) break;
       await new Promise((r) => setTimeout(r, 50));
     }
     if (!fs.existsSync(p)) return reply.code(404).send();
+    // A long listen keeps its album out of the trim: refresh the done marker
+    // (last-used) on segment reads too, at most once a minute per dir.
+    const now = Date.now();
+    if (now - (segTouched.get(dir) ?? 0) > 60000) { segTouched.set(dir, now); fsp.utimes(path.join(dir, 'done'), new Date(), new Date()).catch(() => {}); }
     const size = (await fsp.stat(p)).size;
     // Immutable once written; a fetch() of it lands in the browser's disk
     // cache, which the native HLS loader on iOS reads (it never writes it).
@@ -395,7 +439,13 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
       for (const prof of await fsp.readdir(path.join(root, id)).catch(() => [] as string[])) {
         const dir = path.join(root, id, prof);
         const used = await fsp.stat(path.join(dir, 'done')).then((s) => s.mtimeMs).catch(() => 0);
-        if (!used) continue; // in progress
+        if (!used) {
+          // No done marker: in progress, or a crash leftover that would stall
+          // segment requests forever. A day old and not running: delete it.
+          const m = await fsp.stat(dir).then((s) => s.mtimeMs).catch(() => 0);
+          if (m && Date.now() - m > 86400000 && !running.has(`${id}:${prof}`)) await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+          continue;
+        }
         let size = 0;
         for (const f of await fsp.readdir(dir).catch(() => [] as string[])) size += await fsp.stat(path.join(dir, f)).then((s) => s.size).catch(() => 0);
         dirs.push({ dir, used, size }); total += size;

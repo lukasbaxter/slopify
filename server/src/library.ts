@@ -189,7 +189,15 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   });
   // Search page tiles: one per canonical genre (genres.ts), covers from the
   // genre's most played albums, biggest shelves first.
-  const albumPlays = () => new Map<string, number>((db.prepare('SELECT t.album_id a, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id GROUP BY t.album_id').all() as any[]).map((r) => [r.a, r.n]));
+  // Play counts aggregate the whole plays table, so they are cached for a
+  // minute: popularity ordering can run a play behind.
+  let playsCache: { at: number; v: Map<string, number> } | null = null;
+  const albumPlays = () => {
+    if (playsCache && Date.now() - playsCache.at < 60000) return playsCache.v;
+    const v = new Map<string, number>((db.prepare('SELECT t.album_id a, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id GROUP BY t.album_id').all() as any[]).map((r) => [r.a, r.n]));
+    playsCache = { at: Date.now(), v };
+    return v;
+  };
   const genreAlbums = (name: string) => {
     const genreOf = albumGenreMap(db);
     return (db.prepare('SELECT id, name, artist, artist_id, year, track_count, added_at, cover_hash FROM albums').all() as any[]).filter((a) => genreOf.get(a.id) === name);
@@ -241,17 +249,26 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   // search page's scoped search).
   const genreTracks = (name: string, limit: number): TrackRow[] => {
     const ids = genreAlbums(name).map((a) => a.id);
+    // One grouped pass over plays for the whole call, not a scan per chunk.
+    const plays = new Map<string, number>((db.prepare('SELECT track_id, COUNT(*) n FROM plays GROUP BY track_id').all() as any[]).map((r) => [r.track_id, r.n]));
     const out: (TrackRow & { _n: number })[] = [];
     for (let i = 0; i < ids.length; i += 400) {
       const chunk = ids.slice(i, i + 400);
-      out.push(...db.prepare(`${TRACK_SELECT} LEFT JOIN (SELECT track_id, COUNT(*) n FROM plays GROUP BY track_id) p ON p.track_id = t.id
-        WHERE t.album_id IN (${chunk.map(() => '?').join(',')})`.replace('SELECT t.*, a.cover_hash', 'SELECT t.*, a.cover_hash, COALESCE(p.n, 0) AS _n')).all(...chunk) as any[]);
+      for (const r of db.prepare(`${TRACK_SELECT} WHERE t.album_id IN (${chunk.map(() => '?').join(',')})`).all(...chunk) as any[]) { r._n = plays.get(r.id) || 0; out.push(r); }
     }
     return out.sort((x, y) => y._n - x._n).slice(0, limit);
   };
+  // The hub's Popular list walks every track of the genre; cached a minute
+  // per genre (staleness is fine, the genre map itself is minutes stale too).
+  const genreTracksCache = new Map<string, { at: number; v: any }>();
   app.get('/api/genres/:name/tracks', auth, async (req) => {
     const name = String((req.params as any).name || '').slice(0, 40);
-    return { items: genreTracks(name, 100).map(trackOut) };
+    const hit = genreTracksCache.get(name);
+    if (hit && Date.now() - hit.at < 60000) return hit.v;
+    const v = { items: genreTracks(name, 100).map(trackOut) };
+    if (genreTracksCache.size > 64) genreTracksCache.clear(); // made-up names cannot grow it unbounded
+    genreTracksCache.set(name, { at: Date.now(), v });
+    return v;
   });
   // A shuffled sitting of the genre, leaning toward what gets played and liked.
   app.get('/api/genres/:name/mix', auth, async (req) => {
@@ -305,6 +322,11 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   // Own, larger bucket: one album grid is hundreds of covers, and every phone on
   // the LAN reaches the public hostname through the router's hairpin NAT, so the
   // whole house shares one client IP. The 600/min default 429'd covers.
+  // Deliberately unauthenticated: the web client and the speaker bridge do carry
+  // ?token= on these URLs, but follows.test.ts and speaker hardware fetching
+  // artwork by bare URL pin the route public. The exposure is cover art behind
+  // unguessable-ish hash ids, held in check by this route's own rate bucket;
+  // flipping to requireUser is a one-liner here if that trade stops being worth it.
   app.get('/api/image/:id', { config: { rateLimit: { max: 6000, timeWindow: '1 minute' } } }, async (req, reply) => {
     const id = String((req.params as any).id || ''); const q = req.query as any;
     const kind = q.kind === 'banner' ? 'banner' : 'primary';

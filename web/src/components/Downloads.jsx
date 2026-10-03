@@ -67,20 +67,25 @@ export default function Downloads({ jf, notify, onPlay, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [retrying, setRetrying] = useState(null);
-  const alive = useRef(true);
-  const load = async (sc = scope) => {
-    try { const r = await jf.downloads(sc); if (alive.current) { setData(r); setError(null); } }
-    catch (e) { if (alive.current) setError(String(e.message || e).replace(/^\d+: /, '')); }
-  };
+  // One alive flag per effect run: a slow answer for the chip you left must
+  // not render under the chip you are on.
+  const reloadRef = useRef(() => Promise.resolve());
   useEffect(() => {
-    alive.current = true; setData(null); load(scope);
-    const t = setInterval(() => { if (!document.hidden) load(scope); }, 5000);
-    return () => { alive.current = false; clearInterval(t); };
+    let alive = true;
+    setData(null); setError(null);
+    const load = async () => {
+      try { const r = await jf.downloads(scope); if (alive) { setData(r); setError(null); } }
+      catch (e) { if (alive) setError(String(e.message || e).replace(/^\d+: /, '')); }
+    };
+    reloadRef.current = load;
+    load();
+    const t = setInterval(() => { if (!document.hidden) load(); }, 5000);
+    return () => { alive = false; clearInterval(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, jf]);
   const retry = async (d) => {
     setRetrying(d.id);
-    try { await jf.retryDownload(d.id); notify?.(`${d.title} is back in line`); await load(); }
+    try { await jf.retryDownload(d.id); notify?.(`${d.title} is back in line`); await reloadRef.current(); }
     catch (e) { notify?.(`Could not retry: ${String(e.message || e).replace(/^\d+: /, '')}`); }
     finally { setRetrying(null); }
   };

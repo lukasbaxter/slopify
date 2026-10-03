@@ -81,12 +81,19 @@ export async function slskdFind(opts: ExploreOptions, t: LbTrack, pick: { format
   const r = await f(`${opts.slskdUrl}/api/v0/searches`, { method: 'POST', headers: H, body: JSON.stringify({ searchText: `${t.artist} ${t.title}`, filterResponses: true, fileLimit: 2000, responseLimit: 100, searchTimeout: 8000 }) });
   if (!r.ok) throw new Error(`slskd search ${r.status}`);
   const { id } = await r.json() as any;
+  let terminal = false;
   for (let i = 0; i < 30; i++) {
     await new Promise((res) => setTimeout(res, opts.fetcher ? 0 : 1000));
     const s = await (await f(`${opts.slskdUrl}/api/v0/searches/${id}`, { headers: H })).json() as any;
-    if (s.state && /Completed|Errored|TimedOut|Cancelled/.test(s.state)) break;
+    if (s.state && /Completed|Errored|TimedOut|Cancelled/.test(s.state)) { terminal = true; break; }
   }
+  // Still running after the poll budget: give it one more cycle rather than
+  // reading a half-filled response list as the final answer.
+  if (!terminal) await new Promise((res) => setTimeout(res, opts.fetcher ? 0 : 1000));
   const responses = await (await f(`${opts.slskdUrl}/api/v0/searches/${id}/responses`, { headers: H })).json() as any[];
+  // Done with it: drop the search record so slskd's list does not grow
+  // forever (the flac task reuses this and runs hourly). Best effort only.
+  try { await f(`${opts.slskdUrl}/api/v0/searches/${id}`, { method: 'DELETE', headers: H }); } catch { /* slskd will age it out */ }
   const nt = norm(t.title), na = norm(t.artist);
   const cands: (SlskdFile & { score: number })[] = [];
   for (const resp of responses || []) for (const file of resp.files || []) {
@@ -114,9 +121,12 @@ export async function slskdDownload(opts: ExploreOptions, file: SlskdFile): Prom
 // <artist>/<album or title>/<original file name>, reusing an existing artist
 // folder whatever its case (a case-insensitive share cannot hold two). The
 // scanner reads tags, so the folder names only need to be sane.
-export function collectFetched(pairs: { file: SlskdFile; t: LbTrack }[], o: { downloadsDir: string; musicDir: string; log?: (m: string) => void }): string[] {
+export function collectFetched(pairs: { file: SlskdFile; t: LbTrack; startedAt?: number }[], o: { downloadsDir: string; musicDir: string; log?: (m: string) => void }): string[] {
   const log = o.log ?? (() => {});
-  const safe = (x: string) => String(x || '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').replace(/^\.+/, '').trim() || 'Unknown';
+  // NFC first (slskd peers send decomposed names that then mismatch the
+  // share's composed ones); trailing dots and spaces stripped too, CIFS
+  // cannot store them.
+  const safe = (x: string) => String(x || '').normalize('NFC').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').replace(/^\.+/, '').replace(/[. ]+$/, '').trim() || 'Unknown';
   let entries: string[] = [];
   try { entries = (fs.readdirSync(o.downloadsDir, { recursive: true }) as unknown as string[]).map(String); } catch (e: any) { log(`explore: reading ${o.downloadsDir}: ${e.message}`); return []; }
   const byBase = new Map<string, string[]>();
@@ -124,16 +134,37 @@ export function collectFetched(pairs: { file: SlskdFile; t: LbTrack }[], o: { do
   let artistDirs = new Map<string, string>();
   try { artistDirs = new Map(fs.readdirSync(o.musicDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => [norm(d.name), d.name])); } catch { /* new library */ }
   const rels = new Set<string>();
-  for (const { file, t } of pairs) {
+  for (const { file, t, startedAt } of pairs) {
     const base = String(file.filename).split(/[\\/]/).pop()!;
-    const src = (byBase.get(base) || []).find((p) => { try { return fs.statSync(p).size === file.size; } catch { return false; } });
+    // The downloads dir is SHARED with other consumers (Soularr/Lidarr import
+    // album folders from it), so only a file written since this run asked
+    // slskd for it (startedAt, minus a minute of clock slack) may be taken;
+    // an older twin with the same name and size belongs to someone else.
+    // Residual risk: another consumer fetching the very same file inside the
+    // same window is indistinguishable by name+size+mtime and would still be
+    // picked up here.
+    const src = (byBase.get(base) || []).find((p) => {
+      try { const s = fs.statSync(p); return s.size === file.size && (!startedAt || s.mtimeMs >= startedAt - 60000); } catch { return false; }
+    });
     if (!src) continue; // not downloaded after all
     const artist = artistDirs.get(norm(t.artist)) || safe(t.artist);
     const folder = path.join(artist, safe(t.album || t.title));
     try {
       fs.mkdirSync(path.join(o.musicDir, folder), { recursive: true });
       const dest = path.join(o.musicDir, folder, safe(base));
-      if (!fs.existsSync(dest)) fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL); // copy+rm: the library may be another filesystem
+      let destStat: fs.Stats | null = null;
+      try { destStat = fs.statSync(dest); } catch { /* not there: the normal case */ }
+      if (destStat && destStat.size !== file.size) {
+        // Something else sits at dest (a user's own file, a partial copy).
+        // With no db handle here we cannot tell whose it is, so the
+        // conservative move is to touch neither: dest stays as it is and the
+        // download stays in staging for a later look.
+        log(`explore: ${path.join(folder, safe(base))} exists with a different size; leaving ${base} in staging`);
+        continue;
+      }
+      if (!destStat) fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL); // copy+rm: the library may be another filesystem
+      // dest already there with the same size: delivered by an earlier run,
+      // so only the staging copy goes.
       fs.rmSync(src);
       rels.add(folder);
       log(`explore: ${t.artist} - ${t.title} -> ${path.join(folder, safe(base))}`);
@@ -142,20 +173,32 @@ export function collectFetched(pairs: { file: SlskdFile; t: LbTrack }[], o: { do
   return [...rels];
 }
 
-// Wait until every started download has finished (or failed), up to `ms`.
-export async function slskdWait(opts: ExploreOptions, files: SlskdFile[], ms: number) {
+// Wait until every started download has finished (or failed), up to `ms`;
+// returns how many actually SUCCEEDED (an Errored end stops the waiting for
+// that file but is not a fetch). slskd keeps historical transfer records, so
+// with `since` (when slskdDownload was called, minus a minute of slack) any
+// record requested before it is an old run's and is ignored — a stale
+// Errored row must not end the wait instantly or be mistaken for this run.
+export async function slskdWait(opts: ExploreOptions, files: SlskdFile[], ms: number, since?: number) {
   const f = opts.fetcher ?? fetch;
   const H = { 'X-API-Key': opts.slskdKey! };
   const t0 = Date.now();
-  const done = new Set<string>();
+  const done = new Set<string>(); const won = new Set<string>();
   while (Date.now() - t0 < ms && done.size < files.length) {
     const all = await (await f(`${opts.slskdUrl}/api/v0/transfers/downloads`, { headers: H })).json() as any[];
     for (const u of all || []) for (const d of u.directories || []) for (const x of d.files || []) {
-      if (files.some((w) => w.filename === x.filename) && /Completed|Succeeded|Errored|Cancelled|Rejected|TimedOut/.test(String(x.state))) done.add(x.filename);
+      if (!files.some((w) => w.filename === x.filename)) continue;
+      const ts = Date.parse(x.requestedAt || x.enqueuedAt || x.startedAt || '');
+      if (since && Number.isFinite(ts) && ts < since - 60000) continue; // a record from an earlier run of the same file
+      const state = String(x.state);
+      if (/Completed|Succeeded|Errored|Cancelled|Rejected|TimedOut/.test(state)) {
+        done.add(x.filename);
+        if (/Succeeded/.test(state)) won.add(x.filename);
+      }
     }
     if (done.size < files.length) await new Promise((res) => setTimeout(res, opts.fetcher ? 0 : 5000));
   }
-  return done.size;
+  return won.size;
 }
 
 // --- ListenBrainz ------------------------------------------------------------
@@ -185,12 +228,12 @@ export async function lbPlaylistTracks(opts: ExploreOptions, mbid: string, token
 }
 
 // --- the job -------------------------------------------------------------------
-export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: ExploreOptions): Promise<{ name: string; matched: number; total: number; fetched: number } | null> {
+export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: ExploreOptions): Promise<{ name: string; matched: number; total: number; fetched: number } | 'no-playlist' | null> {
   const log = opts.log ?? (() => {});
   const creds = lbCreds(db, uid); if (!creds) return null;
   const lists = await lbCreatedFor(opts, creds.user, creds.token);
   const latest = lists.filter((l) => l.kind === kind).sort((a, b) => b.date.localeCompare(a.date))[0];
-  if (!latest) { log(`explore ${creds.user}: no ${kind} playlist on ListenBrainz yet`); return null; }
+  if (!latest) { log(`explore ${creds.user}: no ${kind} playlist on ListenBrainz yet`); return 'no-playlist'; }
   const key = `explore:${uid}:${kind}`;
   const prev = JSON.parse(kvGet(db, key) || 'null');
   if (prev?.mbid === latest.mbid && db.prepare('SELECT 1 FROM playlists WHERE id = ?').get(prev.playlistId)) return null; // already built
@@ -199,13 +242,16 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
   let fetched = 0;
   if (KINDS[kind].download && opts.slskdUrl && opts.slskdKey) {
     const missing = tracks.filter((_, i) => !ids[i]);
-    const started: { file: SlskdFile; t: LbTrack }[] = [];
+    const started: { file: SlskdFile; t: LbTrack; startedAt: number }[] = [];
     for (const t of missing) {
-      try { const file = await slskdFind(opts, t); if (file && await slskdDownload(opts, file)) { started.push({ file, t }); log(`explore: fetching ${t.artist} - ${t.title} from ${file.username}`); } }
-      catch (e: any) { log(`explore: ${t.artist} - ${t.title}: ${e.message}`); }
+      try {
+        const startedAt = (opts.now ?? Date.now)(); // before the download ask: collectFetched and slskdWait ignore anything older
+        const file = await slskdFind(opts, t);
+        if (file && await slskdDownload(opts, file)) { started.push({ file, t, startedAt }); log(`explore: fetching ${t.artist} - ${t.title} from ${file.username}`); }
+      } catch (e: any) { log(`explore: ${t.artist} - ${t.title}: ${e.message}`); }
     }
     if (started.length) {
-      fetched = await slskdWait(opts, started.map((s) => s.file), 25 * 60 * 1000);
+      fetched = await slskdWait(opts, started.map((s) => s.file), 25 * 60 * 1000, started[0].startedAt);
       if (opts.slskdDownloadsDir && opts.musicDir) {
         const rels = collectFetched(started, { downloadsDir: opts.slskdDownloadsDir, musicDir: opts.musicDir, log });
         if (rels.length) await (opts.scanFolders ? opts.scanFolders(rels) : opts.runScan?.());
@@ -217,13 +263,24 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
   const name = `${KINDS[kind].name} ${latest.date}`;
   const now = Date.now();
   db.transaction(() => {
-    if (prev?.playlistId) db.prepare('DELETE FROM playlists WHERE id = ? AND user_id = ?').run(prev.playlistId, uid);
+    if (prev?.playlistId) {
+      // Replace the previous generated playlist only if it still holds
+      // exactly the tracks we put in it (kept as trackIds in kv). Any edit
+      // since means the user made it theirs: keep it, the new one appears
+      // alongside. A kv entry from before trackIds were stored also keeps it.
+      const cur = (db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(prev.playlistId) as any[]).map((r) => r.track_id);
+      const untouched = Array.isArray(prev.trackIds) && cur.length === prev.trackIds.length && cur.every((x, i) => x === prev.trackIds[i]);
+      if (untouched) db.prepare('DELETE FROM playlists WHERE id = ? AND user_id = ?').run(prev.playlistId, uid);
+    }
     const id = playlistId();
     db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
     trackIds.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t, now));
-    kvSet(db, key, JSON.stringify({ mbid: latest.mbid, playlistId: id, date: latest.date, built: now, matched: trackIds.length, total: tracks.length }));
-    // Keep the last four of each kind; older ones go.
-    const old = db.prepare('SELECT id FROM playlists WHERE user_id = ? AND name LIKE ? ORDER BY name DESC').all(uid, `${KINDS[kind].name} %`) as any[];
+    kvSet(db, key, JSON.stringify({ mbid: latest.mbid, playlistId: id, date: latest.date, built: now, matched: trackIds.length, total: tracks.length, trackIds }));
+    // Keep the last four of each kind; older ones go. Only names matching the
+    // exact generated pattern "<Name> YYYY-MM-DD" count — a user's own
+    // "Weekly Exploration faves" must never be pruned by a LIKE match.
+    const pat = new RegExp(`^${KINDS[kind].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\d{4}-\\d{2}-\\d{2}$`);
+    const old = (db.prepare('SELECT id, name FROM playlists WHERE user_id = ? AND name LIKE ? ORDER BY name DESC').all(uid, `${KINDS[kind].name} %`) as any[]).filter((o) => pat.test(o.name));
     for (const o of old.slice(4)) db.prepare('DELETE FROM playlists WHERE id = ?').run(o.id);
   })();
   log(`explore ${creds.user}: ${name}: ${trackIds.length}/${tracks.length} in the library (${fetched} fetched)`);
@@ -232,12 +289,16 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
 
 export async function exploreAll(db: DB, opts: ExploreOptions, kinds: Kind[]) {
   const users = db.prepare('SELECT id FROM users').all() as any[];
-  const out: any[] = [];
+  const built: any[] = [];
+  let failures = 0; // throws, plus accounts whose ListenBrainz list has no such playlist yet
   for (const u of users) {
     if (!lbCreds(db, u.id)) continue;
-    for (const k of kinds) { try { const r = await buildPlaylist(db, u.id, k, opts); if (r) out.push({ user: u.id, ...r }); } catch (e: any) { (opts.log ?? (() => {}))(`explore ${u.id} ${k}: ${e.message}`); } }
+    for (const k of kinds) {
+      try { const r = await buildPlaylist(db, u.id, k, opts); if (r === 'no-playlist') failures++; else if (r) built.push({ user: u.id, ...r }); }
+      catch (e: any) { failures++; (opts.log ?? (() => {}))(`explore ${u.id} ${k}: ${e.message}`); }
+    }
   }
-  return out;
+  return { built, failures };
 }
 
 // --- scrobbling ------------------------------------------------------------------
@@ -282,12 +343,24 @@ export function registerExplore(app: FastifyInstance, db: DB, opts: ExploreOptio
     }, wait).unref());
   });
   // Weekly on Monday from 06:30, daily from 07:15, whichever minute the process is awake.
+  // The last-run stamp is written only AFTER a run that worked: something was
+  // built, or every list was fetched and there was simply nothing new. A
+  // throw or an account with no ListenBrainz playlist yet leaves the stamp
+  // unset so the run is retried — and the try-stamp backs those retries off
+  // to one an hour, so a ListenBrainz outage is not hammered every minute.
+  const attempt = (slot: 'weekly' | 'daily', kinds: Kind[]) => {
+    if (Date.now() - Number(kvGet(db, `explore:try:${slot}`) || 0) < 3600000) return;
+    kvSet(db, `explore:try:${slot}`, String(Date.now()));
+    void run(kinds).then((r: any) => {
+      if (Array.isArray(r?.built) && (r.built.length > 0 || r.failures === 0)) kvSet(db, `explore:last:${slot}`, String(Date.now()));
+    });
+  };
   const tick = () => {
     const now = new Date();
     const day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes();
     const lastWeekly = Number(kvGet(db, 'explore:last:weekly') || 0), lastDaily = Number(kvGet(db, 'explore:last:daily') || 0);
-    if (day === 1 && mins >= 390 && Date.now() - lastWeekly > 6 * 86400000) { kvSet(db, 'explore:last:weekly', String(Date.now())); void run(['weekly-exploration', 'weekly-jams']); }
-    else if (mins >= 435 && new Date(lastDaily).toDateString() !== now.toDateString()) { kvSet(db, 'explore:last:daily', String(Date.now())); void run(['daily-jams']); }
+    if (day === 1 && mins >= 390 && Date.now() - lastWeekly > 6 * 86400000) attempt('weekly', ['weekly-exploration', 'weekly-jams']);
+    else if (mins >= 435 && new Date(lastDaily).toDateString() !== now.toDateString()) attempt('daily', ['daily-jams']);
   };
   if (process.env.NODE_ENV !== 'test') setInterval(tick, 60000).unref();
   app.post('/api/admin/explore', { preHandler: (app as any).requireAdmin }, async (req) => {

@@ -10,6 +10,7 @@ import { albumId, artistId, audioContentId, jellyfinAudioId, sortName } from './
 import { parseLrc, isSynced } from './lyrics.js';
 import { storeArtwork } from './artwork.js';
 import { buildHead, headOf, reconcileHeads } from './heads.js';
+import { dropGenreCache } from './genres.js';
 
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
@@ -26,15 +27,15 @@ export type ScanOptions = {
   recordAs?: (file: string) => string; heads?: { cacheDir: string; seconds: number }; pauseMs?: number;
   files?: string[]; // exactly these files (no walk, nothing treated as gone)
 };
-export type ScanResult = { files: number; added: number; changed: number; removed: number; ms: number };
+export type ScanResult = { files: number; added: number; changed: number; removed: number; ms: number; removalSkipped?: string };
 
-async function* walk(dir: string): AsyncGenerator<string> {
+async function* walk(dir: string, errs?: { n: number }): AsyncGenerator<string> {
   let entries;
-  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { if (errs) errs.n++; return; }
   for (const e of entries) {
     if (e.name.startsWith('.')) continue;
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walk(p);
+    if (e.isDirectory()) yield* walk(p, errs);
     else if (e.isFile() && AUDIO_EXT.has(path.extname(e.name).toLowerCase())) yield p;
   }
 }
@@ -49,7 +50,12 @@ export function splitArtists(list: string[] | undefined, single: string | undefi
   for (const raw of src) {
     const s = raw.trim(); if (!s) continue;
     if (KEEP.has(s.toLowerCase())) { out.push(s); continue; }
-    for (const part of s.split(/\s*(?:;|\/|,|\b(?:feat|ft|featuring|vs)\.?\s+|\s+x\s+(?=[A-Z]))\s*/i)) { const p = part.trim(); if (p && !out.includes(p)) out.push(p); }
+    // Two passes so the " x " splitter stays case-sensitive: under the /i of
+    // the keyword split its (?=[A-Z]) guard matched anything, and
+    // "salem x bones" (one name) split in two. "KAYTRANADA x Anderson .Paak"
+    // (capitalized second name) still splits.
+    for (const chunk of s.split(/\s*(?:;|\/|,|\b(?:feat|ft|featuring|vs)\.?\s+)\s*/i))
+      for (const part of chunk.split(/\s+[xX]\s+(?=[A-Z])/)) { const p = part.trim(); if (p && !out.includes(p)) out.push(p); }
   }
   return out.length ? out : ['Unknown Artist'];
 }
@@ -92,8 +98,9 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   const roots = opts.only?.length ? opts.only : [opts.musicDir];
   const inScope = (p: string) => roots.some((r) => p === r || p.startsWith(r.endsWith(path.sep) ? r : r + path.sep));
   const all: string[] = [];
+  const walkErrors = { n: 0 }; // readdir failures under a scope root (a NAS share dropping mid-walk)
   if (opts.files) all.push(...opts.files);
-  else for (const root of roots) for await (const file of walk(root)) all.push(file);
+  else for (const root of roots) for await (const file of walk(root, walkErrors)) all.push(file);
   // Tag reading, audio hashing and cover rendering run CONCURRENT_FILES at a
   // time (ffmpeg + sharp are the cost: ~0.6 s per new file alone, 27k files
   // = hours); the database writes stay serial.
@@ -175,16 +182,33 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   };
   await Promise.all(Array.from({ length: CONCURRENT_FILES }, worker));
   // Files that are gone (a renamed file is not gone: its id was met under the new path).
+  // Guarded: the library lives on a CIFS share, and a walk that could not read
+  // a folder (or came back implausibly empty) is a dropped mount, not 132k
+  // deleted songs. Removals then wait for a healthy walk.
   let removed = 0;
-  if (!opts.files) for (const [p, r] of known) if (inScope(p) && !seen.has(p) && !seenIds.has(r.id)) { db.prepare('DELETE FROM tracks WHERE id = ?').run(r.id); removed++; }
+  let removalSkipped: string | undefined;
+  if (!opts.files) {
+    const gone: string[] = [];
+    let knownInScope = 0;
+    for (const [p, r] of known) if (inScope(p)) { knownInScope++; if (!seen.has(p) && !seenIds.has(r.id)) gone.push(r.id); }
+    if (walkErrors.n) removalSkipped = `removal pass skipped: ${walkErrors.n} unreadable folder(s) during the walk`;
+    else if (knownInScope > 0 && knownInScope - gone.length < knownInScope / 2) removalSkipped = `removal pass skipped: walk found only ${knownInScope - gone.length} of ${knownInScope} known files`;
+    if (removalSkipped) log(removalSkipped);
+    else for (const id of gone) { db.prepare('DELETE FROM tracks WHERE id = ?').run(id); removed++; }
+  }
   if (opts.heads) { const n = await reconcileHeads(db, opts.heads.cacheDir, opts.heads.seconds, log); if (n) log(`recut ${n} heads that belonged to a duplicate`); }
-  splitCollabCredits(db);
+  // The credit-splitting and spelling passes read the whole tracks table; a
+  // scoped scan (a download landing, an ingest) skips them and the next full
+  // scan sweeps its files up.
+  const fullScan = !opts.only && !opts.files;
+  if (fullScan) splitCollabCredits(db);
   recount(db);
-  canonicalArtistNames(db);
+  if (fullScan) canonicalArtistNames(db);
   bumpLibraryVersion(db);
+  if (added || changed || removed) dropGenreCache(); // new or gone tags shift the live genre vote
   const ms = Date.now() - t0;
-  db.prepare('UPDATE scans SET finished = ?, files = ?, added = ?, changed = ?, removed = ? WHERE id = ?').run(Date.now(), files, added, changed, removed, scanId);
-  return { files, added, changed, removed, ms };
+  db.prepare('UPDATE scans SET finished = ?, files = ?, added = ?, changed = ?, removed = ?, error = ? WHERE id = ?').run(Date.now(), files, added, changed, removed, removalSkipped ?? null, scanId);
+  return { files, added, changed, removed, ms, ...(removalSkipped ? { removalSkipped } : {}) };
 }
 
 async function syncSidecar(db: DB, trackId: string, file: string, upsert: any) {

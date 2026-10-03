@@ -52,7 +52,9 @@ export async function browse(jf) {
 // Beyond the library (the server asks Lidarr / Deezer and flags what
 // is here): the artist page's full discography with "Request" for the rest,
 // similar artists, the Release Radar and the search page's "Everywhere" shelf.
-export const globalSearch = (jf, q, signal) => jf._fetch(`/api/gsearch?q=${encodeURIComponent(q)}`, { timeoutMs: 20000, signal });
+// 35 s: the server's own Lidarr lookup can take up to 30 s; a shorter client
+// timeout aborted mid-flight and the page span forever.
+export const globalSearch = (jf, q, signal) => jf._fetch(`/api/gsearch?q=${encodeURIComponent(q)}`, { timeoutMs: 35000, signal });
 export const discography = (jf, artistId) => jf._fetch(`/api/discography/${encodeURIComponent(artistId)}`, { timeoutMs: 30000 });
 export const similar = (jf, artistId) => jf._fetch(`/api/similar/${encodeURIComponent(artistId)}`, { timeoutMs: 20000 });
 export const popular = async () => ({ ids: [] });

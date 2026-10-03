@@ -13,12 +13,13 @@ const MAX_MS = 20 * 60 * 1000; // longer mixes stream only (a 60-minute set is 1
 export function createTrackCache(urlFor, { onReady } = {}) {
   const ready = new Map(); // id -> object URL
   const loading = new Map(); // id -> { abort } (one at a time)
+  const failed = new Set(); // gave up (404, or ~5 straight failures): no retry until re-requested
   let wanted = new Set();
 
   let order = [];
   const pump = () => {
     if (loading.size) return;
-    const id = order.find((x) => wanted.has(x) && !ready.has(x));
+    const id = order.find((x) => wanted.has(x) && !ready.has(x) && !failed.has(x));
     if (!id) return;
     const ctrl = new AbortController();
     const abort = () => ctrl.abort();
@@ -27,7 +28,7 @@ export function createTrackCache(urlFor, { onReady } = {}) {
       if (loading.get(id)?.abort !== abort) return; // released meanwhile
       loading.delete(id);
       if (blob && wanted.has(id)) { const url = URL.createObjectURL(blob); ready.set(id, url); onReady?.(id, url); }
-      else order = order.filter((x) => x !== id); // gone from the server: do not retry
+      else { if (wanted.has(id)) failed.add(id); order = order.filter((x) => x !== id); } // gone or hopeless: do not retry
       pump();
     });
   };
@@ -65,6 +66,9 @@ export function createTrackCache(urlFor, { onReady } = {}) {
         if (signal.aborted) return null;
       } finally { clearTimeout(idle); signal.removeEventListener('abort', stop); }
       tries += 1;
+      // ~5 straight failures with no bytes in between: the server is saying
+      // no, not the signal. Give up until the track is asked for again.
+      if (tries >= 5) return null;
       await new Promise((r) => setTimeout(r, Math.min(30000, 1000 * 2 ** Math.min(tries, 5))));
     }
     return null;
@@ -78,11 +82,15 @@ export function createTrackCache(urlFor, { onReady } = {}) {
     // first gets the whole connection.
     keep(tracks) {
       const list = tracks.filter((t) => t && t.id && !(t.durationMs > MAX_MS));
-      wanted = new Set(list.map((t) => t.id));
+      const next = new Set(list.map((t) => t.id));
+      // A track asked for anew (it left the wanted set in between) gets a
+      // fresh chance; one that merely stays wanted does not retry-loop.
+      for (const id of next) if (!wanted.has(id)) failed.delete(id);
+      wanted = next;
       for (const id of [...ready.keys(), ...loading.keys()]) if (!wanted.has(id)) release(id);
       order = list.map((t) => t.id);
       pump();
     },
-    clear() { wanted = new Set(); order = []; for (const id of [...ready.keys(), ...loading.keys()]) release(id); },
+    clear() { wanted = new Set(); order = []; failed.clear(); for (const id of [...ready.keys(), ...loading.keys()]) release(id); },
   };
 }

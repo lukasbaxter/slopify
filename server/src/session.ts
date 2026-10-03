@@ -109,7 +109,9 @@ function networkOf(req: FastifyRequest) {
   ip = ip.replace(/^::ffff:/, '');
   return isPrivate(ip) ? 'lan' : ip;
 }
-const wsSend = (ws: WebSocket) => (obj: unknown) => { try { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)); } catch { /* gone */ } };
+// A socket that stopped reading must not buffer the whole firehose: past
+// ~4 MiB queued it is skipped (the heartbeat will reap it if it is dead).
+const wsSend = (ws: WebSocket) => (obj: unknown) => { try { if (ws.readyState === ws.OPEN && ws.bufferedAmount < 4 * 1024 * 1024) ws.send(JSON.stringify(obj)); } catch { /* gone */ } };
 const send = (c: Client, obj: unknown) => c.send(obj);
 const ofUser = (uid: string) => [...clients.values()].filter((c) => c.uid === uid);
 
@@ -185,6 +187,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       case 'devices': me.devices = Array.isArray(msg.devices) ? msg.devices.slice(0, 50) : []; broadcastRoster(me.uid); break;
       case 'queue': {
         me.queue = Array.isArray(msg.queue) ? msg.queue.slice(0, 5000) : null;
+        if (me.queue && JSON.stringify(me.queue).length > 2 * 1024 * 1024) { app.log.warn(`oversize queue from ${me.name} dropped`); me.queue = null; break; }
         if (me.queue && (!s.active || s.active === me.id)) {
           const ids = me.queue.map((t: any) => t?.Id).filter((x: any) => typeof x === 'string');
           const idx = s.trackId ? ids.indexOf(s.trackId) : -1;
@@ -238,11 +241,14 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         break;
       }
       case 'offset': {
-        // A speaker's measured visualizer offset (seconds), shared by everyone on the server.
-        if (typeof msg.id !== 'string' || !msg.id) break;
+        // A speaker's measured visualizer offset (seconds). The stored set
+        // reaches everyone on their next hello; the live update only goes
+        // to this account's clients. Only ids shaped like our speaker ids
+        // are persisted (the kv store is not a free-form dump).
+        if (typeof msg.id !== 'string' || !msg.id || msg.id.length > 128 || !/^(cast|bluos):/.test(msg.id)) break;
         const offset = Number.isFinite(msg.offset) ? Math.max(-5, Math.min(5, msg.offset)) : null;
         if (offset == null) db.prepare('DELETE FROM kv WHERE k = ?').run(`offset:${msg.id}`); else db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(`offset:${msg.id}`, String(offset));
-        for (const c of clients.values()) send(c, { type: 'offset', id: msg.id, offset });
+        for (const c of ofUser(me.uid)) send(c, { type: 'offset', id: msg.id, offset });
         break;
       }
       case 'prefs': for (const c of ofUser(me.uid)) if (c.id !== me.id) send(c, { type: 'prefs', prefs: msg.prefs || {} }); break;
@@ -250,11 +256,23 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     }
   };
 
+  // Message types a client may send; anything else is dropped unparsed into handle().
+  const KNOWN = new Set(['ping', 'devices', 'queue', 'nowplaying', 'claim', 'command', 'like', 'offset', 'prefs', 'diag']);
   app.get('/api/ws', { websocket: true }, (ws, req) => {
     const net = networkOf(req);
     let self: Client | null = null;
     const timeout = setTimeout(() => { if (!self) ws.close(4001, 'auth timeout'); }, 10000);
+    // Liveness: ping every 30 s; a socket that cannot pong within 10 s is dead.
+    let pongWait: NodeJS.Timeout | null = null;
+    const heartbeat = setInterval(() => {
+      if (pongWait) return; // still owed a pong from the last ping
+      try { ws.ping(); } catch { return; }
+      pongWait = setTimeout(() => { try { ws.terminate(); } catch { /* gone */ } }, 10000);
+    }, 30000);
+    ws.on('pong', () => { if (pongWait) clearTimeout(pongWait); pongWait = null; });
     ws.on('message', (raw: Buffer | string) => {
+      // No frame we send or expect comes near 1 MiB: close before even parsing one.
+      if ((typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > 1024 * 1024) { ws.close(1009, 'too large'); return; }
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
       if (!self) {
         if (msg.type !== 'hello' || !msg.token) return;
@@ -271,6 +289,9 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         let id = typeof msg.clientId === 'string' && /^[\w-]{4,64}$/.test(msg.clientId) && !msg.clientId.startsWith('server:') ? msg.clientId : `c_${Math.random().toString(36).slice(2)}`;
         const instance = typeof msg.instance === 'string' ? msg.instance.slice(0, 64) : null;
         let prev = clients.get(id);
+        // An id held by another account is never evicted: the id is simply
+        // taken, and the newcomer gets a suffixed one of its own.
+        if (prev && prev.uid !== who.id) { id = `${id.slice(0, 55)}-${Math.random().toString(36).slice(2, 8)}`; prev = undefined; }
         // Same stored id from a different, still-connected page (a second tab
         // of the same browser): that is another player, not a reconnect. It
         // gets an id of its own instead of replacing the first, which would
@@ -294,10 +315,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         if (!s.active) { const sm = sessionMsg(s); if (sm) send(self, sm); }
         return;
       }
+      if (typeof msg.type !== 'string' || !KNOWN.has(msg.type)) return;
       handle(self, msg);
     });
     ws.on('close', () => {
       clearTimeout(timeout);
+      clearInterval(heartbeat); if (pongWait) clearTimeout(pongWait);
       if (!self) return;
       if (clients.get(self.id) !== self) return; // replaced by a reconnect of the same client id
       clients.delete(self.id);

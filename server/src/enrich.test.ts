@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { enrichPass, enrichStatus, artistImagesPass, albumCoversPass, artistDirOf, type Fetcher } from './enrich.js';
+import { enrichPass, enrichStatus, artistImagesPass, albumCoversPass, artistDirOf, lrclibLookup, type Fetcher } from './enrich.js';
+import { parseLrc } from './lyrics.js';
 
 // saveToLibrary writes artist.jpg/cover.jpg INTO the library, so these tests
 // run on their own copy of the fixtures: the shared ones stay pristine for
@@ -84,7 +85,12 @@ describe('fetched extras land in the library (saveToLibrary)', () => {
     const dir = artistDirOf(db, artist.id, lib)!;
     expect(dir).toBeTruthy();
     fs.writeFileSync(path.join(dir, 'artist.jpg'), png);
-    const deezer: Fetcher = async () => { throw new Error('no deezer answer'); };
+    // Asking Deezer about THIS artist would be the bug; everyone else gets a
+    // real empty answer (a throw would look like an outage and end the pass).
+    const deezer: Fetcher = async (url) => {
+      if (decodeURIComponent(url).includes(artist.name)) throw new Error('asked Deezer despite the local picture');
+      return { status: 200, json: async () => ({ data: [] }) };
+    };
     const r = await artistImagesPass(db, { fetcher: deezer, dataDir: data, musicDir: lib, saveToLibrary: true, max: 50 });
     expect(r.found).toBe(1); // only the artist whose folder holds a picture
     const row = db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(artist.id) as any;
@@ -104,5 +110,63 @@ describe('fetched extras land in the library (saveToLibrary)', () => {
     const row = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(al.id) as any;
     expect(row.cover_hash).toBeTruthy();
     expect((db.prepare('SELECT src FROM artwork WHERE hash = ?').get(row.cover_hash) as any).src).toBe(path.join(al.dir, 'cover.jpg'));
+  });
+});
+
+describe('external failures are never cached and burn no tries', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-fail-'));
+  const db = openDb(data);
+  const cacheRows = (like: string) => (db.prepare('SELECT COUNT(*) n FROM ext_cache WHERE k LIKE ?').get(like) as any).n;
+
+  it('an LrcLib outage caches nothing; the next call asks again; a real 404 miss IS cached', async () => {
+    const t = { title: 'T', artist: 'A', album: 'B', durationMs: 60000 };
+    await expect(lrclibLookup(db, async () => ({ status: 503, json: async () => ({}) }), t)).rejects.toThrow();
+    expect(cacheRows('lrclib:%')).toBe(0);
+    const rec = { id: 1, trackName: 'T', artistName: 'A', albumName: 'B', duration: 60, instrumental: false, plainLyrics: 'x', syncedLyrics: null };
+    const got = await lrclibLookup(db, async (url) => (url.includes('/get') ? { status: 200, json: async () => rec } : { status: 200, json: async () => [] }), t);
+    expect(got?.id).toBe(1);
+    expect(cacheRows('lrclib:%')).toBe(1);
+    await expect(lrclibLookup(db, async () => ({ status: 404, json: async () => ({}) }), { ...t, title: 'T2' })).resolves.toBeNull();
+    expect(cacheRows('lrclib:%')).toBe(3); // the 404 get and the 404 search, both real misses
+  });
+
+  it('Deezer failures (non-200 and 200-with-error) burn no image_tries; 3 in a row end the pass', async () => {
+    db.exec(`INSERT INTO artists (id, name, sort_name, track_count) VALUES
+      ('a1','Alpha','alpha',5),('a2','Beta','beta',4),('a3','Gamma','gamma',3),('a4','Delta','delta',2),('a5','Epsilon','epsilon',1)`);
+    let calls = 0;
+    const down: Fetcher = async () => { calls++; return { status: 500, json: async () => ({}) }; };
+    await artistImagesPass(db, { fetcher: down, dataDir: data, max: 50 });
+    expect(calls).toBe(3); // stopped early: an outage must not walk the whole queue
+    expect((db.prepare('SELECT SUM(image_tries) s FROM artists').get() as any).s).toBe(0);
+    expect(cacheRows('deezer:%')).toBe(0);
+    const quota: Fetcher = async () => ({ status: 200, json: async () => ({ error: { code: 4, message: 'Quota limit exceeded' } }) });
+    await artistImagesPass(db, { fetcher: quota, dataDir: data, max: 50 });
+    expect((db.prepare('SELECT SUM(image_tries) s FROM artists').get() as any).s).toBe(0);
+    expect(cacheRows('deezer:%')).toBe(0);
+    // a real empty answer is the one that burns a try and is cached
+    const empty: Fetcher = async () => ({ status: 200, json: async () => ({ data: [] }) });
+    const r = await artistImagesPass(db, { fetcher: empty, dataDir: data, max: 50 });
+    expect(r.missing).toBe(5);
+    expect((db.prepare('SELECT SUM(image_tries) s FROM artists').get() as any).s).toBe(5);
+    expect(cacheRows('deezer:artist:%')).toBe(5);
+  });
+
+  it('album cover fetch failures burn no cover_tries either', async () => {
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, added_at, sort_name, track_count) VALUES ('al1','X','a1','Alpha','/nowhere',0,'x',1)").run();
+    await albumCoversPass(db, { fetcher: async () => ({ status: 500, json: async () => ({}) }), dataDir: data, max: 10 });
+    expect((db.prepare("SELECT cover_tries FROM albums WHERE id = 'al1'").get() as any).cover_tries).toBe(0);
+    expect(cacheRows('deezer:album:%')).toBe(0);
+    await albumCoversPass(db, { fetcher: async () => ({ status: 200, json: async () => ({ data: [] }) }), dataDir: data, max: 10 });
+    expect((db.prepare("SELECT cover_tries FROM albums WHERE id = 'al1'").get() as any).cover_tries).toBe(1);
+    expect(cacheRows('deezer:album:%')).toBe(1);
+  });
+});
+
+describe('parseLrc with mixed timed and plain lines', () => {
+  it('keeps untimestamped lines in place while the timed ones sort by time', () => {
+    const lines = parseLrc('[00:02.00] b\nplain note\n[00:01.00] a');
+    expect(lines.map((l) => l.text)).toEqual(['a', 'plain note', 'b']);
+    expect(lines[1].start).toBeNull();
+    expect(lines[0].start).toBe(1000);
   });
 });

@@ -219,7 +219,7 @@ export default function Library({
     try {
       const items = await jf.instantMix(seed.Id, 50);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
-    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false } : d)); }
+    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   const openRadar = async () => {
     setDetail({ item: { Id: 'radar', Name: 'Release Radar', Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
@@ -239,7 +239,7 @@ export default function Library({
         const r = await relaySearch(jf, '', { filter: tile.filter, limit: 50 });
         setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, tracks: r.tracks, loading: false } : d));
       }
-    } catch { setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, loading: false } : d)); }
+    } catch { setDetail((d) => (d && d.item?.Id === `browse:${tile.id}` ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   const TILE_COLORS = ['#e13300', '#1e3264', '#8d67ab', '#e8115b', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07', '#477d95', '#503750', '#27856a', '#d84000', '#e1118c', '#a56752', '#4b7d9b', '#e61e32'];
   // Records what was opened or played from a search: the item (with art and
@@ -270,11 +270,19 @@ export default function Library({
     if (view !== 'search' || searchType !== 'Everywhere' || !query.trim()) { setGres(null); return undefined; }
     let alive = true; const ctrl = new AbortController();
     const t = setTimeout(() => {
-      relayGlobal(jf, query.trim(), ctrl.signal).then((r) => { if (alive) setGres(r); }).catch((e) => { if (alive && e.name !== 'AbortError' && e.name !== 'TimeoutError') setErr(e.message); });
+      relayGlobal(jf, query.trim(), ctrl.signal).then((r) => { if (alive) setGres(r); }).catch((e) => {
+        if (!alive) return;
+        // Any failure (a timeout aborts too) ends the spinner with a quiet
+        // "couldn't search" line; the banner is kept for real errors only.
+        setGres({ albums: [], artists: [], failed: true });
+        if (e.name !== 'AbortError' && e.name !== 'TimeoutError') setErr(e.message);
+      });
     }, 300);
     return () => { alive = false; ctrl.abort(); clearTimeout(t); };
   }, [view, query, searchType]); // eslint-disable-line react-hooks/exhaustive-deps
   const [err, setErr] = useState(null);
+  // An error belongs to the page it happened on, not the next one.
+  useEffect(() => { setErr(null); }, [detail?.item?.Id, view, seeAll]);
   const [heroMenu, setHeroMenu] = useState(null);
   // The column header is see-through over the hero's colour band and turns
   // solid once it sticks under the top bar (Spotify does the same).
@@ -298,12 +306,19 @@ export default function Library({
   const [discog, setDiscog] = useState({});
   const [simil, setSimil] = useState({});
   const [requesting, setRequesting] = useState({});
+  // One failed discography fetch must not blank the artist for the whole
+  // session: a failed entry counts as absent, so reopening the artist (or
+  // the Retry note) fetches again.
+  const loadDiscog = (it) => {
+    setDiscog((d) => ({ ...d, [it.Id]: null }));
+    relayDiscography(jf, it.Id, it.Name).then((r) => setDiscog((d) => ({ ...d, [it.Id]: r }))).catch(() => setDiscog((d) => ({ ...d, [it.Id]: { releases: [], failed: true } })));
+  };
   useEffect(() => {
     const it = detail?.item;
-    if (!it || detail.kind !== 'Artist' || discog[it.Id] !== undefined) return;
+    const cur = it ? discog[it.Id] : undefined;
+    if (!it || detail.kind !== 'Artist' || (cur !== undefined && !cur?.failed)) return;
     let alive = true;
-    setDiscog((d) => ({ ...d, [it.Id]: null }));
-    relayDiscography(jf, it.Id, it.Name).then((r) => { if (alive) setDiscog((d) => ({ ...d, [it.Id]: r })); }).catch(() => { if (alive) setDiscog((d) => ({ ...d, [it.Id]: { releases: [] } })); });
+    loadDiscog(it);
     relaySimilar(jf, it.Id, it.Name).then((r) => { if (alive) setSimil((d) => ({ ...d, [it.Id]: r.artists || [] })); }).catch(() => {});
     return () => { alive = false; };
   }, [detail?.item?.Id, detail?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -349,36 +364,54 @@ export default function Library({
   // One vocabulary for a release's request button everywhere. The server's
   // state wins once it reports progress; until then the tap's own state shows
   // (a retry must not flash the old "failed").
-  const PENDING = ['queued', 'exists', 'downloading', 'adding'];
-  const stateOf = (r) => { const mine = requesting[r.album_id]; const srv = r.requestStatus; return mine && (!srv || srv === 'failed' || srv === 'missing') ? mine : srv || mine; };
+  // Server vocabulary: requestStatus is queued | downloading | failed | null;
+  // the POST answers status: queued | exists. 'error' is this client's own
+  // "the POST itself failed".
+  const PENDING = ['queued', 'exists', 'downloading'];
+  const stateOf = (r) => { const mine = requesting[r.album_id]; const srv = r.requestStatus; return mine && (!srv || srv === 'failed') ? mine : srv || mine; };
   const requestUi = (st) => ({
-    label: st === 'queued' || st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'adding' ? 'Adding…' : st === 'failed' ? 'Retry' : st === 'missing' ? 'Request again' : st === 'error' ? 'Failed' : 'Request',
-    busy: PENDING.includes(st) || st === 'done',
+    label: st === 'queued' ? 'Requested' : st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'failed' ? 'Retry' : st === 'error' ? 'Failed' : 'Request',
+    busy: PENDING.includes(st),
   });
   const requestRelease = async (artistId, rel) => {
     setRequesting((m) => ({ ...m, [rel.album_id]: 'queued' }));
     try {
       const r = await relayRequest(jf, rel.album_id);
-      setRequesting((m) => ({ ...m, [rel.album_id]: r.state || r.status || 'queued' }));
-      setDiscog((d) => { const cur = d[artistId]; if (!cur) return d; return { ...d, [artistId]: { ...cur, releases: cur.releases.map((x) => (x.album_id === rel.album_id ? { ...x, requestStatus: r.state || 'queued' } : x)) } }; });
+      setRequesting((m) => ({ ...m, [rel.album_id]: r.status || 'queued' }));
+      setDiscog((d) => { const cur = d[artistId]; if (!cur) return d; return { ...d, [artistId]: { ...cur, releases: cur.releases.map((x) => (x.album_id === rel.album_id ? { ...x, requestStatus: r.status || 'queued' } : x)) } }; });
     } catch (e) { setRequesting((m) => ({ ...m, [rel.album_id]: 'error' })); setErr(e.message); }
   };
   // While a requested release is on its way, look again every few seconds:
   // it turns playable the moment the library has it, with no new search.
+  // Both polls skip hidden tabs, drop stale responses (the alive flag) and
+  // give up after 30 minutes -- a request stuck in line must not poll forever.
+  const POLL_MAX_MS = 30 * 60 * 1000;
   const gPending = Boolean(gres?.albums?.some((a) => !a.inLibrary && PENDING.includes(stateOf(a))));
   useEffect(() => {
     if (!gPending || !query.trim()) return undefined;
     const q = query.trim();
-    const t = setInterval(() => { relayGlobal(jf, q).then((r) => setGres(r)).catch(() => {}); }, 4000);
-    return () => clearInterval(t);
+    let alive = true;
+    const started = Date.now();
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      if (Date.now() - started > POLL_MAX_MS) { clearInterval(t); return; }
+      relayGlobal(jf, q).then((r) => { if (alive) setGres(r); }).catch(() => {});
+    }, 4000);
+    return () => { alive = false; clearInterval(t); };
   }, [gPending, query]); // eslint-disable-line react-hooks/exhaustive-deps
   const artistNow = detail?.kind === 'Artist' ? detail.item : null;
   const dPending = Boolean(artistNow && discog[artistNow.Id]?.releases?.some((r) => !r.inLibrary && PENDING.includes(stateOf(r))));
   useEffect(() => {
     if (!dPending) return undefined;
     const { Id, Name } = artistNow;
-    const t = setInterval(() => { relayDiscography(jf, Id, Name).then((r) => setDiscog((d) => ({ ...d, [Id]: r }))).catch(() => {}); }, 5000);
-    return () => clearInterval(t);
+    let alive = true;
+    const started = Date.now();
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      if (Date.now() - started > POLL_MAX_MS) { clearInterval(t); return; }
+      relayDiscography(jf, Id, Name).then((r) => { if (alive) setDiscog((d) => ({ ...d, [Id]: r })); }).catch(() => {});
+    }, 5000);
+    return () => { alive = false; clearInterval(t); };
   }, [dPending, artistNow?.Id]); // eslint-disable-line react-hooks/exhaustive-deps
   const headSentinelRef = useRef(null);
   const [headStuck, setHeadStuck] = useState(false);
@@ -567,14 +600,16 @@ export default function Library({
           </header>
           <div className="actions slim" />
           <div className="pad">
+            {err && <div className="banner error">{err}</div>}
             {rels && rels.length === 0 && <p className="placeholder-note">Nothing new from your top artists in the last 90 days.</p>}
             {rels && rels.length > 0 && (
               <div className="grid">
+                {/* Two artists can share a release (splits, features): the key needs both ids. */}
                 {rels.map((r) => r.inLibrary ? (
-                  <Card key={r.album_id} title={r.title} subtitle={`${r.artistName} • ${r.date}`} image={jf.imageUrl(r.inLibrary, { maxHeight: 320 })}
+                  <Card key={`${r.album_id}:${r.artistId}`} title={r.title} subtitle={`${r.artistName} • ${r.date}`} image={jf.imageUrl(r.inLibrary, { maxHeight: 320 })}
                     onOpen={() => openAlbum({ Id: r.inLibrary, Name: r.title })} onPlay={() => playItem({ Id: r.inLibrary, Type: 'MusicAlbum' })} />
                 ) : (
-                  <div key={r.album_id} className="card missing">
+                  <div key={`${r.album_id}:${r.artistId}`} className="card missing">
                     <div className="card-art">
                       {r.image ? <img src={r.image} alt="" loading="lazy" /> : <div className="ph" />}
                       {(() => {
@@ -611,7 +646,7 @@ export default function Library({
             <div style={{ minWidth: 0 }}>
               <div className="kind">Genre</div>
               <FittedTitle text={item.Name} maxLines={2} />
-              <p className="hero-meta">{hub ? `${(hub.trackCount || 0).toLocaleString()} songs • ${(hub.albumCount || 0).toLocaleString()} albums` : tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : 'Nothing here yet'}</p>
+              <p className="hero-meta">{hub ? `${(hub.trackCount || 0).toLocaleString()} songs • ${(hub.albumCount || 0).toLocaleString()} albums` : tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : detail.loadFailed ? 'Couldn’t load this — try again' : 'Nothing in this genre yet'}</p>
             </div>
           </header>
           <div className="actions">
@@ -619,6 +654,7 @@ export default function Library({
             <button className="bigplay" onClick={() => playMix(false)} title="Play"><PlayGlyph size={24} /></button>
           </div>
           <div className="pad">
+            {err && <div className="banner error">{err}</div>}
             {hub?.topArtists?.length > 0 && (
               <section>
                 <div className="shelf-head"><h2>Top artists</h2></div>
@@ -904,6 +940,7 @@ export default function Library({
             <div className="actions slim" />
           )}
           <div className="pad">
+            {err && <div className="banner error">{err}</div>}
             {detail.topArtists?.length > 0 && (
               <section>
                 <div className="shelf-head"><h2>Top artists this month</h2></div>
@@ -958,6 +995,7 @@ export default function Library({
     const SORTS = [['recent', 'Recently added'], ['title', 'Title'], ['artist', 'Artist'], ['album', 'Album']];
     return (
       <div className={`content ${phone && isLiked ? 'liked-page' : ''}`} style={heroStyle}>
+        {err && <div className="banner error">{err}</div>}
 
         {/* Spotify's Liked Songs: "Find in Liked Songs" + Sort chip pinned at the very top, above the cover. */}
         {phone && isLiked && (
@@ -1084,7 +1122,12 @@ export default function Library({
               !isLiked ? { label: 'Go to radio', icon: MI.radio, onClick: () => startMix(item) } : null,
               tracks.length ? { label: 'Add to playlist', icon: MI.plus, sub: [
                 { label: 'New playlist', icon: MI.plus, onClick: () => onNewPlaylist?.(tracks[0]) },
-                ...playlists.filter((p) => p.Id !== item.Id).map((p) => ({ key: p.Id, label: p.Name, onClick: () => tracks.forEach((t) => onAddTo?.(p, t)) })),
+                // One POST with every id (the API takes an array), one toast --
+                // not a request and a toast per track.
+                ...playlists.filter((p) => p.Id !== item.Id).map((p) => ({ key: p.Id, label: p.Name, onClick: async () => {
+                  try { await jf.addToPlaylist(p.Id, tracks.map((t) => t.Id)); notify?.(`Added to ${p.Name}`); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); }
+                  catch (e) { setErr(e.message); }
+                } })),
               ] } : null,
               lead ? { label: 'Go to artist', icon: MI.artist, onClick: () => onOpenArtistById(lead.Id) } : null,
               kind === 'Album' ? { label: item.UserData?.IsFavorite ? 'Remove from Your Library' : 'Save to Your Library', icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
@@ -1178,7 +1221,7 @@ export default function Library({
                 ...rels.map((r, i) => ({ key: `${r.inLibrary || r.album_id || r.title}-${i}`, r, type: r.rtype || 'Album', year: r.year, inLib: r.inLibrary })),
                 ...libOnly.map((a) => ({ key: a.Id, r: { title: a.Name, inLibrary: a.Id, image: null }, type: releaseType(a), year: a.ProductionYear ? String(a.ProductionYear) : '', inLib: a.Id })),
               ];
-              if (!all.length && dg !== null) return null;
+              if (!all.length && dg !== null && !dg?.failed) return null;
               const counts = all.reduce((m, x) => ({ ...m, [x.type]: (m[x.type] || 0) + 1 }), {});
               const pills = [
                 ['all', 'All'],
@@ -1215,6 +1258,7 @@ export default function Library({
                   <section className="releases">
                     <div className="shelf-head"><h2>Popular releases</h2></div>
                     {dg === null && !top.length && <p className="placeholder-note">Loading…</p>}
+                    {dg?.failed && <p className="placeholder-note">Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></p>}
                     {top.map(({ key, r, type, year, inLib }) => (
                       <div key={key} className={`release ${inLib ? '' : 'missing'}`} role="button" tabIndex={0}
                         onClick={inLib ? () => openAlbum({ Id: inLib, Name: r.localName || r.title }) : undefined}
@@ -1239,6 +1283,7 @@ export default function Library({
                     <h2>Discography</h2>
                     {dg === null ? <span className="settings-hint">Loading…</span> : all.length ? <span className="settings-hint">{have} of {all.length} in your library</span> : null}
                   </div>
+                  {dg?.failed && <p className="placeholder-note">Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></p>}
                   <div className="disco-filters">
                     <div className="pills">
                       {libPills.map(([k, label]) => (
@@ -1304,7 +1349,11 @@ export default function Library({
             )}
             {tracks.length === 0 && !detail.loading && (
               <p className="placeholder-note">
-                {isLiked ? 'Songs you like will appear here. Save songs by tapping the heart icon.' : 'This playlist is empty.'}
+                {detail.loadFailed ? 'Couldn’t load this — try again.'
+                  : isLiked ? 'Songs you like will appear here. Save songs by tapping the heart icon.'
+                  : isPlaylist ? 'This playlist is empty.'
+                  : kind === 'Album' ? 'This album is empty.'
+                  : 'Nothing here yet.'}
               </p>
             )}
             {/* Rows still on their way: grey placeholders the page is laid out on, like Spotify's. */}
@@ -1597,6 +1646,7 @@ export default function Library({
             );
             const sub = (a) => [a.rtype, a.year, a.artist].filter(Boolean).join(' • ');
             if (!gres) return <p className="placeholder-note gsearch-note">Searching everywhere…</p>;
+            if (gres.failed) return <p className="placeholder-note gsearch-note">Couldn&rsquo;t search everywhere right now.</p>;
             if (!gres.albums?.length) return (
               <div className="search-empty"><b>Couldn&rsquo;t find &ldquo;{query.trim()}&rdquo; anywhere</b><span>Try a different spelling, or the artist and album together.</span></div>
             );

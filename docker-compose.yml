@@ -3,13 +3,23 @@ services:
     image: ghcr.io/lukasbaxter/slopify:latest
     container_name: slopify
     restart: unless-stopped
-    ports: ["8080:8080"]
+    # Host networking so the server can discover Chromecast / BluOS speakers
+    # (mDNS). Bridge mode (ports: ["8080:8080"]) works for everything else
+    # but disables speaker discovery; you can also set SPEAKERS=0 then.
+    network_mode: host
     volumes:
-      - /path/to/music:/music        # read-only is fine unless Soulseek downloads should land here
+      # SAVE_TO_LIBRARY=1 (the default) writes .lrc lyrics, cover.jpg and
+      # artist.jpg next to your files, so /music is mounted writable here.
+      # Set SAVE_TO_LIBRARY=0 to keep the library untouched (then :ro is fine).
+      - /path/to/music:/music
       - ./data:/data
     environment:
-      PUBLIC_URL: https://music.example.com
+      PORT: "8080"                     # host networking: PORT picks the port
+      PUBLIC_URL: http://192.168.1.10:8080  # what speakers fetch audio from (LAN address)
       ADMIN_USER: admin
-      ADMIN_PASS: admin              # forced to change on first login
-      # SLSK_USER: ...               # optional: Soulseek
-      # SLSK_PASS: ...
+      ADMIN_PASS: admin                # forced to change on first login
+      # HEADS=1 (default) copies the first seconds of every track into /data
+      # at scan so playback starts before a NAS wakes; HEADS=0 disables it.
+      # SAVE_TO_LIBRARY: "0"
+      # HEADS: "0"
+      # CACHE_DIR: /data               # heads/transcodes/artwork cache (defaults to /data)

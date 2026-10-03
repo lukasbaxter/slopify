@@ -2,7 +2,7 @@
 // lyrics and artwork fetching, what is still missing), the speakers the
 // server can see, and the accounts (roles, removal, invites for new ones).
 // Same building blocks as the rest of Settings.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const fmtN = (n) => (n ?? 0).toLocaleString('en-US');
 const ago = (t) => { if (!t) return 'never'; const s = Math.round((Date.now() - t) / 1000); if (s < 60) return 'just now'; if (s < 3600) return `${Math.round(s / 60)} min ago`; if (s < 86400) return `${Math.round(s / 3600)} h ago`; return `${Math.round(s / 86400)} d ago`; };
@@ -15,7 +15,7 @@ export function useAdminStatus(jf, every = 5000) {
     let alive = true;
     const tick = () => jf.adminStatus().then((s) => { if (alive) { setStatus(s); setErr(null); } }).catch((e) => { if (alive) setErr(e.message); });
     tick();
-    const t = setInterval(tick, every);
+    const t = setInterval(() => { if (!document.hidden) tick(); }, every);
     return () => { alive = false; clearInterval(t); };
   }, [jf, every]);
   return [status, err];
@@ -29,16 +29,20 @@ const TASK_ICONS = {
   heads: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" /></svg>,
   discovery: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5 5-2z" /></svg>,
   backlog: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" /></svg>,
+  flac: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9v6" /><path d="M7 6v12" /><path d="M11 10v4" /><path d="M18 19V7" /><path d="m14.5 10.5 3.5-3.5 3.5 3.5" /></svg>,
 };
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const HOURS = [[0.25, '15 min'], [0.5, '30 min'], [1, 'hour'], [2, '2 h'], [3, '3 h'], [6, '6 h'], [12, '12 h'], [24, '24 h']];
 
 // The schedule, editable in place: every N hours, daily or weekly at a
 // time, on file change (tasks that watch a folder), or off.
-function TaskSchedule({ jf, t, onSaved, notify }) {
-  const save = (schedule) => jf._fetch(`/api/admin/tasks/${t.id}/schedule`, { method: 'PUT', body: JSON.stringify({ schedule }) })
-    .then(onSaved).catch((e) => notify?.(`Could not change the schedule: ${e.message}`));
+function TaskSchedule({ t, onChange }) {
+  const save = (schedule) => onChange(schedule);
   const s = t.schedule;
+  // The time input is committed when editing finishes (blur / Enter), not on
+  // every segment keystroke -- typing 04:30 must not PUT three times.
+  const [atDraft, setAtDraft] = useState(null);
+  const commitAt = () => { if (atDraft && atDraft !== s.at) save({ ...s, at: atDraft }); setAtDraft(null); };
   return (
     <span className="task-sched">
       <select value={s.mode} aria-label={`${t.name} schedule`} onChange={(e) => {
@@ -63,7 +67,9 @@ function TaskSchedule({ jf, t, onSaved, notify }) {
         </select>
       )}
       {(s.mode === 'daily' || s.mode === 'weekly') && (
-        <input type="time" value={s.at} aria-label="time" onChange={(e) => e.target.value && save({ ...s, at: e.target.value })} />
+        <input type="time" value={atDraft ?? s.at} aria-label="time"
+          onChange={(e) => setAtDraft(e.target.value)} onBlur={commitAt}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
       )}
     </span>
   );
@@ -75,22 +81,38 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
   const [users, setUsers] = useState(null);
   const [invite, setInvite] = useState(null);
   const [busy, setBusy] = useState('');
-  const loadTasks = () => jf._fetch('/api/admin/tasks').then((r) => setTasks(r.tasks || [])).catch(() => {});
+  // Every accepted change bumps the seq; a poll that left before the change
+  // is stale and must not revert what was just saved.
+  const taskSeq = useRef(0);
+  const loadTasks = () => { const seq = taskSeq.current; return jf._fetch('/api/admin/tasks').then((r) => { if (seq === taskSeq.current) setTasks(r.tasks || []); }).catch(() => {}); };
   useEffect(() => {
     if (!jf) return undefined;
     let alive = true;
-    const tick = () => jf._fetch('/api/admin/tasks').then((r) => { if (alive) setTasks(r.tasks || []); }).catch(() => {});
+    const tick = () => { const seq = taskSeq.current; jf._fetch('/api/admin/tasks').then((r) => { if (alive && seq === taskSeq.current) setTasks(r.tasks || []); }).catch(() => {}); };
     tick();
-    const t = setInterval(tick, 5000);
+    const t = setInterval(() => { if (!document.hidden) tick(); }, 5000);
     return () => { alive = false; clearInterval(t); };
   }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Schedule changes show at once and the PUT's answer (the task as the
+  // server now has it) reconciles; an error rolls back to the server's list.
+  const onSchedule = (task, schedule) => {
+    taskSeq.current += 1;
+    setTasks((ts) => (ts || []).map((x) => (x.id === task.id ? { ...x, schedule } : x)));
+    return jf._fetch(`/api/admin/tasks/${task.id}/schedule`, { method: 'PUT', body: JSON.stringify({ schedule }) })
+      .then((out) => { taskSeq.current += 1; setTasks((ts) => (ts || []).map((x) => (x.id === out.id ? out : x))); })
+      .catch((e) => { notify?.(`Could not change the schedule: ${e.message}`); taskSeq.current += 1; loadTasks(); });
+  };
   const loadUsers = () => jf.users().then((r) => setUsers(r.users || [])).catch(() => setUsers([]));
   useEffect(() => { loadUsers(); }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The ref blocks the double-click that lands before the re-render disables
+  // the button (two "Run now" POSTs = a 409 and a confusing toast).
+  const busyRef = useRef(false);
   const run = async (what, fn, done) => {
-    setBusy(what);
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(what);
     try { await fn(); if (done) notify?.(done); } catch (e) { notify?.(`Could not ${what}: ${e.message}`); }
-    finally { setBusy(''); }
+    finally { busyRef.current = false; setBusy(''); }
   };
   const lib = status?.library || {};
   const scan = status?.scans?.[0];
@@ -134,8 +156,8 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
                     : t.last ? `${t.last.ok ? '' : 'failed · '}${ago(t.last.started)}${t.last.summary ? ` · ${t.last.summary}` : ''}${t.last.error ? ` · ${t.last.error}` : ''}`
                     : 'never run'}
                 </span>
-                <TaskSchedule jf={jf} t={t} notify={notify} onSaved={loadTasks} />
-                <button type="button" className="btn-secondary task-run" disabled={!!t.running} onClick={() => run(`run ${t.name}`, () => jf._fetch(`/api/admin/tasks/${t.id}/run`, { method: 'POST' }).then(loadTasks), `${t.name} started`)}>{t.running ? 'Running…' : 'Run now'}</button>
+                <TaskSchedule t={t} onChange={(schedule) => onSchedule(t, schedule)} />
+                <button type="button" className="btn-secondary task-run" disabled={!!busy || !!t.running} onClick={() => run(`run ${t.name}`, () => jf._fetch(`/api/admin/tasks/${t.id}/run`, { method: 'POST' }).then(loadTasks), `${t.name} started`)}>{t.running ? 'Running…' : 'Run now'}</button>
               </li>
             ))}
           </ul>

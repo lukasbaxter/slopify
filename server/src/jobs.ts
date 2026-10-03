@@ -15,9 +15,16 @@ export type Job = {
 
 const jobs = new Map<string, Job>();
 const KEEP_MS = 60 * 60 * 1000;
+const STUCK_MS = 24 * 60 * 60 * 1000; // a job still "running" after a day is an orphan
+
+function sweep() {
+  const now = Date.now();
+  for (const [id, j] of jobs) if ((j.finished && now - j.finished > KEEP_MS) || (!j.finished && now - j.created > STUCK_MS)) jobs.delete(id);
+}
+setInterval(sweep, 60 * 60 * 1000).unref();
 
 export function startJob(userId: string, kind: string, run: (job: Job) => Promise<any>): Job {
-  for (const [id, j] of jobs) if (j.finished && Date.now() - j.finished > KEEP_MS) jobs.delete(id);
+  sweep();
   const job: Job = { id: crypto.randomBytes(8).toString('hex'), userId, kind, state: 'running', step: 'Starting', progress: null, result: null, error: null, created: Date.now(), finished: null };
   jobs.set(job.id, job);
   run(job).then((result) => { job.result = result; job.state = 'done'; job.progress = 1; },

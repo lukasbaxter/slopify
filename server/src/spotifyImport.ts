@@ -30,11 +30,23 @@ export type Parsed = { plays: Play[]; basicPlays: Play[]; likes: Song[]; albums:
 const MIN_MS = 30000;
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
+// Zip-bomb guard: fflate's filter sees each entry's declared originalSize
+// before inflating, so oversized entries are skipped and the whole unzip is
+// abandoned once the cumulative inflated size passes the budget.
+const MAX_ENTRY = 256 * 1024 * 1024; // one JSON file
+const MAX_INFLATED = 1024 * 1024 * 1024; // whole archive
+
 // Everything readable in one upload (a zip or a single JSON file) goes into `into`.
 export function parseExport(name: string, bytes: Uint8Array, into: Parsed) {
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+  let inflated = 0;
   const files: [string, Uint8Array][] = isZip
-    ? Object.entries(unzipSync(bytes, { filter: (f) => /\.json$/i.test(f.name) && !/__MACOSX/.test(f.name) }))
+    ? Object.entries(unzipSync(bytes, { filter: (f) => {
+        if (!/\.json$/i.test(f.name) || /__MACOSX/.test(f.name) || f.originalSize > MAX_ENTRY) return false;
+        inflated += f.originalSize;
+        if (inflated > MAX_INFLATED) throw new Error('zip expands too large to import');
+        return true;
+      } }))
     : [[name, bytes]];
   for (const [fname, data] of files) {
     const base = fname.split('/').pop() || fname;
@@ -134,16 +146,26 @@ export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: str
   const auth = { preHandler: (app as any).requireUser };
   const dir = path.join(dataDir, 'imports');
   const MAX = 2 * 1024 * 1024 * 1024;
+  // Disk-fill guard: each user may hold a few pending uploads within a byte
+  // budget; anything beyond is refused until an import consumes them (or the
+  // daily cleanup below does).
+  const MAX_PENDING = 3;
+  const MAX_PENDING_BYTES = 512 * 1024 * 1024;
   // One file per request, streamed to disk (an extended history zip can run to hundreds of MB).
   app.post('/api/import/spotify/upload', auth, async (req: any, reply) => {
     fs.mkdirSync(dir, { recursive: true });
     for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { force: true }); }
+    const mine = fs.readdirSync(dir).filter((f) => f.startsWith(`${req.user.id}-`) && f.endsWith('.bin'));
+    if (mine.length >= MAX_PENDING) return reply.code(429).send({ error: 'too many pending uploads — import them first' });
+    const pendingBytes = mine.reduce((s, f) => s + fs.statSync(path.join(dir, f)).size, 0);
+    const budget = Math.min(MAX, MAX_PENDING_BYTES - pendingBytes);
+    if (budget <= 0) return reply.code(413).send({ error: 'pending uploads are too large — import them first' });
     const id = `${req.user.id}-${crypto.randomBytes(6).toString('hex')}`;
     const name = String(req.headers['x-filename'] || 'upload').replace(/[^\w. -]/g, '_').slice(0, 100);
     const file = path.join(dir, `${id}.bin`);
     const out = fs.createWriteStream(file); let n = 0;
     try {
-      for await (const c of req.raw) { n += c.length; if (n > MAX) throw new Error('too large'); if (!out.write(c)) await new Promise<void>((r) => out.once('drain', () => r())); }
+      for await (const c of req.raw) { n += c.length; if (n > budget) throw new Error('too large'); if (!out.write(c)) await new Promise<void>((r) => out.once('drain', () => r())); }
       await new Promise<void>((res, rej) => out.end((e?: Error | null) => (e ? rej(e) : res())));
     } catch (e: any) { out.destroy(); fs.rmSync(file, { force: true }); return reply.code(e?.message === 'too large' ? 413 : 400).send({ error: e?.message || 'upload failed' }); }
     fs.writeFileSync(path.join(dir, `${id}.name`), name);

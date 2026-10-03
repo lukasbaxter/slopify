@@ -219,7 +219,9 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     if (typeof req.body !== 'object' || !req.body) return reply.code(400).send({ error: 'object required' });
     const cur = JSON.parse((db.prepare('SELECT json FROM prefs WHERE user_id = ?').get(uid(req)) as any)?.json ?? '{}');
     const next = { ...cur, ...(req.body as object) };
-    db.prepare('INSERT INTO prefs (user_id, json, updated) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, updated = excluded.updated').run(uid(req), JSON.stringify(next), Date.now());
+    const json = JSON.stringify(next);
+    if (json.length > 64 * 1024) return reply.code(400).send({ error: 'prefs too large' });
+    db.prepare('INSERT INTO prefs (user_id, json, updated) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, updated = excluded.updated').run(uid(req), json, Date.now());
     return next;
   });
 }

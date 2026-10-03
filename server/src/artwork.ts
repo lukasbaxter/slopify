@@ -11,6 +11,14 @@ export type ArtSize = (typeof SIZES)[number];
 
 export function artDir(dataDir: string) { return path.join(dataDir, 'art'); }
 
+// The size variants are served as immutable: write to a tmp name and rename,
+// so a crash mid-render never leaves a truncated file at the served path.
+// (sharp's format comes from .webp()/.jpeg(), not the extension.)
+async function toFileAtomic(img: sharp.Sharp, dst: string) {
+  const tmp = `${dst}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try { await img.toFile(tmp); await fs.rename(tmp, dst); } catch (e) { await fs.rm(tmp, { force: true }).catch(() => {}); throw e; }
+}
+
 // `banner`: also a wide crop (artist pages) at banner.webp|jpg.
 export async function storeArtwork(dataDir: string, bytes: Buffer, opts: { banner?: boolean } = {}): Promise<{ hash: string; width: number; height: number }> {
   const hash = crypto.createHash('sha1').update(bytes).digest('hex');
@@ -27,8 +35,8 @@ export async function storeArtwork(dataDir: string, bytes: Buffer, opts: { banne
   const meta = await img.metadata();
   const width = meta.width ?? 0, height = meta.height ?? 0;
   await Promise.all(SIZES.flatMap((s) => [
-    img.clone().resize(s, s, { fit: 'cover' }).webp({ quality: 78 }).toFile(path.join(dir, `${s}.webp`)),
-    img.clone().resize(s, s, { fit: 'cover' }).jpeg({ quality: 80, mozjpeg: true }).toFile(path.join(dir, `${s}.jpg`)),
+    toFileAtomic(img.clone().resize(s, s, { fit: 'cover' }).webp({ quality: 78 }), path.join(dir, `${s}.webp`)),
+    toFileAtomic(img.clone().resize(s, s, { fit: 'cover' }).jpeg({ quality: 80, mozjpeg: true }), path.join(dir, `${s}.jpg`)),
   ]));
   if (opts.banner) await renderBanner(bytes, dir);
   await fs.writeFile(done, JSON.stringify({ width, height }));
@@ -37,8 +45,8 @@ export async function storeArtwork(dataDir: string, bytes: Buffer, opts: { banne
 async function renderBanner(bytes: Buffer, dir: string) {
   const img = sharp(bytes, { failOn: 'none' }).rotate();
   await Promise.all([
-    img.clone().resize(1600, 560, { fit: 'cover', position: sharp.strategy.attention }).webp({ quality: 74 }).toFile(path.join(dir, 'banner.webp')),
-    img.clone().resize(1600, 560, { fit: 'cover', position: sharp.strategy.attention }).jpeg({ quality: 78, mozjpeg: true }).toFile(path.join(dir, 'banner.jpg')),
+    toFileAtomic(img.clone().resize(1600, 560, { fit: 'cover', position: sharp.strategy.attention }).webp({ quality: 74 }), path.join(dir, 'banner.webp')),
+    toFileAtomic(img.clone().resize(1600, 560, { fit: 'cover', position: sharp.strategy.attention }).jpeg({ quality: 78, mozjpeg: true }), path.join(dir, 'banner.jpg')),
   ]);
 }
 

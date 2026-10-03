@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
-import DevicePicker from './DevicePicker.jsx';
+import DevicePicker, { useThrottledVolume } from './DevicePicker.jsx';
 import { usePhone, Heart, ShuffleGlyph, ArtistLinks } from './TrackRow.jsx';
 import { vibrantColor } from '../api/colors.js';
 import { seekHover } from '../api/seekHover.js';
@@ -175,6 +175,10 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
   const elsewhere = elsewhereLabel(player);
   const { current, nowPlaying, playing, position, duration, volume, device, error, roster, relay, repeat, shuffle } = player;
   const sessionDevice = sessionDeviceOf(player, devices);
+  // A speaker gets at most one volume command every 120 ms (SheetVolume's
+  // throttle); the local device still follows every step of the drag.
+  const remoteVol = Boolean(sessionDevice?.kind && sessionDevice.kind !== 'local');
+  const [volShown, volMove, volEnd] = useThrottledVolume(volume, player.setVolume, remoteVol);
   const liked = useLiked(nowPlaying?.itemId);
   // nowPlaying covers both our own queue and a session adopted from a speaker
   // that was already playing when the app opened.
@@ -402,9 +406,10 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
               </svg>
             </button>
             <input
-              type="range" min="0" max="100" value={volume}
-              onChange={(e) => player.setVolume(Number(e.target.value))}
-              style={{ '--pct': `${volume}%` }}
+              type="range" min="0" max="100" value={volShown}
+              onChange={(e) => volMove(Number(e.target.value))}
+              onPointerUp={volEnd} onPointerCancel={volEnd} onTouchEnd={volEnd} onTouchCancel={volEnd} onKeyUp={volEnd}
+              style={{ '--pct': `${volShown}%` }}
             />
           </div>
           <button className="icon-btn" onClick={onFullScreen} title="Now playing view">

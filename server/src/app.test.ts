@@ -8,6 +8,9 @@ describe('server', () => {
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
     expect(res.json().ok).toBe(true);
+    expect(res.json().version).toBeUndefined(); // no fingerprint for unauthenticated scanners
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['referrer-policy']).toBe('no-referrer');
     await app.close();
   });
 });

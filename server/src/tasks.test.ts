@@ -1,8 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
 import { registerTasks, builtinTasks, isStudio, isDue, prevPoint, parseSchedule, remapTrackId, type TaskDef, type Schedule } from './tasks.js';
+import { slskdFind } from './explore.js';
+
+// The flac chore talks to slskd; the tests only care that it does not.
+vi.mock('./explore.js', () => ({
+  slskdFind: vi.fn(async () => null),
+  slskdDownload: vi.fn(async () => false),
+  slskdWait: vi.fn(async () => {}),
+}));
 
 const adminApp = () => {
   const app = Fastify();
@@ -51,6 +59,37 @@ describe('tasks framework', () => {
     expect(by.c).toBeNull();
     await app.close();
   });
+
+  it('the tick is round-robin: when both are due at every tick, turns alternate instead of the first starving the second', async () => {
+    const db = tmpdb('rr');
+    let t = new Date('2026-10-03T12:00:00').getTime();
+    const ran: string[] = [];
+    const defs: TaskDef[] = ['a', 'b'].map((id) => ({ id, name: id, description: '', schedule: { mode: 'interval', hours: 1 } as Schedule, run: async () => { ran.push(id); return 'ok'; } }));
+    const app = adminApp();
+    const { tick } = registerTasks(app, db, defs, { now: () => t });
+    const turn = async () => { tick(); await new Promise((r) => setTimeout(r, 20)); t += 2 * 3600e3; };
+    await turn(); await turn(); await turn(); await turn();
+    expect(ran).toEqual(['a', 'b', 'a', 'b']);
+    await app.close();
+  });
+
+  it('corrupt kv rows degrade to never-ran and the default schedule instead of crashing the tick', async () => {
+    const db = tmpdb('corrupt');
+    const put = db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)');
+    put.run('task:x1', '{not json');
+    put.run('task:x1:sched', 'also not json');
+    const ran: string[] = [];
+    const def: TaskDef = { id: 'x1', name: 'X1', description: '', schedule: { mode: 'interval', hours: 1 }, run: async () => { ran.push('x1'); return 'ok'; } };
+    const app = adminApp();
+    const { tick } = registerTasks(app, db, [def]);
+    const t = (await app.inject({ url: '/api/admin/tasks' })).json().tasks[0];
+    expect(t.last).toBeNull();
+    expect(t.schedule).toEqual({ mode: 'interval', hours: 1 });
+    expect(() => tick()).not.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ran).toEqual(['x1']); // never-ran means due
+    await app.close();
+  });
 });
 
 describe('schedules', () => {
@@ -67,6 +106,10 @@ describe('schedules', () => {
     expect(new Date(prevPoint(weekly, now)!).getDay()).toBe(0);
     expect(isDue({ mode: 'interval', hours: 2 }, { started: now - 3 * 3600e3, ended: 0, ok: true }, now)).toBe(true);
     expect(isDue({ mode: 'interval', hours: 2 }, { started: now - 1 * 3600e3, ended: 0, ok: true }, now)).toBe(false);
+    // Interval counts from the END of the last run: a 4-hour chore on a
+    // 2-hour interval is not due again the moment it finishes.
+    expect(isDue({ mode: 'interval', hours: 2 }, { started: now - 5 * 3600e3, ended: now - 1 * 3600e3, ok: true }, now)).toBe(false);
+    expect(isDue({ mode: 'interval', hours: 2 }, { started: now - 5 * 3600e3, ended: now - 3 * 3600e3, ok: true }, now)).toBe(true);
     expect(isDue({ mode: 'off' }, null, now)).toBe(false);
     expect(isDue({ mode: 'watch' }, null, now)).toBe(false);
   });
@@ -176,6 +219,71 @@ describe('built-in chores', () => {
     const flac = builtinTasks(adminApp() as any, opts(db, { enabled: false })).find((t) => t.id === 'flac')!;
     expect(await flac.run(ctx)).toContain('slskd is not configured');
   });
+
+  // slskd configured but every call mocked dead: these runs must never reach it.
+  const slskdOpts = (db: any, musicDir: string) => ({
+    ...opts(db, { enabled: false }), musicDir,
+    slskdUrl: 'http://slskd', slskdKey: 'k', slskdDownloadsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl-')),
+  });
+
+  it('flac never overwrites an existing library file: dest present means skip, no search spent, and the skip key carries the duration', async () => {
+    const db = tmpdb('flacdest');
+    seed(db);
+    const musicDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-music-'));
+    fs.mkdirSync(path.join(musicDir, 'al'));
+    fs.writeFileSync(path.join(musicDir, 'al', '01.flac'), 'already here');
+    db.prepare("UPDATE tracks SET codec = 'MPEG 1 Layer 3', duration_ms = 123456, path = ? WHERE id = 't1'").run(path.join(musicDir, 'al', '01.mp3'));
+    const flac = builtinTasks(adminApp() as any, slskdOpts(db, musicDir)).find((t) => t.id === 'flac')!;
+    const summary = await flac.run(ctx);
+    expect(summary).toContain('1 blocked by an existing file');
+    expect(vi.mocked(slskdFind)).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(musicDir, 'al', '01.flac'), 'utf8')).toBe('already here');
+    const skip = JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'task:flac:skip'").get() as any).v);
+    expect(Object.keys(skip)).toEqual(['tycho | a walk | 123']);
+  });
+
+  it('a journaled replacement left by a crash is settled at the next run: folder scanned, traces remapped, lyrics restored', async () => {
+    const db = tmpdb('flacjournal');
+    seed(db);
+    db.prepare("UPDATE tracks SET codec = 'MPEG 1 Layer 3', duration_ms = 200000 WHERE id = 't1'").run();
+    db.prepare("INSERT INTO likes (user_id, track_id, at) VALUES ('u1', 't1', 1)").run();
+    db.prepare("INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES ('t1', 'synced', '[\"la\"]', 'lrclib', 7)").run();
+    const entry = { oldId: 't1', newPath: '/m/01.flac', rel: '', lyrics: { kind: 'synced', lines: '["la"]', source: 'lrclib', fetched_at: 7 } };
+    db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run('task:flac:journal', JSON.stringify([entry]));
+    const app = adminApp();
+    const scanned: string[][] = [];
+    // A folder scan of the real thing deletes the old row (the lyrics
+    // cascade with it) and admits the new file under its new id.
+    app.decorate('scanFolders', async (rel: string[]) => {
+      scanned.push(rel);
+      db.prepare("DELETE FROM tracks WHERE id = 't1'").run();
+      db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at, codec)
+        VALUES ('t-new', '/m/01.flac', 0, 0, 'A Walk', 'Tycho', '["Tycho"]', '["ar"]', 'al', 'Dive', 'Tycho', 0, 'FLAC')`).run();
+    });
+    const flac = builtinTasks(app as any, slskdOpts(db, '/m')).find((t) => t.id === 'flac')!;
+    const summary = await flac.run(ctx);
+    expect(summary).toContain('recovered from the journal');
+    expect(scanned).toEqual([['']]); // the library-root case rides through as rel ''
+    expect((db.prepare("SELECT track_id FROM likes WHERE user_id = 'u1'").get() as any).track_id).toBe('t-new');
+    expect(db.prepare("SELECT kind, lines, source FROM lyrics WHERE track_id = 't-new'").get()).toEqual({ kind: 'synced', lines: '["la"]', source: 'lrclib' });
+    expect(JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'task:flac:journal'").get() as any).v)).toEqual([]);
+    expect(vi.mocked(slskdFind)).not.toHaveBeenCalled(); // nothing lossy left after recovery
+  });
+
+  it('a journal entry whose folder scan keeps failing stays journaled and the run says so', async () => {
+    const db = tmpdb('flacjournal2');
+    seed(db);
+    const entry = { oldId: 't1', newPath: '/m/al/01.flac', rel: 'al', lyrics: null };
+    db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run('task:flac:journal', JSON.stringify([entry]));
+    const app = adminApp();
+    let calls = 0;
+    app.decorate('scanFolders', async () => { calls++; throw new Error('NAS asleep'); });
+    const flac = builtinTasks(app as any, slskdOpts(db, '/m')).find((t) => t.id === 'flac')!;
+    const summary = await flac.run(ctx);
+    expect(summary).toContain('folder scans failed, kept journaled for recovery');
+    expect(calls).toBe(2); // one retry, then give up until next run
+    expect(JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'task:flac:journal'").get() as any).v)).toEqual([entry]);
+  }, 10000);
 
   it('the heads chore says so when heads are off', async () => {
     const db = tmpdb('heads');

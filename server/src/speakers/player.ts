@@ -17,6 +17,11 @@ export type PlayerDeps = {
   report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void; scrobble?: (trackId: string, at: number) => void;
 };
 
+// One physical speaker, one driver: whichever account claimed a device last
+// owns it, and the previous owner's player is made to yield first, so two
+// accounts never fight over the same box.
+const owners = new Map<string, ServerPlayer>();
+
 export class ServerPlayer {
   queue: Row[] = []; index = -1; original: Row[] = [];
   device: Speaker | null = null; transport: Transport | null = null;
@@ -24,6 +29,9 @@ export class ServerPlayer {
   repeat: 'off' | 'all' | 'one' = 'off'; shuffle: 'off' | 'on' = 'off';
   private timer: NodeJS.Timeout | null = null; private starting = false; private ticking = false; private lastTick = 0;
   private lastRead: { pos: number; at: number } | null = null;
+  private busyUntil = 0; // a seek/toggle in flight: the poll leaves the clock alone until then
+  private ops: Promise<void> = Promise.resolve();
+  private playLogTimer: NodeJS.Timeout | null = null;
   constructor(public uid: string, private d: PlayerDeps) {}
 
   get current() { return this.queue[this.index] ?? null; }
@@ -52,7 +60,13 @@ export class ServerPlayer {
   private report() { this.d.report(this.nowPlaying()); }
   private setPos(pos: number, playing = this.playing) { this.anchor = { pos: Math.max(0, pos), at: Date.now() }; this.playing = playing; this.lastRead = null; }
 
-  async execute(cmd: any) {
+  // Commands arrive fire-and-forget: run them one at a time so a second
+  // command never interleaves with a transfer or seek still mid-flight.
+  execute(cmd: any) {
+    this.ops = this.ops.then(() => this.run(cmd));
+    return this.ops;
+  }
+  private async run(cmd: any) {
     const a = cmd?.action;
     this.d.log(`speaker ${this.device?.name || cmd?.deviceId || '?'}: ${a}${cmd?.trackIds ? ` ${cmd.trackIds.length} tracks @${cmd.index ?? 0}` : ''}${cmd?.pos != null ? ` pos=${cmd.pos}` : ''}${cmd?.level != null ? ` level=${cmd.level}` : ''}`);
     try {
@@ -88,7 +102,13 @@ export class ServerPlayer {
     const idx = keep ? this.queue.findIndex((r) => r.Id === ids[0]) : Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     // The chosen track first (the speaker starts within a second), the rest around it.
     const chosenId = keep ? ids[0] : ids[idx];
-    const at = Math.max(0, rows.findIndex((r) => r.Id === chosenId));
+    let at = rows.findIndex((r) => r.Id === chosenId);
+    if (at < 0) {
+      // The chosen track is gone from the library: land on the first id
+      // after it that survived, not back at the top of the queue.
+      for (let i = ids.indexOf(chosenId) + 1; i < ids.length && at < 0; i++) at = rows.findIndex((r) => r.Id === ids[i]);
+      if (at < 0) at = 0;
+    }
     await this.switchDevice(dev);
     if (!keep) { this.queue = rows; this.original = rows; }
     this.index = at;
@@ -99,6 +119,16 @@ export class ServerPlayer {
   // A mirror tapped a track: play that list here, from that index.
   private async play(cmd: any) {
     if (!this.device) throw new Error('no speaker selected');
+    // After a yield the device is remembered but the transport is gone:
+    // get the speaker back the way a transfer does, or give up loudly
+    // instead of claiming the session with nothing to make sound.
+    if (!this.transport) {
+      const dev = this.d.discovery.get(this.device.id);
+      if (!dev) { this.device = null; this.d.report(null); throw new Error('speaker is gone'); }
+      await this.claimDevice(dev);
+      this.device = dev;
+      this.transport = transportFor(dev);
+    }
     const ids: string[] = Array.isArray(cmd.trackIds) ? cmd.trackIds : [];
     const rows = this.rowsFor(ids); if (!rows.length) return;
     const idx = Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
@@ -110,10 +140,19 @@ export class ServerPlayer {
     this.d.reportQueue(this.queue);
   }
   private async switchDevice(dev: Speaker) {
-    if (this.device && this.device.id !== dev.id && this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; }
+    if (this.device && this.device.id !== dev.id && this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; this.releaseDevice(); }
+    await this.claimDevice(dev);
     this.device = dev;
     if (!this.transport) this.transport = transportFor(dev);
   }
+  // Latest claim wins: whoever held this speaker is stopped first (it yields
+  // and reports its session not-playing), then the device is ours.
+  private async claimDevice(dev: Speaker) {
+    const prev = owners.get(dev.id);
+    if (prev && prev !== this) await prev.yield().catch(() => {});
+    owners.set(dev.id, this);
+  }
+  private releaseDevice() { if (this.device && owners.get(this.device.id) === this) owners.delete(this.device.id); }
   private async start(t: Row, startAt: number, play: boolean) {
     if (!this.transport || !t) return;
     this.starting = true;
@@ -126,11 +165,18 @@ export class ServerPlayer {
       this.d.log(`speaker ${this.device?.name}: playing ${t.Name} from ${Math.round(startAt)}s after ${Date.now() - t0} ms`);
       if (!play) await this.transport.pause().catch(() => {});
       this.setPos(startAt, play);
-      this.logPlay(t.Id);
+      if (play) this.armLogPlay(t.Id);
     } finally { this.starting = false; }
     this.report();
     this.startPolling();
   }
+  // A play is logged once the same track has kept playing for 8 s, the same
+  // confirmation clients get: skip-hunting on a speaker never enters history.
+  private armLogPlay(trackId: string) {
+    if (this.playLogTimer) clearTimeout(this.playLogTimer);
+    this.playLogTimer = setTimeout(() => { this.playLogTimer = null; if (this.playing && this.current?.Id === trackId) this.logPlay(trackId); }, 8000);
+  }
+  private cancelLogPlay() { if (this.playLogTimer) clearTimeout(this.playLogTimer); this.playLogTimer = null; }
   private logPlay(trackId: string) {
     const db = this.d.db;
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(this.uid) as any;
@@ -143,15 +189,23 @@ export class ServerPlayer {
   }
   async toggle() {
     if (!this.transport || !this.current) return;
+    // The poll must not re-anchor off a reading taken while the device is
+    // still flipping state.
+    this.busyUntil = Date.now() + 2000;
     if (this.playing) { await this.transport.pause(); this.setPos(this.position, false); }
     else { await this.transport.resume(); this.setPos(this.position, true); }
     this.report();
   }
   async seek(pos: number) {
     if (!this.transport || !this.current) return;
+    // Readings taken mid-seek are the old position: hold the poll off until
+    // the transport settles (BluOS verifies the landing itself) or 8 s.
+    this.busyUntil = Date.now() + 8000;
     this.setPos(pos); this.report();
-    await this.transport.seek(pos);
-    this.setPos(pos); this.report();
+    try {
+      await this.transport.seek(pos);
+      this.setPos(pos); this.report();
+    } finally { this.busyUntil = 0; }
   }
   async setVolume(level: number) {
     this.volume = Math.max(0, Math.min(100, Math.round(level)));
@@ -200,11 +254,13 @@ export class ServerPlayer {
   // Another client took the session over: silence the speaker, keep the queue.
   async yield() {
     this.stopPolling();
+    this.cancelLogPlay();
     if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; }
+    this.releaseDevice();
     this.setPos(this.position, false);
     this.d.report(null);
   }
-  async stopAll() { this.stopPolling(); if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; } }
+  async stopAll() { this.stopPolling(); this.cancelLogPlay(); if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; } this.releaseDevice(); }
 
   // Follow the speaker's own clock; move on when a track ends; notice when
   // someone paused or stopped it from the speaker's own app.
@@ -222,16 +278,26 @@ export class ServerPlayer {
   private stopPolling() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   private async tick() {
     if (!this.transport || this.starting || !this.current) return;
+    if (Date.now() < this.busyUntil) return;
     const t0 = Date.now();
     const s = await this.transport.status();
+    if (Date.now() < this.busyUntil) return; // a seek/toggle started while we read: stale
     const readAt = (t0 + Date.now()) / 2;
     // Mirror the speaker's own volume (someone used the dial or the BluOS
     // app), but never a muted reading and never right after we set it.
     if (typeof s.volume === 'number' && !s.muted && Date.now() > this.volumeHeldUntil) this.volume = s.volume;
+    // The transport lost the device under us (socket error, receiver hung
+    // up): release the session cleanly, never relaunch on a dead connection.
+    if (s.gone) { await this.yield(); return; }
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
     // does not always know a stream's length).
     const nearEnd = this.duration > 0 && this.position >= this.duration - 3;
+    // 'ended' is only believed near the end: Cast reports FINISHED for an
+    // external stop too, and skipping ahead on that would relaunch a
+    // speaker someone just silenced. Anything else is an external stop.
+    const atEnd = this.duration > 0 && (this.position >= this.duration - 5 || this.position >= this.duration * 0.95);
+    if (s.ended && !atEnd) { await this.yield(); return; }
     if (s.ended || (s.state === 'stop' && this.playing && nearEnd)) { await this.next(true); return; }
     if (s.state === 'IDLE' || s.state === 'stop') {
       // Stopped from the speaker itself (or the stream failed): show it paused where it was.

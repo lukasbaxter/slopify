@@ -50,3 +50,36 @@ describe('library matching for catalog releases', () => {
     expect(r.releases.find((x: any) => x.album_id === 'mb-worlds').requestStatus).toBe('queued');
   });
 });
+
+// The radar's 6h cache holds only the raw releases: whether one is in the
+// library or mid-request changes by the minute and is flagged per look.
+describe('release radar', () => {
+  it('serves fresh inLibrary/requestStatus from the cached raw list, without refetching discographies', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-')));
+    db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('tycho', 'Tycho', 'tycho')").run();
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-dive', 'Dive', 'tycho', 'Tycho', '/m/dive', 1, 0, 'dive')").run();
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES ('t-dive', '/m/dive/01.flac', 0, 0, 'A Walk', 'Tycho', '["Tycho"]', '["tycho"]', 'al-dive', 'Dive', 'Tycho', 0)`).run();
+    db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', 't-dive', Date.now());
+    const date = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    let status = new Map([['mb-ih', { status: 'queued', updated: 0 }]]);
+    let discogCalls = 0;
+    const lidarr: any = {
+      enabled: true,
+      statuses: async () => status,
+      discography: async () => { discogCalls++; return { artist: { name: 'Tycho', image: null }, releases: [{ album_id: 'mb-ih', artist: 'Tycho', title: 'Infinite Health', rtype: 'Album', year: date.slice(0, 4), date, image: null, total_tracks: 10, secondary: [] }] }; },
+    };
+    const app = Fastify();
+    app.decorate('requireUser', async () => {});
+    registerDiscover(app, db, { lidarr });
+    const first = (await app.inject({ url: '/api/radar' })).json();
+    expect(first.releases[0]).toMatchObject({ album_id: 'mb-ih', requestStatus: 'queued', inLibrary: null });
+    // it downloaded in the meantime: the cached radar must show that
+    status = new Map();
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-ih', 'Infinite Health', 'tycho', 'Tycho', '/m/ih', 10, 0, 'infinite health')").run();
+    const second = (await app.inject({ url: '/api/radar' })).json();
+    expect(second.releases[0]).toMatchObject({ album_id: 'mb-ih', requestStatus: null, inLibrary: 'al-ih', localName: 'Infinite Health' });
+    expect(discogCalls).toBe(1);
+    await app.close();
+  });
+});

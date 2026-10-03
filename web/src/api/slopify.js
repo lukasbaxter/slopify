@@ -120,8 +120,10 @@ export class Slopify {
   get isAdmin() { return this.user?.role === 'admin'; }
 
   // --- profile picture ------------------------------------------------------
-  userImageUrl({ maxHeight = 96 } = {}) {
-    const q = { size: String(maxHeight) };
+  userImageUrl() {
+    // One URL for every spot (the server has a single 512px rendition anyway):
+    // per-size URLs cached as separate images and drifted apart after a change.
+    const q = {};
     if (this._bust?.user) q.v = String(this._bust.user);
     return this._url(`/api/users/${this.userId}/avatar`, q);
   }

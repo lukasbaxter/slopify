@@ -57,7 +57,13 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   app.get('/api/users/:id/avatar', async (req, reply) => {
     const p = avatarPath(String((req.params as any).id).replace(/[^\w-]/g, ''));
     if (!fs.existsSync(p)) return reply.code(404).send();
-    reply.header('Cache-Control', 'private, max-age=600').type('image/jpeg');
+    // Revalidate every time (cheap 304s): a max-age split the header and the
+    // settings menu into separately-cached copies that disagreed after an
+    // avatar change.
+    const st = fs.statSync(p);
+    const tag = `"${st.mtimeMs}-${st.size}"`;
+    reply.header('Cache-Control', 'private, no-cache').header('ETag', tag).type('image/jpeg');
+    if (req.headers['if-none-match'] === tag) return reply.code(304).send();
     return reply.send(fs.createReadStream(p));
   });
   const rawBody = async (req: any) => { const chunks: Buffer[] = []; let n = 0; for await (const c of req.raw) { n += c.length; if (n > 12 * 1024 * 1024) throw new Error('too large'); chunks.push(c); } return Buffer.concat(chunks); };

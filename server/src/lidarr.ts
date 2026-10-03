@@ -32,6 +32,12 @@ export type AlbumState = {
 };
 
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+// Only real URLs leave this module: Lidarr swaps an added artist's remote
+// image for its own /MediaCover path, which no browser here can reach.
+const webImage = (images: any[] | undefined, kind: string) => {
+  const u = images?.find((i: any) => i.coverType === kind)?.remoteUrl || images?.[0]?.remoteUrl || null;
+  return u && /^https?:/.test(u) ? u : null;
+};
 
 const releaseOf = (a: any): Release => ({
   album_id: a.foreignAlbumId,
@@ -40,7 +46,7 @@ const releaseOf = (a: any): Release => ({
   rtype: (a.secondaryTypes || []).includes('Compilation') ? 'Compilation' : a.albumType || 'Album',
   year: String(a.releaseDate || '').slice(0, 4),
   date: String(a.releaseDate || '').slice(0, 10),
-  image: a.images?.find((i: any) => i.coverType === 'cover')?.remoteUrl || a.images?.[0]?.remoteUrl || null,
+  image: webImage(a.images, 'cover'),
   total_tracks: a.statistics?.totalTrackCount ?? 0,
 });
 
@@ -152,7 +158,7 @@ export function lidarrClient(opts: LidarrOptions) {
       if (!artist?.id) return { artist: null, releases: [] };
       const albums = await artistAlbums(artist.id);
       return {
-        artist: { name: artist.artistName, image: artist.images?.find((i: any) => i.coverType === 'poster')?.remoteUrl || artist.images?.[0]?.remoteUrl || null },
+        artist: { name: artist.artistName, image: webImage(artist.images, 'poster') },
         releases: albums.map(releaseOf),
       };
     },

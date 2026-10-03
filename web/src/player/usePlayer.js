@@ -833,11 +833,14 @@ export function usePlayer(jf) {
 
   const setVolume = useCallback(
     async (level) => {
-      const act = activePlayerRef.current;
-      if (act && relayRef.current) { relayRef.current.command(act, { action: 'setVolume', level }); setVolumeState(level); return; }
-      // Hold off the poll briefly so it cannot fight the drag.
+      // Hold off whatever reports the volume back (a local device poll, or the
+      // mirrored session's echo while casting) so it cannot yank the handle
+      // back to a stale value -- including the brief 0 a speaker reports while
+      // it applies the change.
       volumeHeldRef.current = Date.now() + 2000;
       setVolumeState(level);
+      const act = activePlayerRef.current;
+      if (act && relayRef.current) { relayRef.current.command(act, { action: 'setVolume', level }); return; }
       const dev = deviceRef.current;
       try {
         if (dev.kind === 'local') audioRef.current.volume = level / 100;
@@ -1809,7 +1812,11 @@ export function usePlayer(jf) {
     : position;
   const shownDuration = relayTarget ? (relayTarget.duration || 0) : duration;
   const shownPlaying = relayTarget ? Boolean(relayTarget.playing) : playing;
-  const shownVolume = relayTarget && typeof relayTarget.volume === 'number' ? relayTarget.volume : volume;
+  // While casting, the slider follows the mirrored session's volume -- except
+  // right after a drag, when the just-set local value wins until the hold
+  // expires (a re-render from the next echo or tick then switches back).
+  const shownVolume = Date.now() < volumeHeldRef.current ? volume
+    : (relayTarget && typeof relayTarget.volume === 'number' ? relayTarget.volume : volume);
   const shownRepeat = relayTarget ? (relayTarget.repeat || 'off') : repeat;
   const shownShuffle = relayTarget ? (relayTarget.shuffle || 'off') : shuffle;
 

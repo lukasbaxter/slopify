@@ -189,12 +189,12 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   };
   const goArtist = (id) => { close(); onOpenArtist(id); };
   const moreItems = asTrack ? [
+    player.addToQueue ? { label: 'Add to queue', icon: G16.queue, onClick: () => player.addToQueue([fullTrack]) } : null,
     onAddTo ? { label: 'Add to playlist', icon: G.plus, sub: [
       onNewPlaylist ? { label: 'New playlist', icon: G.plus, onClick: () => { close(); onNewPlaylist(fullTrack); } } : null,
       onNewPlaylist && playlists.length ? { sep: true } : null,
       ...playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo(p, fullTrack) })),
     ] } : null,
-    player.addToQueue ? { label: 'Add to queue', icon: G16.queue, onClick: () => player.addToQueue([fullTrack]) } : null,
     { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.checkCircle : I.plusCircle, onClick: toggleLike },
     { sep: true },
     { label: 'Go to song radio', icon: G16.radio, onClick: () => { jf.instantMix(nowPlaying.itemId).then((items) => { if (items?.length) player.playQueue(items, 0); }).catch(() => {}); } },

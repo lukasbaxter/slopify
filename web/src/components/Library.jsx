@@ -1117,8 +1117,8 @@ export default function Library({
             const all = (fn) => tracks.length && fn(tracks);
             const isFollowed = isArtist ? (followed[item.Id] ?? Boolean(item.UserData?.IsFavorite)) : false;
             const heroItems = [
-              isArtist ? { label: isFollowed ? 'Unfollow' : 'Follow', icon: MI.follow, onClick: () => toggleFollow(item) } : null,
               { label: 'Add to queue', icon: MI.queue, onClick: () => all((t) => player.addToQueue(t)) },
+              isArtist ? { label: isFollowed ? 'Unfollow' : 'Follow', icon: MI.follow, onClick: () => toggleFollow(item) } : null,
               !isLiked ? { label: 'Go to radio', icon: MI.radio, onClick: () => startMix(item) } : null,
               tracks.length ? { label: 'Add to playlist', icon: MI.plus, sub: [
                 { label: 'New playlist', icon: MI.plus, onClick: () => onNewPlaylist?.(tracks[0]) },

@@ -177,6 +177,7 @@ export default function TrackRow({
 
   // Spotify's row menu, top to bottom. Submenus open on hover.
   const menuItems = [
+    onAddToQueue ? { label: 'Add to queue', icon: I.queue, onClick: () => onAddToQueue(track) } : null,
     { label: 'Add to playlist', icon: I.plus, sub: [
       { label: 'New playlist', icon: I.plus, onClick: () => onNewPlaylist?.(track) },
       playlists.length ? { sep: true } : null,
@@ -184,7 +185,6 @@ export default function TrackRow({
     ] },
     onRemove ? { label: 'Remove from this playlist', icon: I.trash, onClick: () => onRemove(track) } : null,
     { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.checkCircle : I.plusCircle, onClick: () => onLike?.(track, !liked) },
-    onAddToQueue ? { label: 'Add to queue', icon: I.queue, onClick: () => onAddToQueue(track) } : null,
     onExclude ? { label: excluded ? 'Include in your taste profile' : 'Exclude from your taste profile', icon: I.ban, onClick: () => onExclude(track, !excluded) } : null,
     { sep: true },
     onRadio ? { label: 'Go to song radio', icon: I.radio, onClick: () => onRadio(track) } : null,

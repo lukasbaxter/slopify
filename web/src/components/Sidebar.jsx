@@ -79,24 +79,24 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     if (enqueue) player.addToQueue(items); else player.playQueue(items, 0, e.id);
   };
   const menuItems = (e) => e.kind === 'liked' ? [
-    { label: 'Play', onClick: async () => { const { items } = await jf.favoriteTracks(); if (items.length) player.playQueue(items, 0, 'liked'); } },
     { label: 'Add to queue', onClick: async () => { const { items } = await jf.favoriteTracks(); player.addToQueue(items); } },
+    { label: 'Play', onClick: async () => { const { items } = await jf.favoriteTracks(); if (items.length) player.playQueue(items, 0, 'liked'); } },
   ] : e.kind === 'album' ? [
-    { label: 'Play', onClick: () => playEntry(e) },
     { label: 'Add to queue', onClick: () => playEntry(e, true) },
+    { label: 'Play', onClick: () => playEntry(e) },
     { sep: true },
     { label: pinned.has(e.id) ? 'Unpin album' : 'Pin album', onClick: () => togglePin(e.id) },
     e.item.AlbumArtists?.[0]?.Id ? { label: 'Go to artist', onClick: () => onOpenArtist?.(e.item.AlbumArtists[0].Id) } : null,
     { label: 'Remove from Your Library', onClick: () => onFollowAlbum?.(e.item, false) },
   ] : e.kind === 'artist' ? [
-    { label: 'Play', onClick: () => playEntry(e) },
     { label: 'Add to queue', onClick: () => playEntry(e, true) },
+    { label: 'Play', onClick: () => playEntry(e) },
     { sep: true },
     { label: pinned.has(e.id) ? 'Unpin artist' : 'Pin artist', onClick: () => togglePin(e.id) },
     { label: 'Unfollow', onClick: async () => { await jf.setFavorite(e.id, false).catch(() => {}); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); } },
   ] : [
-    { label: 'Play', onClick: () => playEntry(e) },
     { label: 'Add to queue', onClick: () => playEntry(e, true) },
+    { label: 'Play', onClick: () => playEntry(e) },
     { sep: true },
     { label: pinned.has(e.id) ? 'Unpin playlist' : 'Pin playlist', onClick: () => togglePin(e.id) },
     { label: 'Edit details', onClick: () => onEditPlaylist?.(e.item) },

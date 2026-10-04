@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60000,
-  use: { baseURL: 'http://localhost:8080', trace: 'retain-on-failure', launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } },
+  use: { baseURL: 'http://localhost:8080', trace: 'retain-on-failure' },
   workers: 1, // the flows share one server and one admin account
   webServer: {
     // NODE_ENV=test keeps the background tasks tick off; SAVE_TO_LIBRARY=0
@@ -14,5 +14,11 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120000,
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }, { name: 'phone', use: { browserName: 'chromium', viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true } }],
+  // The autoplay flag is Chrome's own: set per project, so a WebKit browser a
+  // test launches itself (e2e/remote.spec.ts) does not get it (WebKit on
+  // Linux refuses to start with an option it does not know).
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium', launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } } },
+    { name: 'phone', use: { browserName: 'chromium', viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } } },
+  ],
 });

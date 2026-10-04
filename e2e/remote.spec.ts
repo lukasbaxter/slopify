@@ -26,7 +26,7 @@ test('the desktop picks songs for the phone that is playing', async ({ browser }
   // The phone is WebKit with its real autoplay rules (an iPhone, Safari):
   // sound may only start after a tap, so a song chosen elsewhere has to play
   // on the element the tap unlocked.
-  const wk = await webkit.launch();
+  const wk = await webkit.launch({ args: [] }); // none of the Chrome-only flags from the config
   const phone = await device(wk, true);
   const desk = await device(browser, false);
 

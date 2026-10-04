@@ -25,17 +25,18 @@ describe("an artist page's Popular", () => {
     const once = rows.filter((r) => rows.filter((x) => x.title === r.title).length === 1);
     expect(once.length).toBeGreaterThan(2);
     const [a, b, c] = [once[once.length - 1], once[1], once[0]];
-    // Deezer's top tracks: the last title alphabetically, then the second (with a feature credit).
-    const fetcher = (async (url: string) => (url.includes('/search/artist')
-      ? ok({ data: [{ id: 77, name: 'The Fixture Band' }] })
-      : ok({ data: [{ title: a.title }, { title: `${b.title} (feat. Someone)` }, { title: 'Not In This Library' }] }))) as any;
+    // ListenBrainz listen counts: the last title alphabetically most, then the
+    // second (credited with a feature there).
+    const fetcher = (async (url: string) => (url.includes('musicbrainz.org')
+      ? ok({ artists: [{ id: 'mbid-1', name: 'The Fixture Band', score: 100 }] })
+      : ok([{ recording_name: a.title, total_listen_count: 900 }, { recording_name: `${b.title} (feat. Someone)`, total_listen_count: 400 }, { recording_name: 'Not In This Library', total_listen_count: 5000 }]))) as any;
     // One play of the first title alphabetically: it leads the rest.
     db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', c.id, Date.now());
     const order = await popularOrder(db, artist, { fetcher });
     expect(order.slice(0, 3)).toEqual([a.id, b.id, c.id]);
     expect(new Set(order).size).toBe(rows.length); // every song is still listed, after the Popular ones
   });
-  it('without Deezer it is plays alone', async () => {
+  it('without ListenBrainz it is plays alone', async () => {
     const artist = db.prepare("SELECT id, name FROM artists WHERE name = 'Ada Lovelace'").get();
     const failing = (async () => { throw new Error('offline'); }) as any;
     const order = await popularOrder(db, artist, { fetcher: failing });

@@ -81,11 +81,13 @@ export async function similarInLibrary(db: DB, a: { id: string; name: string }, 
   return remember(`similar:${a.id}`, out);
 }
 
-// An artist's songs in the order people actually play them: Deezer's top
-// tracks for the artist (the world's listening, cached a week), matched to the
-// library one row per song title (a remix or live take is its own title), then
-// everything else of theirs by plays on this server, then by title. Without
-// Deezer (offline, unknown artist) it is plays alone.
+// An artist's songs in the order people actually play them: worldwide listen
+// counts from ListenBrainz (their open listening data, keyed by the artist's
+// MusicBrainz id, found by exact name; both cached a week), one row per song
+// title (a remix or live take is its own title), then everything else of
+// theirs by plays on this server, then by title. Without an answer (offline,
+// an artist they do not know) it is this server's plays alone. No keys needed.
+const MB_UA = 'Slopify/0.1 (self-hosted music server; https://github.com/lukasbaxter/slopify)';
 export async function popularOrder(db: DB, a: { id: string; name: string }, o: { fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<string[]> {
   const rows = db.prepare('SELECT t.id, t.title, t.album_id, al.artist_id FROM tracks t JOIN albums al ON al.id = t.album_id WHERE t.artist_ids LIKE ?').all(`%"${a.id}"%`) as { id: string; title: string; album_id: string; artist_id: string }[];
   if (!rows.length) return [];
@@ -97,23 +99,33 @@ export async function popularOrder(db: DB, a: { id: string; name: string }, o: {
   // Within one title: the artist's own release first, then the most played.
   const better = (x: typeof rows[number], y: typeof rows[number]) =>
     Number(y.artist_id === a.id) - Number(x.artist_id === a.id) || (plays.get(y.id) || 0) - (plays.get(x.id) || 0);
-  let top: string[] = cached(`top:${a.id}`, 7 * 24 * 60 * 60 * 1000);
-  if (!top) {
+  let listens: Record<string, number> | null = cached(`listens:${a.id}`, 7 * 24 * 60 * 60 * 1000);
+  if (!listens) {
     const f = o.fetcher || fetch;
-    const json = (url: string) => f(url, { signal: AbortSignal.timeout(8000) }).then(async (r) => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.json() as any; });
+    const json = (url: string) => f(url, { headers: { 'User-Agent': MB_UA, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) })
+      .then(async (r) => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.json() as any; });
     try {
-      const s = await json(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=5`);
-      const dz = (s.data || []).find((x: any) => norm(x.name) === norm(a.name));
-      const t = dz ? await json(`https://api.deezer.com/artist/${dz.id}/top?limit=50`) : { data: [] };
-      top = remember(`top:${a.id}`, (t.data || []).map((x: any) => songTitle(x.title_short || x.title)).filter(Boolean));
-    } catch (e: any) { o.log?.(`popular ${a.name}: ${e.message}`); top = []; }
+      const mb = await json(`https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(`artist:"${a.name.replace(/"/g, '')}"`)}&limit=5&fmt=json`);
+      const artist = (mb.artists || []).filter((x: any) => norm(x.name) === norm(a.name)).sort((x: any, y: any) => (y.score || 0) - (x.score || 0))[0];
+      const out: Record<string, number> = {};
+      if (artist?.id) {
+        const top = await json(`https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/${artist.id}`);
+        for (const r of Array.isArray(top) ? top : []) {
+          const t = songTitle(r.recording_name || '');
+          if (t) out[t] = Math.max(out[t] || 0, Number(r.total_listen_count) || 0);
+        }
+      }
+      listens = remember(`listens:${a.id}`, out);
+    } catch (e: any) { o.log?.(`popular ${a.name}: ${e.message}`); listens = {}; }
   }
   const byTitle = new Map<string, typeof rows>();
   for (const r of rows) { const k = songTitle(r.title); byTitle.set(k, [...(byTitle.get(k) || []), r]); }
+  const known = [...byTitle.keys()].filter((t) => (listens![t] || 0) > 0).sort((x, y) => listens![y] - listens![x]);
   const out: string[] = []; const taken = new Set<string>();
-  for (const title of top) {
-    const pick = (byTitle.get(title) || []).filter((r) => !taken.has(r.id)).sort(better)[0];
-    if (pick && !out.includes(pick.id)) { out.push(pick.id); for (const r of byTitle.get(title) || []) taken.add(r.id); }
+  for (const title of known) {
+    const group = byTitle.get(title)!;
+    out.push(group.slice().sort(better)[0].id);
+    for (const r of group) taken.add(r.id);
   }
   const rest = rows.filter((r) => !out.includes(r.id))
     .sort((x, y) => (plays.get(y.id) || 0) - (plays.get(x.id) || 0) || Number(taken.has(x.id)) - Number(taken.has(y.id)) || x.title.localeCompare(y.title));

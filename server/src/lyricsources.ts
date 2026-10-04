@@ -16,6 +16,23 @@ const defaultFetch: Fetch = (url, init) => fetch(url, { ...init, headers: { 'Use
 // live version keeps its words, so it does not match the plain song.
 export const normTitle = (t: string) => String(t || '').normalize('NFKC').toLowerCase()
   .replace(/\s*[([](?:feat|ft|with|prod)\.?\s[^)\]]*[)\]]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+// A library title often carries more than the catalogues do: "Biutyful With
+// Angel Moon", "Song - Remastered 2011", "Song (Radio Edit)". These are the
+// forms worth searching for and matching on; the alignment that follows is
+// what proves a match, so generous here costs nothing.
+export function titleVariants(t: string): string[] {
+  const v = new Set<string>([String(t || '').trim()]);
+  const noBrackets = String(t || '').replace(/\s*[([][^)\]]*[)\]]/g, '').trim();
+  v.add(noBrackets);
+  v.add(String(t || '').split(/\s+[-–—]\s+/)[0].trim());
+  v.add(noBrackets.split(/\s+[-–—]\s+/)[0].replace(/\s+(?:feat\.?|ft\.?|featuring|with|x)\s+.*$/i, '').trim());
+  return [...v].filter(Boolean);
+}
+const sameTitle = (theirs: string, ours: string) => {
+  const mine = new Set(titleVariants(ours).map(normTitle));
+  return titleVariants(theirs).some((x) => mine.has(normTitle(x)));
+};
+
 const normName = (t: string) => String(t || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const sameArtist = (theirs: string, ours: string) => { const a = normName(theirs), b = normName(ours); return Boolean(a && b) && (a.includes(b) || b.includes(a)); };
 
@@ -32,12 +49,17 @@ export function cleanNetease(lrc: string): LyricLine[] | null {
 
 export async function fromNetease(q: { artist: string; title: string; durationMs: number }, f: Fetch = defaultFetch): Promise<Candidate | null> {
   const H = { headers: { Referer: 'https://music.163.com' } };
-  const r = await f(`https://music.163.com/api/search/get?${new URLSearchParams({ s: `${q.artist} ${q.title}`, type: '1', limit: '10' })}`, H);
-  if (!r.ok) throw new Error(`netease search ${r.status}`);
-  const songs: any[] = (await r.json())?.result?.songs || [];
-  const hits = songs.filter((s) => normTitle(s.name) === normTitle(q.title)
-    && (s.artists || []).some((a: any) => sameArtist(a.name, q.artist))
-    && Math.abs((s.duration || 0) - q.durationMs) <= 4000);
+  const seen = new Set<number>();
+  const hits: any[] = [];
+  for (const title of titleVariants(q.title)) {
+    const r = await f(`https://music.163.com/api/search/get?${new URLSearchParams({ s: `${q.artist} ${title}`, type: '1', limit: '10' })}`, H);
+    if (!r.ok) throw new Error(`netease search ${r.status}`);
+    for (const s of ((await r.json())?.result?.songs || []) as any[]) {
+      if (seen.has(s.id) || !sameTitle(s.name, q.title) || !(s.artists || []).some((a: any) => sameArtist(a.name, q.artist)) || Math.abs((s.duration || 0) - q.durationMs) > 4000) continue;
+      seen.add(s.id); hits.push(s);
+    }
+    if (hits.length) break;
+  }
   for (const s of hits.slice(0, 3)) {
     const lr = await f(`https://music.163.com/api/song/lyric?id=${s.id}&lv=1&kv=1&tv=-1`, H);
     if (!lr.ok) continue;
@@ -92,12 +114,16 @@ export function parseGeniusHtml(html: string): LyricLine[] | null {
 }
 
 export async function fromGenius(q: { artist: string; title: string }, f: Fetch = defaultFetch): Promise<Candidate | null> {
-  const r = await f(`https://genius.com/api/search/multi?${new URLSearchParams({ q: `${q.artist} ${q.title}` })}`);
-  if (!r.ok) throw new Error(`genius search ${r.status}`);
-  const sections: any[] = (await r.json())?.response?.sections || [];
-  const hits = sections.filter((s) => s.type === 'song').flatMap((s) => s.hits || []).map((h) => h.result)
-    .filter((s: any) => s && !/genius/i.test(s.primary_artist?.name || '') // translation and romanization pages
-      && normTitle(s.title) === normTitle(q.title) && sameArtist(s.artist_names || s.primary_artist?.name || '', q.artist));
+  let hits: any[] = [];
+  for (const title of titleVariants(q.title)) {
+    const r = await f(`https://genius.com/api/search/multi?${new URLSearchParams({ q: `${q.artist} ${title}` })}`);
+    if (!r.ok) throw new Error(`genius search ${r.status}`);
+    const sections: any[] = (await r.json())?.response?.sections || [];
+    hits = sections.filter((s) => s.type === 'song').flatMap((s) => s.hits || []).map((h) => h.result)
+      .filter((s: any) => s && !/genius/i.test(s.primary_artist?.name || '') // translation and romanization pages
+        && sameTitle(s.title, q.title) && sameArtist(s.artist_names || s.primary_artist?.name || '', q.artist));
+    if (hits.length) break;
+  }
   for (const s of hits.slice(0, 2)) {
     const page = await f(s.url);
     if (!page.ok) continue;

@@ -29,7 +29,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { parseLrc, type LyricLine } from './lyrics.js';
 import { lrclibLookup, storeLyricsFromRecord } from './enrich.js';
-import { fromNetease, fromGenius, type Candidate, type Fetch } from './lyricsources.js';
+import { fromNetease, fromGenius, titleVariants, type Candidate, type Fetch } from './lyricsources.js';
 import type { TaskDef, TaskCtx } from './tasks.js';
 
 export type AlignedLine = { start: number | null; end: number | null; prob: number | null };
@@ -282,8 +282,8 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
     if (!usable(prev)) {
       candidates.push(async () => {
         ctx.step('Looking for lyrics on LrcLib');
-        for (const a of [...new Set([artist, t.artist])]) {
-          const rec = await lrclibLookup(db, lrclib, { title: t.title, artist: a, album: t.album, durationMs: t.duration_ms }, { fresh: true }).catch(() => null);
+        for (const [a, title] of [...new Set([artist, t.artist])].flatMap((x) => titleVariants(t.title).map((v) => [x, v] as const))) {
+          const rec = await lrclibLookup(db, lrclib, { title, artist: a, album: t.album, durationMs: t.duration_ms }, { fresh: true }).catch(() => null);
           if (rec && !rec.instrumental) {
             const lines = rec.syncedLyrics ? parseLrc(rec.syncedLyrics) : [];
             if (lines.some((l) => l.start != null)) return { source: 'lrclib', kind: 'synced', lines, title: rec.trackName, artist: rec.artistName } as any;

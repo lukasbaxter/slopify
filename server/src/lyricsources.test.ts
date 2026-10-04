@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseGeniusHtml, cleanNetease, fromNetease, fromGenius, normTitle } from './lyricsources.js';
+import { parseGeniusHtml, cleanNetease, fromNetease, fromGenius, normTitle, titleVariants } from './lyricsources.js';
 
 // Real responses, trimmed: Genius' page for Coldplay "Biutyful" and NetEase's
 // search and lyric answers for it.
@@ -54,6 +54,13 @@ describe('finding a song', () => {
     const f = async (url: string) => (url.includes('/api/search') ? res(search) : res(geniusPage));
     expect(await fromGenius({ artist: 'Coldplay', title: 'Biutyful' }, f as any)).toMatchObject({ source: 'genius', kind: 'plain', artist: 'Coldplay' });
     expect(await fromGenius({ artist: 'SOSA', title: 'Its Time to Move' }, f as any)).toBeNull();
+  });
+  it('a library title with extras still finds the song ("Biutyful With Angel Moon" is "Biutyful")', async () => {
+    expect(titleVariants('Biutyful With Angel Moon')).toContain('Biutyful');
+    expect(titleVariants('Hayloft - Remastered 2011')).toContain('Hayloft');
+    expect(titleVariants('Stay (Radio Edit)')).toContain('Stay');
+    const c = await fromNetease({ artist: 'Coldplay', title: 'Biutyful With Angel Moon', durationMs: 192000 }, ne as any);
+    expect(c).toMatchObject({ source: 'netease', title: 'Biutyful' });
   });
   it('a featured credit does not stop a match; a remix is not the plain song', () => {
     expect(normTitle('Stay (feat. Justin Bieber)')).toBe(normTitle('Stay'));

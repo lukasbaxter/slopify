@@ -541,6 +541,10 @@ async def test_search(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
     titles = [r.title for r in result[E].result]
     assert titles[0] == "Radiohead"
     assert "OK Computer · Radiohead" in titles
+    exact = await hass.services.async_call(
+        MP, "search_media", {ATTR_ENTITY_ID: E, "search_query": "kid a"}, blocking=True, return_response=True
+    )
+    assert exact[E].result[0].title == "Kid A · Radiohead", "an exact name comes first"
     only_albums = await hass.services.async_call(
         MP,
         "search_media",

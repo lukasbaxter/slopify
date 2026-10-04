@@ -379,6 +379,9 @@ class Library:
             ]
         if want(MediaClass.TRACK):
             out += [self.track_item(t) for t in found.get("tracks") or []]
+        # An exact name leads (voice assistants play the first result), then
+        # artists, albums, playlists and songs in the order the server ranked.
+        out.sort(key=lambda item: item.title.split(" · ")[0].casefold() != text.casefold())
         return SearchMedia(result=out)
 
     # --- play_media -------------------------------------------------------------

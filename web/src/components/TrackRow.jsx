@@ -219,9 +219,9 @@ export default function TrackRow({
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      // onRowOpen (search rows): the row itself navigates (the song's album);
-      // playing stays on the number / play button and the card's own play.
-      onDoubleClick={onRowOpen || onPlay}
+      // onRowOpen (search rows): a tap on the row navigates (the song's
+      // album); a mouse double-click still plays, like every other list.
+      onDoubleClick={onPlay}
       onContextMenu={openMenuAt}
       // Phone: the number / play button is hidden, so a tap on the row itself
       // plays (Spotify); the same on any touch screen (iPad), where there is

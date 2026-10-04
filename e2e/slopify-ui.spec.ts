@@ -37,8 +37,12 @@ test('search, lyrics in now playing, phone tab bar', async ({ page, isMobile }) 
   await box.fill('harbour');
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.trackrow').first()).toContainText(/harbour/i);
-  // play it, open now playing, lyrics tab shows lines
-  await page.locator('.trackrow').first().dblclick();
+  // play it, open now playing, lyrics tab shows lines. Mouse: double-click
+  // plays. Phone: a tap on a search result opens its album; a tap there plays.
+  if (isMobile) {
+    await page.locator('.trackrow').first().click();
+    await page.locator('.trackrow', { hasText: /harbour/i }).first().click();
+  } else await page.locator('.trackrow').first().dblclick();
   await expect(page.locator('.player button[title="Pause"], .player button[aria-label="Pause"]').first()).toBeVisible({ timeout: 20000 });
   if (isMobile) { await expect(page.locator('.tabbar')).toBeVisible(); await page.locator('.player-row').click(); }
   else await page.locator('.player button[title*="Now playing" i], .player button[aria-label*="Now playing" i], .player .expand').first().click().catch(() => {});

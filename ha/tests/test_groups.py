@@ -94,3 +94,12 @@ async def test_picking_an_account_already_on_the_group_does_not_restart_it(
     await call(hass, LOFT, "select_source", source="Slopify - henrybaxter")
     await settle(hass, fake)
     assert fake.commands_of(HENRY_ID) == []
+
+
+async def test_a_server_without_groups_says_to_update(
+    hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify
+) -> None:
+    fake.groups_supported = False
+    fake.group_calls.clear()
+    with pytest.raises(ServiceValidationError, match="Update the server"):
+        await call(hass, DEN, "join", group_members=[LOFT])

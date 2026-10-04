@@ -183,6 +183,7 @@ class FakeSlopify:
         self.socket_user: dict[int, str] = {}
         self.commands_by_user: list[tuple[str, dict[str, Any]]] = []
         self.groups: list[list[str]] = []
+        self.groups_supported = True
         self.group_calls: list[tuple[str, dict[str, Any]]] = []
         self.url = ""
         self._runner: web.AppRunner | None = None
@@ -347,6 +348,8 @@ class FakeSlopify:
     async def _group_join(self, request: web.Request) -> web.StreamResponse:
         if not self._user(request):
             return web.json_response({"error": "unauthorized"}, status=401)
+        if not self.groups_supported:
+            return web.json_response({"error": "not found"}, status=404)
         body = await request.json()
         self.group_calls.append(("join", body))
         ids = [body["leader"], *body["members"]]

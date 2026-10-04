@@ -37,7 +37,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import Account, SlopifyConfigEntry, SlopifyData, account_label
-from .api import CannotConnect, SlopifyError
+from .api import CannotConnect, NotFound, SlopifyError
 from .const import BROWSE_IMAGE_SIZE, CONF_DEFAULT_SOURCE, DEFAULT_SOURCE_LAST, DOMAIN, PLAYER_IMAGE_SIZE
 from .library import Library, MediaNotFound, Playable, UnsupportedMedia, valid_image_id
 from .model import Target, as_dict, current_key, handoff, last_speaker_key, position_now, targets
@@ -631,6 +631,8 @@ class SlopifySpeaker(_SlopifyMedia):
         members = [self._speaker_of(e) for e in group_members if e != self.entity_id]
         try:
             await self._data.api.post("/api/speakers/groups", {"leader": self._speaker_id, "members": members})
+        except NotFound as err:
+            _raise(err, "groups_unsupported")
         except SlopifyError as err:
             _raise(err, "group_failed", error=str(err))
 
@@ -638,6 +640,8 @@ class SlopifySpeaker(_SlopifyMedia):
         """Take this speaker out of its group."""
         try:
             await self._data.api.post("/api/speakers/groups/unjoin", {"speaker": self._speaker_id})
+        except NotFound as err:
+            _raise(err, "groups_unsupported")
         except SlopifyError as err:
             _raise(err, "group_failed", error=str(err))
 

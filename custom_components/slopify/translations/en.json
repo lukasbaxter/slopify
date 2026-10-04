@@ -140,6 +140,9 @@
     },
     "group_failed": {
       "message": "Could not change the speaker group: {error}"
+    },
+    "groups_unsupported": {
+      "message": "This Slopify server does not have speaker groups yet. Update the server, then try again."
     }
   }
 }

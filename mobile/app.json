@@ -7,8 +7,20 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
-    "splash": { "backgroundColor": "#000000", "resizeMode": "contain", "image": "./assets/icon.png" },
-    "ios": { "supportsTablet": true, "bundleIdentifier": "com.lukasbaxter.slopify" },
+    "splash": {
+      "backgroundColor": "#000000",
+      "resizeMode": "contain",
+      "image": "./assets/icon.png"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lukasbaxter.slopify",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
+    },
     "android": {
       "package": "com.lukasbaxter.slopify",
       "adaptiveIcon": {
@@ -18,6 +30,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       }
     },
-    "plugins": ["expo-status-bar"]
+    "plugins": [
+      "expo-status-bar"
+    ]
   }
 }

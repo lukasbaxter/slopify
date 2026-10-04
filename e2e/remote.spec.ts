@@ -105,3 +105,34 @@ test('a phone picks a song from Liked Songs for the laptop that is playing', asy
   await expect.poll(() => nowTitle(phone), { timeout: 15000 }).toContain(title.slice(0, 12));
 });
 
+
+test('closing the phone app never pauses the laptop; a lock-screen pause still does', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  const desk = await device(browser, false);
+  const pctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true });
+  // Keep the page's lock-screen handlers where the test can press them.
+  await pctx.addInitScript(() => {
+    const ms = navigator.mediaSession as any; const handlers: Record<string, any> = {};
+    (window as any).__ms = handlers;
+    const orig = ms.setActionHandler.bind(ms);
+    ms.setActionHandler = (a: string, fn: any) => { handlers[a] = fn; try { orig(a, fn); } catch { /* unsupported */ } };
+  });
+  const phone = await pctx.newPage(); await login(phone); await waitForLibrary(phone);
+  let toggles = 0;
+  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && p.includes('"action":"toggle"')) toggles += 1; }));
+  await phone.reload(); await waitForLibrary(phone);
+  // The laptop plays; the phone shows it.
+  await openAlbum(desk, 'First Light');
+  await desk.locator('.trackrow').nth(0).dblclick();
+  await expect.poll(() => nowTitle(phone), { timeout: 20000 }).toContain('River Harbour');
+  await expect.poll(() => phone.evaluate(() => typeof (window as any).__ms.pause), { timeout: 10000 }).toBe('function');
+  await expect.poll(() => phone.evaluate(() => navigator.mediaSession.playbackState), { timeout: 10000 }).toBe('playing');
+  // iOS pauses the stand-in session as the app closes: dropped.
+  await phone.evaluate(() => { (window as any).__ms.pause(); window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: 'background' } })); });
+  await phone.waitForTimeout(1600);
+  expect(toggles).toBe(0);
+  // A real lock-screen pause: reaches the laptop a moment later.
+  await phone.evaluate(() => (window as any).__ms.pause());
+  await phone.waitForTimeout(1500);
+  await expect.poll(() => toggles, { timeout: 4000 }).toBe(1);
+});

@@ -68,7 +68,12 @@ export default function App() {
       // The listener sets Ambient as it starts observing: put Playback back after it.
       setTimeout(musicSession, 300);
     })();
-    const appState = AppState.addEventListener('change', (s) => { if (s === 'active') musicSession(); });
+    const appState = AppState.addEventListener('change', (s) => {
+      if (s === 'active') musicSession();
+      // The page holds lock-screen play/pause for other devices briefly and
+      // drops it when the app is leaving (iOS pauses that session on close).
+      web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: ${JSON.stringify(s)} } })); true;`);
+    });
     return () => { try { sub?.remove(); } catch { /* gone */ } appState.remove(); };
   }, []);
 

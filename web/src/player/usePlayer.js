@@ -7,6 +7,19 @@ import { createTrackCache } from './trackCache.js';
 // among possibly several (the relay numbers those for the OTHER clients).
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
+// A lock-screen play/pause meant for another device, held for a moment and
+// dropped if the app is closing (see the Media Session handlers).
+const remotePauseHold = (() => {
+  let timer = null;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', cancel);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') cancel(); });
+    window.addEventListener('slopify:appstate', (e) => { if (e.detail?.state !== 'active') cancel(); });
+  }
+  return { start(fn) { cancel(); timer = setTimeout(() => { timer = null; fn(); }, 1000); }, cancel };
+})();
+
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
@@ -1867,7 +1880,7 @@ export function usePlayer(jf) {
       else if (!shownPlaying && !el.paused) el.pause();
     }
   };
-  msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync };
+  msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
   const msNote = (m) => {
@@ -1883,8 +1896,20 @@ export function usePlayer(jf) {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     if (!ms) return;
     const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* action unsupported */ } };
-    on('play', () => { if (msRefs.current.playing) msRefs.current.resync(); else msRefs.current.toggle(); });
-    on('pause', () => { if (!msRefs.current.playing) msRefs.current.resync(); else msRefs.current.toggle(); });
+    // While the sound is on another device, iOS sends this page's stand-in
+    // session a 'pause' as the app is closed or switched away from, and it went
+    // to the laptop as a real pause. So a play/pause for a remote session
+    // waits a moment and is dropped if the app goes away meanwhile (a killed
+    // app never sends it at all); a real lock-screen tap arrives a second late.
+    const playPause = (wantPlaying) => () => {
+      const r = msRefs.current;
+      if (r.playing === wantPlaying) { r.resync(); return; }
+      if (!r.remote) { r.toggle(); return; }
+      msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);
+      remotePauseHold.start(() => { msNote('sent'); msRefs.current.toggle(); });
+    };
+    on('play', playPause(true));
+    on('pause', playPause(false));
     on('previoustrack', () => { msNote('previoustrack'); msRefs.current.previous(); });
     on('nexttrack', () => { msNote('nexttrack'); msRefs.current.next(); });
     on('seekto', (d) => { msNote(`seekto ${d?.seekTime} fast=${!!d?.fastSeek}`); if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });

@@ -6,6 +6,7 @@ const fs = require('fs');
 const { Discovery } = require('./discovery');
 const { CastTransport } = require('./transports/cast');
 const { BluOSTransport } = require('./transports/bluos');
+const updater = require('./updater');
 
 // SLOPIFY_DEV=1: load the Vite dev server instead of the shipped web build.
 const isDev = !app.isPackaged && process.env.SLOPIFY_DEV === '1';
@@ -126,6 +127,7 @@ function startDiscovery() {
 
 app.whenReady().then(() => {
   createWindow();
+  updater.start((st) => { if (win && !win.isDestroyed()) win.webContents.send('update:state', st); });
   startDiscovery();
 
   app.on('activate', () => {
@@ -198,6 +200,10 @@ handle('devices:list', () => (discovery ? withSyncInfo(discovery.list()) : []));
 // renderer passes the wanted filename as a `conduit_name` query param, which
 // Jellyfin ignores.
 handle('download', (url) => { if (win) win.webContents.downloadURL(url); return true; });
+// In-app updates (updater.js): the page shows them in the profile menu.
+handle('update:state', () => updater.state());
+handle('update:check', () => updater.check());
+handle('update:install', () => updater.install());
 app.whenReady().then(() => {
   session.defaultSession.on('will-download', (_e, item) => {
     let name = item.getFilename();

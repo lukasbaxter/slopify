@@ -128,6 +128,14 @@ export default function App() {
   const [avatarOk, setAvatarOk] = useState(true);
   const [userMenu, setUserMenu] = useState(false);
   const drawerSwipe = useRef(null);
+  // Desktop app updates (desktop/electron/updater.js): shown in the profile menu.
+  const [update, setUpdate] = useState(null);
+  useEffect(() => {
+    const u = window.conduit?.updates;
+    if (!u) return undefined;
+    u.state().then(setUpdate).catch(() => {});
+    return u.onState(setUpdate);
+  }, []);
   const [appMenu, setAppMenu] = useState(false);
   useEffect(() => {
     if (!appMenu) return undefined;
@@ -1218,6 +1226,20 @@ export default function App() {
                 <button onClick={() => { setUserMenu(false); openHistory(); }}><MenuIco d="M12 8v4l3 2M21 12a9 9 0 1 1-3-6.7M21 3v5h-5" /><span className="phone-only">Listening history</span><span className="desktop-only">History</span></button>
                 <button onClick={() => { setUserMenu(false); openDownloads(); }}><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />Downloads</button>
                 <button onClick={() => { setUserMenu(false); openSettings(); }}><MenuIco d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />Settings</button>
+                {window.conduit?.updates && (
+                  update?.status === 'ready' ? (
+                    <button className="update-ready" onClick={() => { setUserMenu(false); window.conduit.updates.install(); }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />Restart to update{update.version ? ` (${update.version})` : ''}</button>
+                  ) : update?.status === 'checking' || update?.status === 'downloading' ? (
+                    <button disabled><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />{update.status === 'checking' ? 'Checking for updates' : `Downloading ${update.version || 'update'}`}</button>
+                  ) : (
+                    <button onClick={() => {
+                      window.conduit.updates.check().then((st) => {
+                        if (st?.status === 'current') notify('Slopify is up to date');
+                        else if (st?.status === 'error') notify(`Could not check for updates: ${st.error}`);
+                      }).catch((e) => notify(`Could not check for updates: ${e.message}`));
+                    }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />Check for updates</button>
+                  )
+                )}
                 <button onClick={signOut}><MenuIco d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />Log out</button>
               </div>
             )}

@@ -17,7 +17,10 @@ jobs:
         include:
           - os: macos-latest
             script: dist:mac
-            glob: 'desktop/release/*.dmg'
+            # the dmg to install, the zip for in-app updates (desktop/electron/updater.js)
+            glob: |
+              desktop/release/*.dmg
+              desktop/release/*-mac.zip
           - os: windows-latest
             script: dist:win
             glob: 'desktop/release/*.exe'

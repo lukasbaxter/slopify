@@ -60,6 +60,20 @@ contextBridge.exposeInMainWorld('conduit', {
   // Save a track: main names the file and shows the save dialog.
   download: (url) => call('download', url),
 
+  // In-app updates: state() / check() resolve to { status, version, error }
+  // (status idle | checking | downloading | ready | current | error);
+  // onState(cb) returns an unsubscribe; install() restarts into the update.
+  updates: {
+    state: () => call('update:state'),
+    check: () => call('update:check'),
+    install: () => call('update:install'),
+    onState: (cb) => {
+      const handler = (_evt, st) => cb(st);
+      ipcRenderer.on('update:state', handler);
+      return () => ipcRenderer.removeListener('update:state', handler);
+    },
+  },
+
   remote: {
     play: (device, url, meta, startAt = 0) => call('device:play', device, url, meta, startAt),
     resume: (device) => call('device:resume', device),

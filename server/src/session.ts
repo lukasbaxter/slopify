@@ -20,6 +20,7 @@ import { Discovery } from './speakers/discovery.js';
 import { linkedGroups, ServerPlayer } from './speakers/player.js';
 import { BluOSTransport } from './speakers/transports.js';
 import { speakerGroups } from './speakers/groups.js';
+import { SpeakerStates } from './speakers/state.js';
 
 export type Device = { id: string; name: string; kind: string } | null;
 export type Session = {
@@ -121,13 +122,21 @@ export type SessionOptions = { speakers?: boolean; publicUrl?: string; bluosGrou
 
 const SpeakerJoin = z.object({ leader: z.string().min(1).max(128), members: z.array(z.string().min(1).max(128)).max(32) });
 const SpeakerUnjoin = z.object({ speaker: z.string().min(1).max(128) });
+const SpeakerVolume = z.object({ level: z.number().min(0).max(100) });
+const SpeakerInput = z.object({ input: z.string().min(1).max(128) });
+const SpeakerControl = z.object({ action: z.enum(['play', 'pause', 'next', 'previous']) });
 
 export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptions = {}) {
   const log = (m: string) => app.log.error(m);
   const offsetsAll = () => Object.fromEntries((db.prepare("SELECT k, v FROM kv WHERE k LIKE 'offset:%'").all() as any[]).map((r) => [r.k.slice(7), Number(r.v)]));
   const groups = speakerGroups(db);
   // A server speaker in a group carries the group (itself first) for the apps.
-  const withGroup = (d: any) => { const g = groups.groupOf(String(d.id)); return g.length > 1 ? { ...d, group: g } : d; };
+  let states: SpeakerStates | null = null;
+  const withGroup = (d: any) => {
+    const g = groups.groupOf(String(d.id));
+    const state = states?.get(String(d.id));
+    return { ...d, ...(g.length > 1 ? { group: g } : {}), ...(state ? { state } : {}) };
+  };
   const rosterFor = (self: Client, s: Session) => {
     const players: any[] = [], lanDevices: any[] = [];
     for (const c of ofUser(self.uid)) {
@@ -152,7 +161,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   // One virtual client per account ("Home speakers") carries the speakers the
   // server found and, once a session is put on one, plays it (ServerPlayer).
   const discovery = opts.speakers ? new Discovery((list) => { for (const c of clients.values()) if (c.kind === 'server') c.devices = list; for (const uid of new Set([...clients.values()].map((c) => c.uid))) broadcastRoster(uid); }, (m) => app.log.warn(m)) : null;
-  if (discovery) { discovery.start(); app.addHook('onClose', async () => { discovery.stop(); for (const c of clients.values()) await c.player?.stopAll(); }); }
+  if (discovery) { discovery.start(); app.addHook('onClose', async () => { discovery.stop(); states?.stop(); for (const c of clients.values()) await c.player?.stopAll(); }); }
   const speakerToken = (uid: string) => {
     const row = db.prepare("SELECT token FROM tokens WHERE user_id = ? AND kind = 'speaker' LIMIT 1").get(uid) as any;
     if (row) return row.token as string;
@@ -177,6 +186,29 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     clients.set(id, c);
     return c;
   };
+  // --- each speaker on its own (volume, inputs, its own playback) ------------------
+  if (discovery) {
+    states = new SpeakerStates(discovery, () => { for (const uid of new Set([...clients.values()].map((c) => c.uid))) broadcastRoster(uid); });
+    states.start();
+  }
+  const speakerCall = async (reply: any, run: () => Promise<void>) => {
+    if (!states) return reply.code(404).send({ error: 'speakers are off on this server' });
+    try { await run(); return { ok: true }; } catch (e: any) { return reply.code(e.status || 502).send({ error: e.message }); }
+  };
+  const sid = (req: any) => String((req.params as any).id || '');
+  app.post('/api/speakers/:id/volume', { preHandler: (app as any).requireUser }, async (req, reply) => {
+    const b = SpeakerVolume.safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'level 0-100 required' });
+    return speakerCall(reply, () => states!.setVolume(sid(req), b.data.level));
+  });
+  app.post('/api/speakers/:id/input', { preHandler: (app as any).requireUser }, async (req, reply) => {
+    const b = SpeakerInput.safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'input required' });
+    return speakerCall(reply, () => states!.playInput(sid(req), b.data.input));
+  });
+  app.post('/api/speakers/:id/control', { preHandler: (app as any).requireUser }, async (req, reply) => {
+    const b = SpeakerControl.safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'action must be play, pause, next or previous' });
+    return speakerCall(reply, () => states!.control(sid(req), b.data.action));
+  });
+
   // --- speaker groups ------------------------------------------------------------
   groups.onChange(() => {
     for (const uid of new Set([...clients.values()].map((c) => c.uid))) broadcastRoster(uid);

@@ -28,6 +28,21 @@ export const linkedGroups = new Map<string, string[]>();
 // accounts never fight over the same box.
 const owners = new Map<string, ServerPlayer>();
 
+// Someone wants a speaker for something else (one of its own inputs): whoever
+// plays there lets go of it (all of it if it leads their group, else just it).
+export async function releaseSpeaker(id: string) {
+  const p = owners.get(id);
+  if (!p) return;
+  if (p.device?.id === id) await p.yield();
+  else await p.dropMember(id);
+}
+// The speaker's own volume was set directly: the player leading on it keeps
+// that reading instead of fighting it on its next poll.
+export function heldVolume(id: string, level: number) {
+  const p = owners.get(id);
+  if (p && p.device?.id === id) p.holdVolume(level);
+}
+
 export class ServerPlayer {
   queue: Row[] = []; index = -1; original: Row[] = [];
   device: Speaker | null = null; transport: Transport | null = null;
@@ -187,6 +202,17 @@ export class ServerPlayer {
   private async dissolveGroup() {
     for (const m of [...this.members]) await this.unlink(m);
     if (this.device) linkedGroups.delete(this.device.id);
+  }
+  async dropMember(id: string) {
+    const m = this.members.find((x) => x.id === id);
+    if (!m) return;
+    this.ops = this.ops.then(async () => { await this.unlink(m); if (this.device) { if (this.members.length) linkedGroups.set(this.device.id, this.members.map((x) => x.id)); else linkedGroups.delete(this.device.id); } this.report(); }).catch(() => {});
+    return this.ops;
+  }
+  holdVolume(level: number) {
+    this.volume = Math.max(0, Math.min(100, Math.round(level)));
+    this.volumeHeldUntil = Date.now() + 2000;
+    this.report();
   }
   // The household changed the groups while music plays here: follow.
   async regroup() {

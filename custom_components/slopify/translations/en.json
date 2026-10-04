@@ -143,6 +143,9 @@
     },
     "groups_unsupported": {
       "message": "This Slopify server does not have speaker groups yet. Update the server, then try again."
+    },
+    "speaker_unsupported": {
+      "message": "This Slopify server cannot control speakers directly yet. Update the server, then try again."
     }
   }
 }

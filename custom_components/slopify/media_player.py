@@ -15,6 +15,7 @@ from datetime import datetime
 import logging
 import time
 from typing import Any
+from urllib.parse import quote
 
 from homeassistant.components.media_player import (
     ATTR_MEDIA_ENQUEUE,
@@ -553,6 +554,8 @@ class SlopifySpeaker(_SlopifyMedia):
         self._speaker_id = str(speaker["id"])
         self._speaker_name = str(speaker.get("name") or self._speaker_id)
         self._kind = str(speaker.get("kind") or "")
+        self._inputs: list[str] = []
+        self._native = False
         server = entry.data.get("server_id") or entry.unique_id
         self._attr_unique_id = f"{server}-speaker-{self._speaker_id}"
         self._attr_device_info = DeviceInfo(
@@ -577,10 +580,13 @@ class SlopifySpeaker(_SlopifyMedia):
         return Target(f"speaker:{self._speaker_id}", self._speaker_name, f"server:{account.user_id}", self._speaker_id)
 
     def _refresh(self) -> None:
-        here = {str(d["id"]) for d in server_speakers(self._data)}
-        self._attr_available = self._data.session.connected and self._speaker_id in here
+        speakers = server_speakers(self._data)
+        me = next((d for d in speakers if str(d["id"]) == self._speaker_id), {})
+        self._attr_available = self._data.session.connected and bool(me)
+        own = as_dict(me.get("state"))  # the speaker on its own: volume, inputs, its own playback
+        self._inputs = [str(i.get("name")) for i in own.get("inputs") or [] if i.get("name")]
         accounts = self._accounts()
-        self._attr_source_list = [account_label(a) for a in accounts]
+        self._attr_source_list = [account_label(a) for a in accounts] + self._inputs
         # Whose music is on this speaker: playing beats paused.
         best: tuple[Account, str, dict[str, Any]] | None = None
         for account in accounts:
@@ -589,23 +595,85 @@ class SlopifySpeaker(_SlopifyMedia):
                 continue
             if best is None or (np.get("playing") and not best[2].get("playing")):
                 best = (account, active_id, np)
+        self._native = False
+        features = ALWAYS
         if best:
             self._account, self._active_id, self._now_playing = best
             self._attr_state = MediaPlayerState.PLAYING if best[2].get("playing") else MediaPlayerState.PAUSED
             self._attr_source = account_label(best[0])
             received = best[0].session.np_received.get(best[1], time.monotonic())
+            features |= WHILE_ACTIVE
         else:
-            self._account = self._active_id = self._now_playing = None
-            self._attr_state = MediaPlayerState.IDLE
-            self._attr_source = None
+            self._account = self._active_id = None
             received = time.monotonic()
-        self._attr_supported_features = ALWAYS | (WHILE_ACTIVE if best else MediaPlayerEntityFeature(0))
-        me = next((d for d in server_speakers(self._data) if str(d["id"]) == self._speaker_id), {})
+            if own.get("state") in ("play", "stream", "pause", "connecting"):
+                # Playing something of its own (an input, Spotify, the BluOS app).
+                self._native = True
+                self._now_playing = {"itemId": None, "title": own.get("title"), "artist": own.get("artist")}
+                self._attr_state = MediaPlayerState.PLAYING if own.get("playing") else MediaPlayerState.PAUSED
+                self._attr_source = own.get("input")
+                features |= (
+                    MediaPlayerEntityFeature.PAUSE
+                    | MediaPlayerEntityFeature.STOP
+                    | MediaPlayerEntityFeature.NEXT_TRACK
+                    | MediaPlayerEntityFeature.PREVIOUS_TRACK
+                )
+            else:
+                self._now_playing = None
+                self._attr_state = MediaPlayerState.IDLE
+                self._attr_source = None
+        if isinstance(own.get("volume"), (int, float)):
+            features |= (
+                MediaPlayerEntityFeature.VOLUME_SET
+                | MediaPlayerEntityFeature.VOLUME_STEP
+                | MediaPlayerEntityFeature.VOLUME_MUTE
+            )
         if me.get("kind", self._kind) == "bluos":
-            self._attr_supported_features |= MediaPlayerEntityFeature.GROUPING
+            features |= MediaPlayerEntityFeature.GROUPING
+        self._attr_supported_features = features
         group = [str(x) for x in me.get("group") or []]
         self._attr_group_members = [e for e in (self._entity_of(x) for x in group) if e] if len(group) > 1 else []
         self._show(self._now_playing, active=bool(best), received=received)
+        if self._native:
+            self._attr_media_title = own.get("title") or None
+            self._attr_media_artist = own.get("artist") or None
+        # The card's volume is this speaker's own, whoever plays on it.
+        if isinstance(own.get("volume"), (int, float)):
+            self._attr_volume_level = max(0.0, min(1.0, float(own["volume"]) / 100))
+            self._attr_is_volume_muted = self._attr_volume_level == 0 or bool(own.get("muted"))
+
+    async def _speaker_call(self, path: str, body: dict[str, Any]) -> None:
+        try:
+            await self._data.api.post(f"/api/speakers/{quote(self._speaker_id, safe='')}/{path}", body)
+        except NotFound as err:
+            _raise(err, "speaker_unsupported")
+        except SlopifyError as err:
+            _raise(err, "request_failed", error=str(err))
+
+    async def async_set_volume_level(self, volume: float) -> None:
+        """This speaker's own volume."""
+        await self._speaker_call("volume", {"level": round(max(0.0, min(1.0, volume)) * 100)})
+
+    async def async_media_pause(self) -> None:
+        """Pause whatever plays here."""
+        if self._native:
+            await self._speaker_call("control", {"action": "pause"})
+        else:
+            await super().async_media_pause()
+
+    async def async_media_next_track(self) -> None:
+        """Next song."""
+        if self._native:
+            await self._speaker_call("control", {"action": "next"})
+        else:
+            await super().async_media_next_track()
+
+    async def async_media_previous_track(self) -> None:
+        """Previous song."""
+        if self._native:
+            await self._speaker_call("control", {"action": "previous"})
+        else:
+            await super().async_media_previous_track()
 
     def _registry_id(self, speaker_id: str) -> str:
         return f"{self._entry.data.get('server_id') or self._entry.unique_id}-speaker-{speaker_id}"
@@ -657,14 +725,21 @@ class SlopifySpeaker(_SlopifyMedia):
         )
 
     async def async_select_source(self, source: str) -> None:
-        """Bring that account's music to this speaker."""
+        """Bring that account's music to this speaker, or play one of its own inputs."""
+        wanted = (source or "").strip().casefold()
+        is_account = any(account_label(a).casefold() == wanted or a.name.casefold() == wanted for a in self._accounts())
+        if not is_account and wanted in (i.casefold() for i in self._inputs):
+            await self._speaker_call("input", {"input": source})
+            return
         account = self._account_labelled(source)
         playing = not (account is self._account and self.state == MediaPlayerState.PAUSED)
         await move_session(account, self._target(account), playing=playing)
 
     async def async_media_play(self) -> None:
         """Resume what is paused here, or bring the main account's music here."""
-        if self.state == MediaPlayerState.PAUSED:
+        if self._native:
+            await self._speaker_call("control", {"action": "play"})
+        elif self.state == MediaPlayerState.PAUSED:
             await self._send({"action": "toggle"})
         elif self.state == MediaPlayerState.IDLE:
             await move_session(self._data.main, self._target(self._data.main), playing=True)

@@ -37,7 +37,7 @@ export type Verdict =
   | { state: 'verified'; shiftMs: 0 }
   | { state: 'corrected'; shiftMs: number; lines: LyricLine[] }
   | { state: 'synced'; lines: LyricLine[] }
-  | { state: 'unsure'; reason: string };
+  | { state: 'unsure'; reason: string; agree?: number };
 
 const WORD = /[\p{L}\p{N}]/u;
 const median = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
@@ -51,7 +51,7 @@ export function judgeSynced(orig: LyricLine[], aligned: AlignedLine[], score: nu
   if (d.length < Math.max(6, worded * 0.4)) return { state: 'unsure', reason: `only ${d.length} confident lines` };
   const m = median(d);
   const agree = d.filter((x) => Math.abs(x - m) <= 500).length / d.length;
-  if (agree < 0.7) return { state: 'unsure', reason: `lines disagree (${Math.round(agree * 100)}% consistent)` };
+  if (agree < 0.7) return { state: 'unsure', reason: `lines disagree (${Math.round(agree * 100)}% consistent)`, agree };
   if (Math.abs(m) < 400) return { state: 'verified', shiftMs: 0 };
   const shift = Math.round(m / 10) * 10;
   return { state: 'corrected', shiftMs: shift, lines: orig.map((l) => (l.start == null ? l : { ...l, start: Math.max(0, l.start + shift) })) };
@@ -255,6 +255,7 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
 
     // 1. Lyrics in hand: line them up.
     let plainTried = false;
+    let otherVersion: { lines: LyricLine[]; res: any } | null = null;
     if (usable(prev)) {
       const lines = JSON.parse(prev.lines) as LyricLine[];
       const res = await alignWith(ctx, t.path, lines);
@@ -270,16 +271,24 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
       }
       if (v.state === 'corrected') { record.run({ ...base, state: 'off', shift_ms: v.shiftMs, error: `off by ${v.shiftMs} ms (fixing is switched off)` }); return { ok: true, message: `The lyrics are ${secs(v.shiftMs)} ${v.shiftMs > 0 ? 'early' : 'late'}; fixing is switched off` }; }
       if (v.state === 'verified') { record.run({ ...base, state: 'verified' }); return { ok: true, message: 'Already in sync' }; }
-      // Synced but unsure: the human-made timing stays. Plain that will not
-      // line up: maybe a synced copy elsewhere will.
       record.run({ ...base, state: 'unsure', error: v.reason });
-      if (prev.kind !== 'plain') return { ok: true, message: "Couldn't confirm the timing; left it as it was" };
-      plainTried = true;
+      if (prev.kind === 'plain') plainTried = true; // maybe a synced copy elsewhere will line up
+      else {
+        // Synced but unsure. Half the lines agreeing is a human-made file the
+        // aligner is fooled on (repeated chants): it stays. Almost none
+        // agreeing, or lines past the end of the song, is a file timed to
+        // another version (Lights "Up We Go": the 5:39 piano version's file on
+        // the 2:51 album cut). Look for this version's file, else re-time.
+        const lastStart = Math.max(...lines.map((l) => l.start ?? 0));
+        const wrongVersion = (res.score ?? 0) >= 0.5 && ((v.agree ?? 1) < 0.3 || lastStart > t.duration_ms + 2000);
+        if (!wrongVersion) return { ok: true, message: "Couldn't confirm the timing; left it as it was" };
+        otherVersion = { lines, res };
+      }
     }
 
     // 2. Look further, and keep the first copy that lines up with this song.
     const candidates: (() => Promise<Candidate | null>)[] = [];
-    if (!usable(prev)) {
+    if (!usable(prev) || otherVersion) {
       candidates.push(async () => {
         ctx.step('Looking for lyrics on LrcLib');
         for (const [a, title] of [...new Set([artist, t.artist])].flatMap((x) => titleVariants(t.title).map((v) => [x, v] as const))) {
@@ -294,7 +303,7 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
       });
     }
     candidates.push(async () => { ctx.step('Looking for lyrics on NetEase'); return fromNetease({ artist, title: t.title, durationMs: t.duration_ms }, o.web).catch(() => null); });
-    if (!plainTried) candidates.push(async () => { ctx.step('Looking for lyrics on Genius'); return fromGenius({ artist, title: t.title }, o.web).catch(() => null); });
+    if (!plainTried && !otherVersion) candidates.push(async () => { ctx.step('Looking for lyrics on Genius'); return fromGenius({ artist, title: t.title }, o.web).catch(() => null); });
 
     const found: string[] = [];
     for (const next of candidates) {
@@ -309,6 +318,7 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
         // really there (a good score), shifted when it is consistently off.
         if ((res.score ?? 0) < 0.5) continue;
         const v = judgeSynced(c.lines, res.lines, res.score);
+        if (otherVersion && v.state === 'unsure') continue; // the same wrong version again
         if (v.state === 'corrected' && ctx.setting('correct')) {
           replace(id, prev, v.lines, 'aligned', 'corrected', { score: res.score, shift_ms: v.shiftMs, lang: res.lang ?? null });
           await writeSidecar(t.path, v.lines, prev?.source ?? null);
@@ -323,6 +333,15 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
       replace(id, prev, v.lines, 'aligned', 'synced', { score: res.score, lang: res.lang ?? null });
       await writeSidecar(t.path, v.lines, prev?.source ?? null);
       return { ok: true, message: `Found lyrics on ${from} and synced them` };
+    }
+    if (otherVersion) {
+      // No copy timed for this version anywhere: the words are right, so time
+      // them to this recording from the alignment already made.
+      const v = timePlain(otherVersion.lines.map((l) => ({ start: null, text: l.text })), otherVersion.res.lines, otherVersion.res.score, t.duration_ms);
+      if (v.state !== 'synced') return { ok: true, message: "These lyrics are timed for another version of the song, and couldn't be re-timed confidently" };
+      replace(id, prev, v.lines, 'aligned', 'retimed', { score: otherVersion.res.score, lang: otherVersion.res.lang ?? null });
+      await writeSidecar(t.path, v.lines, prev.source);
+      return { ok: true, message: 'These lyrics were timed for another version of the song; re-synced them to this one' };
     }
     if (plainTried) return { ok: true, message: "Couldn't line these lyrics up confidently; left them as they were" };
     if (found.length) return { ok: true, message: `Found lyrics on ${found.join(' and ')}, but they don't match this recording` };
@@ -417,7 +436,7 @@ export function registerLyricSync(app: FastifyInstance, db: DB, o: { saveToLibra
   app.post('/api/admin/lyricsync/undo', admin, async () => {
     const rows = db.prepare(`SELECT a.track_id, a.state, a.original, a.original_kind, a.original_source, t.path, l.lines current
       FROM lyric_align a JOIN tracks t ON t.id = a.track_id LEFT JOIN lyrics l ON l.track_id = a.track_id
-      WHERE a.state IN ('synced','corrected','found')`).all() as any[];
+      WHERE a.state IN ('synced','corrected','found','retimed')`).all() as any[];
     for (const r of rows) {
       const now = Date.now();
       db.transaction(() => {

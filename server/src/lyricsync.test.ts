@@ -100,10 +100,16 @@ describe('Sync Lyrics on a song', () => {
       geniussong: add('geniussong'),
       wrongsong: add('wrongsong'),
       nowhere: add('nowhere'),
+      // timed to a 5-minute version: lines run past this 3:20 song's end
+      otherver: add('otherver', { kind: 'synced', lines: synced(synced8.map((_, i) => 30000 + i * 40000)), source: 'sidecar' }),
+      // a human file the aligner half-disagrees with (Hayloft's chants)
+      halfway: add('halfway', { kind: 'synced', lines: synced(synced8) }),
       broken: add('broken', { kind: 'plain', lines: [{ start: null, text: 'words' }] }),
     };
     fs.writeFileSync(paths.off.replace('.flac', '.lrc'), 'their own file\n');
-    Object.assign(process.env, { FAKE_SHIFT: '0', FAKE_STARTS: JSON.stringify({ [paths.off]: synced8 }), ...(opts.env || {}) });
+    fs.writeFileSync(paths.otherver.replace('.flac', '.lrc'), 'the piano version file\n');
+    const halfway = synced8.map((x, i) => (i < 5 ? x : x - 30000));
+    Object.assign(process.env, { FAKE_SHIFT: '0', FAKE_STARTS: JSON.stringify({ [paths.off]: synced8, [paths.halfway]: halfway }), ...(opts.env || {}) });
     const app = Fastify();
     app.decorateRequest('user', undefined);
     app.addHook('onRequest', async (req: any) => { req.user = { id: 'u1' }; });
@@ -146,6 +152,19 @@ describe('Sync Lyrics on a song', () => {
     expect(j.broken.state).toBe('failed');
     for (const want of ['Looking for lyrics on NetEase', 'Looking for lyrics on Genius', 'Lining the lyrics up with the vocals']) expect(steps.some((s) => s.includes(want))).toBe(true);
     expect(await task.run(ctx as any)).toBe('Nothing queued: use Sync Lyrics on a song');
+  });
+
+  it('a file timed to another version of the song is re-timed to this one; a mostly-right human file is left alone', async () => {
+    const { task, ctx, ask, jobs, lyr, paths } = setup();
+    await ask('otherver'); await ask('halfway');
+    await task.run(ctx as any);
+    const j = await jobs('otherver', 'halfway');
+    expect(j.otherver.result).toBe('These lyrics were timed for another version of the song; re-synced them to this one');
+    expect(lyr('otherver').source).toBe('aligned');
+    expect(JSON.parse(lyr('otherver').lines).map((l: LyricLine) => l.start)).toEqual(synced8.map((_, i) => i * 3000));
+    expect(fs.existsSync(paths.otherver.replace('.flac', '.orig.lrc'))).toBe(true); // their own file, kept
+    expect(j.halfway.result).toBe("Couldn't confirm the timing; left it as it was");
+    expect(lyr('halfway').source).toBe('lrclib');
   });
 
   it('a waiting song says how many are ahead of it; a running one says what it is doing; ?mine=1 lists them after a reload', async () => {

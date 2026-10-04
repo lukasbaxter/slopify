@@ -33,7 +33,7 @@ export const trackOut = (t: TrackRow) => ({
   identity: { state: t.identity_state, score: t.identity_score }, addedAt: t.added_at,
 });
 const albumOut = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artistId: a.artist_id, year: a.year, trackCount: a.track_count, durationMs: a.duration_ms, cover: a.cover_hash, addedAt: a.added_at });
-const artistOut = (a: any) => ({ id: a.id, name: a.name, trackCount: a.track_count, albumCount: a.album_count, image: a.image_hash });
+const artistOut = (a: any) => ({ id: a.id, name: a.name, trackCount: a.track_count, albumCount: a.album_count, image: a.image_hash, banner: a.banner_hash ?? null });
 
 const TRACK_SELECT = 'SELECT t.*, a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id';
 const page = (q: any) => ({ offset: Math.max(0, Number(q.offset) || 0), limit: Math.min(20000, Math.max(1, Number(q.limit) || 200)) });
@@ -146,7 +146,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const isCollab = (al: any) => splitArtists(undefined, al.artist).some((n) => norm(n) === norm(a.name));
     const albums = [...own, ...others.filter(isCollab)].sort((x, y) => (y.year || 0) - (x.year || 0)).map(albumOut);
     const appearsOn = others.filter((al) => !isCollab(al)).map(albumOut);
-    const tracks = (db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? ORDER BY t.title LIMIT 200`).all(`%"${id}"%`) as TrackRow[]).map(trackOut);
+    // Most played first (the page then reorders by real-world popularity, /popular).
+    const tracks = (db.prepare(`${TRACK_SELECT} LEFT JOIN (SELECT track_id, COUNT(*) n FROM plays GROUP BY track_id) pc ON pc.track_id = t.id WHERE t.artist_ids LIKE ? ORDER BY COALESCE(pc.n, 0) DESC, t.title LIMIT 200`).all(`%"${id}"%`) as TrackRow[]).map(trackOut);
     const followed = !!db.prepare('SELECT 1 FROM artist_follows WHERE user_id = ? AND artist_id = ?').get((req as any).user?.id, id);
     return { ...artistOut(a), followed, albums, appearsOn, tracks };
   });
@@ -317,8 +318,11 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     if (id.startsWith('pl_')) { const p = db.prepare('SELECT cover_hash FROM playlists WHERE id = ?').get(id) as any; if (!p) return null; return p.cover_hash ?? (db.prepare('SELECT a.cover_hash FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id JOIN albums a ON a.id = t.album_id WHERE x.playlist_id = ? AND a.cover_hash IS NOT NULL ORDER BY x.pos LIMIT 1').get(id) as any)?.cover_hash ?? null; }
     const al = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(id) as any; if (al) return al.cover_hash ?? null;
     const tr = db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?').get(id) as any; if (tr) return tr.cover_hash ?? null;
-    const ar = db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as any;
+    const ar = db.prepare('SELECT image_hash, banner_hash FROM artists WHERE id = ?').get(id) as any;
     if (ar) {
+      // A banner: the artist's wide photo when there is one (its size is
+      // filled in by the route), else a wide cut of the portrait.
+      if (kind === 'banner' && ar.banner_hash) return `${ar.banner_hash}/banner-{w}`;
       if (ar.image_hash) return kind === 'banner' ? `${ar.image_hash}/banner` : ar.image_hash;
       // No portrait yet: the cover of their biggest album (a broken image otherwise).
       if (kind === 'banner') return null;
@@ -342,7 +346,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     if (!hash) return reply.code(404).send();
     const webp = /image\/webp/.test(String(req.headers.accept || ''));
     const size = kind === 'banner' ? 'banner' : String(nearestSize(Number(q.size) || Number(q.maxHeight) || 320));
-    const [h, sub] = hash.split('/');
+    // Banner width: 640 for a small screen or a slow / metered connection, 1280 otherwise.
+    const [h, sub] = hash.replace('{w}', Number(q.w) > 0 && Number(q.w) <= 800 ? '640' : '1280').split('/');
     const p = path.join(dataDir, 'art', h, sub ? `${sub}.${webp ? 'webp' : 'jpg'}` : `${size}.${webp ? 'webp' : 'jpg'}`);
     if (!fs.existsSync(p)) return reply.code(404).send();
     reply.header('Cache-Control', 'private, max-age=86400').header('Vary', 'Accept').type(webp ? 'image/webp' : 'image/jpeg');

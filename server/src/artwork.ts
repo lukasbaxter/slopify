@@ -50,6 +50,27 @@ async function renderBanner(bytes: Buffer, dir: string) {
   ]);
 }
 
+// A wide artist photo (fanart) for the artist page: two widths, so a phone on
+// mobile data downloads a quarter of what a big screen gets.
+export const BANNER_WIDTHS = [640, 1280] as const;
+export async function storeBanner(dataDir: string, bytes: Buffer): Promise<{ hash: string; width: number; height: number }> {
+  const hash = crypto.createHash('sha1').update(bytes).digest('hex');
+  const dir = path.join(artDir(dataDir), hash);
+  const img = sharp(bytes, { failOn: 'none' }).rotate();
+  const meta = await img.metadata();
+  const width = meta.width ?? 0, height = meta.height ?? 0;
+  try { await fs.access(path.join(dir, 'banner-1280.webp')); return { hash, width, height }; } catch { /* render */ }
+  await fs.mkdir(dir, { recursive: true });
+  await Promise.all(BANNER_WIDTHS.flatMap((w) => {
+    const crop = () => img.clone().resize(w, Math.round(w * 0.35), { fit: 'cover', position: sharp.strategy.attention });
+    return [
+      toFileAtomic(crop().webp({ quality: 80 }), path.join(dir, `banner-${w}.webp`)),
+      toFileAtomic(crop().jpeg({ quality: 82, mozjpeg: true }), path.join(dir, `banner-${w}.jpg`)),
+    ];
+  }));
+  return { hash, width, height };
+}
+
 export function artPath(dataDir: string, hash: string, size: ArtSize, format: 'webp' | 'jpg') {
   return path.join(artDir(dataDir), hash, `${size}.${format}`);
 }

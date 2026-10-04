@@ -39,7 +39,7 @@ export const rowAlbum = (a) => ({
   ProductionYear: a.year, ChildCount: a.trackCount, RunTimeTicks: ticks(a.durationMs), DateCreated: a.addedAt ? new Date(a.addedAt).toISOString() : undefined,
   ImageTags: a.cover ? { Primary: a.cover } : {}, UserData: { IsFavorite: !!a.likedAt || savedAlbums.has(a.id) },
 });
-export const rowArtist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ChildCount: a.albumCount, ImageTags: a.image ? { Primary: a.image } : {}, BackdropImageTags: a.image ? [a.image] : [], UserData: { IsFavorite: !!a.followed || followedArtists.has(a.id) } });
+export const rowArtist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ChildCount: a.albumCount, ImageTags: a.image ? { Primary: a.image } : {}, BackdropImageTags: a.banner || a.image ? [a.banner || a.image] : [], UserData: { IsFavorite: !!a.followed || followedArtists.has(a.id) } });
 export const rowPlaylist = (p) => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackCount, ImageTags: p.cover ? { Primary: p.cover } : {}, DateCreated: p.created ? new Date(p.created).toISOString() : undefined, UserData: {} });
 
 const isPlaylistId = (id) => /^pl_/.test(id || '');
@@ -86,7 +86,9 @@ export class Slopify {
           if (res.status >= 500 && attempt < retries) throw Object.assign(err, { retry: true });
           throw err;
         }
-        return res.status === 204 ? null : res.json();
+        // Awaited here so the timeout also covers the body: a response whose
+        // body stalls (a phone changing networks) would otherwise hang forever.
+        return res.status === 204 ? null : await res.json();
       } catch (e) {
         const transient = e.retry || e.name === 'AbortError' || e instanceof TypeError;
         if (!transient || attempt >= retries) throw e;
@@ -423,8 +425,18 @@ export class Slopify {
     return this._url(`/api/image/${itemId}`, q);
   }
   // Wide artist banner (the portrait cropped wide), or nothing.
+  // The artist page banner, sized for this screen and connection: the full
+  // 1280 px photo on a good connection, 640 px on a small screen, mobile data,
+  // a slow link or with Data Saver on (a quarter of the bytes).
+  bannerWidth() {
+    const c = typeof navigator !== 'undefined' ? navigator.connection : null;
+    const metered = !!c && (c.saveData || c.type === 'cellular' || /(^|-)2g$|^3g$/.test(c.effectiveType || ''));
+    const need = (typeof window !== 'undefined' ? window.innerWidth * (window.devicePixelRatio || 1) : 1280);
+    return metered || need <= 800 ? 640 : 1280;
+  }
+
   bannerUrl(item) {
-    if (item?.BackdropImageTags?.length) return this._url(`/api/image/${item.Id}`, { kind: 'banner' });
+    if (item?.BackdropImageTags?.length) return this._url(`/api/image/${item.Id}`, { kind: 'banner', w: this.bannerWidth(), v: String(item.BackdropImageTags[0]).slice(0, 8) });
     if (item?.ImageTags?.Primary) return this.imageUrl(item.Id, { maxHeight: 640 });
     return null;
   }

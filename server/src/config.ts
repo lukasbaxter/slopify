@@ -63,6 +63,9 @@ export const config = {
   // Announce the server on the LAN over mDNS (_slopify._tcp) so Home Assistant
   // and other apps can find it; SERVER_NAME is the name they show.
   mdns: env('MDNS', '1') !== '0',
+  // TheAudioDB key for wide artist photos (artist page banners); '123' is its
+  // free public key. Empty turns banner fetching off.
+  theAudioDbKey: env('THEAUDIODB_KEY', '123'),
   // 'slopify' (default): BluOS speakers are only ever grouped by Slopify's
   // speaker groups; a group made elsewhere (the BluOS app, another controller)
   // is unlinked within a minute. 'keep' leaves such groups alone.

@@ -187,6 +187,7 @@ are the homelab defaults: music at `/music`, state in `/data`.
 | `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |
 | `LIDARR_QUALITY_PROFILE` / `LIDARR_METADATA_PROFILE` | (blank) | Profiles for artists Slopify adds; blank = Lidarr's first |
 | `LIDARR_SEARCH_ON_REQUEST` | `0` | `1`: a request also fires Lidarr's indexer search immediately |
+| `THEAUDIODB_KEY` | `123` | TheAudioDB key for wide artist photos (artist page banners); `123` is its free public key, empty turns it off. A `backdrop.jpg` / `fanart.jpg` in the artist's folder is used first |
 | `ENRICH_EVERY_H` | `1` | Fetch lyrics & artwork interval |
 | `TASKS_WANTED_TARGET` | `25` | Cap on what background chores put on Lidarr's wanted list |
 | `DISCOVERY_PER_RUN` | `10` | Albums per Discover run |

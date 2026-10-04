@@ -4,7 +4,8 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { enrichPass, enrichStatus, artistImagesPass, albumCoversPass } from './enrich.js';
+import { enrichPass, enrichStatus, artistImagesPass, artistBannersPass, albumCoversPass } from './enrich.js';
+import { config } from './config.js';
 import { albumGenresPass } from './genres.js';
 
 // heads: cut each scanned song's head into the cache; pauseMs: breathing room
@@ -41,6 +42,8 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
       // Keep going while there is work: a first run over a big library takes hours.
       if (on('artists')) phase('Artist pictures');
       for (let i = 0; on('artists') && i < 40; i++) { const a = await artistImagesPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300, ...lib }); if (a.found + a.missing) app.log.info(`artist images: ${JSON.stringify(a)}`); if (a.found + a.missing < 300) break; }
+      if (on('artists') && config.theAudioDbKey !== '') phase('Artist banners');
+      for (let i = 0; on('artists') && i < 40; i++) { const b = await artistBannersPass(db, { log: (m) => app.log.warn(m), dataDir, max: 100, audioDbKey: config.theAudioDbKey, ...lib }); if (b.found + b.missing) app.log.info(`artist banners: ${JSON.stringify(b)}`); if (b.found + b.missing < 100) break; }
       if (on('covers')) phase('Album covers');
       for (let i = 0; on('covers') && i < 40; i++) { const c = await albumCoversPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300, ...lib }); if (c.found + c.missing) app.log.info(`album covers: ${JSON.stringify(c)}`); if (c.found + c.missing < 300) break; }
       if (on('genres')) phase('Genres');

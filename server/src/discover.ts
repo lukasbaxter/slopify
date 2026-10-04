@@ -14,6 +14,7 @@ import { z } from 'zod';
 import type { DB } from './db.js';
 import { recordRequest } from './downloads.js';
 import type { Lidarr } from './lidarr.js';
+import { normTitle as songTitle } from './lyricsources.js';
 
 export type DiscoverOptions = { lidarr?: Lidarr; log?: (m: string) => void; fetcher?: typeof fetch };
 
@@ -80,6 +81,45 @@ export async function similarInLibrary(db: DB, a: { id: string; name: string }, 
   return remember(`similar:${a.id}`, out);
 }
 
+// An artist's songs in the order people actually play them: Deezer's top
+// tracks for the artist (the world's listening, cached a week), matched to the
+// library one row per song title (a remix or live take is its own title), then
+// everything else of theirs by plays on this server, then by title. Without
+// Deezer (offline, unknown artist) it is plays alone.
+export async function popularOrder(db: DB, a: { id: string; name: string }, o: { fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<string[]> {
+  const rows = db.prepare('SELECT t.id, t.title, t.album_id, al.artist_id FROM tracks t JOIN albums al ON al.id = t.album_id WHERE t.artist_ids LIKE ?').all(`%"${a.id}"%`) as { id: string; title: string; album_id: string; artist_id: string }[];
+  if (!rows.length) return [];
+  const plays = new Map<string, number>();
+  for (let i = 0; i < rows.length; i += 400) {
+    const ids = rows.slice(i, i + 400).map((r) => r.id);
+    for (const p of db.prepare(`SELECT track_id, COUNT(*) n FROM plays WHERE track_id IN (${ids.map(() => '?').join(',')}) GROUP BY track_id`).all(...ids) as any[]) plays.set(p.track_id, p.n);
+  }
+  // Within one title: the artist's own release first, then the most played.
+  const better = (x: typeof rows[number], y: typeof rows[number]) =>
+    Number(y.artist_id === a.id) - Number(x.artist_id === a.id) || (plays.get(y.id) || 0) - (plays.get(x.id) || 0);
+  let top: string[] = cached(`top:${a.id}`, 7 * 24 * 60 * 60 * 1000);
+  if (!top) {
+    const f = o.fetcher || fetch;
+    const json = (url: string) => f(url, { signal: AbortSignal.timeout(8000) }).then(async (r) => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.json() as any; });
+    try {
+      const s = await json(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=5`);
+      const dz = (s.data || []).find((x: any) => norm(x.name) === norm(a.name));
+      const t = dz ? await json(`https://api.deezer.com/artist/${dz.id}/top?limit=50`) : { data: [] };
+      top = remember(`top:${a.id}`, (t.data || []).map((x: any) => songTitle(x.title_short || x.title)).filter(Boolean));
+    } catch (e: any) { o.log?.(`popular ${a.name}: ${e.message}`); top = []; }
+  }
+  const byTitle = new Map<string, typeof rows>();
+  for (const r of rows) { const k = songTitle(r.title); byTitle.set(k, [...(byTitle.get(k) || []), r]); }
+  const out: string[] = []; const taken = new Set<string>();
+  for (const title of top) {
+    const pick = (byTitle.get(title) || []).filter((r) => !taken.has(r.id)).sort(better)[0];
+    if (pick && !out.includes(pick.id)) { out.push(pick.id); for (const r of byTitle.get(title) || []) taken.add(r.id); }
+  }
+  const rest = rows.filter((r) => !out.includes(r.id))
+    .sort((x, y) => (plays.get(y.id) || 0) - (plays.get(x.id) || 0) || Number(taken.has(x.id)) - Number(taken.has(y.id)) || x.title.localeCompare(y.title));
+  return [...out, ...rest.map((r) => r.id)];
+}
+
 export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOptions = {}) {
   const auth = { preHandler: (app as any).requireUser };
   const log = opts.log || (() => {});
@@ -120,6 +160,11 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   });
 
   // "Fans also like": Deezer's related artists that the library has. Cached a day.
+  app.get('/api/artists/:id/popular', auth, async (req, reply) => {
+    const a = db.prepare('SELECT id, name FROM artists WHERE id = ?').get((req.params as any).id) as { id: string; name: string } | undefined;
+    if (!a) return reply.code(404).send({ error: 'no such artist' });
+    return { ids: await popularOrder(db, a, { fetcher, log }) };
+  });
   app.get('/api/similar/:id', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
     const a = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as any;

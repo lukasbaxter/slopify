@@ -13,7 +13,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { DB } from './db.js';
 import { parseLrc, isSynced, type LyricLine } from './lyrics.js';
-import { storeArtwork } from './artwork.js';
+import { storeArtwork, storeBanner } from './artwork.js';
 
 const run = promisify(execFile);
 const UA = 'slopify/0.1 (https://github.com/lukasbaxter/slopify)';
@@ -212,6 +212,63 @@ export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promis
     else if (failed) { stats.missing++; if (++consecFails >= 3) return stats; } // a try is only burned on a real empty answer
     else { consecFails = 0; db.prepare('UPDATE artists SET image_tries = image_tries + 1 WHERE id = ?').run(a.id); stats.missing++; }
     await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 120));
+  }
+  return stats;
+}
+
+// Wide artist photos for the artist page banner. A backdrop already in the
+// artist's folder (backdrop.jpg / fanart.jpg, the Jellyfin and Kodi names)
+// wins; else TheAudioDB's fanart for an artist of exactly that name, saved
+// into the folder as backdrop.jpg with saveToLibrary. TheAudioDB's free key
+// allows about 30 calls a minute: the pass spaces them two seconds apart.
+// Artists it does not know keep the banner cut from their portrait.
+const BACKDROPS = ['backdrop.jpg', 'backdrop.png', 'fanart.jpg', 'fanart.png'];
+export async function artistBannersPass(db: DB, opts: EnrichOptions & { audioDbKey?: string } = {}): Promise<{ found: number; missing: number }> {
+  const key = opts.audioDbKey ?? '123';
+  const fetcher: Fetcher = opts.fetcher ?? ((url) => fetch(url, { headers: { 'User-Agent': UA } }));
+  const bytes = opts.bytes ?? (async (url: string) => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; });
+  const log = opts.log ?? (() => {});
+  const dataDir = opts.dataDir; if (!dataDir) return { found: 0, missing: 0 };
+  const due = db.prepare('SELECT id, name FROM artists WHERE banner_hash IS NULL AND banner_tries < 3 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 100) as any[];
+  const stats = { found: 0, missing: 0 };
+  let consecFails = 0;
+  for (const a of due) {
+    const dir = opts.musicDir ? artistDirOf(db, a.id, opts.musicDir) : null;
+    let stored = false, failed = false, asked = false;
+    if (dir) {
+      for (const name of BACKDROPS) {
+        try {
+          const buf = await fsp.readFile(path.join(dir, name));
+          if (buf.length > 5000) { const { hash } = await storeBanner(dataDir, buf); db.prepare('UPDATE artists SET banner_hash = ? WHERE id = ?').run(hash, a.id); stored = true; break; }
+        } catch { /* next */ }
+      }
+    }
+    if (!stored && key) {
+      asked = true;
+      try {
+        const url = await cached(db, `audiodb:fanart:${normName(a.name)}`, 30 * DAY, async () => {
+          const r = await fetcher(`https://www.theaudiodb.com/api/v1/json/${encodeURIComponent(key)}/search.php?s=${encodeURIComponent(a.name)}`);
+          if (r.status !== 200) throw new Error(`theaudiodb ${r.status}`);
+          const j = await r.json();
+          const hit = (j?.artists || []).find((x: any) => normName(String(x.strArtist || '')) === normName(a.name));
+          return (hit && (hit.strArtistFanart || hit.strArtistFanart2 || hit.strArtistWideThumb)) || null;
+        }) as string | null;
+        if (url) {
+          const buf = await bytes(url);
+          if (buf === null) failed = true;
+          else if (buf.length > 5000) {
+            const { hash } = await storeBanner(dataDir, buf);
+            if (opts.saveToLibrary && dir) await writeNew(path.join(dir, 'backdrop.jpg'), buf, log);
+            db.prepare('UPDATE artists SET banner_hash = ? WHERE id = ?').run(hash, a.id);
+            stored = true;
+          }
+        }
+      } catch (e: any) { failed = true; log(`banner ${a.name}: ${e.message}`); }
+    }
+    if (stored) { stats.found++; consecFails = 0; }
+    else if (failed) { stats.missing++; if (++consecFails >= 3) return stats; }
+    else { consecFails = 0; db.prepare('UPDATE artists SET banner_tries = banner_tries + 1 WHERE id = ?').run(a.id); stats.missing++; }
+    if (asked) await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 2100));
   }
   return stats;
 }

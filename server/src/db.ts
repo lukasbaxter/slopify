@@ -151,6 +151,11 @@ const MIGRATIONS: string[] = [
   -- What a Sync Lyrics job is doing right now, for the app to show.
   ALTER TABLE lyric_jobs ADD COLUMN step TEXT;
   `,
+  `
+  -- A wide artist photo for the artist page banner (fanart), apart from the portrait.
+  ALTER TABLE artists ADD COLUMN banner_hash TEXT;
+  ALTER TABLE artists ADD COLUMN banner_tries INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export type DB = Database.Database;

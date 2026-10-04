@@ -96,6 +96,11 @@
           }
         }
       }
+    },
+    "button": {
+      "ungroup_all": {
+        "name": "Ungroup all speakers"
+      }
     }
   },
   "exceptions": {

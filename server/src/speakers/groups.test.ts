@@ -29,11 +29,13 @@ describe('the group store', () => {
     g.unjoin('a'); g.unjoin('b');
     expect(g.list()).toEqual([]);
     expect(g.groupOf('d')).toEqual(['d']);
+    g.join('a', ['b']); g.join('c', ['d']); g.clear();
+    expect(g.list()).toEqual([]);
   });
 });
 
 // Four BluOS units, each its own little HTTP server, keeping BluOS sync state.
-type Unit = { port: number; name: string; slaves: Set<number>; master: number | null; calls: string[]; state: string };
+type Unit = { port: number; name: string; slaves: Set<number>; master: number | null; calls: string[]; state: string; native?: boolean };
 const units: Unit[] = [];
 const byPort = (p: number) => units.find((u) => u.port === p)!;
 async function unit(name: string): Promise<Unit> {
@@ -43,7 +45,7 @@ async function unit(name: string): Promise<Unit> {
     const slave = Number(url.searchParams.get('port'));
     if (url.pathname === '/AddSlave') { u.slaves.add(slave); byPort(slave).master = u.port; }
     if (url.pathname === '/RemoveSlave') { u.slaves.delete(slave); if (byPort(slave).master === u.port) byPort(slave).master = null; }
-    if (url.pathname === '/Play') u.state = 'stream';
+    if (url.pathname === '/Play') { u.state = 'stream'; u.native = false; }
     if (url.pathname === '/Pause' || url.pathname === '/Stop') u.state = 'pause';
     if (url.pathname === '/SyncStatus') return res.end(`<SyncStatus>${u.master ? `<master port="${u.master}">127.0.0.1</master>` : ''}${[...u.slaves].map((p) => `<slave id="127.0.0.1" port="${p}"></slave>`).join('')}</SyncStatus>`);
     if (url.pathname === '/Status') return res.end(`<status><state>${u.state}</state><volume>30</volume><mute>0</mute><secs>1</secs><totlen>200</totlen><canSeek>1</canSeek></status>`);
@@ -90,6 +92,42 @@ describe('playing on speaker groups', () => {
     expect(reports.henry.device).toMatchObject({ id: sp(garage).id, members: [sp(pulse).id] });
     expect(linkedGroups.get(sp(node).id)).toEqual([sp(towers).id]);
     await lukas.stopAll(); await henry.stopAll();
+  });
+
+  it("picking one speaker leaves a group member that is busy with other music alone", async () => {
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    groups.join(sp(pulse).id, [sp(node).id]);
+    node.state = 'stream'; // Spotify, from someone's phone
+    node.calls.length = 0;
+    const lukas = player('lukas5');
+    try {
+      await lukas.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      expect(pulse.slaves.size).toBe(0);
+      expect(node.master).toBeNull();
+      expect(node.calls.filter((c) => /^\/(Play|Stop|Pause)/.test(c))).toEqual([]);
+      expect(reports.lukas5.device.members).toEqual([]);
+      // Added on purpose while the music plays, it joins.
+      groups.join(sp(pulse).id, [sp(node).id]);
+      await lukas.regroup(new Set([sp(node).id]));
+      expect([...pulse.slaves]).toEqual([node.port]);
+      // A speaker skipped for being busy is not taken when another joins.
+      await lukas.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      groups.unjoin(sp(node).id); await lukas.regroup();
+      groups.join(sp(pulse).id, [sp(node).id]);
+      node.state = 'stream';
+      await lukas.stopAll();
+      await lukas.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      expect(pulse.slaves.size).toBe(0); // node busy: left out
+      groups.join(sp(pulse).id, [sp(garage).id]);
+      await lukas.regroup(new Set([sp(garage).id]));
+      expect([...pulse.slaves]).toEqual([garage.port]); // garage joined, node still left alone
+    } finally {
+      await lukas.stopAll();
+      node.state = 'stop';
+      groups.unjoin(sp(node).id); groups.unjoin(sp(pulse).id);
+      for (const g of saved) groups.join(g[0], g.slice(1));
+    }
   });
 
   it('volume reaches every speaker of the group', async () => {

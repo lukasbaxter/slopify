@@ -210,9 +210,11 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   });
 
   // --- speaker groups ------------------------------------------------------------
+  // Speakers just added on purpose (a join): they may be taken from other music.
+  let joining = new Set<string>();
   groups.onChange(() => {
     for (const uid of new Set([...clients.values()].map((c) => c.uid))) broadcastRoster(uid);
-    for (const c of clients.values()) void c.player?.regroup();
+    for (const c of clients.values()) void c.player?.regroup(joining);
   });
   const auth = { preHandler: (app as any).requireUser };
   app.get('/api/speakers/groups', auth, async () => ({ groups: groups.list() }));
@@ -225,9 +227,11 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       if (!d) return reply.code(404).send({ error: `no such speaker ${id}` });
       if (d.kind !== 'bluos') return reply.code(400).send({ error: `${d.name} cannot be grouped: only BluOS speakers play in sync (group Chromecasts in Google Home)` });
     }
-    groups.join(b.data.leader, b.data.members);
+    joining = new Set(b.data.members);
+    try { groups.join(b.data.leader, b.data.members); } finally { joining = new Set(); }
     return { groups: groups.list() };
   });
+  app.post('/api/speakers/groups/clear', auth, async () => { groups.clear(); return { groups: [] }; });
   app.post('/api/speakers/groups/unjoin', auth, async (req, reply) => {
     const b = SpeakerUnjoin.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'speaker required' });

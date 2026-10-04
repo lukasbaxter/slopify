@@ -170,9 +170,19 @@ export class ServerPlayer {
     if (!this.transport) this.transport = transportFor(dev);
     await this.formGroup();
   }
-  // The device's group plays along: each member is claimed (whoever played on
-  // it lets go), taken out of any other BluOS group, and linked to the leader.
-  private async formGroup() {
+  // The device's group plays along: each member is claimed, taken out of any
+  // other BluOS group, and linked to the leader. Only the picked speaker is
+  // ever taken from something else: a member busy with other music (its own
+  // input, Spotify, someone else's Slopify) is left alone, unless someone
+  // put it into this group on purpose while the music plays (takeBusy).
+  private async busy(m: Speaker) {
+    const o = owners.get(m.id);
+    if (o && o !== this) return o.playing;
+    if (o === this) return false;
+    try { const st = await new BluOSTransport(m).status(); return st.state === 'play' || st.state === 'stream'; }
+    catch { return false; }
+  }
+  private async formGroup({ take = new Set<string>() }: { take?: Set<string> } = {}) {
     const leader = this.device;
     if (!leader) return;
     const want = (this.d.groupOf?.(leader.id) ?? [leader.id]).slice(1)
@@ -183,6 +193,7 @@ export class ServerPlayer {
     if (leader.kind === 'bluos' && lt?.standAlone) await lt.standAlone().catch((e: any) => this.d.log(`group: ${leader.name} stand alone: ${e.message}`));
     const have = new Set(this.members.map((m) => m.id));
     for (const m of want.filter((m) => !have.has(m.id))) {
+      if (!take.has(m.id) && (await this.busy(m))) { this.d.log(`group: ${m.name} is playing something else; ${leader.name} plays without it`); continue; }
       await this.claimDevice(m);
       try {
         const t = new BluOSTransport(m);
@@ -214,10 +225,11 @@ export class ServerPlayer {
     this.volumeHeldUntil = Date.now() + 2000;
     this.report();
   }
-  // The household changed the groups while music plays here: follow.
-  async regroup() {
+  // The household changed the groups while music plays here: follow. `take`
+  // names the speakers someone added on purpose: those join even when busy.
+  async regroup(take: Set<string> = new Set()) {
     if (!this.transport || !this.device) return;
-    this.ops = this.ops.then(async () => { await this.formGroup(); this.report(); }).catch(() => {});
+    this.ops = this.ops.then(async () => { await this.formGroup({ take }); this.report(); }).catch(() => {});
     return this.ops;
   }
   // Latest claim wins: whoever held this speaker is stopped first (it yields

@@ -15,6 +15,7 @@ export type SpeakerGroups = {
   groupOf(id: string): string[];
   join(leader: string, members: string[]): void;
   unjoin(id: string): void;
+  clear(): void;
   onChange(cb: () => void): void;
 };
 
@@ -47,6 +48,7 @@ export function speakerGroups(db: DB): SpeakerGroups {
       write([...read().map((g) => g.filter((x) => !all.includes(x))), all]);
     },
     unjoin(id) { write(read().map((g) => g.filter((x) => x !== id))); },
+    clear() { write([]); },
     onChange(cb) { listeners.push(cb); },
   };
 }

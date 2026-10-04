@@ -103,3 +103,48 @@ async def test_a_server_without_groups_says_to_update(
     fake.group_calls.clear()
     with pytest.raises(ServiceValidationError, match="Update the server"):
         await call(hass, DEN, "join", group_members=[LOFT])
+
+
+async def test_ungroup_all_button(hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify) -> None:
+    await call(hass, DEN, "join", group_members=[LOFT])
+    await settle(hass, fake)
+    assert hass.states.get(DEN).attributes[ATTR_GROUP_MEMBERS] == [DEN, LOFT]
+    buttons = hass.states.async_entity_ids("button")
+    assert buttons == ["button.slopify_speakers_ungroup_all_speakers"], buttons
+    await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: buttons[0]}, blocking=True)
+    assert fake.group_calls[-1] == ("clear", {})
+    await settle(hass, fake)
+    assert hass.states.get(DEN).attributes[ATTR_GROUP_MEMBERS] == []
+
+
+async def test_picking_the_same_name_on_another_speaker_groups_them(
+    hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify
+) -> None:
+    np = now_playing(T4, device={"id": "bluos:10.0.0.6", "kind": "bluos", "name": "Den"})
+    await fake.set_roster(
+        players=[{"id": f"server:{HENRY_ID}", "nowPlaying": np}], active=f"server:{HENRY_ID}", uid=HENRY_ID
+    )
+    await settle(hass, fake)
+    await call(hass, LOFT, "select_source", source="Slopify - henrybaxter")
+    assert fake.group_calls[-1] == ("join", {"leader": "bluos:10.0.0.6", "members": ["bluos:10.0.0.7"]})
+    assert fake.commands_of(HENRY_ID) == [], "the music is not moved, the speaker joins it"
+
+
+async def test_picking_a_name_whose_music_is_in_an_app_moves_it(
+    hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify
+) -> None:
+    web = {
+        "id": "web-h",
+        "name": "Web Player (1)",
+        "kind": "web",
+        "canPlay": True,
+        "nowPlaying": now_playing(T4),
+        "sameNetwork": True,
+    }
+    await fake.send_queue("web-h", [], uid=HENRY_ID)
+    await fake.set_roster(players=[web], active="web-h", uid=HENRY_ID)
+    await settle(hass, fake)
+    await call(hass, LOFT, "select_source", source="Slopify - henrybaxter")
+    await fake.wait_for(lambda: fake.commands_of(HENRY_ID))
+    assert fake.commands_of(HENRY_ID)[-1]["command"]["action"] == "transfer"
+    assert not [c for c in fake.group_calls if c[0] == "join"]

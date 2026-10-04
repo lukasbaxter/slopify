@@ -157,14 +157,22 @@ script:
 
 ### Speaker groups
 
-Group BluOS speakers from Home Assistant: open a Slopify speaker, select the
-**group** button, and tick the speakers that should play with it (or call
-`media_player.join` / `media_player.unjoin`). Groups are kept by Slopify, so
-every app sees them: picking any speaker of a group plays the whole group, and
-two people can each play on their own group at the same time. While music
-plays on a group, Slopify links its speakers with BluOS's own sync so rooms
-stay in time, and unlinks them when the music leaves. Taking a speaker that
-someone else's music is on takes over that whole group.
+The easy way: pick your name as the source on one speaker, then pick your name
+on another speaker too. The second speaker joins the first and your music plays
+on both. Pick it on a third and that joins as well.
+
+Or open a Slopify speaker, select the **group** button, and tick the speakers
+that should play with it (or call `media_player.join` / `media_player.unjoin`).
+The **Ungroup all speakers** button (under the **Slopify speakers** device)
+breaks every group at once.
+
+Groups are kept by Slopify, so every app sees them: picking any speaker of a
+group plays the group. Speakers of the group that are busy with other music (a
+Bluetooth input, Spotify, someone else's Slopify music) are left alone and the
+rest plays; a speaker you add to the group on purpose joins even when busy.
+Two people can each play on their own group at the same time. While music plays
+on a group, Slopify links its speakers with BluOS's own sync so rooms stay in
+time, and unlinks them when the music leaves.
 
 Only BluOS speakers can be grouped. Chromecasts cannot be kept in sync from
 outside; group them in Google Home, and the Google Home group shows up as a

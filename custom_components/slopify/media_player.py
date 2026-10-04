@@ -87,7 +87,7 @@ async def async_setup_entry(
             ent_reg.async_remove(ent.entity_id)
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         ids = {i[1] for i in device.identifiers if i[0] == DOMAIN}
-        if ids and not any("-speaker-" in i or i in data.accounts for i in ids):
+        if ids and not any("-speaker" in i or i in data.accounts for i in ids):
             dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
     async_add_entities([SlopifyPlayer(entry, a) for a in data.accounts.values()])
 
@@ -732,6 +732,21 @@ class SlopifySpeaker(_SlopifyMedia):
             await self._speaker_call("input", {"input": source})
             return
         account = self._account_labelled(source)
+        # Already playing on other speakers of the server: picking the same
+        # name here adds this speaker to them, the way people expect to group.
+        active_id, np = active_now_playing(account)
+        playing_on = on_devices(np) if active_id == f"server:{account.user_id}" else []
+        bluos = {str(d["id"]) for d in server_speakers(self._data) if d.get("kind") == "bluos"}
+        if playing_on and self._speaker_id not in playing_on and self._kind == "bluos" and playing_on[0] in bluos:
+            try:
+                await self._data.api.post(
+                    "/api/speakers/groups", {"leader": playing_on[0], "members": [self._speaker_id]}
+                )
+            except NotFound as err:
+                _raise(err, "groups_unsupported")
+            except SlopifyError as err:
+                _raise(err, "group_failed", error=str(err))
+            return
         playing = not (account is self._account and self.state == MediaPlayerState.PAUSED)
         await move_session(account, self._target(account), playing=playing)
 

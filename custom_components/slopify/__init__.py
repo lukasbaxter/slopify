@@ -33,7 +33,7 @@ from .const import CLIENT_KIND, CLIENT_NAME, CONF_HOUSEHOLD, CONF_TOKEN, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER]
+PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.MEDIA_PLAYER]
 # Long enough for a healthy server to answer the hello, short enough that a
 # slow one does not hold up Home Assistant's start; the entity shows
 # unavailable until it connects either way.

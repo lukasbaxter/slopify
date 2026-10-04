@@ -204,6 +204,7 @@ class FakeSlopify:
             app.router.add_post(f"{base}/api/users/{{id}}/household-token", self._household_token)
             app.router.add_post(f"{base}/api/speakers/groups", self._group_join)
             app.router.add_post(f"{base}/api/speakers/groups/unjoin", self._group_unjoin)
+            app.router.add_post(f"{base}/api/speakers/groups/clear", self._group_clear)
             app.router.add_post(f"{base}/api/speakers/{{id}}/{{what}}", self._speaker_call)
             app.router.add_get(f"{base}/api/ws", self._ws)
             app.router.add_get(f"{base}/api/image/{{id}}", self._image)
@@ -368,6 +369,14 @@ class FakeSlopify:
         self.groups = [g for g in self.groups if len(g) > 1] + [merged]
         await self._rosters_to_all()
         return web.json_response({"groups": self.groups})
+
+    async def _group_clear(self, request: web.Request) -> web.StreamResponse:
+        if not self._user(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        self.group_calls.append(("clear", {}))
+        self.groups = []
+        await self._rosters_to_all()
+        return web.json_response({"groups": []})
 
     async def _group_unjoin(self, request: web.Request) -> web.StreamResponse:
         if not self._user(request):

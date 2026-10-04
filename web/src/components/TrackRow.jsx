@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { syncLyrics } from '../api/lyricsync.js';
 import ContextMenu from './ContextMenu.jsx';
 import { FORMATS } from '../api/download.js';
 import { useLiked } from '../api/likes.js';
@@ -144,6 +145,7 @@ export const I = {
   trash: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M5.25 3v-.917C5.25.958 6.271 0 7.5 0h1c1.229 0 2.25.958 2.25 2.083V3h4.25v1.5h-1.028l-.86 10.28A1.5 1.5 0 0 1 11.617 16H4.383a1.5 1.5 0 0 1-1.495-1.22L2.028 4.5H1V3h4.25zm1.5-.917V3h2.5v-.917c0-.283-.278-.583-.75-.583h-1c-.472 0-.75.3-.75.583zM3.533 4.5l.848 10h7.238l.848-10H3.533z" /></svg>,
   heart: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M1.69 2A4.582 4.582 0 0 1 8 2.023 4.583 4.583 0 0 1 11.88.817h.002a4.618 4.618 0 0 1 3.782 3.65v.003a4.543 4.543 0 0 1-1.011 3.84L9.35 14.629a1.765 1.765 0 0 1-2.093.464 1.762 1.762 0 0 1-.605-.463L1.348 8.309A4.582 4.582 0 0 1 1.689 2zm3.158.252A3.082 3.082 0 0 0 2.49 7.337l.005.005L7.8 13.664a.264.264 0 0 0 .311.069.262.262 0 0 0 .09-.069l5.312-6.33a3.043 3.043 0 0 0 .68-2.573 3.118 3.118 0 0 0-2.551-2.463 3.079 3.079 0 0 0-2.612.816l-.007.007a1.501 1.501 0 0 1-2.045 0l-.009-.008a3.082 3.082 0 0 0-2.121-.861z" /></svg>,
   heartOn: <svg viewBox="0 0 16 16" width="16" height="16" fill="var(--seek-accent, #1db954)"><path d="M15.724 4.22A4.313 4.313 0 0 0 12.192.814a4.269 4.269 0 0 0-3.622 1.13.837.837 0 0 1-1.14 0 4.272 4.272 0 0 0-6.21 5.855l5.916 7.05a1.128 1.128 0 0 0 1.727 0l5.916-7.05a4.228 4.228 0 0 0 .945-3.577z" /></svg>,
+  lyrics: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1z" /><path d="M3.25 6.5a.75.75 0 0 1 .75.75 4 4 0 0 0 8 0 .75.75 0 0 1 1.5 0 5.5 5.5 0 0 1-4.75 5.45V14.5h-1.5v-1.8A5.5 5.5 0 0 1 2.5 7.25a.75.75 0 0 1 .75-.75z" /></svg>,
   share: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M1 5.75A.75.75 0 0 1 1.75 5H4v1.5H2.5v8h11v-8H12V5h2.25a.75.75 0 0 1 .75.75v9.5a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75v-9.5z" /><path d="M8 9.013a.75.75 0 0 1-.75-.75V2.812L5.23 4.83a.75.75 0 1 1-1.06-1.06L8 .94l3.83 2.83a.75.75 0 1 1-1.06 1.06L8.75 2.812v5.451a.75.75 0 0 1-.75.75z" /></svg>,
   follow: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6.233.371a4.388 4.388 0 0 1 5.002 1.052c.421.459.713.992.904 1.554.143.421.263 1.173.22 1.894-.078 1.322-.638 2.408-1.399 3.316l-.127.152a.75.75 0 0 0 .201 1.13l2.209 1.275a4.75 4.75 0 0 1 2.375 4.114V16H0v-1.142a4.75 4.75 0 0 1 2.375-4.114l2.209-1.275a.75.75 0 0 0 .201-1.13l-.126-.152c-.761-.908-1.322-1.994-1.4-3.316-.043-.721.077-1.473.22-1.894a4.346 4.346 0 0 1 .904-1.554c.411-.448.91-.807 1.85-1.052z" /></svg>,
   edit: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M11.838.714a2.438 2.438 0 0 1 3.448 3.448l-9.841 9.841c-.358.358-.79.633-1.267.804L.5 15.5l.693-3.678c.17-.477.446-.909.804-1.267L11.838.714zm2.387 1.06a.938.938 0 0 0-1.327 0l-9.84 9.84a1.6 1.6 0 0 0-.377.594l-.263 1.393 1.393-.263a1.6 1.6 0 0 0 .594-.377l9.84-9.84a.938.938 0 0 0 0-1.327z" /></svg>,
@@ -202,6 +204,7 @@ export default function TrackRow({
         : { label: 'Go to artist', icon: I.artist, onClick: () => onOpenArtist(artistsOf.find((a) => a.Id).Id) }
     ) : null,
     onOpenAlbum && track.AlbumId ? { label: 'Go to album', icon: I.album, onClick: () => onOpenAlbum(track.AlbumId) } : null,
+    jf ? { label: 'Sync Lyrics', icon: I.lyrics, onClick: () => syncLyrics(jf, track) } : null,
     { label: 'Share', icon: I.share, onClick: () => shareItem({ kind: 'track', id: track.Id, title: track.Name, by: artistsOf.map((a) => a.Name).join(', ') }) },
     onDownload ? { sep: true } : null,
     onDownload ? { label: 'Download', icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: f.label, onClick: () => onDownload(track, f.id) })) } : null,

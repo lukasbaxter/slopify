@@ -139,6 +139,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX lyric_align_state ON lyric_align(state);
   `,
+  `
+  -- Songs someone asked to Sync Lyrics on, worked through by the task.
+  CREATE TABLE lyric_jobs (
+    track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    user_id TEXT, state TEXT NOT NULL, result TEXT, requested INTEGER NOT NULL, finished INTEGER
+  );
+  CREATE INDEX lyric_jobs_state ON lyric_jobs(state, requested);
+  `,
 ];
 
 export type DB = Database.Database;

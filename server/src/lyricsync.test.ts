@@ -3,7 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { judgeSynced, timePlain, toLrc, lyricSyncTask, registerLyricSyncAdmin, type AlignedLine } from './lyricsync.js';
+import { judgeSynced, timePlain, toLrc, lyricSyncTask, registerLyricSync, type AlignedLine } from './lyricsync.js';
 import type { LyricLine } from './lyrics.js';
 import type { TaskDef } from './tasks.js';
 
@@ -56,83 +56,125 @@ it('writes LRC timestamps the way players read them', () => {
   expect(toLrc([{ start: 61500, text: 'hi' }, { start: 5, text: 'yo' }])).toBe('[01:01.50]hi\n[00:00.01]yo\n');
 });
 
-describe('the Sync lyrics task', () => {
-  const setup = (env: Record<string, string>, settings: Record<string, any> = {}, gpu?: () => Promise<any>) => {
+describe('Sync Lyrics on a song', () => {
+  const synced8 = [10000, 13000, 16000, 19000, 22000, 25000, 28000, 31000];
+  // LrcLib that knows only the songs in `has` (plain lyrics), 404 for the rest.
+  const lrclibWith = (has: Record<string, string>) => async (url: string) => {
+    const title = new URL(url).searchParams.get('track_name') || '';
+    if (url.includes('/api/get')) return has[title] ? { status: 200, json: async () => ({ id: 1, trackName: title, artistName: 'A', albumName: 'B', duration: 200, instrumental: false, plainLyrics: has[title], syncedLyrics: null }) } : { status: 404, json: async () => null };
+    return { status: 200, json: async () => [] };
+  };
+  const setup = (opts: { env?: Record<string, string>; settings?: Record<string, any>; gpu?: () => Promise<any>; lrclib?: Record<string, string>; python?: string } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-lyricsync-'));
     const db = openDb(dir);
     db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('ar', 'A', 'a')").run();
-    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al', 'B', 'ar', 'A', ?, 3, 0, 'b')").run(dir);
-    const add = (id: string, file: string, kind: string, lines: LyricLine[], source = 'lrclib') => {
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al', 'B', 'ar', 'A', ?, 9, 0, 'b')").run(dir);
+    const add = (id: string, file: string, lyr?: { kind: string; lines: LyricLine[]; source?: string }) => {
       const p = path.join(dir, file); fs.writeFileSync(p, 'x');
       db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, duration_ms, added_at)
         VALUES (?, ?, 0, 0, ?, 'A', '["A"]', '["ar"]', 'al', 'B', 'A', 200000, 0)`).run(id, p, id);
-      db.prepare('INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES (?, ?, ?, ?, 1)').run(id, kind, JSON.stringify(lines), source);
+      if (lyr) db.prepare('INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES (?, ?, ?, ?, 1)').run(id, lyr.kind, JSON.stringify(lyr.lines), lyr.source ?? 'lrclib');
       return p;
     };
-    const sPath = add('s1', 'synced.flac', 'synced', synced([10000, 13000, 16000, 19000, 22000, 25000, 28000, 31000]), 'sidecar');
-    fs.writeFileSync(sPath.replace('.flac', '.lrc'), 'their own file\n');
-    add('p1', 'plain.flac', 'plain', ['a', 'b', 'c', 'd'].map((text) => ({ start: null, text })));
-    add('x1', 'broken.flac', 'plain', [{ start: null, text: 'words' }]);
-    add('i1', 'inst.flac', 'instrumental', []);
-    Object.assign(process.env, { FAKE_STARTS: JSON.stringify({ [sPath]: [10000, 13000, 16000, 19000, 22000, 25000, 28000, 31000] }), ...env });
+    const paths = {
+      off: add('off', 'off.flac', { kind: 'synced', lines: synced(synced8), source: 'sidecar' }),
+      plain: add('plain', 'plain.flac', { kind: 'plain', lines: ['a', 'b', 'c', 'd'].map((text) => ({ start: null, text })) }),
+      none: add('none', 'none.flac'),
+      found: add('found', 'found.flac'),
+      quiet: add('quiet', 'quiet.flac'),
+      broken: add('broken', 'broken.flac', { kind: 'plain', lines: [{ start: null, text: 'words' }] }),
+    };
+    fs.writeFileSync(paths.off.replace('.flac', '.lrc'), 'their own file\n');
+    Object.assign(process.env, { FAKE_SHIFT: '0', FAKE_STARTS: JSON.stringify({ [paths.off]: synced8 }), ...(opts.env || {}) });
     const app = Fastify();
+    app.decorateRequest('user', undefined);
+    app.addHook('onRequest', async (req: any) => { req.user = { id: 'u1' }; });
+    app.decorate('requireUser', async () => {});
     app.decorate('requireAdmin', async () => {});
-    const task = lyricSyncTask(app, { db, cacheDir: dir, saveToLibrary: true, python: process.execPath, script: FAKE, model: 'fake', gpu: gpu ?? (async () => ({ freeMb: 8000, totalMb: 8188, encoders: 0 })), pollMs: 5 });
+    const task = lyricSyncTask(app, {
+      db, cacheDir: dir, saveToLibrary: true, python: opts.python ?? process.execPath, script: FAKE, model: 'fake', pollMs: 5,
+      gpu: opts.gpu ?? (async () => ({ freeMb: 8000, totalMb: 8188, encoders: 0 })),
+      lrclib: lrclibWith(opts.lrclib ?? { found: 'one\ntwo\nthree' }) as any,
+    });
+    registerLyricSync(app, db, { saveToLibrary: true });
     const steps: string[] = [];
-    const ctx = { step: (t: string) => { steps.push(t); }, log: () => {}, setting: (k: string) => (k in settings ? settings[k] : (task as TaskDef).settings!.find((x) => x.key === k)!.default) };
-    return { db, task, ctx, steps, app, sPath };
+    const settings = { power: 'full', ...(opts.settings || {}) };
+    const ctx = { step: (t: string) => { steps.push(t); }, log: () => {}, setting: (k: string) => (k in settings ? (settings as any)[k] : (task as TaskDef).settings!.find((x) => x.key === k)!.default) };
+    const ask = async (id: string) => (await app.inject({ method: 'POST', url: `/api/lyrics/${id}/sync` })).json();
+    const jobs = async (...ids: string[]) => Object.fromEntries(((await app.inject({ url: `/api/lyrics/sync?ids=${ids.join(',')}` })).json().jobs as any[]).map((j) => [j.trackId, j]));
+    const lyr = (id: string) => db.prepare('SELECT kind, source, lines FROM lyrics WHERE track_id = ?').get(id) as any;
+    return { db, task, ctx, steps, app, paths, ask, jobs, lyr };
   };
 
-  it('times plain lyrics, shifts an offset synced file (keeping the original sidecar), records failures, then has nothing left', async () => {
-    const { db, task, ctx, steps, sPath } = setup({ FAKE_SHIFT: '1500' }, { power: 'full' });
-    const summary = await task.run(ctx as any);
-    expect(summary).toMatch(/2 timed|1 timed/);
-    const lyr = Object.fromEntries((db.prepare('SELECT track_id, kind, source, lines FROM lyrics').all() as any[]).map((r) => [r.track_id, r]));
-    expect(lyr.p1).toMatchObject({ kind: 'synced', source: 'aligned' });
-    expect(JSON.parse(lyr.p1.lines).map((l: LyricLine) => l.start)).toEqual([0, 3000, 6000, 9000]);
-    expect(lyr.s1.source).toBe('aligned');
-    expect(JSON.parse(lyr.s1.lines)[0].start).toBe(11500);
-    expect(lyr.i1.kind).toBe('instrumental'); // never touched
-    const states = Object.fromEntries((db.prepare('SELECT track_id, state FROM lyric_align').all() as any[]).map((r) => [r.track_id, r.state]));
-    expect(states).toEqual({ p1: 'synced', s1: 'corrected', x1: 'failed' });
-    expect(fs.readFileSync(sPath.replace('.flac', '.orig.lrc'), 'utf8')).toBe('their own file\n');
-    expect(fs.readFileSync(sPath.replace('.flac', '.lrc'), 'utf8')).toMatch(/^\[00:11\.50\]line 0/);
-    expect(steps.some((s) => / · 1 of 3$/.test(s))).toBe(true); // progress names the song and the count
-    expect(await task.run(ctx as any)).toBe('every song with lyrics has been checked');
+  it('each song gets what it needs: timing, a whole-file shift, lyrics from LrcLib, written lyrics, or "no vocals"', async () => {
+    const { task, ctx, ask, jobs, lyr, paths, steps } = setup({ env: { FAKE_SHIFT: '1500' } });
+    for (const id of ['plain', 'off', 'found', 'none', 'quiet', 'broken']) await ask(id);
+    expect(await task.run(ctx as any)).toBe('6 songs synced');
+    const j = await jobs('plain', 'off', 'found', 'none', 'quiet', 'broken');
+    expect(j.plain).toMatchObject({ state: 'done', result: 'Added timing to the lyrics' });
+    expect(lyr('plain')).toMatchObject({ kind: 'synced', source: 'aligned' });
+    expect(j.off).toMatchObject({ state: 'done', result: 'Moved the lyrics 1.5 s later' });
+    expect(JSON.parse(lyr('off').lines)[0].start).toBe(11500);
+    expect(fs.readFileSync(paths.off.replace('.flac', '.orig.lrc'), 'utf8')).toBe('their own file\n');
+    expect(j.found).toMatchObject({ state: 'done', result: 'Added timing to the lyrics' }); // LrcLib had them plain
+    expect(j.none).toMatchObject({ state: 'done', result: 'Wrote lyrics (3 lines)' });
+    expect(lyr('none')).toMatchObject({ kind: 'synced', source: 'generated' });
+    expect(fs.readFileSync(paths.none.replace('.flac', '.lrc'), 'utf8')).toMatch(/^\[00:10\.00\]written line number 0 here/);
+    expect(j.quiet).toMatchObject({ state: 'done', result: 'No vocals found, so no lyrics' });
+    expect(lyr('quiet')).toMatchObject({ kind: 'instrumental', source: 'generated' });
+    expect(j.broken).toMatchObject({ state: 'failed' });
+    expect(steps.some((s) => s.startsWith('Writing lyrics (slow) · A – none'))).toBe(true);
+    expect(await task.run(ctx as any)).toBe('Nothing queued: use Sync Lyrics on a song');
   });
 
-  it('undo puts back every change, the original sidecar included', async () => {
-    const { db, task, ctx, app, sPath } = setup({ FAKE_SHIFT: '1500' }, { power: 'full' });
+  it('asking twice while it waits is one job; lyrics already in step are left alone', async () => {
+    const { task, ctx, ask, jobs, lyr } = setup();
+    expect((await ask('off')).already).toBe(false);
+    expect((await ask('off')).already).toBe(true);
     await task.run(ctx as any);
-    registerLyricSyncAdmin(app, db, { saveToLibrary: true });
-    expect((await app.inject({ method: 'POST', url: '/api/admin/lyricsync/undo' })).json()).toEqual({ restored: 2 });
-    const s1 = db.prepare("SELECT kind, source, lines FROM lyrics WHERE track_id = 's1'").get() as any;
-    expect(s1).toMatchObject({ kind: 'synced', source: 'sidecar' });
-    expect(JSON.parse(s1.lines)[0].start).toBe(10000);
-    expect(fs.readFileSync(sPath.replace('.flac', '.lrc'), 'utf8')).toBe('their own file\n');
-    expect((db.prepare("SELECT kind FROM lyrics WHERE track_id = 'p1'").get() as any).kind).toBe('plain');
-    expect(await task.run(ctx as any)).toBe('every song with lyrics has been checked'); // undone stays undone
+    expect((await jobs('off')).off).toMatchObject({ state: 'done', result: 'Already in sync' });
+    expect(lyr('off').source).toBe('sidecar');
   });
 
-  it('with fixing switched off, an off file is reported and left as it was', async () => {
-    const { db, task, ctx } = setup({ FAKE_SHIFT: '1500' }, { power: 'full', correct: false, plain: false });
+  it('with fixing switched off it reports how far off the file is and changes nothing', async () => {
+    const { task, ctx, ask, jobs, lyr } = setup({ env: { FAKE_SHIFT: '-2000' }, settings: { correct: false } });
+    await ask('off'); await task.run(ctx as any);
+    expect((await jobs('off')).off.result).toBe('The lyrics are 2 s late; fixing is switched off');
+    expect(lyr('off').source).toBe('sidecar');
+  });
+
+  it('undo puts back every change: originals restored, written lyrics removed with their .lrc', async () => {
+    const { task, ctx, ask, app, lyr, paths } = setup({ env: { FAKE_SHIFT: '1500' } });
+    for (const id of ['plain', 'off', 'none']) await ask(id);
     await task.run(ctx as any);
-    expect((db.prepare("SELECT source FROM lyrics WHERE track_id = 's1'").get() as any).source).toBe('sidecar');
-    expect((db.prepare("SELECT state, shift_ms FROM lyric_align WHERE track_id = 's1'").get() as any)).toEqual({ state: 'off', shift_ms: 1500 });
+    expect((await app.inject({ method: 'POST', url: '/api/admin/lyricsync/undo' })).json()).toEqual({ restored: 3 });
+    expect(lyr('off')).toMatchObject({ kind: 'synced', source: 'sidecar' });
+    expect(JSON.parse(lyr('off').lines)[0].start).toBe(10000);
+    expect(fs.readFileSync(paths.off.replace('.flac', '.lrc'), 'utf8')).toBe('their own file\n');
+    expect(lyr('plain').kind).toBe('plain');
+    expect(lyr('none')).toBeUndefined();
+    expect(fs.existsSync(paths.none.replace('.flac', '.lrc'))).toBe(false);
   });
 
   it('on Normal power it waits while the GPU is encoding (Jellyfin), then carries on', async () => {
     let calls = 0;
-    const gpu = async () => ({ freeMb: 8000, totalMb: 8188, encoders: calls++ < 2 ? 1 : 0 });
-    const { task, ctx, steps } = setup({ FAKE_SHIFT: '0' }, { power: 'normal' }, gpu);
-    await task.run(ctx as any);
+    const { task, ctx, ask, steps, jobs } = setup({ settings: { power: 'normal' }, gpu: async () => ({ freeMb: 8000, totalMb: 8188, encoders: calls++ < 2 ? 1 : 0 }) });
+    await ask('plain'); await task.run(ctx as any);
     expect(steps.filter((s) => s.startsWith('Paused: the GPU is encoding')).length).toBe(2);
+    expect((await jobs('plain')).plain.state).toBe('done');
   });
 
-  it('stands down on an image without the aligner', async () => {
-    const app = Fastify();
-    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-lyricsync-none-')));
-    const task = lyricSyncTask(app, { db, cacheDir: '/tmp', saveToLibrary: false, python: '/nope/python', script: '/nope/align.py', model: 'turbo' });
-    expect(await task.run({ step: () => {}, log: () => {}, setting: () => true } as any)).toMatch(/needs the GPU image/);
+  it('writing lyrics waits for room for the large model', async () => {
+    let free = 4000;
+    const { task, ctx, ask, steps } = setup({ gpu: async () => ({ freeMb: (free += 1500), totalMb: 8188, encoders: 0 }) });
+    await ask('none'); await task.run(ctx as any);
+    expect(steps.some((s) => s.startsWith('Paused: the GPU is busy (5500 MB free)'))).toBe(true);
+  });
+
+  it('a server without the GPU image answers every waiting song instead of leaving it queued', async () => {
+    const { task, ctx, ask, jobs } = setup({ python: '/nope/python' });
+    await ask('plain');
+    expect(await task.run(ctx as any)).toMatch(/needs the GPU image/);
+    expect((await jobs('plain')).plain).toMatchObject({ state: 'failed', result: 'This server cannot sync lyrics (it needs the GPU image)' });
   });
 });

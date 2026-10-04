@@ -103,16 +103,25 @@ task's next step, even mid-run; the env values above only seed the defaults.
 
 ### Sync lyrics (GPU image)
 
-**Sync lyrics** (daily 01:00) lines lyrics up with the vocals on an NVIDIA
-GPU. Demucs isolates the voice, then Whisper finds when each *known* line
-is sung (forced alignment: nothing is transcribed or invented). Plain
-lyrics get timestamps when a song aligns confidently. Synced lyrics are
-checked: a file that is consistently early or late (timed to another
-version or intro) is shifted as a whole, and anything doubtful is left
-alone. Every change is recorded with the original, and **Undo all
-changes** in the task's menu puts everything back. With `SAVE_TO_LIBRARY=1`
-the new timing is written to the song's `.lrc`; a `.lrc` that came with
-your music is kept once as `<name>.orig.lrc`.
+Right-click a song (or use the now-playing menu) and pick **Sync Lyrics**.
+The song joins a queue that the **Sync lyrics** task works through on an
+NVIDIA GPU, and a toast says how it went:
+
+- **No lyrics yet:** LrcLib is asked again, fresh.
+- **None anywhere:** they are written from the vocals. Demucs isolates the
+  voice and Whisper's large model transcribes it, slowly and carefully, with
+  its known hallucinations ("Thank you." in a quiet gap, a looping line)
+  filtered out. A song with almost no words is marked instrumental instead.
+- **Plain lyrics:** they get timestamps when the song aligns confidently
+  (forced alignment: the words are known, only their timing is searched for).
+- **Synced lyrics:** checked against the vocals. A file that is consistently
+  early or late (timed to another version or intro) is shifted as a whole;
+  anything doubtful is left alone.
+
+Every change is recorded with the original, and **Undo all changes** in the
+task's ⋯ menu puts everything back. With `SAVE_TO_LIBRARY=1` new timing is
+written to the song's `.lrc`; a `.lrc` that came with your music is kept
+once as `<name>.orig.lrc`.
 
 It needs the GPU image and the card passed in:
 
@@ -130,12 +139,14 @@ services:
 ```
 
 (NVIDIA driver plus the container toolkit with CDI on the host; on older
-setups `driver: nvidia, count: 1` works too.) The first run downloads the
-models (~1.7 GB) into `CACHE_DIR/models`. It peaks around 4.5 GB of VRAM,
-and **GPU power** in its menu decides how much it takes: Light, Normal,
-High or Full. The lower levels work in bursts with the model unloaded in
-between, and pause entirely while anything (Jellyfin, Immich) is encoding
-on the card. On an RTX 4060 a song takes about a tenth of its own length.
+setups `driver: nvidia, count: 1` works too.) The models download into
+`CACHE_DIR/models` on first use (~1.6 GB to line up lyrics, ~3 GB more to
+write them). Lining up peaks around 3.5 GB of VRAM; writing around 5.5 GB,
+and only starts when that much is free (the large model is unloaded again
+right after). **GPU power** in the task's menu decides how hard it leans on
+the card: the lower levels pause while anything (Jellyfin, Immich) is
+encoding. On an RTX 4060 lining up takes about a tenth of a song's length;
+writing about a quarter.
 
 ## All configuration
 
@@ -181,7 +192,8 @@ are the homelab defaults: music at `/music`, state in `/data`.
 | `FLAC_PER_RUN` | `40` | Upgrade-to-FLAC tracks per run |
 | `ANTHROPIC_API_KEY` | (unset) | Powers Generated playlists (Claude) |
 | `AI_MODEL` | `claude-opus-5` | Model for Generated playlists |
-| `ALIGN_MODEL` | `turbo` | Whisper model for Sync lyrics (gpu image) |
+| `ALIGN_MODEL` | `turbo` | Whisper model that lines lyrics up (gpu image) |
+| `ALIGN_WRITE_MODEL` | `large-v3` | Whisper model that writes lyrics for songs that have none |
 | `ALIGN_PYTHON` / `ALIGN_SCRIPT` | gpu image paths | Where the aligner lives, if you run it outside the gpu image |
 
 ## What works today

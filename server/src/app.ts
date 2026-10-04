@@ -24,7 +24,7 @@ import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
 import { registerTasks, builtinTasks } from './tasks.js';
-import { lyricSyncTask, registerLyricSyncAdmin } from './lyricsync.js';
+import { lyricSyncTask, registerLyricSync } from './lyricsync.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 
@@ -106,9 +106,9 @@ export async function buildServer(opts: BuildOptions = {}) {
     ...config.tasks,
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,
-    python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
+    python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model, writeModel: config.align.writeModel,
   })]);
-  registerLyricSyncAdmin(app, db, { saveToLibrary: config.saveToLibrary });
+  registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 
   // No version on the unauthenticated health checks (don't hand scanners a
   // fingerprint); nothing in web/src consumes it.

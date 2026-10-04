@@ -211,6 +211,8 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
     };
   };
   app.get('/api/admin/tasks', admin, async () => ({ tasks: defs.map(taskOut) }));
+  // Work queued from elsewhere (Sync Lyrics on a song) starts its task now.
+  app.decorate('startTask', (id: string) => { const def = defs.find((d) => d.id === id); return def ? start(def) : false; });
   app.post('/api/admin/tasks/:id/run', admin, async (req: any, reply) => {
     const def = defs.find((d) => d.id === req.params.id);
     if (!def) return reply.code(404).send({ error: 'no such task' });

@@ -37,21 +37,24 @@ async function cached<T>(db: DB, key: string, ttlMs: number, load: () => Promise
 
 // Pick the LrcLib record for a track: exact get by duration, else the search
 // candidate closest in duration within 3 s, synced preferred.
-export async function lrclibLookup(db: DB, fetcher: Fetcher, t: { title: string; artist: string; album: string; durationMs: number }): Promise<LrclibRecord | null> {
+export async function lrclibLookup(db: DB, fetcher: Fetcher, t: { title: string; artist: string; album: string; durationMs: number }, opts: { fresh?: boolean } = {}): Promise<LrclibRecord | null> {
   const dur = Math.round(t.durationMs / 1000);
+  // fresh: someone asked for this song's lyrics just now; a month-old "not
+  // found" is not an answer to that.
+  const DAY_ = opts.fresh ? 0 : DAY;
   const q = (o: Record<string, string>) => new URLSearchParams(o).toString();
   // Only real answers are cached: 200 and 404 (LrcLib's genuine "no lyrics
   // here"). Anything else is an outage or throttle — the loader throws, so
   // `cached` stores nothing and the next pass simply asks again instead of
   // sitting on a 30-day poisoned miss.
-  const get = await cached(db, `lrclib:get:${t.artist}|${t.title}|${t.album}|${dur}`, 30 * DAY, async () => {
+  const get = await cached(db, `lrclib:get:${t.artist}|${t.title}|${t.album}|${dur}`, 30 * DAY_, async () => {
     const r = await fetcher(`https://lrclib.net/api/get?${q({ track_name: t.title, artist_name: t.artist, album_name: t.album, duration: String(dur) })}`);
     if (r.status === 200) return await r.json();
     if (r.status === 404) return null;
     throw new Error(`lrclib get ${r.status}`);
   });
   if (get) return get as LrclibRecord;
-  const list = await cached(db, `lrclib:search:${t.artist}|${t.title}`, 7 * DAY, async () => {
+  const list = await cached(db, `lrclib:search:${t.artist}|${t.title}`, 7 * DAY_, async () => {
     const r = await fetcher(`https://lrclib.net/api/search?${q({ track_name: t.title, artist_name: t.artist })}`);
     if (r.status === 200) return await r.json();
     if (r.status === 404) return [];

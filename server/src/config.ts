@@ -110,6 +110,7 @@ export const config = {
     python: env('ALIGN_PYTHON', '/opt/align/bin/python'),
     script: env('ALIGN_SCRIPT', ''), // default: aligner/align.py in the app
     model: env('ALIGN_MODEL', 'turbo'),
+    writeModel: env('ALIGN_WRITE_MODEL', 'large-v3'), // writes lyrics for songs that have none
   },
   // Generated playlists: Claude through the Anthropic API.
   ai: {

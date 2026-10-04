@@ -258,6 +258,8 @@ export class Slopify {
     return { items: items.slice(startIndex, startIndex + limit), total: items.length };
   }
 
+  syncLyrics(itemId) { return this._fetch(`/api/lyrics/${itemId}/sync`, { method: 'POST' }); }
+  lyricJobs(ids) { return this._fetch(`/api/lyrics/sync?ids=${ids.map(encodeURIComponent).join(',')}`); }
   // Lyrics: [{ start: seconds | null, text }]. Empty for none / instrumental.
   async lyrics(itemId) {
     try {

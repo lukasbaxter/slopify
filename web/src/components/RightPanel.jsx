@@ -289,6 +289,13 @@ export function Lyrics({ player, jf }) {
   const activeRef = useRef(null);
   const phone = usePhone();
 
+  // Sync Lyrics finishing for this song: load its new lyrics.
+  const [rev, setRev] = useState(0);
+  useEffect(() => {
+    const on = (e) => { if (e.detail === trackId) setRev((v) => v + 1); };
+    window.addEventListener('slopify:lyricschanged', on);
+    return () => window.removeEventListener('slopify:lyricschanged', on);
+  }, [trackId]);
   useEffect(() => {
     if (!trackId) { setLines(null); setState('idle'); return; }
     let cancelled = false;
@@ -301,7 +308,7 @@ export function Lyrics({ player, jf }) {
       })
       .catch(() => { if (!cancelled) setState('none'); });
     return () => { cancelled = true; };
-  }, [trackId, jf]);
+  }, [trackId, jf, rev]);
 
   // Nudge the playhead forward slightly when choosing the active line. Human
   // perception is asymmetric here: a lyric arriving a hair early reads as in

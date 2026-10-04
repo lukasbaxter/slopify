@@ -77,15 +77,22 @@ export function paletteColors(url) {
         ctx.drawImage(img, 0, 0, N, N);
         const d = ctx.getImageData(0, 0, N, N).data;
         const bins = new Map();
+        let total = 0, neutral = 0;
         for (let i = 0; i < d.length; i += 4) {
           const r = d[i], g = d[i + 1], b = d[i + 2];
           const [h, s, l] = rgbToHsl(r, g, b);
+          total++;
+          if (s < .15 || l < .08 || l > .92) neutral++;
           if (l < .08 || l > .94) continue;
           const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
           const e = bins.get(key) || { n: 0, r: 0, g: 0, b: 0, h: 0, s: 0, l: 0 };
           e.n++; e.r += r; e.g += g; e.b += b; e.h += h; e.s += s; e.l += l;
           bins.set(key, e);
         }
+        // A cover that is mostly white, grey or black (a few coloured specks on
+        // a white sleeve) is that, not its specks: white bars with soft grey
+        // depth, instead of the specks blown up into green, orange and yellow.
+        if (total && neutral / total >= .6) { resolve(['rgb(255,255,255)', 'rgb(226,226,226)', 'rgb(190,190,190)']); return; }
         const ranked = [...bins.values()].map((e) => ({ rgb: [Math.round(e.r / e.n), Math.round(e.g / e.n), Math.round(e.b / e.n)], h: e.h / e.n, s: e.s / e.n, l: e.l / e.n, score: e.n * (.15 + e.s / e.n) * (e.l / e.n > .2 && e.l / e.n < .8 ? 1 : .35) }))
           .sort((a, b) => b.score - a.score);
         const out = [];

@@ -221,7 +221,9 @@ export default function TrackRow({
       onDrop={onDrop}
       // onRowOpen (search rows): a tap on the row navigates (the song's
       // album); a mouse double-click still plays, like every other list.
-      onDoubleClick={onPlay}
+      // Mouse only: on a phone a tap already plays, and two quick taps would
+      // also fire a double-click and play it twice.
+      onDoubleClick={phone || touch ? undefined : onPlay}
       onContextMenu={openMenuAt}
       // Phone: the number / play button is hidden, so a tap on the row itself
       // plays (Spotify); the same on any touch screen (iPad), where there is

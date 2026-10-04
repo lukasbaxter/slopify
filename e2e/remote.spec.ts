@@ -62,3 +62,46 @@ test('the desktop picks songs for the phone that is playing', async ({ browser }
   expect(names.some((n: string) => /^Chrome on (Mac|Linux|Windows)/.test(n))).toBe(true);
   await wk.close();
 });
+
+test('a phone picks a song from Liked Songs for the laptop that is playing', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  const desk = await device(browser, false);
+  const phone = await device(browser, true);
+  // Like every track, so Liked Songs has a list to pick from.
+  await phone.evaluate(async () => {
+    const tok = JSON.parse(localStorage.getItem('slopify.session') || '{}').token;
+    const h = { authorization: `Bearer ${tok}` };
+    const r = await (await fetch('/api/search?q=a&limit=50', { headers: h })).json();
+    for (const t of r.tracks || []) await fetch(`/api/likes/${t.id}`, { method: 'PUT', headers: h });
+  });
+  // The laptop plays.
+  await openAlbum(desk, 'First Light');
+  await desk.locator('.trackrow').nth(0).dblclick();
+  await expect.poll(() => nowTitle(desk), { timeout: 20000 }).toMatch(/0:0[1-9]|0:[1-5]\d/);
+  await expect.poll(() => nowTitle(phone), { timeout: 20000 }).toContain('River Harbour');
+  // The phone opens Liked Songs and taps a song further down.
+  await phone.reload(); await waitForLibrary(phone);
+  await phone.locator('.tabbar button', { hasText: 'Your Library' }).click();
+  await phone.getByText('Liked Songs', { exact: true }).first().click();
+  await expect(phone.locator('.trackrow').nth(3)).toBeVisible({ timeout: 15000 });
+  const row = phone.locator('.trackrow').nth(3);
+  const title = (await row.locator('.trackrow-name, .trackrow-title').first().textContent())!.trim();
+  // A real touch tap (a phone has no mouse), counting the play commands it sends.
+  let sent = 0;
+  phone.on('websocket', (ws) => ws.on('framesent', (f) => { if (String(f.payload).includes('"type":"command"') && String(f.payload).includes('"action":"play"')) sent += 1; }));
+  await phone.reload(); await waitForLibrary(phone);
+  await phone.locator('.tabbar button', { hasText: 'Your Library' }).click();
+  await phone.getByText('Liked Songs', { exact: true }).first().click();
+  await expect(phone.locator('.trackrow').nth(3)).toBeVisible({ timeout: 15000 });
+  await phone.waitForTimeout(1500);
+  const t0 = Date.now();
+  await phone.locator('.trackrow').nth(3).tap();
+  await expect.poll(() => nowTitle(desk), { timeout: 15000, intervals: [50] }).toContain(title.slice(0, 12));
+  const tDesk = Date.now() - t0;
+  await expect.poll(() => nowTitle(phone), { timeout: 15000, intervals: [50] }).toContain(title.slice(0, 12));
+  console.log(`tap -> laptop ${tDesk} ms, -> phone shows it ${Date.now() - t0} ms`);
+  await phone.waitForTimeout(1000);
+  expect(sent).toBe(1);
+  await expect.poll(() => nowTitle(phone), { timeout: 15000 }).toContain(title.slice(0, 12));
+});
+

@@ -1685,8 +1685,8 @@ export function usePlayer(jf) {
         const idx = Math.min(cmd.index || 0, cmd.trackIds.length - 1);
         const chosenId = cmd.trackIds[idx];
         try {
-          const rest = cmd.trackIds.length > 1 ? fetchByIds(jf, cmd.trackIds, fields).catch(() => null) : null;
           const [first] = await fetchByIds(jf, [chosenId], fields);
+          const rest = cmd.trackIds.length > 1 ? fetchByIds(jf, cmd.trackIds, fields).catch(() => null) : null;
           if (!first) throw new Error('track not found');
           await startHereRef.current([first], 0, cmd.position || 0, cmd.playing !== false);
           const tracks = rest ? await rest : null;
@@ -1707,12 +1707,14 @@ export function usePlayer(jf) {
       const idx = Math.min(cmd.index || 0, cmd.trackIds.length - 1);
       const chosenId = cmd.trackIds[idx];
       try {
-        const rest = cmd.trackIds.length > 1 ? fetchByIds(jf, cmd.trackIds, fields) : null;
+        // The chosen song first, on its own: the rest of a long list (Liked
+        // Songs runs to thousands) is fetched only once it is playing, so a
+        // problem with that can never stop the song itself.
         const [first] = await fetchByIds(jf, [chosenId], fields);
         if (!first) return;
         await playQueueRef.current([first], 0, cmd.ctx || null, cmd.startAt || 0);
-        if (!rest) return;
-        const tracks = await rest;
+        if (cmd.trackIds.length <= 1) return;
+        const tracks = await fetchByIds(jf, cmd.trackIds, fields).catch(() => []);
         // Still on that song? Then fill the queue in around it, respecting shuffle.
         if (queueRef.current[indexRef.current]?.Id !== chosenId || !tracks.length) return;
         const at = Math.max(0, tracks.findIndex((t) => t.Id === chosenId));

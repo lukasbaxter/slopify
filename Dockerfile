@@ -35,7 +35,9 @@ VOLUME ["/data"]
 EXPOSE 8080
 ENTRYPOINT ["slopify-entrypoint"]
 HEALTHCHECK --interval=30s CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "server/dist/index.js"]
+# 64 KB of headers: older apps ask for 500 track ids in one URL (~16.5 KB),
+# just past Node's 16 KB default.
+CMD ["node", "--max-http-header-size=65536", "server/dist/index.js"]
 
 # The GPU variant: everything above plus the aligner's Python stack. Run it
 # with the GPU passed in (CDI: devices nvidia.com/gpu=all); the models

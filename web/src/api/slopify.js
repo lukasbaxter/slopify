@@ -277,8 +277,11 @@ export class Slopify {
   async itemsByIds(ids) {
     if (!ids.length) return [];
     const out = [];
-    for (let i = 0; i < ids.length; i += 500) {
-      const r = await this._fetch(`/api/tracks?ids=${ids.slice(i, i + 500).join(',')}`);
+    // 100 ids a request (about 3.3 KB of URL). 500 made a 16.5 KB URL: past
+    // Node's 16 KB header limit (431) and nginx's 8 KB buffers, which over
+    // HTTP/2 can fail the whole connection, the requests beside it included.
+    for (let i = 0; i < ids.length; i += 100) {
+      const r = await this._fetch(`/api/tracks?ids=${ids.slice(i, i + 100).join(',')}`);
       out.push(...(r.items || []).map(rowTrack));
     }
     const by = new Map(out.map((t) => [t.Id, t]));

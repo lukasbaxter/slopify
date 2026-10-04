@@ -1,219 +1,87 @@
 # Slopify
 
-Self-hosted music: one container, your music folder, Spotify-style apps
-(web/phone, desktop with Chromecast + BluOS, a shared session across all of
-them). Successor to Conduit, rebuilt on what that taught (see `docs/PLAN.md`).
+Self-hosted music: one container and your music folder give your household
+Spotify-style apps (web, Android, Mac, Windows) with a shared session across
+them, Chromecast and BluOS speakers driven by the server, and a Home Assistant
+integration.
 
 Free software under the [GNU AGPL v3](LICENSE). No telemetry, no accounts with
 anyone: [what leaves your server](PRIVACY.md) lists every outside service and
 how to turn it off. Not affiliated with Spotify.
 
-## Run it
+## Quick start
 
-```yaml
-services:
-  slopify:
-    image: ghcr.io/lukasbaxter/slopify:latest
-    network_mode: host   # so it can find Chromecast / BluOS speakers; PORT picks the port
-    volumes:                # bridge mode (ports: ["8080:8080"]) works too, but
-      - /path/to/music:/music   # disables speaker discovery (set SPEAKERS=0)
-      - ./data:/data
-    environment:
-      PORT: "8080"
-      PUBLIC_URL: http://192.168.1.10:8080   # what speakers fetch audio from (LAN address)
-      ADMIN_USER: admin
-      ADMIN_PASS: admin   # you are asked to change it on first login
-```
+You need Docker with Compose, and a folder of music (any layout; tags are
+read from the files). The image runs on amd64 and arm64 (Raspberry Pi 4/5,
+ARM NAS boxes).
 
-`docker compose up -d`, open http://host:8080, log in, it scans. Music gets
-into `/music` however you like (Lidarr, slskd, rsync).
+1. Save this as `compose.yml` and change the music path:
 
-Two defaults to know about before pointing it at a library you care about:
+   ```yaml
+   services:
+     slopify:
+       image: ghcr.io/lukasbaxter/slopify:latest
+       container_name: slopify
+       restart: unless-stopped
+       network_mode: host        # lets it find and play to Chromecast / BluOS speakers
+       volumes:
+         - /path/to/music:/music:ro
+         - ./data:/data
+       environment:
+         PORT: "8080"
+         TZ: America/Vancouver   # your time zone, for scheduled tasks
+   ```
 
-- `SAVE_TO_LIBRARY=1` (default) **writes into the mounted library**: lyrics
-  as `.lrc` sidecars, found covers as `<album>/cover.jpg`, artist pictures
-  as `<artist>/artist.jpg`. Set `SAVE_TO_LIBRARY=0` to keep it untouched
-  (then mounting `/music` read-only is fine).
-- `HEADS=1` (default) copies the first seconds of every track into
-  `CACHE_DIR` (which defaults to `CONFIG_DIR`/`/data`) at scan, so playback
-  starts at SSD speed while a NAS wakes. Set `HEADS=0` to disable.
+2. `docker compose up -d`
+3. Open `http://<server>:8080`, sign in as `admin` / `admin` and choose a new
+   password. The library scans on its own; a few thousand songs take a
+   minute or two.
+4. Add your household in Settings › Accounts (or send them an invite), and
+   get the apps from the [releases page](https://github.com/lukasbaxter/slopify/releases).
 
-The container runs as the non-root `node` user (uid 1000). The volumes are
-host mounts, so make sure `./data` — and `/path/to/music` when
-`SAVE_TO_LIBRARY=1` — are writable by uid 1000 (`chown -R 1000` or matching
-group permissions).
+`docker compose logs slopify` says what it found: your music folder, the
+speakers' address, anything it could not do. Most first-run problems are
+spelled out there.
 
-## Downloads: plug in your own arr stack (optional)
+### Good to know
 
-Slopify speaks Lidarr and slskd natively — no glue services. With a Lidarr
-that manages the same music folder, the artist pages grow full
-discographies with Request buttons, search gets an "Everywhere" shelf, the
-Release Radar fills, generated playlists can fetch what the library lacks,
-and a Downloads page shows where everything is. Requests simply monitor the
-album in Lidarr; whatever you have watching Lidarr does the fetching — its
-own indexers, [Soularr](https://github.com/mrusse/soularr) bridging slskd
-for Soulseek, or both.
+- **Your music folder is read-only to Slopify** unless you ask otherwise.
+  `SAVE_TO_LIBRARY=1` writes found lyrics and artwork next to your files
+  (drop the `:ro` then).
+- **It runs as uid 1000.** It sets up `./data` itself; the music needs to be
+  readable by that user. `PUID` / `PGID` pick a different user.
+- **Speakers need host networking.** With Docker's default network
+  (`ports: ["8080:8080"]` instead of `network_mode: host`) everything else
+  works, but no speakers are found and Home Assistant needs the address typed
+  in. Speakers fetch audio from the server's LAN address, worked out on its
+  own; set `PUBLIC_URL` if the log shows the wrong one.
+- **Outside your home**, put it behind HTTPS: [reverse proxy setup](docs/reverse-proxy.md).
 
-```yaml
-    environment:
-      # Lidarr: catalog + download queue
-      LIDARR_URL: http://127.0.0.1:8686
-      LIDARR_API_KEY: ...
-      LIDARR_ROOT: /music              # the library as LIDARR's container sees it
-      LIDARR_QUALITY_PROFILE: ""       # profile (name or id) for artists Slopify adds; blank = Lidarr's first
-      LIDARR_METADATA_PROFILE: ""
-      LIDARR_SEARCH_ON_REQUEST: "0"    # "1": every request also fires Lidarr's indexer search immediately
-      # slskd: Weekly Exploration fetches single missing tracks directly
-      SLSKD_URL: http://127.0.0.1:5030
-      SLSKD_API_KEY: ...
-      SLSKD_DOWNLOADS_DIR: /slskd-downloads  # slskd's finished-downloads folder, mounted here,
-                                             # so fetched tracks move into the library and scan at once
-```
+## More
 
-In Lidarr add a Webhook notification (Settings → Connect → Webhook, on
-Release Import + on Upgrade) pointed at
-`http://<slopify>:8080/api/hooks/lidarr?key=<LIDARR_API_KEY>` — imported
-albums become playable seconds later instead of at the next library scan.
-Artists Slopify adds to Lidarr while browsing stay unmonitored; only a
-Request monitors an album.
+- [Configuration](docs/configuration.md): every setting.
+- [HTTPS and a reverse proxy](docs/reverse-proxy.md): Caddy, nginx, Traefik.
+- [Backups and upgrades](docs/backup-and-upgrade.md): what to keep, pinning versions, moving machines.
+- [Downloads with Lidarr and slskd](docs/downloads.md): discographies, requests, the Tasks list.
+- [Sync lyrics on a GPU](docs/lyric-sync.md): the GPU image.
+- [Home Assistant](docs/home-assistant.md): the integration, installed with HACS.
 
-## Tasks
+## What it does
 
-Settings → Admin has a Tasks list, Jellyfin-style: every recurring chore
-on one line with its last run, live progress, a Run now button and its
-schedule, editable in place — every N hours, daily at a time, weekly on a
-day, on file change (tasks that watch the music folder), or off. Built in,
-with their defaults: **Scan library** (daily 04:00; can also watch the
-folder and scan two minutes after files change), **Fetch lyrics & artwork**
-(hourly, `ENRICH_EVERY_H`), **Cut song heads** (daily 05:00, when
-`HEADS=1`), **Discover new music** (Sundays 06:00 — an album each from
-artists similar to your most played, via Deezer + Lidarr,
-`DISCOVERY_PER_RUN`), and **Fill in discographies** (every 6 h,
-`BACKLOG_EVERY_H`/`BACKLOG_PER_RUN`/`BACKLOG_ARTISTS_PER_RUN` — missing
-studio albums and EPs of the artists you actually play). The background
-chores never fill Lidarr's wanted list past `TASKS_WANTED_TARGET` (default
-25), so a person's own request is always near the front of the line.
-
-There is also **Upgrade to FLAC** (`FLAC_PER_RUN` per run). **Warning:**
-setting the three slskd envs (`SLSKD_URL`, `SLSKD_API_KEY`,
-`SLSKD_DOWNLOADS_DIR`) enables it, hourly by default, and it **replaces
-lossy files in your library** with lossless ones as it finds them. If you
-want slskd for Weekly Exploration but not that, set the task to Off in the
-Tasks UI.
-
-Every task's ⋯ menu holds its own settings (pace, how much per run, which
-parts to fetch, ...). They are saved in the database and apply from the
-task's next step, even mid-run; the env values above only seed the defaults.
-
-### Sync lyrics (GPU image)
-
-Right-click a song (or use the now-playing menu, or the button in the
-lyrics view) and pick **Sync Lyrics**. The song joins a queue that the
-**Sync lyrics** task works through on an NVIDIA GPU; a pill above the
-player shows which song and what stage it is at, and a toast says how it
-went.
-
-- **Lyrics in hand:** they are lined up with the vocals. Demucs isolates
-  the voice and Whisper finds when each *known* line is sung (forced
-  alignment: nothing is transcribed or invented). Plain lyrics get
-  timestamps; synced ones are checked, and a file that is consistently
-  early or late (timed to another version or intro) is shifted as a whole.
-- **No lyrics, or plain ones that will not line up:** it looks further:
-  LrcLib (fresh), NetEase Cloud Music (time-synced), then Genius (plain).
-  Every copy it finds is lined up with the song before it is kept, which is
-  also the proof that it is the right song; a copy that does not match the
-  recording is dropped, and a song nobody has lyrics for is left without.
-
-Every change is recorded with the original, and **Undo all changes** in the
-task's ⋯ menu puts everything back. With `SAVE_TO_LIBRARY=1` the result is
-written to the song's `.lrc`; a `.lrc` that came with your music is kept
-once as `<name>.orig.lrc`.
-
-It needs the GPU image and the card passed in:
-
-```yaml
-services:
-  slopify:
-    image: ghcr.io/lukasbaxter/slopify:gpu   # or build with --target gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: cdi
-              device_ids: [nvidia.com/gpu=all]
-              capabilities: [gpu]
-```
-
-(NVIDIA driver plus the container toolkit with CDI on the host; on older
-setups `driver: nvidia, count: 1` works too.) The model downloads into
-`CACHE_DIR/models` on first use (~1.6 GB). It peaks around 3.5 GB of VRAM
-and **GPU power** in the task's menu decides how hard it leans on the card:
-the lower levels pause while anything (Jellyfin, Immich) is encoding. On an
-RTX 4060 a song takes about a tenth of its own length.
-
-## All configuration
-
-Everything comes from the environment (`server/src/config.ts`). Defaults
-are the homelab defaults: music at `/music`, state in `/data`.
-
-| Env | Default | What it does |
-| --- | --- | --- |
-| `HOST` | `0.0.0.0` | Listen address |
-| `PORT` | `8080` | Listen port |
-| `MUSIC_DIR` | `/music` | The library (may be a NAS mount) |
-| `CONFIG_DIR` / `DATA_DIR` | `/data` | Database, avatars, imports — small, precious. `CONFIG_DIR` wins if both set |
-| `CACHE_DIR` | = `CONFIG_DIR` | Song heads, transcodes, artwork sizes — rebuildable, put it on an SSD |
-| `HEADS` | `1` | Copy the first seconds of every track into the cache at scan; `0` disables |
-| `HEAD_SECONDS` | `5` | Length of those heads |
-| `TRANSCODE_CONCURRENCY` | `4` | Foreground HLS transcodes allowed at once; extra requests wait. |
-| `TRANSCODE_CACHE_GB` | `60` | HLS transcode cache cap; nightly trim drops oldest-used |
-| `SAVE_TO_LIBRARY` | `1` | Write `.lrc` / `cover.jpg` / `artist.jpg` into `MUSIC_DIR`; `0` keeps the library untouched |
-| `SONG_CACHE_GB` | `0` | Whole songs copied to cache before playing; `0` = off |
-| `SCAN_ON_BOOT` | `1` | Full library walk at boot |
-| `SCAN_PAUSE_MS` | `0` | Pause between files during a scan (gentle on a NAS) |
-| `INCOMING_DIR` | (unset) | Ingest: new music lands here (SSD) and is moved to `NAS_DIR` |
-| `NAS_DIR` | = `MUSIC_DIR` | Ingest destination |
-| `INGEST_EVERY_MIN` | `10` | Ingest sweep interval |
-| `INGEST_SETTLE_MIN` | `10` | A file must be this old before it moves |
-| `INGEST_DELETE` | `0` | Delete emptied incoming folders |
-| `INGEST_DELETE_SETTLE_MIN` | `60` | Folder quiet this long before deletion |
-| `PUBLIC_URL` | (unset) | URL speakers fetch audio from (LAN address) |
-| `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin` | First account; password change forced on first login |
-| `LOG_LEVEL` | `info` | Fastify log level |
-| `TRUST_PROXY` | `1` | How many proxy hops to trust for the client IP (`true`/`false`/hop count). Keep `1` behind a single nginx; rate limits key on the resulting IP. |
-| `LOGIN_RATE_MAX` | `10` | Login attempts per IP per minute |
-| `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
-| `MDNS` | `1` | Announce the server on the LAN (`_slopify._tcp`) so Home Assistant finds it; `0` = off |
-| `BLUOS_GROUPS` | `slopify` | BluOS speakers are grouped only by Slopify's speaker groups; a group made elsewhere (the BluOS app) is unlinked within a minute. `keep` leaves those alone |
-| `SOURCE_URL` | this repository | The source code link every app shows in Settings › About; point it at your fork if you run a modified Slopify (the AGPL asks you to offer your users its source) |
-| `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under |
-| `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
-| `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
-| `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |
-| `LIDARR_QUALITY_PROFILE` / `LIDARR_METADATA_PROFILE` | (blank) | Profiles for artists Slopify adds; blank = Lidarr's first |
-| `LIDARR_SEARCH_ON_REQUEST` | `0` | `1`: a request also fires Lidarr's indexer search immediately |
-| `THEAUDIODB_KEY` | `123` | TheAudioDB key for wide artist photos (artist page banners); `123` is its free public key, empty turns it off. A `backdrop.jpg` / `fanart.jpg` in the artist's folder is used first |
-| `ENRICH_EVERY_H` | `1` | Fetch lyrics & artwork interval |
-| `TASKS_WANTED_TARGET` | `25` | Cap on what background chores put on Lidarr's wanted list |
-| `DISCOVERY_PER_RUN` | `10` | Albums per Discover run |
-| `BACKLOG_EVERY_H` / `BACKLOG_PER_RUN` / `BACKLOG_ARTISTS_PER_RUN` | `6` / `10` / `5` | Fill-in-discographies pace |
-| `FLAC_PER_RUN` | `40` | Upgrade-to-FLAC tracks per run |
-| `ANTHROPIC_API_KEY` | (unset) | Powers Generated playlists (Claude) |
-| `AI_MODEL` | `claude-opus-5` | Model for Generated playlists |
-| `ALIGN_MODEL` | `turbo` | Whisper model that lines lyrics up (gpu image) |
-| `ALIGN_PYTHON` / `ALIGN_SCRIPT` | gpu image paths | Where the aligner lives, if you run it outside the gpu image |
-
-## Home Assistant
-
-The `custom_components/slopify` integration (installable with HACS) adds each
-account's session as a media player: live state, every control, moving the
-music between speakers and apps, the library in the media browser, search,
-and `play_media`. Home Assistant finds the server on its own. Setup and
-automation examples: [`docs/home-assistant.md`](docs/home-assistant.md).
-
-## What works today
-
-See `docs/STATUS.md`. Short version: scan your folder, browse/search, play (originals or HLS transcodes), lyrics (sidecars + LrcLib), artist pictures, likes, playlists, Home and history from your own plays, several devices sharing one session (mirror, control, hand over), Chromecast and BluOS speakers at home driven by the server so any phone or browser can pick them, accounts with invites and admin roles. Desktop app, phone shell and Soulseek are next.
+- Browse and search your library; play the original files or a quality you
+  pick per device (adaptive on a weak signal); lyrics (your `.lrc` files, else LrcLib), artist pictures and
+  banners, album art.
+- Likes, playlists, history and a Home page built from your own listening;
+  Popular per artist from ListenBrainz.
+- One session per person across every device: start on the phone, carry on
+  at the desk, control one from another.
+- Chromecast and BluOS speakers driven by the server, so any phone or browser
+  can pick them, and speaker groups.
+- Accounts with invites and admin roles; sign-ins revocable per device.
+- Optional: Lidarr and slskd for filling the library, ListenBrainz
+  scrobbling and weekly playlists, generated playlists (Claude), synced
+  lyrics on a GPU.
+- Imports your Spotify listening history.
 
 ## Develop
 

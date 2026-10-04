@@ -26,9 +26,9 @@ export const config = {
   transcodeConcurrency: Math.max(1, Number(env('TRANSCODE_CONCURRENCY', '4')) || 4),
   // Fetched extras live in the library too: lyrics as .lrc sidecars, artist
   // pictures as <artist>/artist.jpg, found covers as <album>/cover.jpg - so
-  // nothing external is ever fetched twice. Needs MUSIC_DIR writable;
-  // SAVE_TO_LIBRARY=0 keeps the library untouched.
-  saveToLibrary: env('SAVE_TO_LIBRARY', '1') !== '0',
+  // nothing external is ever fetched twice. Off by default: the library is
+  // left untouched unless SAVE_TO_LIBRARY=1 (and MUSIC_DIR is writable).
+  saveToLibrary: env('SAVE_TO_LIBRARY', '0') === '1',
   // Whole songs copied from the NAS to the cache when they are about to play,
   // least recently played dropped first past this size (0 = off).
   songCacheGb: Number(env('SONG_CACHE_GB', '0')),

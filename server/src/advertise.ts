@@ -11,7 +11,6 @@
 // app could pick an address it cannot reach and the host's own mDNS name would
 // collide. Here the only address given out is the LAN one, under a name of
 // its own.
-import os from 'node:os';
 import type { FastifyInstance } from 'fastify';
 import makeMdns from 'multicast-dns';
 import type { DB } from './db.js';
@@ -28,7 +27,7 @@ export function serverId(db: DB): string {
   return (db.prepare("SELECT v FROM kv WHERE k = 'server_id'").get() as { v: string }).v;
 }
 
-export const defaultServerName = () => `Slopify on ${os.hostname().split('.')[0] || 'this server'}`;
+export { defaultServerName } from './startup.js';
 
 export function registerServerInfo(app: FastifyInstance, db: DB, opts: { name: string; version?: string; source?: string }) {
   const id = serverId(db);

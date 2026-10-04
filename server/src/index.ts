@@ -1,8 +1,21 @@
 import { buildServer } from './app.js';
 import { config } from './config.js';
 import { advertise, defaultServerName } from './advertise.js';
+import { bridgedContainer, checkStateDirs, checkSurroundings, stateDirs } from './startup.js';
+
+// Before anything opens a file: folders it cannot write stop the start with
+// the fix spelled out; everything else is a warning in the log.
+try { checkStateDirs(stateDirs(config.dataDir, config.cacheDir)); } catch (e: any) { console.error(`slopify: ${e.message}`); process.exit(1); }
+const notes: ['info' | 'warn', string][] = [];
+const found = checkSurroundings({
+  musicDir: config.musicDir, saveToLibrary: config.saveToLibrary, speakers: config.speakers,
+  mdns: config.mdns, publicUrl: config.publicUrl, port: config.port,
+}, { info: (m) => notes.push(['info', m]), warn: (m) => notes.push(['warn', m]) });
+config.saveToLibrary = found.saveToLibrary;
+config.publicUrl = found.speakerUrl;
 
 const app = await buildServer();
+for (const [level, m] of notes) app.log[level](m);
 // A full scan at boot if asked; recurring scans are a scheduled task now (tasks.ts).
 if (config.scanOnBoot) (app as any).runScan();
 // New music on the SSD -> the NAS (see ingest.ts); the first sweep a minute after boot.
@@ -41,7 +54,8 @@ process.on('uncaughtException', (err) => {
 
 try {
   await app.listen({ port: config.port, host: config.host });
-  if (config.mdns) unannounce = advertise(app, (app as any).db, { port: config.port, name: config.serverName || defaultServerName() });
+  // (not from Docker's default network: the only address there is the container's own)
+  if (config.mdns && !bridgedContainer()) unannounce = advertise(app, (app as any).db, { port: config.port, name: config.serverName || defaultServerName() });
 } catch (err) {
   app.log.error(err);
   process.exit(1);

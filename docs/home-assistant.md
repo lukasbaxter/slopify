@@ -278,7 +278,7 @@ need them:
 | Env | Default | What it does |
 | --- | --- | --- |
 | `MDNS` | `1` | `0` stops the announcement (Home Assistant can still be set up by address) |
-| `SERVER_NAME` | `Slopify on <host name>` | The name the discovered server is shown under |
+| `SERVER_NAME` | `Slopify on <host name>` | The name the discovered server is shown under (`Slopify` on Docker's default network) |
 
 Discovery needs the container on the host network (`network_mode: host`,
 which speaker discovery also needs). In bridge mode, add the integration by

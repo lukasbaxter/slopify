@@ -94,6 +94,33 @@ describe('playing on speaker groups', () => {
     await lukas.stopAll(); await henry.stopAll();
   });
 
+  it('a server shutdown never stops a speaker another app took over', async () => {
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    groups.join(sp(node).id, [sp(towers).id]);
+    const lukas = player('lukas-shutdown');
+    try {
+      await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      node.foreign = true; node.state = 'stream'; // Spotify, before Slopify noticed
+      node.calls.length = 0; towers.calls.length = 0;
+      await lukas.shutdown();
+      expect(node.calls.filter((c) => /^\/(Play|Stop|Pause|RemoveSlave)/.test(c))).toEqual([]);
+      expect(towers.calls.filter((c) => /^\/(Play|Stop|Pause)/.test(c))).toEqual([]);
+      expect(towers.master).toBe(node.port);
+      // Our own stream is still stopped at shutdown.
+      node.foreign = false;
+      await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      node.calls.length = 0;
+      await lukas.shutdown();
+      expect(node.calls.some((c) => c.startsWith('/Stop') || c.startsWith('/Pause'))).toBe(true);
+    } finally {
+      node.foreign = false; node.state = 'stop';
+      await lukas.stopAll();
+      groups.unjoin(sp(node).id); groups.unjoin(sp(towers).id);
+      for (const g of saved) groups.join(g[0], g.slice(1));
+    }
+  });
+
   it('lets go of a speaker another app takes over, without stopping it or its group', async () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);

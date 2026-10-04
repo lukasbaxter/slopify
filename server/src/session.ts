@@ -161,7 +161,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   // One virtual client per account ("Home speakers") carries the speakers the
   // server found and, once a session is put on one, plays it (ServerPlayer).
   const discovery = opts.speakers ? new Discovery((list) => { for (const c of clients.values()) if (c.kind === 'server') c.devices = list; for (const uid of new Set([...clients.values()].map((c) => c.uid))) broadcastRoster(uid); }, (m) => app.log.warn(m)) : null;
-  if (discovery) { discovery.start(); app.addHook('onClose', async () => { discovery.stop(); states?.stop(); for (const c of clients.values()) await c.player?.stopAll(); }); }
+  if (discovery) { discovery.start(); app.addHook('onClose', async () => { discovery.stop(); states?.stop(); for (const c of clients.values()) await c.player?.shutdown(); }); }
   const speakerToken = (uid: string) => {
     const row = db.prepare("SELECT token FROM tokens WHERE user_id = ? AND kind = 'speaker' LIMIT 1").get(uid) as any;
     if (row) return row.token as string;

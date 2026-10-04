@@ -394,6 +394,22 @@ export class ServerPlayer {
     this.setPos(this.position, false);
     this.d.report(null);
   }
+  // The server is shutting down. Only a speaker still playing OUR stream is
+  // stopped; one another app took over (Spotify on the group) is left
+  // exactly as it is, group links included. A restart used to stop Spotify
+  // on a whole group Slopify had played on earlier and still thought it had.
+  async shutdown() {
+    this.stopPolling(); this.cancelLogPlay();
+    const t = this.transport;
+    const s = t ? await t.status().catch(() => null) : null;
+    const theirs = !!s && !!s.service && !/^(url)?$/i.test(s.service) && !!s.streamUrl && !s.streamUrl.includes('/api/stream');
+    if (theirs) {
+      this.d.log(`speaker ${this.device?.name || '?'}: plays ${s?.serviceName || s?.service} now; left alone at shutdown`);
+      this.members = []; t?.close(); this.transport = null; this.releaseDevice();
+      return;
+    }
+    await this.stopAll();
+  }
   async stopAll() { this.stopPolling(); this.cancelLogPlay(); await this.dissolveGroup(); if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; } this.releaseDevice(); }
 
   // Follow the speaker's own clock; move on when a track ends; notice when

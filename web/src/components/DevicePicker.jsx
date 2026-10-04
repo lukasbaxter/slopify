@@ -111,17 +111,17 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
     devices.flatMap((d) => (d.slaves || []).map((s) => s.host))
   );
   // Slopify's own speaker groups (the server's speakers carry `group`, the
-  // speaker itself first): one entry per group, any member plays them all.
+  // speaker itself first): each speaker is listed, says who it plays with,
+  // and every speaker the music is on shows as playing.
   const nameOf = new Map(devices.map((d) => [d.id, d.name]));
-  const groupLead = (d) => (d.group?.length > 1 ? [...d.group].sort()[0] : d.id);
-  const visible = devices.filter((d) => !(d.kind === 'bluos' && (d.isSlave || slaveHosts.has(d.host))) && groupLead(d) === d.id);
+  const visible = devices.filter((d) => !(d.kind === 'bluos' && (d.isSlave || slaveHosts.has(d.host))));
   const labelFor = (d) => {
-    if (d.group?.length > 1) return d.group.map((id) => nameOf.get(id) || id).join(' + ');
+    if (d.playingOn?.length > 1) return d.playingOn.map((id) => nameOf.get(id) || id).join(' + ');
     if (d.kind !== 'bluos' || !d.slaves?.length) return d.name;
     return [d.name, ...d.slaves.map((s) => s.name)].join(' + ');
   };
   const subtitleFor = (d) => {
-    if (d.group?.length > 1) return `Group • ${d.group.length} speakers`;
+    if (d.group?.length > 1) return `Grouped with ${d.group.slice(1).map((id) => nameOf.get(id) || id).join(', ')}`;
     if (d.kind === 'bluos' && d.slaves?.length) {
       return `Grouped • ${d.slaves.length + 1} speakers`;
     }
@@ -139,7 +139,8 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
   const remoteCount = visible.length;
   const isBrowser = typeof window !== 'undefined' && !window.conduit;
   const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : 'Slopify');
-  const isActive = (d) => d.id === active.id || (d.group || []).includes(active.id);
+  const playing = new Set(active.playingOn || [active.id]);
+  const isActive = (d) => playing.has(d.id);
   const others = all.filter((d) => !isActive(d));
 
   return (
@@ -212,7 +213,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
                     <span className="deviceitem-model">{subtitleFor(d)}</span>
                   </span>
                   {d.id === active.id && <QualityBadge quality={quality} className="in-menu" />}
-                  {d.id === active.id && <span className="deviceitem-dot" />}
+                  {isActive(d) && <span className="deviceitem-dot" />}
                 </button>
               ))}
             </div>

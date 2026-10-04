@@ -160,10 +160,12 @@ export function sessionDeviceOf(player, devices) {
   const activeId = roster?.activeClientId;
   const activeSpeaker = nowPlaying?.device && nowPlaying.device.kind !== 'local' && nowPlaying.device.kind !== 'relay'
     ? nowPlaying.device : null;
+  // Every speaker the music is on: the one picked and the rest of its group.
+  const playingOn = activeSpeaker ? [activeSpeaker.id, ...(activeSpeaker.members || [])] : null;
   return activeId && activeId !== relay?.id
     ? (activeSpeaker
         // The other client is driving a speaker: the session is ON the speaker.
-        ? (devices.find((d) => d.id === activeSpeaker.id) || { ...activeSpeaker, model: '' })
+        ? { ...(devices.find((d) => d.id === activeSpeaker.id) || { ...activeSpeaker, model: '' }), playingOn }
         : devices.find((d) => d.kind === 'relay' && d.relayClientId === activeId)
           || { id: `relay:${activeId}`, kind: 'relay', name: (roster.players || []).find((p) => p.id === activeId)?.name || 'Slopify' })
     : device;

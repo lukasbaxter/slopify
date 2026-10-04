@@ -923,6 +923,7 @@ export default function App() {
   // session volume; the shell turns hardware volume presses into steps here
   // while the sound is elsewhere (the phone's own buttons already control its
   // own output natively). setVolume routes to the active device.
+  const volumeTargetRef = useRef(null);
   const remoteSession = !!player.mirroring || (player.device?.kind && player.device.kind !== 'local');
   useEffect(() => {
     const rn = window.ReactNativeWebView;
@@ -934,7 +935,13 @@ export default function App() {
     if (!window.ReactNativeWebView) return undefined;
     const onStep = (e) => {
       const step = Number(e.detail?.step) || 0; if (!step) return;
-      const next = Math.max(0, Math.min(100, Math.round(player.volume ?? 0) + step * 5));
+      // Presses in quick succession build on the level the last one asked
+      // for: the device's reported volume lags them, and stepping from it
+      // kept every burst within one step of where it started.
+      const t = volumeTargetRef.current;
+      const from = t && Date.now() - t.at < 2500 ? t.level : Math.round(player.volume ?? 0);
+      const next = Math.max(0, Math.min(100, from + step * 5));
+      volumeTargetRef.current = { level: next, at: Date.now() };
       player.setVolume(next);
     };
     window.addEventListener('conduit:volumestep', onStep);

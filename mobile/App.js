@@ -39,7 +39,14 @@ export default function App() {
   // The phone's own level while the sound is elsewhere; presses are measured
   // against it and it is restored after each one.
   const base = useRef(null);
-  const restoring = useRef(0);
+  // The level we just put back: its change event is our own, not a press.
+  // Recognised by value, not by a quiet period after each press, so presses
+  // in quick succession all count.
+  const echo = useRef(null);
+  const putBack = (level) => {
+    echo.current = level;
+    VolumeManager.setVolume(level, { showUI: false }).catch(() => {});
+  };
 
   useEffect(() => {
     let sub = null;
@@ -49,14 +56,13 @@ export default function App() {
       sub = VolumeManager.addVolumeListener((ev) => {
         const vol = typeof ev === 'number' ? ev : ev?.volume;
         if (typeof vol !== 'number') return;
-        if (Date.now() < restoring.current) { base.current = vol; return; } // our own restore echoing back
+        if (echo.current != null && Math.abs(vol - echo.current) < 0.001) { echo.current = null; return; } // our own put-back
         if (!remote.current || base.current == null) { base.current = vol; return; }
         const step = vol > base.current + 0.001 ? 1 : vol < base.current - 0.001 ? -1 : 0;
         if (!step) return;
         web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('conduit:volumestep', { detail: { step: ${step} } })); true;`);
         // Put the phone's own level back, quietly, so the next press measures from the same place.
-        restoring.current = Date.now() + 700;
-        VolumeManager.setVolume(base.current, { showUI: false }).catch(() => {});
+        putBack(base.current);
       });
       // The listener sets Ambient as it starts observing: put Playback back after it.
       setTimeout(musicSession, 300);
@@ -76,10 +82,13 @@ export default function App() {
         VolumeManager.getVolume().then((v) => {
           let b = typeof v === 'number' ? v : v?.volume;
           if (typeof b !== 'number') return;
-          if (b > 0.95 || b < 0.05) { b = b > 0.95 ? 0.8 : 0.2; restoring.current = Date.now() + 700; VolumeManager.setVolume(b, { showUI: false }).catch(() => {}); }
+          if (b > 0.95 || b < 0.05) { b = b > 0.95 ? 0.8 : 0.2; putBack(b); }
           base.current = b;
         }).catch(() => {});
       }
+      // The phone's own volume bar would show presses that are not changing
+      // its sound: hide it while the buttons drive another device.
+      if (remote.current !== was && Platform.OS === 'ios') VolumeManager.showNativeVolumeUI({ enabled: !remote.current }).catch(() => {});
     }
   };
 

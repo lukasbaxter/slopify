@@ -9,7 +9,7 @@ import { heldVolume, releaseSpeaker } from './player.js';
 export type SpeakerInput = { id: string; name: string };
 export type SpeakerState = {
   volume: number | null; muted: boolean; state: string | null; playing: boolean;
-  title: string | null; artist: string | null; input: string | null; inputs: SpeakerInput[];
+  title: string | null; artist: string | null; album: string | null; image: string | null; input: string | null; inputs: SpeakerInput[];
 };
 
 const POLL_EVERY = 5000;
@@ -47,11 +47,14 @@ export class SpeakerStates {
         const t = new BluOSTransport(d);
         try {
           const [st, inputs] = await Promise.all([t.status(), this.inputsOf(t, d.id)]);
+          // An input (Bluetooth, HDMI) by its name; a service (Spotify, TuneIn) by
+          // the name the speaker gives it, listed among the inputs or not.
           const input = st.service === 'Capture' ? inputs.find((i) => i.id === st.inputId)?.name ?? null
-            : inputs.find((i) => i.name.toLowerCase() === String(st.service || '').toLowerCase())?.name ?? null;
+            : inputs.find((i) => i.name.toLowerCase() === String(st.service || '').toLowerCase())?.name ?? (st.serviceName || null);
+          const image = st.image ? (/^https?:\/\//.test(st.image) ? st.image : `http://${d.host}:${d.port}${st.image.startsWith('/') ? '' : '/'}${st.image}`) : null;
           const next: SpeakerState = {
             volume: st.volume, muted: !!st.muted, state: st.state, playing: st.playing,
-            title: st.title ?? null, artist: st.artist ?? null, input, inputs: inputs.map(({ id, name }) => ({ id, name })),
+            title: st.title ?? null, artist: st.artist ?? null, album: st.album ?? null, image, input, inputs: inputs.map(({ id, name }) => ({ id, name })),
           };
           if (JSON.stringify(next) !== JSON.stringify(this.states.get(d.id))) { this.states.set(d.id, next); changed = true; }
         } catch { /* asleep or gone: keep the last reading */ }

@@ -91,3 +91,25 @@ async def test_slopify_music_on_it_still_uses_its_own_volume(
     await fake.wait_for(lambda: fake.commands_of(HENRY_ID))
     assert fake.commands_of(HENRY_ID)[-1]["command"] == {"action": "toggle"}
     assert all(c[1] != "control" for c in fake.speaker_calls)
+
+
+async def test_spotify_on_a_speaker_shows_as_spotify_with_its_artwork(
+    hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify, hass_client: Any
+) -> None:
+    art = f"{fake.url}/api/healthz"  # any public URL stands in for the Spotify CDN
+    fake.speaker_states[SPEAKER_DEN["id"]] = {
+        **OWN,
+        "input": "Spotify",
+        "title": "staring contest",
+        "artist": "tomcbumpz",
+        "album": "Single",
+        "image": art,
+    }
+    await fake.set_roster(lan=[SPEAKER_KITCHEN, SPEAKER_DEN])
+    await settle(hass, fake)
+    state = hass.states.get(DEN)
+    assert state.attributes[ATTR_INPUT_SOURCE] == "Spotify"
+    assert state.attributes[ATTR_MEDIA_TITLE] == "staring contest"
+    client = await hass_client()
+    resp = await client.get(state.attributes["entity_picture"])
+    assert resp.status == 200

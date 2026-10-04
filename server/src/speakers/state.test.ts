@@ -18,7 +18,7 @@ beforeAll(async () => {
   server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://x'); unit.calls.push(url.pathname + url.search);
     if (url.pathname === '/RadioBrowse') return res.end('<radiotime service="Capture"><item text="Bluetooth" id="input3" URL="Capture%3Abluez%3Abluetooth"></item><item text="HDMI ARC" id="input2" URL="Capture%3Ahw%3Aimxspdif%2C0%2F1%2F25%2F2%3Fid%3Dinput2"></item><item text="Spotify" id="Spotify" URL="Spotify%3Aplay"></item></radiotime>');
-    if (url.pathname === '/Status') return res.end(`<status><state>${unit.state}</state><service>${unit.service}</service><inputId>${unit.inputId}</inputId><title1>TV</title1><volume>${unit.volume}</volume><mute>0</mute><secs>3</secs></status>`);
+    if (url.pathname === '/Status') return res.end(`<status><state>${unit.state}</state><service>${unit.service}</service><inputId>${unit.inputId}</inputId><title1>TV</title1>${unit.service === 'Spotify' ? '<serviceName>Spotify</serviceName><title2>Artist</title2><image>https://i.scdn.co/image/abc</image>' : '<image>/images/tv.png</image>'}<volume>${unit.volume}</volume><mute>0</mute><secs>3</secs></status>`);
     if (url.pathname === '/SyncStatus') return res.end(`<SyncStatus>${[...unit.slaves].map((p) => `<slave id="127.0.0.1" port="${p}"></slave>`).join('')}</SyncStatus>`);
     if (url.pathname === '/Volume' && url.searchParams.has('level')) unit.volume = Number(url.searchParams.get('level'));
     if (url.pathname === '/Play' && url.searchParams.get('url')?.startsWith('Spotify')) { unit.service = 'Spotify'; unit.inputId = ''; }
@@ -38,7 +38,7 @@ describe('a speaker on its own', () => {
     const changes: number[] = [];
     const s = new SpeakerStates(discovery(), () => changes.push(1));
     await s.poll();
-    expect(s.get('bluos:towers')).toMatchObject({ volume: 23, state: 'stream', playing: true, input: 'HDMI ARC', inputs: [{ name: 'Bluetooth' }, { name: 'HDMI ARC' }, { name: 'Spotify' }] });
+    expect(s.get('bluos:towers')).toMatchObject({ volume: 23, state: 'stream', playing: true, input: 'HDMI ARC', image: `http://127.0.0.1:${port}/images/tv.png`, inputs: [{ name: 'Bluetooth' }, { name: 'HDMI ARC' }, { name: 'Spotify' }] });
     expect(changes).toHaveLength(1);
     await s.poll();
     expect(changes).toHaveLength(1); // nothing new, no broadcast
@@ -49,7 +49,7 @@ describe('a speaker on its own', () => {
     expect(s.get('bluos:towers')?.volume).toBe(41);
     await s.playInput('bluos:towers', 'spotify');
     expect(unit.calls).toContain('/Play?url=Spotify%3Aplay');
-    expect(s.get('bluos:towers')?.input).toBe('Spotify');
+    expect(s.get('bluos:towers')).toMatchObject({ input: 'Spotify', artist: 'Artist', image: 'https://i.scdn.co/image/abc' });
     await s.control('bluos:towers', 'pause');
     expect(s.get('bluos:towers')?.state).toBe('pause');
     await expect(s.playInput('bluos:towers', 'Vinyl')).rejects.toThrow(/no input called Vinyl/);

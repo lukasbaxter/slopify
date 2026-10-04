@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { Client, DefaultMediaReceiver } = require('castv2-client');
 
 export type PlayMeta = { title?: string; artist?: string; album?: string; artwork?: string; artworkFallback?: string; contentType?: string };
-export type Status = { playing: boolean; state: string | null; title?: string | null; artist?: string | null; album?: string | null; position: number; duration: number; volume: number | null; muted?: boolean; streamUrl?: string | null; ended?: boolean; gone?: boolean; canSeek?: boolean; coarse?: boolean; service?: string | null; inputId?: string | null };
+export type Status = { playing: boolean; state: string | null; title?: string | null; artist?: string | null; album?: string | null; position: number; duration: number; volume: number | null; muted?: boolean; streamUrl?: string | null; ended?: boolean; gone?: boolean; canSeek?: boolean; coarse?: boolean; service?: string | null; serviceName?: string | null; inputId?: string | null; image?: string | null };
 export interface Transport {
   play(url: string, meta?: PlayMeta, startAt?: number): Promise<unknown>;
   resume(): Promise<unknown>; pause(): Promise<unknown>; stop(): Promise<unknown>;
@@ -251,7 +251,7 @@ export class BluOSTransport implements Transport {
     const position = Number(tag(xml, 'secs') ?? 0), duration = Number(tag(xml, 'totlen') ?? 0);
     // The stream ran out: stopped by itself near the end of what it was playing.
     const ended = this.wasPlaying && state === 'stop' && duration > 0 && position >= duration - 3;
-    return { playing, state, title: tag(xml, 'title1'), artist: tag(xml, 'title2'), album: tag(xml, 'title3'), volume: muted ? (this.lastVolume ?? rawVol) : rawVol != null && rawVol >= 0 ? rawVol : null, muted, position, duration, canSeek: tag(xml, 'canSeek') === '1', streamUrl: tag(xml, 'streamUrl'), ended, coarse: true, service: tag(xml, 'service'), inputId: tag(xml, 'inputId') };
+    return { playing, state, title: tag(xml, 'title1'), artist: tag(xml, 'title2'), album: tag(xml, 'title3'), volume: muted ? (this.lastVolume ?? rawVol) : rawVol != null && rawVol >= 0 ? rawVol : null, muted, position, duration, canSeek: tag(xml, 'canSeek') === '1', streamUrl: tag(xml, 'streamUrl'), ended, coarse: true, service: tag(xml, 'service'), serviceName: tag(xml, 'serviceName'), inputId: tag(xml, 'inputId'), image: tag(xml, 'image') };
   }
   close() { /* nothing to hold */ }
 

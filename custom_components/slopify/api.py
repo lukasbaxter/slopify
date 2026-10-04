@@ -204,7 +204,7 @@ class SlopifyApi:
             ) as resp:
                 if resp.status != 200:
                     return None, None
-                return await resp.read(), resp.headers.get("Content-Type", "image/jpeg")
+                return await resp.read(), resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
         except (aiohttp.ClientError, TimeoutError):
             return None, None
 

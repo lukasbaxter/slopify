@@ -12,11 +12,13 @@ picking "Slopify - <name>" moves that account's music onto the speaker.
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import logging
 import time
 from typing import Any
 from urllib.parse import quote
 
+import aiohttp
 from homeassistant.components.media_player import (
     ATTR_MEDIA_ENQUEUE,
     BrowseMedia,
@@ -556,6 +558,7 @@ class SlopifySpeaker(_SlopifyMedia):
         self._kind = str(speaker.get("kind") or "")
         self._inputs: list[str] = []
         self._native = False
+        self._native_image: str | None = None
         server = entry.data.get("server_id") or entry.unique_id
         self._attr_unique_id = f"{server}-speaker-{self._speaker_id}"
         self._attr_device_info = DeviceInfo(
@@ -634,13 +637,32 @@ class SlopifySpeaker(_SlopifyMedia):
         group = [str(x) for x in me.get("group") or []]
         self._attr_group_members = [e for e in (self._entity_of(x) for x in group) if e] if len(group) > 1 else []
         self._show(self._now_playing, active=bool(best), received=received)
+        self._native_image = None
         if self._native:
             self._attr_media_title = own.get("title") or None
             self._attr_media_artist = own.get("artist") or None
+            self._attr_media_album_name = own.get("album") or None
+            image = own.get("image")
+            self._native_image = image if isinstance(image, str) and image.startswith(("http://", "https://")) else None
+            self._attr_media_image_hash = (
+                hashlib.sha1(self._native_image.encode()).hexdigest()[:32] if self._native_image else None
+            )
         # The card's volume is this speaker's own, whoever plays on it.
         if isinstance(own.get("volume"), (int, float)):
             self._attr_volume_level = max(0.0, min(1.0, float(own["volume"]) / 100))
             self._attr_is_volume_muted = self._attr_volume_level == 0 or bool(own.get("muted"))
+
+    async def async_get_media_image(self) -> tuple[bytes | None, str | None]:
+        """Artwork: Slopify's for its music, the speaker's own (Spotify, a radio) otherwise."""
+        if not self._native_image:
+            return await super().async_get_media_image()
+        try:
+            async with self._data.api.http.get(self._native_image, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return None, None
+                return await resp.read(), resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        except (aiohttp.ClientError, TimeoutError):
+            return None, None
 
     async def _speaker_call(self, path: str, body: dict[str, Any]) -> None:
         try:

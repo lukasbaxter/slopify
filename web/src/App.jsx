@@ -1,4 +1,5 @@
 import LyricSyncStatus from './components/LyricSyncStatus.jsx';
+import { clientIdentity } from './api/deviceName.js';
 import { resumeLyricJobs, useLyricJobs } from './api/lyricsync.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Slopify, loadSession, persistSession, clearSession } from './api/slopify.js';
@@ -479,8 +480,7 @@ export default function App() {
     const relay = new SessionLink({
       baseUrl: jf.baseUrl,
       token: jf.token,
-      name: (typeof window !== 'undefined' && window.conduit?.deviceName) || (window.conduit ? 'Slopify Desktop' : 'This Browser'),
-      kind: window.conduit ? 'desktop' : 'web',
+      ...clientIdentity(),
       canPlay: true,
       onRoster: (r) => playerRef.current.applyRoster(r),
       onCommand: (cmd) => playerRef.current.executeCommand(cmd),

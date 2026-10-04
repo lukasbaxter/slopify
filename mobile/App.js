@@ -9,11 +9,27 @@
 // home indicator (viewport-fit=cover).
 import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Device from 'expo-device';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
 
 const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || 'https://music.baxtergroup.io/';
+
+// What the page shows other devices this phone as: its model ("iPhone 16",
+// "Pixel 8"). Android also knows the name the owner gave it; iOS keeps that
+// behind an entitlement, so the model it is.
+const DEVICE_NAME = (Platform.OS === 'android' && Device.deviceName) || Device.modelName || (Platform.OS === 'ios' ? 'iPhone' : 'Android phone');
+const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, platform: Platform.OS })}; true;`;
+
+// iOS: a music player's audio session. The volume listener switches the
+// session to Ambient, which iOS silences when the phone locks (and with the
+// ring switch); Playback keeps the music going with the screen off. Set
+// again whenever the app comes forward, since the listener re-arms Ambient.
+const musicSession = () => {
+  if (Platform.OS !== 'ios') return;
+  VolumeManager.setCategory('Playback', false).catch(() => {});
+};
 
 export default function App() {
   const web = useRef(null);
@@ -29,6 +45,7 @@ export default function App() {
     let sub = null;
     (async () => {
       try { const v = await VolumeManager.getVolume(); base.current = typeof v === 'number' ? v : v?.volume ?? null; } catch { /* no audio yet */ }
+      musicSession();
       sub = VolumeManager.addVolumeListener((ev) => {
         const vol = typeof ev === 'number' ? ev : ev?.volume;
         if (typeof vol !== 'number') return;
@@ -41,8 +58,11 @@ export default function App() {
         restoring.current = Date.now() + 700;
         VolumeManager.setVolume(base.current, { showUI: false }).catch(() => {});
       });
+      // The listener sets Ambient as it starts observing: put Playback back after it.
+      setTimeout(musicSession, 300);
     })();
-    return () => { try { sub?.remove(); } catch { /* gone */ } };
+    const appState = AppState.addEventListener('change', (s) => { if (s === 'active') musicSession(); });
+    return () => { try { sub?.remove(); } catch { /* gone */ } appState.remove(); };
   }, []);
 
   const onMessage = (e) => {
@@ -76,6 +96,10 @@ export default function App() {
         ref={web}
         source={{ uri: URL }}
         style={styles.web}
+        // Tell the page it is the phone app, and which phone, before its scripts run.
+        injectedJavaScriptBeforeContentLoaded={SHELL}
+        // Safari's Web Inspector can attach (Develop menu) to debug the page.
+        webviewDebuggingEnabled
         onMessage={onMessage}
         // Audio keeps playing with the screen off; inline (no forced fullscreen video UI).
         allowsInlineMediaPlayback

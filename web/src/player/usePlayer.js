@@ -6,11 +6,12 @@ import { createTrackCache } from './trackCache.js';
 // for the runtime: the desktop app IS the computer, the PWA is one web player
 // among possibly several (the relay numbers those for the OTHER clients).
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
+const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
-  name: IS_DESKTOP ? 'This Computer' : 'This Web Player',
-  model: IS_DESKTOP ? 'Local playback' : 'Browser playback',
+  name: IS_DESKTOP ? 'This Computer' : IN_PHONE_APP ? 'This Phone' : 'This Web Player',
+  model: IS_DESKTOP ? 'Local playback' : IN_PHONE_APP ? 'Phone playback' : 'Browser playback',
 };
 
 const MIME_BY_CONTAINER = {
@@ -340,7 +341,7 @@ export function usePlayer(jf) {
   // Remote players from the relay, presented as selectable devices.
   const relayDevices = roster.players
     .filter((p) => p.canPlay)
-    .map((p) => ({ id: `relay:${p.id}`, kind: 'relay', name: p.name, model: p.kind === 'desktop' ? 'Desktop' : 'Slopify', relayClientId: p.id }));
+    .map((p) => ({ id: `relay:${p.id}`, kind: 'relay', name: p.name, model: p.kind === 'desktop' ? 'Desktop' : p.kind === 'phone' ? 'Phone' : 'Slopify', relayClientId: p.id }));
 
   const metaFor = useCallback(
     (track) => {

@@ -1,3 +1,4 @@
+import { clientIdentity } from './deviceName.js';
 // The Slopify server client: everything the app reads and writes goes
 // through here, over /api. The components keep the row/card shape they were
 // written for (Id, Name, AlbumId, RunTimeTicks, ImageTags, UserData...), so
@@ -106,7 +107,7 @@ export class Slopify {
     const client = new Slopify({ baseUrl: baseUrl.trim() });
     const data = await client._fetch('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password, device: (typeof window !== 'undefined' && window.conduit?.deviceName) || (typeof navigator !== 'undefined' && navigator.platform) || 'Browser', kind: typeof window !== 'undefined' && window.conduit ? 'desktop' : 'web', deviceId: deviceId() }),
+      body: JSON.stringify({ username, password, device: clientIdentity().name, kind: clientIdentity().kind, deviceId: deviceId() }),
     });
     client.token = data.token;
     client.userId = data.user.id;

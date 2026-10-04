@@ -372,12 +372,6 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         if (!who) { ws.close(4003, 'bad token'); return; }
         clearTimeout(timeout);
         const kind = String(msg.kind || 'web').slice(0, 20);
-        let name = String(msg.name || who.name || 'Slopify').slice(0, 60);
-        // Browsers are numbered per account ("Web Player (2)"); desktops carry their machine name.
-        if (kind === 'web' || kind === 'mobile') {
-          const used = new Set(ofUser(who.id).filter((c) => (c.kind === 'web' || c.kind === 'mobile') && c.id !== msg.clientId).map((c) => c.name));
-          let n = 1; while (used.has(`Web Player (${n})`)) n += 1; name = `Web Player (${n})`;
-        }
         let id = typeof msg.clientId === 'string' && /^[\w-]{4,64}$/.test(msg.clientId) && !msg.clientId.startsWith('server:') ? msg.clientId : `c_${Math.random().toString(36).slice(2)}`;
         const instance = typeof msg.instance === 'string' ? msg.instance.slice(0, 64) : null;
         let prev = clients.get(id);
@@ -397,6 +391,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
           id = `${id.slice(0, 55)}-${Math.random().toString(36).slice(2, 8)}`; prev = undefined;
         }
         if (prev && prev !== self) { try { prev.close(); } catch { /* gone */ } clients.delete(id); }
+        // Each client names itself (the desktop its machine, the phone app its
+        // model, a browser "Safari on Mac"); a name already taken by another
+        // of the account's clients gets a number ("Safari on Mac (2)").
+        const base = String(msg.name || 'Web Player').trim().slice(0, 56) || 'Web Player';
+        const used = new Set(ofUser(who.id).filter((c) => c.id !== id).map((c) => c.name));
+        let name = base; for (let n = 2; used.has(name); n += 1) name = `${base} (${n})`;
         self = { id, uid: who.id, net, name, kind, instance, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced') };
         clients.set(id, self);
         serverClientFor(who.id);

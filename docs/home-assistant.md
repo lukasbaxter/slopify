@@ -250,6 +250,20 @@ after the current song, the way the app's Add to queue does. Both behave the
 same. `enqueue: play` and `enqueue: replace` (and no `enqueue`) start the new
 music now, replacing the queue.
 
+### Now Playing card
+
+The integration brings a dashboard card, **Slopify Now Playing**
+(`custom:slopify-now-playing`, pick a Slopify player as its entity). It is
+Home Assistant's media control card, and tapping it opens a full-screen Now
+Playing view: the cover large over a blur of itself, title, artist and album,
+a live progress bar, controls, volume, and the song's synced lyrics. Nothing
+to install: the card loads with the integration.
+
+```yaml
+type: custom:slopify-now-playing
+entity: media_player.slopify_lukas
+```
+
 ### Voice
 
 The player supports media search, so Assist can find and play music in your

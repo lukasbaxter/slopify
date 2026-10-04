@@ -39,7 +39,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from . import Account, SlopifyConfigEntry, SlopifyData, account_label
+from . import PLAYERS, Account, SlopifyConfigEntry, SlopifyData, account_label
 from .api import CannotConnect, NotFound, SlopifyError
 from .const import BROWSE_IMAGE_SIZE, CONF_DEFAULT_SOURCE, DEFAULT_SOURCE_LAST, DOMAIN, PLAYER_IMAGE_SIZE
 from .library import Library, MediaNotFound, Playable, UnsupportedMedia, valid_image_id
@@ -305,6 +305,28 @@ class _SlopifyMedia(MediaPlayerEntity):
     def _refresh(self) -> None:
         raise NotImplementedError
 
+    def _register(self) -> None:
+        PLAYERS[self.entity_id] = self
+        self.async_on_remove(lambda: PLAYERS.pop(self.entity_id, None))
+
+    async def async_lyrics(self) -> list[dict[str, Any]]:
+        """The current song's lyrics from Slopify (empty when there are none)."""
+        content = self._attr_media_content_id or ""
+        if not content.startswith("track:"):
+            return []
+        account = self._account or self._data.main
+        try:
+            found = await account.api.get(f"/api/lyrics/{quote(content[6:], safe='')}")
+        except SlopifyError:
+            return []
+        if not isinstance(found, dict) or found.get("kind") == "instrumental":
+            return []
+        return [
+            {"start": line.get("start"), "text": str(line.get("text") or "")}
+            for line in found.get("lines") or []
+            if isinstance(line, dict)
+        ]
+
     def _show(self, np: dict[str, Any] | None, *, active: bool, received: float) -> None:
         """Fill the media attributes from a nowPlaying report."""
         np = np or {}
@@ -461,6 +483,7 @@ class SlopifyPlayer(_SlopifyMedia):
 
     async def async_added_to_hass(self) -> None:
         """Follow the session."""
+        self._register()
         self._me.listeners.append(self._on_change)
         self.async_on_remove(lambda: self._me.listeners.remove(self._on_change))
         self._on_change()
@@ -571,6 +594,7 @@ class SlopifySpeaker(_SlopifyMedia):
 
     async def async_added_to_hass(self) -> None:
         """Follow every account's session."""
+        self._register()
         self._data.listeners.append(self._on_change)
         self.async_on_remove(lambda: self._data.listeners.remove(self._on_change))
         self._on_change()

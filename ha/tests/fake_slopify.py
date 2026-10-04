@@ -472,6 +472,19 @@ class FakeSlopify:
             )
         q = request.query
         tracks = lambda ids: [TRACKS[i] for i in ids]  # noqa: E731
+        if path.startswith("/lyrics/"):
+            if path.split("/")[2] != T2:
+                return web.json_response({"error": "no lyrics"}, status=404)
+            return web.json_response(
+                {
+                    "kind": "synced",
+                    "source": "lrclib",
+                    "lines": [
+                        {"start": 1000, "text": "Please could you stop the noise"},
+                        {"start": 4500, "text": "I'm trying to get some rest"},
+                    ],
+                }
+            )
         if path == "/albums":
             return web.json_response({"items": [a for a, _ in ALBUMS.values()], "total": len(ALBUMS)})
         if path.startswith("/albums/"):

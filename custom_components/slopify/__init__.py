@@ -13,13 +13,22 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
+from pathlib import Path
+from typing import Any
 
+from homeassistant.components import websocket_api
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_URL, CONF_VERIFY_SSL, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
+import voluptuous as vol
 
 from .api import (
     InvalidAuth,
@@ -34,6 +43,10 @@ from .const import CLIENT_KIND, CLIENT_NAME, CONF_HOUSEHOLD, CONF_TOKEN, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.MEDIA_PLAYER]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+CARDS_URL = "/slopify_static"
+# entity_id -> the Slopify media player entity (for the cards' lyrics).
+PLAYERS: dict[str, Any] = {}
 # Long enough for a healthy server to answer the hello, short enough that a
 # slow one does not hold up Home Assistant's start; the entity shows
 # unavailable until it connects either way.
@@ -126,6 +139,29 @@ async def _drop(data: SlopifyData, user_id: str) -> None:
     for callback_ in list(data.on_removed):
         callback_(account)
     data.notify_all()
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Serve and load the Slopify cards, and answer their lyrics requests."""
+    version = (await async_get_integration(hass, DOMAIN)).version
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARDS_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
+    )
+    add_extra_js_url(hass, f"{CARDS_URL}/slopify-cards.js?v={version}")
+    websocket_api.async_register_command(hass, ws_lyrics)
+    return True
+
+
+@websocket_api.websocket_command({vol.Required("type"): "slopify/lyrics", vol.Required("entity_id"): str})
+@websocket_api.async_response
+async def ws_lyrics(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The lyrics of the song a Slopify player shows: [{start (ms) | null, text}]."""
+    player = PLAYERS.get(msg["entity_id"])
+    if player is None:
+        connection.send_error(msg["id"], "not_found", "Not a Slopify player")
+        return
+    lines = await player.async_lyrics()
+    connection.send_result(msg["id"], {"lines": lines})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SlopifyConfigEntry) -> bool:

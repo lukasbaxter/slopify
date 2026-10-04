@@ -1,3 +1,6 @@
 # Home Assistant's own test harness, pinned to the Home Assistant release the
 # integration is tested against (it pulls in that exact homeassistant).
 pytest-homeassistant-custom-component==0.13.367
+# The integration depends on the frontend (it serves its card), which needs
+# the frontend package that release of Home Assistant pins.
+home-assistant-frontend==20260826.7

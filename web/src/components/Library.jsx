@@ -1316,6 +1316,17 @@ export default function Library({
                 </section>
               );
             })()}
+            {(detail.appearsOn || []).length > 0 && (
+              <section>
+                <div className="shelf-head"><h2>Appears On</h2></div>
+                <div className="shelf">
+                  {detail.appearsOn.map((a) => (
+                    <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || (a.AlbumArtists || [])[0]?.Name} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
+                      onOpen={() => openAlbum(a)} onPlay={() => playItem(a)} />
+                  ))}
+                </div>
+              </section>
+            )}
             {(simil[item.Id] || []).length > 0 && (
               <section>
                 <div className="shelf-head"><h2>Fans also like</h2></div>

@@ -590,7 +590,7 @@ export default function App() {
     // same question (this artist's tracks, most played first) in ~20 ms.
     const fast = relaySearch(jf, '', { filter: `artistIds = "${artistId}"`, limit: 150 }).then((r) => r.tracks).catch(() => null);
     const metaP = jf.itemById(artistId).then((meta) => { if (alive() && meta) setDetail((d) => (d && d.item?.Id === artistId ? { ...d, item: meta } : d)); return meta; }).catch(() => null);
-    jf.artistAlbums(artistId).then((a) => setDetail((d) => (d && d.item?.Id === artistId ? { ...d, albums: a.items } : d))).catch(() => {});
+    jf.artistAlbums(artistId).then((a) => setDetail((d) => (d && d.item?.Id === artistId ? { ...d, albums: a.items, appearsOn: a.appearsOn } : d))).catch(() => {});
     try {
       let tracks = await fast;
       if (!tracks || !tracks.length) tracks = (await jf.tracks({ artistId, limit: 200 })).items;

@@ -8,6 +8,7 @@ import { libraryVersion } from './db.js';
 import { artPath, nearestSize, SIZES } from './artwork.js';
 import { similarInLibrary } from './discover.js';
 import { albumGenreMap } from './genres.js';
+import { splitArtists } from './scanner.js';
 
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
@@ -136,8 +137,15 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const id = (req.params as any).id as string;
     const a = db.prepare('SELECT * FROM artists WHERE id = ?').get(id) as any;
     if (!a) return reply.code(404).send({ error: 'no such artist' });
-    const albums = (db.prepare('SELECT * FROM albums WHERE artist_id = ? ORDER BY year DESC, sort_name').all(id) as any[]).map(albumOut);
-    const appearsOn = (db.prepare(`SELECT DISTINCT a.* FROM albums a JOIN tracks t ON t.album_id = a.id WHERE t.artist_ids LIKE ? AND a.artist_id != ? ORDER BY a.year DESC`).all(`%"${id}"%`, id) as any[]).map(albumOut);
+    const own = db.prepare('SELECT * FROM albums WHERE artist_id = ? ORDER BY year DESC, sort_name').all(id) as any[];
+    const others = db.prepare(`SELECT DISTINCT a.* FROM albums a JOIN tracks t ON t.album_id = a.id WHERE t.artist_ids LIKE ? AND a.artist_id != ? ORDER BY a.year DESC`).all(`%"${id}"%`, id) as any[];
+    // An album whose album-artist credit names this artist ("Drake, 21
+    // Savage") is a collab and belongs to their discography; someone else's
+    // album with one feature on it (Migos' Culture III) only appears on.
+    const norm = (x: string) => x.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+    const isCollab = (al: any) => splitArtists(undefined, al.artist).some((n) => norm(n) === norm(a.name));
+    const albums = [...own, ...others.filter(isCollab)].sort((x, y) => (y.year || 0) - (x.year || 0)).map(albumOut);
+    const appearsOn = others.filter((al) => !isCollab(al)).map(albumOut);
     const tracks = (db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? ORDER BY t.title LIMIT 200`).all(`%"${id}"%`) as TrackRow[]).map(trackOut);
     const followed = !!db.prepare('SELECT 1 FROM artist_follows WHERE user_id = ? AND artist_id = ?').get((req as any).user?.id, id);
     return { ...artistOut(a), followed, albums, appearsOn, tracks };

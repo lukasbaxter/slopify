@@ -224,9 +224,13 @@ export class Slopify {
   async lastPlayedTrack() { const h = await this._fetch('/api/history?limit=1'); const t = h.items?.[0]?.track; return t ? rowTrack(t) : null; }
 
   _artist(artistId) { return this._cached(`artist:${artistId}`, () => this._fetch(`/api/artists/${artistId}`)); }
-  // Albums credited to an artist, newest first, then the ones they appear on.
+  // The artist's own albums and collabs, newest first; albums by others they
+  // only feature on come separately (the page's Appears On row).
   artistAlbums(artistId, { limit = 60 } = {}) {
-    return this._artist(artistId).then((a) => { const items = [...(a.albums || []), ...(a.appearsOn || [])].map(rowAlbum); return { items: items.slice(0, limit), total: items.length }; });
+    return this._artist(artistId).then((a) => {
+      const items = (a.albums || []).map(rowAlbum);
+      return { items: items.slice(0, limit), total: items.length, appearsOn: (a.appearsOn || []).map(rowAlbum).slice(0, limit) };
+    });
   }
   _album(albumId) { return this._cached(`album:${albumId}`, () => this._fetch(`/api/albums/${albumId}`)); }
   tracks(opts = {}) {

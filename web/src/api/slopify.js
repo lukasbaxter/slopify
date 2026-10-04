@@ -135,6 +135,7 @@ export class Slopify {
   }
 
   // --- account settings (a JSON blob per user, patched) --------------------
+  serverInfo() { return this._cachedFor('serverInfo', 10 * 60 * 1000, () => this._fetch('/api/server')); }
   async getPrefs() { return this._fetch('/api/prefs'); }
   async setPrefs(patch) { return this._fetch('/api/prefs', { method: 'PATCH', body: JSON.stringify(patch), retries: 2 }); }
 

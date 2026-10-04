@@ -66,6 +66,10 @@ export const config = {
   // TheAudioDB key for wide artist photos (artist page banners); '123' is its
   // free public key. Empty turns banner fetching off.
   theAudioDbKey: env('THEAUDIODB_KEY', '123'),
+  // Where this server's source code is (shown in every app's About, as the
+  // AGPL asks of a server people use over a network): a modified deployment
+  // points it at its own source.
+  sourceUrl: env('SOURCE_URL', 'https://github.com/lukasbaxter/slopify'),
   // 'slopify' (default): BluOS speakers are only ever grouped by Slopify's
   // speaker groups; a group made elsewhere (the BluOS app, another controller)
   // is unlinked within a minute. 'keep' leaves such groups alone.

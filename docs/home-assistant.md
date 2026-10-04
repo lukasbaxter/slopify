@@ -323,3 +323,9 @@ in-process fake Slopify server speaking the same messages as
 python3 -m venv .venv && .venv/bin/pip install -r ha/requirements_test.txt
 cd ha && ../.venv/bin/pytest
 ```
+
+## License
+
+The integration is licensed under the [Apache License 2.0](../custom_components/slopify/LICENSE),
+like Home Assistant itself. It only talks to your own Slopify server (see
+[PRIVACY.md](../PRIVACY.md)).

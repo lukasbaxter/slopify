@@ -4,6 +4,10 @@ Self-hosted music: one container, your music folder, Spotify-style apps
 (web/phone, desktop with Chromecast + BluOS, a shared session across all of
 them). Successor to Conduit, rebuilt on what that taught (see `docs/PLAN.md`).
 
+Free software under the [GNU AGPL v3](LICENSE). No telemetry, no accounts with
+anyone: [what leaves your server](PRIVACY.md) lists every outside service and
+how to turn it off. Not affiliated with Spotify.
+
 ## Run it
 
 ```yaml
@@ -181,6 +185,7 @@ are the homelab defaults: music at `/music`, state in `/data`.
 | `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
 | `MDNS` | `1` | Announce the server on the LAN (`_slopify._tcp`) so Home Assistant finds it; `0` = off |
 | `BLUOS_GROUPS` | `slopify` | BluOS speakers are grouped only by Slopify's speaker groups; a group made elsewhere (the BluOS app) is unlinked within a minute. `keep` leaves those alone |
+| `SOURCE_URL` | this repository | The source code link every app shows in Settings › About; point it at your fork if you run a modified Slopify (the AGPL asks you to offer your users its source) |
 | `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under |
 | `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
 | `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
@@ -224,3 +229,25 @@ npm run e2e             # Playwright against the fixture library
 
 Tests never touch a real library or account: they run against the fixture
 folder and a data dir under /tmp.
+
+## License
+
+Slopify is free software: you can redistribute it and/or modify it under the
+terms of the [GNU Affero General Public License v3](LICENSE) or (at your option)
+any later version. If you run a modified Slopify that other people use over a
+network, offer them its source (set `SOURCE_URL`).
+
+The Home Assistant integration (`custom_components/slopify`) is licensed under
+the [Apache License 2.0](custom_components/slopify/LICENSE), like Home Assistant.
+
+Third-party software and its licenses: [NOTICE](NOTICE) and
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+## Contributing, security, conduct
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): development setup, tests, pull requests.
+- [SECURITY.md](SECURITY.md): report vulnerabilities privately.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): Contributor Covenant 2.1.
+
+Slopify is not affiliated with, endorsed by or connected to Spotify AB.
+"Spotify" is a trademark of Spotify AB.

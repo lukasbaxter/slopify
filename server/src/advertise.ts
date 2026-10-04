@@ -30,9 +30,9 @@ export function serverId(db: DB): string {
 
 export const defaultServerName = () => `Slopify on ${os.hostname().split('.')[0] || 'this server'}`;
 
-export function registerServerInfo(app: FastifyInstance, db: DB, opts: { name: string }) {
+export function registerServerInfo(app: FastifyInstance, db: DB, opts: { name: string; version?: string; source?: string }) {
   const id = serverId(db);
-  app.get('/api/server', { preHandler: (app as any).requireUser }, async () => ({ id, name: opts.name }));
+  app.get('/api/server', { preHandler: (app as any).requireUser }, async () => ({ id, name: opts.name, version: opts.version ?? null, source: opts.source ?? null, license: 'AGPL-3.0-or-later' }));
 }
 
 // The records for one server; ttl 0 says goodbye.

@@ -12,6 +12,7 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libchromaprint-tools
       - run: npm ci
       - run: npm run lint
+      - run: npm run licenses && git diff --exit-code THIRD_PARTY_LICENSES.md
       - run: npm run fixtures
       - run: npm test
       - run: npx playwright install --with-deps chromium

@@ -18,6 +18,9 @@ describe('finding the server on the network', () => {
     const b = (await app.inject({ url: '/api/server', headers: { authorization: `Bearer ${tok}` } })).json();
     expect(a.id).toMatch(/^[0-9a-f]{32}$/);
     expect(b.id).toBe(a.id);
+    // Every app links to the source (the AGPL asks it of a network service).
+    expect(a).toMatchObject({ license: 'AGPL-3.0-or-later', source: 'https://github.com/lukasbaxter/slopify' });
+    expect(a.version).toMatch(/^\d+\.\d+\.\d+/);
   });
   it('the announcement points at the LAN address only, under a name of its own', () => {
     const r = records({ name: 'Slopify on box.lan', id: 'abcdef0123456789abcdef0123456789', port: 8090, address: '192.168.1.20' });

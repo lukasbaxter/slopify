@@ -12,6 +12,10 @@ COPY . .
 RUN npm run build
 
 FROM node:22-bookworm-slim AS base
+LABEL org.opencontainers.image.title="Slopify" \
+      org.opencontainers.image.description="Self-hosted music server and apps" \
+      org.opencontainers.image.source="https://github.com/lukasbaxter/slopify" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production MUSIC_DIR=/music DATA_DIR=/data PORT=8080

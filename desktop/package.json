@@ -23,11 +23,41 @@
   "build": {
     "appId": "io.baxtergroup.slopify",
     "productName": "Slopify",
-    "files": ["electron/**/*", "dist/**/*", "package.json"],
-    "directories": { "output": "release", "buildResources": "build" },
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.music", "identity": null },
-    "win": { "target": ["nsis", "portable"] },
-    "linux": { "target": ["AppImage", "deb"], "category": "Audio" },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.music",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Audio"
+    },
     "afterPack": "build/adhoc-sign.js"
+  },
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lukasbaxter/slopify.git"
   }
 }

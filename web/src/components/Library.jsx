@@ -9,6 +9,7 @@ import Home from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
+import About from './About.jsx';
 import SpotifyImport from './SpotifyImport.jsx';
 import FittedTitle from './FittedTitle.jsx';
 import VirtualList from './VirtualList.jsx';
@@ -791,6 +792,7 @@ export default function Library({
             </button>
             <p className="settings-caption">Saved to your account and applied to every Slopify you have open.</p>
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} phone />}
+            <About jf={jf} phone />
 
             {settingsMenu && (
               <ContextMenu x={settingsMenu.x} y={settingsMenu.y} onClose={() => setSettingsMenu(null)}
@@ -899,6 +901,7 @@ export default function Library({
             </section>
 
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} />}
+            <About jf={jf} />
           </div>
         </div>
       );

@@ -1,0 +1,34 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can it be reproduced?
+      placeholder: "1. Open an artist page\n2. ..."
+  - type: input
+    id: version
+    attributes:
+      label: Slopify version
+      description: Settings › About, or the image tag you run
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      multiple: true
+      options: [Server, Web app, Phone app, Desktop app, Speakers (Chromecast / BluOS), Home Assistant integration]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Server log lines around the problem (docker logs slopify). Remove tokens and addresses you do not want public."
+      render: text

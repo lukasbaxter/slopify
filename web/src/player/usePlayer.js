@@ -341,7 +341,7 @@ export function usePlayer(jf) {
   // Remote players from the relay, presented as selectable devices.
   const relayDevices = roster.players
     .filter((p) => p.canPlay)
-    .map((p) => ({ id: `relay:${p.id}`, kind: 'relay', name: p.name, model: p.kind === 'desktop' ? 'Desktop' : p.kind === 'phone' ? 'Phone' : 'Slopify', relayClientId: p.id }));
+    .map((p) => ({ id: `relay:${p.id}`, kind: 'relay', name: p.name, model: p.kind === 'desktop' ? 'Desktop' : p.kind === 'phone' ? 'Phone' : 'Slopify', form: p.form || null, relayClientId: p.id }));
 
   const metaFor = useCallback(
     (track) => {

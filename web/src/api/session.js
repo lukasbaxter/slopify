@@ -23,11 +23,12 @@ function clientId() {
 }
 
 export class SessionLink {
-  constructor({ baseUrl, token, name, kind, canPlay = true, onRoster, onCommand, onQueue, onSession, onPrefs, onLike, onOffsets }) {
+  constructor({ baseUrl, token, name, kind, form = null, canPlay = true, onRoster, onCommand, onQueue, onSession, onPrefs, onLike, onOffsets }) {
     this.baseUrl = baseUrl;
     this.token = token;
     this.name = name;
-    this.kind = kind; // 'desktop' | 'web' | 'mobile'
+    this.kind = kind; // 'desktop' | 'web' | 'phone'
+    this.form = form; // 'desktop' | 'laptop' | 'phone' | 'tablet': the icon others show
     this.canPlay = canPlay;
     this.onRoster = onRoster || (() => {});
     this.onCommand = onCommand || (() => {});
@@ -60,7 +61,7 @@ export class SessionLink {
 
     ws.onopen = () => {
       this._backoff = 1000;
-      this._send({ type: 'hello', token: this.token, clientId: this.id, instance: this.instance, name: this.name, kind: this.kind, canPlay: this.canPlay });
+      this._send({ type: 'hello', token: this.token, clientId: this.id, instance: this.instance, name: this.name, kind: this.kind, form: this.form, canPlay: this.canPlay });
       this._ping = setInterval(() => this._send({ type: 'ping' }), 25000);
     };
     ws.onmessage = (e) => {

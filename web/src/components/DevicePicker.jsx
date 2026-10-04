@@ -1,3 +1,4 @@
+import { clientIdentity } from '../api/deviceName.js';
 import React, { useEffect, useRef, useState } from 'react';
 import QualityBadge from './QualityBadge.jsx';
 import { LOCAL_DEVICE } from '../player/usePlayer.js';
@@ -25,11 +26,23 @@ const PHONE_ICONS = {
   relay: 'M4 4.5A2.5 2.5 0 0 1 6.5 2h11A2.5 2.5 0 0 1 20 4.5v10a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 14.5v-10zm2.5-1a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-10a1 1 0 0 0-1-1h-11zM1 19.25h22v1.5H1v-1.5z',
 };
 
-function DeviceIcon({ kind, phone = false, size = 18 }) {
+// Slopify devices by their shape (each reports one: the desktop app looks
+// for a battery, the phone app knows phone from tablet, a browser guesses
+// from its user agent).
+const FORM_ICONS = {
+  desktop: 'M3 3h18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6.5v2H17v1.5H7V20h2.5v-2H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h18a.5.5 0 0 0 .5-.5V5a.5.5 0 0 0-.5-.5H3zM11 18v2h2v-2h-2z',
+  laptop: PHONE_ICONS.relay,
+  phone: PHONE_ICONS.local,
+  tablet: 'M5 2h14a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v16a.5.5 0 0 0 .5.5h14a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H5zm7 14.25a1 1 0 1 1 0 2 1 1 0 0 1 0-2z',
+};
+const LOCAL_FORM = clientIdentity().form;
+
+export function DeviceIcon({ kind, form = null, phone = false, size = 18 }) {
   const set = phone ? PHONE_ICONS : ICONS;
+  const shape = form || (kind === 'local' ? LOCAL_FORM : null);
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
-      <path d={set[kind] || set.cast} />
+      <path d={(shape && FORM_ICONS[shape]) || set[kind] || set.cast} />
     </svg>
   );
 }
@@ -164,7 +177,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
             <span>{remoteCount ? `${remoteCount} on your network` : (isBrowser ? '' : 'Searching your network...')}</span>
           </div>
           <div className="dm-current">
-            <DeviceIcon kind={active.kind} phone size={32} />
+            <DeviceIcon kind={active.kind} form={active.form} phone size={32} />
             <span className="dm-current-text">
               <span className="dm-current-label">Current device</span>
               <span className="dm-current-name">{labelFor(active)}</span>
@@ -175,7 +188,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
           {others.length > 0 && <div className="dm-others">Select another device</div>}
           {others.map((d) => (
             <button key={d.id} className="deviceitem" onClick={() => { onSelect(d); close(); }} role="menuitem">
-              <DeviceIcon kind={d.kind} phone size={24} />
+              <DeviceIcon kind={d.kind} form={d.form} phone size={24} />
               <span className="deviceitem-text">
                 <span className="deviceitem-name">{labelFor(d)}</span>
                 <span className="deviceitem-model">{subtitleFor(d) || kindLabel(d)}</span>
@@ -207,7 +220,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
                   onClick={() => { onSelect(d); setOpen(false); }}
                   role="menuitem"
                 >
-                  <DeviceIcon kind={d.kind} />
+                  <DeviceIcon kind={d.kind} form={d.form} />
                   <span className="deviceitem-text">
                     <span className="deviceitem-name">{labelFor(d)}</span>
                     <span className="deviceitem-model">{subtitleFor(d)}</span>

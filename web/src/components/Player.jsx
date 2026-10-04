@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
-import DevicePicker, { useThrottledVolume } from './DevicePicker.jsx';
+import DevicePicker, { useThrottledVolume, DeviceIcon } from './DevicePicker.jsx';
 import { usePhone, Heart, ShuffleGlyph, ArtistLinks } from './TrackRow.jsx';
 import { vibrantColor } from '../api/colors.js';
 import { seekHover } from '../api/seekHover.js';
@@ -139,12 +139,23 @@ const CastGlyph = () => (
   </svg>
 );
 
+// The shape of the other Slopify device the music is on (laptop, phone...),
+// or null when it is on a speaker.
+function elsewhereForm(player) {
+  const { roster, relay } = player;
+  const activeId = roster?.activeClientId;
+  const active = activeId && activeId !== relay?.id ? (roster.players || []).find((p) => p.id === activeId) : null;
+  const d = active?.nowPlaying?.device;
+  return active && !(d && d.kind !== 'local' && d.kind !== 'relay') ? active.form || null : null;
+}
+
 export function PlayingElsewhereBar({ player }) {
   const label = elsewhereLabel(player);
   if (!label) return null;
+  const form = elsewhereForm(player);
   return (
     <div className="playing-elsewhere">
-      <CastGlyph />
+      {form ? <DeviceIcon kind="relay" form={form} size={15} /> : <CastGlyph />}
       <span>Playing on {label}</span>
     </div>
   );
@@ -167,7 +178,7 @@ export function sessionDeviceOf(player, devices) {
         // The other client is driving a speaker: the session is ON the speaker.
         ? { ...(devices.find((d) => d.id === activeSpeaker.id) || { ...activeSpeaker, model: '' }), playingOn }
         : devices.find((d) => d.kind === 'relay' && d.relayClientId === activeId)
-          || { id: `relay:${activeId}`, kind: 'relay', name: (roster.players || []).find((p) => p.id === activeId)?.name || 'Slopify' })
+          || { id: `relay:${activeId}`, kind: 'relay', name: (roster.players || []).find((p) => p.id === activeId)?.name || 'Slopify', form: (roster.players || []).find((p) => p.id === activeId)?.form || null })
     : device;
 }
 

@@ -75,4 +75,20 @@ describe('ws client ids across accounts', () => {
     expect(a.closed()).toBe(false);                 // and the holder was not evicted
     a.ws.terminate(); b.ws.terminate();
   });
+  it('a device that closes while holding the session does not pause the one still playing', async () => {
+    const laptop = await hello('tokA', 'c_laptop_1');
+    const seen: any[] = []; laptop.ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));
+    const phone = await hello('tokA', 'c_phone_1');
+    // The laptop makes the sound...
+    laptop.ws.send(JSON.stringify({ type: 'nowplaying', nowPlaying: { itemId: 't1', title: 'T', playing: true, position: 10 } }));
+    // ...while the phone holds the session (a claim that never reached it, a stale tap).
+    phone.ws.send(JSON.stringify({ type: 'claim' }));
+    await new Promise((r) => setTimeout(r, 100));
+    seen.length = 0;
+    phone.ws.terminate();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(seen.filter((m) => m.type === 'session' && m.nowPlaying?.playing === false)).toEqual([]);
+    expect(seen.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_1');
+    laptop.ws.terminate();
+  });
 });

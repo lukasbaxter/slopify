@@ -29,7 +29,7 @@ export type Session = {
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
-type Client = { id: string; uid: string; name: string; kind: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; player?: ServerPlayer; instance?: string | null; open?: () => boolean };
+type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; player?: ServerPlayer; instance?: string | null; open?: () => boolean };
 
 export const Event = z.object({
   type: z.enum(['play', 'pause', 'toggle', 'seek', 'next', 'previous', 'queue', 'transfer', 'progress', 'stop']),
@@ -140,7 +140,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   const rosterFor = (self: Client, s: Session) => {
     const players: any[] = [], lanDevices: any[] = [];
     for (const c of ofUser(self.uid)) {
-      if (c.id !== self.id) players.push({ id: c.id, name: c.name, kind: c.kind, canPlay: c.canPlay, nowPlaying: c.nowPlaying || null, sameNetwork: c.kind === 'server' || c.net === self.net });
+      if (c.id !== self.id) players.push({ id: c.id, name: c.name, kind: c.kind, form: c.form ?? null, canPlay: c.canPlay, nowPlaying: c.nowPlaying || null, sameNetwork: c.kind === 'server' || c.net === self.net });
       // The server's speakers are for everyone; a client's own only for clients on its network.
       if (c.kind === 'server' || c.net === self.net) for (const d of c.devices || []) lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
     }
@@ -319,12 +319,20 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       }
       case 'claim': {
         // "Play here": this client becomes the one making sound; the others yield.
-        if (s.active !== me.id) { s.lastEventTs = now; s.active = me.id; s.rev++; s.updatedAt = now; }
+        if (s.active !== me.id) { app.log.info(`session: ${me.name} claims playback from ${clients.get(String(s.active))?.name || s.active || 'nobody'}`); s.lastEventTs = now; s.active = me.id; s.rev++; s.updatedAt = now; }
         for (const c of ofUser(me.uid)) if (c.id !== me.id) send(c, { type: 'command', from: me.id, command: { action: 'yield' } });
         broadcastRoster(me.uid);
         break;
       }
-      case 'command': { const target = clients.get(String(msg.to)); if (target && target.uid === me.uid) send(target, { type: 'command', from: me.id, command: msg.command }); break; }
+      case 'command': {
+        const target = clients.get(String(msg.to));
+        if (target && target.uid === me.uid) {
+          const a = typeof msg.command?.action === 'string' ? msg.command.action : '?';
+          if (a !== 'setVolume' && a !== 'seek') app.log.info(`session: ${me.name} -> ${target.name}: ${a}`);
+          send(target, { type: 'command', from: me.id, command: msg.command });
+        }
+        break;
+      }
       case 'like': {
         if (typeof msg.itemId !== 'string' || !msg.itemId) break;
         const liked = !!msg.liked;
@@ -397,7 +405,8 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         const base = String(msg.name || 'Web Player').trim().slice(0, 56) || 'Web Player';
         const used = new Set(ofUser(who.id).filter((c) => c.id !== id).map((c) => c.name));
         let name = base; for (let n = 2; used.has(name); n += 1) name = `${base} (${n})`;
-        self = { id, uid: who.id, net, name, kind, instance, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced') };
+        const form = ['desktop', 'laptop', 'phone', 'tablet'].includes(msg.form) ? msg.form : null;
+        self = { id, uid: who.id, net, name, kind, form, instance, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced') };
         clients.set(id, self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);
@@ -418,9 +427,19 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       clients.delete(self.id);
       const s = loadSession(db, self.uid);
       if (s.active === self.id) {
-        // The sound stopped with it: freeze the clock and remember where it was.
-        s.positionMs = positionNow(s); s.anchorAt = Date.now(); s.playing = false; s.active = null; s.rev++; s.updatedAt = Date.now(); saveSession(db, self.uid, s, log);
-        const sm = sessionMsg(s); if (sm) for (const c of ofUser(self.uid)) send(c, sm);
+        // Another of the account's devices still making sound (it was playing
+        // while this one held the session, say a phone closed while the
+        // laptop plays) takes the session over instead of everything pausing.
+        const still = ofUser(self.uid).find((c) => c.kind !== 'homeassistant' && c.nowPlaying?.playing && Date.now() - c.lastSeen < 60000);
+        if (still) {
+          app.log.info(`session: ${self.name} disconnected while active; ${still.name} is playing and keeps the session`);
+          s.active = still.id; s.rev++; s.updatedAt = Date.now(); saveSession(db, self.uid, s, log);
+        } else {
+          // The sound stopped with it: freeze the clock and remember where it was.
+          app.log.info(`session: ${self.name} disconnected while active; session paused`);
+          s.positionMs = positionNow(s); s.anchorAt = Date.now(); s.playing = false; s.active = null; s.rev++; s.updatedAt = Date.now(); saveSession(db, self.uid, s, log);
+          const sm = sessionMsg(s); if (sm) for (const c of ofUser(self.uid)) send(c, sm);
+        }
       }
       broadcastRoster(self.uid);
     });

@@ -19,10 +19,20 @@ export function describeBrowser(ua) {
   return os ? `${browser} on ${os}` : browser;
 }
 
+// The shape of the device, for its icon: 'desktop', 'laptop', 'phone' or
+// 'tablet'. A browser cannot see a battery reliably, so a computer's browser
+// is a laptop unless the desktop app says otherwise.
+export function browserForm(ua) {
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && /Mobile\//.test(ua)) || (/Android/.test(ua) && !/Mobile/.test(ua))) return 'tablet';
+  if (/iPhone|iPod|Android.*Mobile|Mobile.*Firefox/.test(ua)) return 'phone';
+  return 'laptop';
+}
+
 export function clientIdentity() {
-  if (typeof window === 'undefined') return { name: 'Slopify', kind: 'web' };
-  if (window.conduit) return { name: window.conduit.deviceName || 'Slopify Desktop', kind: 'desktop' };
+  if (typeof window === 'undefined') return { name: 'Slopify', kind: 'web', form: 'laptop' };
+  if (window.conduit) return { name: window.conduit.deviceName || 'Slopify Desktop', kind: 'desktop', form: window.conduit.deviceForm === 'laptop' ? 'laptop' : 'desktop' };
   const shell = window.slopifyShell;
-  if (shell?.deviceName) return { name: String(shell.deviceName), kind: 'phone' };
-  return { name: describeBrowser(navigator.userAgent || ''), kind: 'web' };
+  if (shell?.deviceName) return { name: String(shell.deviceName), kind: 'phone', form: shell.deviceForm === 'tablet' ? 'tablet' : 'phone' };
+  const ua = navigator.userAgent || '';
+  return { name: describeBrowser(ua), kind: 'web', form: browserForm(ua) };
 }

@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('conduit', {
   // Renderer-side breadcrumbs into the same trace file as device calls.
   debug: (msg) => ipcRenderer.send('renderer:debug', String(msg)),
   deviceName: friendlyDeviceName(),
+  // 'laptop' | 'desktop' (main.js looks for a built-in battery).
+  deviceForm: (process.argv.find((a) => a.startsWith('--conduit-device-form=')) || '').split('=')[1] || 'desktop',
 
   devices: {
     list: () => call('devices:list'),

@@ -127,6 +127,7 @@ export default function App() {
   const [me, setMe] = useState(null);
   const [avatarOk, setAvatarOk] = useState(true);
   const [userMenu, setUserMenu] = useState(false);
+  const drawerSwipe = useRef(null);
   const [appMenu, setAppMenu] = useState(false);
   useEffect(() => {
     if (!appMenu) return undefined;
@@ -138,10 +139,12 @@ export default function App() {
   // crossing the gap between the avatar and the menu used to dismiss it).
   useEffect(() => {
     if (!userMenu) return undefined;
+    // pointerdown, not mousedown: a phone sends no mouse events for a tap on
+    // something that is not a control, so the menu never heard it.
     const down = (e) => { if (!e.target.closest?.('.avatarwrap')) setUserMenu(false); };
     const key = (e) => { if (e.key === 'Escape') setUserMenu(false); };
-    document.addEventListener('mousedown', down); document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+    document.addEventListener('pointerdown', down); document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', down); document.removeEventListener('keydown', key); };
   }, [userMenu]);
   // "New playlist" dialog: {track} while open. window.prompt() does not exist
   // in Electron, which is why creating a playlist from a row did nothing there.
@@ -1187,12 +1190,27 @@ export default function App() {
                 (me?.Name || '?').slice(0, 1).toUpperCase()
               )}
             </button>
+            {userMenu && isMobile && (
+              // The drawer's backdrop: a tap on it closes the drawer. (It used to
+              // be the drawer's own ::before, so a tap there counted as inside.)
+              <div className="drawer-scrim" onClick={() => setUserMenu(false)} onTouchEnd={(e) => { e.preventDefault(); setUserMenu(false); }} />
+            )}
             {userMenu && (
               // Desktop: a dropdown. Phone: Spotify's left drawer (avatar + name
               // up top, then rows with icons); the CSS does the reshaping.
-              <div className="avatarmenu">
+              // Swipe it left to close, as in Spotify.
+              <div
+                className="avatarmenu"
+                onTouchStart={(e) => { drawerSwipe.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }}
+                onTouchMove={(e) => {
+                  const st = drawerSwipe.current; if (!st || !isMobile) return;
+                  const dx = e.touches[0].clientX - st.x, dy = e.touches[0].clientY - st.y;
+                  if (dx < -50 && Math.abs(dx) > Math.abs(dy) * 1.5) { drawerSwipe.current = null; setUserMenu(false); }
+                }}
+                onTouchEnd={() => { drawerSwipe.current = null; }}
+              >
                 <button className="who" onClick={() => { setUserMenu(false); openProfile(); }}>
-                  <span className="who-avatar">{avatarOk ? <img src={jf.userImageUrl()} alt="" /> : (me?.Name || '?').slice(0, 1).toUpperCase()}</span>
+                  <span className="who-avatar">{avatarOk ? <img src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} /> : (me?.Name || '?').slice(0, 1).toUpperCase()}</span>
                   <span className="who-text"><b>{me?.Name || 'Signed in'}</b><small>View profile</small></span>
                 </button>
                 <div className="sub">{jf.baseUrl.replace(/^https?:\/\//, '')}</div>

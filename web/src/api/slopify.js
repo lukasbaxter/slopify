@@ -1,3 +1,4 @@
+import { linkTier } from './linkSpeed.js';
 import { clientIdentity } from './deviceName.js';
 // The Slopify server client: everything the app reads and writes goes
 // through here, over /api. The components keep the row/card shape they were
@@ -414,25 +415,27 @@ export class Slopify {
   // --- pictures ------------------------------------------------------------------
   bustImage(itemId) { (this._bust ||= {})[itemId] = Date.now(); }
   imageQuality = 82;
-  // On a phone every list, grid and mini-player picture is the 64 px copy
-  // (about 1 KB, so a whole screen of them costs less than one normal cover
-  // on a weak connection). Only the big views ask for `full`: the full-screen
-  // player and a page's own header, which paint the 64 px copy first and swap
-  // the sharp one in once it has downloaded.
+  // On a phone, list, grid and mini-player pictures follow the link: the
+  // 64 px copy on a slow one (about 1 KB, so a screen of them costs less than
+  // one cover), 160 px on a middling one, and on a fast one the size the
+  // spot asks for up to 320 px (sharp on a 3x screen). Only the big views ask
+  // for `full`: the full-screen player and a page's own header, which paint
+  // the small copy first and swap the sharp one in once it has downloaded.
   imageUrl(itemId, { maxHeight = 480, full = false } = {}) {
     if (!itemId) return null;
     const small = !full && typeof window !== 'undefined' && window.matchMedia?.('(max-width: 760px)').matches;
-    const q = { size: String(small ? 64 : maxHeight) };
+    let size = maxHeight;
+    if (small) { const t = linkTier(); size = t === 'slow' ? 64 : t === 'medium' ? 160 : Math.min(320, Math.max(160, maxHeight)); }
+    const q = { size: String(size) };
     if (this._bust?.[itemId]) q.v = String(this._bust[itemId]);
     return this._url(`/api/image/${itemId}`, q);
   }
   // Wide artist banner (the portrait cropped wide), or nothing.
   // The artist page banner, sized for this screen and connection: the full
-  // 1280 px photo on a good connection, 640 px on a small screen, mobile data,
-  // a slow link or with Data Saver on (a quarter of the bytes).
+  // 1280 px photo on a fast link (measured, see linkSpeed.js), 640 px on a
+  // small screen, a slower link or with Data Saver on (a quarter of the bytes).
   bannerWidth() {
-    const c = typeof navigator !== 'undefined' ? navigator.connection : null;
-    const metered = !!c && (c.saveData || c.type === 'cellular' || /(^|-)2g$|^3g$/.test(c.effectiveType || ''));
+    const metered = linkTier() !== 'fast';
     const need = (typeof window !== 'undefined' ? window.innerWidth * (window.devicePixelRatio || 1) : 1280);
     return metered || need <= 800 ? 640 : 1280;
   }

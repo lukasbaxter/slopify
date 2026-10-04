@@ -16,6 +16,23 @@ function friendlyHostname() {
   return raw.split('.')[0].replace(/-/g, ' ').trim() || 'Desktop';
 }
 
+// 'laptop' or 'desktop', for the icon other devices show for this one. A
+// built-in battery is what tells them apart (model names do not: Apple
+// Silicon MacBooks are "Mac14,2" like the desktops).
+function deviceForm() {
+  try {
+    const { execFileSync } = require('child_process');
+    if (process.platform === 'darwin') {
+      return /InternalBattery/.test(execFileSync('pmset', ['-g', 'batt'], { timeout: 2000, encoding: 'utf8' })) ? 'laptop' : 'desktop';
+    }
+    if (process.platform === 'win32') {
+      const n = execFileSync('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_Battery | Measure-Object).Count'], { timeout: 4000, encoding: 'utf8', windowsHide: true });
+      return Number(n.trim()) > 0 ? 'laptop' : 'desktop';
+    }
+    return fs.readdirSync('/sys/class/power_supply').some((n) => n.startsWith('BAT')) ? 'laptop' : 'desktop';
+  } catch { return 'desktop'; }
+}
+
 let win = null;
 let discovery = null;
 /** @type {Map<string, CastTransport|BluOSTransport>} */
@@ -47,6 +64,7 @@ function createWindow() {
       // machine name is handed across as a launch argument instead.
       additionalArguments: [
         `--conduit-device-name=${encodeURIComponent(friendlyHostname())}`,
+        `--conduit-device-form=${deviceForm()}`,
       ],
     },
   });

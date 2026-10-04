@@ -1084,7 +1084,7 @@ button:disabled { cursor: default; }
   .mobile-title { display: block; font-size: 24px; font-weight: 700; letter-spacing: -.3px; }
   /* Account menu = Spotify's left drawer: profile header, then icon rows. */
   .avatarmenu:not(.appmenu) { position: fixed; top: 0; bottom: 0; left: 0; right: auto; width: min(82vw, 340px); border-radius: 0; padding: calc(24px + env(safe-area-inset-top)) 0 calc(24px + env(safe-area-inset-bottom)); background: #121212; box-shadow: 0 0 60px rgba(0,0,0,.7); animation: drawer-in .25s cubic-bezier(.2,.7,.2,1); z-index: 200; overflow-y: auto; display: flex; flex-direction: column; }
-  .avatarmenu:not(.appmenu)::before { content: ''; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: -1; animation: fade-in .25s; }
+  .drawer-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 199; animation: fade-in .25s; }
   @keyframes drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   .avatarmenu .who { padding: 8px 20px 20px; gap: 12px; margin-bottom: 8px; }

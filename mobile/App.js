@@ -20,7 +20,8 @@ const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || 'https://music.baxtergroup.io
 // "Pixel 8"). Android also knows the name the owner gave it; iOS keeps that
 // behind an entitlement, so the model it is.
 const DEVICE_NAME = (Platform.OS === 'android' && Device.deviceName) || Device.modelName || (Platform.OS === 'ios' ? 'iPhone' : 'Android phone');
-const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, platform: Platform.OS })}; true;`;
+const DEVICE_FORM = Device.deviceType === Device.DeviceType.TABLET ? 'tablet' : 'phone';
+const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS })}; true;`;
 
 // iOS: a music player's audio session. The volume listener switches the
 // session to Ambient, which iOS silences when the phone locks (and with the

@@ -1583,8 +1583,22 @@ button:disabled { cursor: default; }
   .admin-list li.task-row { flex-wrap: wrap; }
   .task-meta { flex-basis: 100%; order: 5; }
 }
-.settings-phone .admin-list li.task-row { flex-wrap: wrap; }
-.settings-phone .task-meta { flex-basis: 100%; order: 5; }
+/* Phone: a stacked card, never wider than the screen. Icon, name and the
+   menu on top; the schedule on its own line (its controls wrap and shrink);
+   the last run's summary wrapped in full; Run now at the bottom. */
+.settings-phone .admin-list li.task-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+  grid-template-areas: "ico name menu" "sched sched sched" "meta meta meta" "run run run";
+  gap: 8px 10px; min-width: 0; max-width: 100%; box-sizing: border-box;
+}
+.settings-phone .task-ico { grid-area: ico; }
+.settings-phone .task-name { grid-area: name; white-space: normal; min-width: 0; overflow-wrap: anywhere; }
+.settings-phone .task-menu { grid-area: menu; }
+.settings-phone .task-sched { grid-area: sched; flex-wrap: wrap; min-width: 0; }
+.settings-phone .task-sched > * { min-width: 0; max-width: 100%; }
+.settings-phone .task-meta { grid-area: meta; white-space: normal; overflow-wrap: anywhere; overflow: visible; }
+.settings-phone .task-run { grid-area: run; justify-self: start; }
+.settings-phone .admin-list { min-width: 0; max-width: 100%; }
 .settings-phone .admin-stats { grid-template-columns: 1fr; gap: 2px; }
 .settings-phone .admin-stat span { font-size: 12px; }
 .settings-phone .admin-list li { padding: 10px 12px; }

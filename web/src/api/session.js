@@ -37,6 +37,11 @@ export class SessionLink {
     this.onPrefs = onPrefs || (() => {});
     this.onLike = onLike || (() => {});
     this.onOffsets = onOffsets || (() => {});
+    // Whether this connection has heard who is playing yet. Until it has, a
+    // play pressed here cannot know the music is already on another device
+    // (a phone app just opened): whenRoster() lets the player wait for it.
+    this.rosterSeen = false;
+    this._rosterWaiters = [];
     this.id = clientId();
     // Per page load. Every tab of a browser shares the stored id, so the server
     // tells a second live tab apart by this and hands it an id of its own
@@ -91,6 +96,8 @@ export class SessionLink {
         const rx = Date.now();
         for (const p of m.players || []) if (p.nowPlaying) p.nowPlaying.rxAt = rx;
         this.onRoster({ players: m.players || [], lanDevices: m.lanDevices || [], activeClientId: m.activeClientId || null });
+        this.rosterSeen = true;
+        for (const done of this._rosterWaiters.splice(0)) done(true);
       }
       else if (m.type === 'command') {
         // A yield means another client took over: we no longer hold the claim,
@@ -99,7 +106,7 @@ export class SessionLink {
         this.onCommand(m.command, m.from);
       }
     };
-    ws.onclose = () => { this.connected = false; clearInterval(this._ping); this._retry(); };
+    ws.onclose = () => { this.connected = false; this.rosterSeen = false; clearInterval(this._ping); this._retry(); };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
@@ -131,6 +138,15 @@ export class SessionLink {
 
   // I just started playing here: make the user's other clients yield.
   claim() { this._claimed = true; this._send({ type: 'claim' }); }
+  // Resolves once this connection has the roster (true), or after `ms` (false).
+  whenRoster(ms = 3000) {
+    if (this.rosterSeen) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const t = setTimeout(() => { this._rosterWaiters = this._rosterWaiters.filter((f) => f !== done); resolve(false); }, ms);
+      const done = (v) => { clearTimeout(t); resolve(v); };
+      this._rosterWaiters.push(done);
+    });
+  }
   sendPrefs(prefs) { this._send({ type: 'prefs', prefs }); }
   // A like / unlike; the server stores the timestamp and tells the other clients.
   sendLike(itemId, liked) { this._send({ type: 'like', itemId, liked }); }

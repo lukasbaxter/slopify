@@ -502,10 +502,21 @@ export function usePlayer(jf) {
 
   // --- public controls ----------------------------------------------------
 
+  // The other client the session is on, straight from the latest roster (the
+  // effect that sets activePlayerRef runs a render after a roster arrives).
+  const activeFromRoster = () => {
+    const r = rosterRef.current, me = relayRef.current?.id;
+    const a = r?.activeClientId && r.activeClientId !== me && (r.players || []).find((p) => p.id === r.activeClientId);
+    return a ? a.id : null;
+  };
   const playQueue = useCallback(
     async (tracks, startIndex = 0, ctx = null, startAt = 0) => {
+      // Just opened and not yet told who is playing: wait for that, or a
+      // play here would take the music off the device it is already on.
+      const waited = !!relayRef.current && !relayRef.current.rosterSeen;
+      if (waited) await relayRef.current.whenRoster(3000);
       // If another of my clients is the active player, change the song THERE.
-      const act = activePlayerRef.current;
+      const act = activePlayerRef.current || (waited ? activeFromRoster() : null);
       if (act && relayRef.current) {
         relayRef.current.command(act, {
           action: 'play', trackIds: tracks.map((t) => t.Id), index: startIndex, ctx, startAt,
@@ -748,8 +759,12 @@ export function usePlayer(jf) {
   }, [skipTo, anchorAt]);
 
   const toggle = useCallback(async () => {
+    // As in playQueue: a play pressed before the roster arrived would claim
+    // the session from the device that is playing.
+    const waited = !!relayRef.current && !relayRef.current.rosterSeen;
+    if (waited) await relayRef.current.whenRoster(3000);
     const dev = deviceRef.current;
-    const act = activePlayerRef.current;
+    const act = activePlayerRef.current || (waited ? activeFromRoster() : null);
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'toggle' }); return; }
     if (!current && !external) return;
     try {

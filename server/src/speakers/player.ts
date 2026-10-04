@@ -202,6 +202,7 @@ export class ServerPlayer {
         await t.standAlone().catch(() => {});
         await (this.transport as unknown as BluOSTransport).addSlave(m.host, m.port);
         this.members.push(m);
+        this.d.log(`group: ${m.name} joins ${leader.name}${take.has(m.id) ? ' (added on purpose)' : ''}`);
       } catch (e: any) { this.d.log(`group: could not add ${m.name} to ${leader.name}: ${e.message}`); if (owners.get(m.id) === this) owners.delete(m.id); }
     }
     if (this.members.length) linkedGroups.set(leader.id, this.members.map((m) => m.id)); else linkedGroups.delete(leader.id);

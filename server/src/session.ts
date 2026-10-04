@@ -227,7 +227,10 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       if (!d) return reply.code(404).send({ error: `no such speaker ${id}` });
       if (d.kind !== 'bluos') return reply.code(400).send({ error: `${d.name} cannot be grouped: only BluOS speakers play in sync (group Chromecasts in Google Home)` });
     }
-    joining = new Set(b.data.members);
+    // Every speaker named in a join is wanted, the one it started from too:
+    // Home Assistant's group dialog joins the others to the speaker it is
+    // open on, and that one was still skipped as busy.
+    joining = new Set([b.data.leader, ...b.data.members]);
     try { groups.join(b.data.leader, b.data.members); } finally { joining = new Set(); }
     return { groups: groups.list() };
   });

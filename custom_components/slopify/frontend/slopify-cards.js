@@ -4,7 +4,7 @@
 //   Home Assistant's own media-control card, unchanged, with one addition:
 //   tapping it (anywhere but its buttons) opens a full-screen Now Playing
 //   view: the cover large over a blur of itself, title, artist and album,
-//   a live progress bar, controls, volume, and the song's synced lyrics.
+//   a live progress bar, controls, and the song's synced lyrics.
 
 const fmt = (s) => {
   if (!Number.isFinite(s) || s < 0) return '0:00';
@@ -17,7 +17,6 @@ const ICONS = {
   play: 'M8,5.14V19.14L19,12.14L8,5.14Z',
   pause: 'M14,19H18V5H14M6,19H10V5H6V19Z',
   close: 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z',
-  volume: 'M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3,9V15H7L12,20V4L7,9H3Z',
 };
 const svg = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -49,24 +48,18 @@ const STYLE = `
 .snp-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.22); overflow: hidden; cursor: pointer; }
 .snp-fill { height: 100%; background: #fff; border-radius: 3px; width: 0; }
 .snp-times { display: flex; justify-content: space-between; font-size: 13px; opacity: .7; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.snp-controls { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
+.snp-controls { display: flex; align-items: center; justify-content: center; gap: 28px; margin-top: 14px; }
 .snp button { background: none; border: 0; color: inherit; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
 .snp button svg { width: 34px; height: 34px; fill: currentColor; }
 .snp .snp-play { width: 68px; height: 68px; background: #fff; color: #111; }
 .snp .snp-play svg { width: 36px; height: 36px; }
 .snp .snp-close svg { width: 30px; height: 30px; }
-.snp-vol { display: flex; align-items: center; gap: 10px; margin-left: auto; width: min(220px, 30%); }
-.snp-vol svg { width: 22px; height: 22px; fill: currentColor; opacity: .8; flex: none; }
-.snp-vol input { width: 100%; accent-color: #fff; }
-.snp-where { font-size: 13px; opacity: .65; margin-top: 12px; letter-spacing: .02em; }
 @media (orientation: portrait) {
   .snp-main { grid-template-columns: 1fr; align-content: center; justify-items: center; text-align: center; }
   .snp-cover { width: min(78vw, 46vh); }
   .snp-side { width: 100%; height: auto; }
   .snp-main { height: auto; min-height: 100%; }
   .snp-lyrics { display: none; }
-  .snp-controls { justify-content: center; }
-  .snp-vol { margin: 0; }
 }
 `;
 
@@ -95,9 +88,7 @@ class NowPlayingView {
             <button class="snp-prev" aria-label="Previous">${svg(ICONS.prev)}</button>
             <button class="snp-play" aria-label="Play or pause"></button>
             <button class="snp-next" aria-label="Next">${svg(ICONS.next)}</button>
-            <label class="snp-vol">${svg(ICONS.volume)}<input type="range" min="0" max="100" step="1" aria-label="Volume"></label>
           </div>
-          <div class="snp-where"></div>
         </div>
       </div>`;
     const $ = (s) => this.el.querySelector(s);
@@ -107,7 +98,6 @@ class NowPlayingView {
     $('.snp-prev').addEventListener('click', () => this.call('media_previous_track'));
     $('.snp-next').addEventListener('click', () => this.call('media_next_track'));
     $('.snp-play').addEventListener('click', () => this.call('media_play_pause'));
-    $('.snp-vol input').addEventListener('change', (e) => this.call('volume_set', { volume_level: Number(e.target.value) / 100 }));
     $('.snp-bar').addEventListener('click', (e) => {
       const st = this.state(); const dur = st?.attributes?.media_duration;
       if (!dur) return;
@@ -139,10 +129,6 @@ class NowPlayingView {
     $('.snp-sub').textContent = [a.media_artist, a.media_album_name].filter(Boolean).join(' · ');
     $('.snp-play').innerHTML = svg(st.state === 'playing' ? ICONS.pause : ICONS.play);
     $('.snp-dur').textContent = fmt(a.media_duration);
-    const vol = $('.snp-vol');
-    vol.style.visibility = typeof a.volume_level === 'number' ? 'visible' : 'hidden';
-    if (typeof a.volume_level === 'number' && document.activeElement !== vol.querySelector('input')) vol.querySelector('input').value = Math.round(a.volume_level * 100);
-    $('.snp-where').textContent = a.source ? `Playing on ${a.source}` : '';
     const track = (a.media_content_id || '').startsWith('track:') ? a.media_content_id : null;
     if (track !== this.lyricsFor) this.loadLyrics(track);
     this.tick();

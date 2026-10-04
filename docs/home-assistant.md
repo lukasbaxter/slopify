@@ -256,7 +256,7 @@ The integration brings a dashboard card, **Slopify Now Playing**
 (`custom:slopify-now-playing`, pick a Slopify player as its entity). It is
 Home Assistant's media control card, and tapping it opens a full-screen Now
 Playing view: the cover large over a blur of itself, title, artist and album,
-a live progress bar, controls, volume, and the song's synced lyrics. Nothing
+a live progress bar, controls, and the song's synced lyrics. Nothing
 to install: the card loads with the integration.
 
 ```yaml

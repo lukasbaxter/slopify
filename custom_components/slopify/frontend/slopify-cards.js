@@ -51,6 +51,7 @@ const STYLE = `
 .snp-controls { display: flex; align-items: center; justify-content: center; gap: 28px; margin-top: 14px; }
 .snp button { background: none; border: 0; color: inherit; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
 .snp button svg { width: 34px; height: 34px; fill: currentColor; }
+.snp button:disabled { opacity: .3; cursor: default; }
 .snp .snp-play { width: 68px; height: 68px; background: #fff; color: #111; }
 .snp .snp-play svg { width: 36px; height: 36px; }
 .snp .snp-close svg { width: 30px; height: 30px; }
@@ -97,7 +98,8 @@ class NowPlayingView {
     this.el.addEventListener('click', (e) => { if (e.target === this.el || e.target.classList?.contains('snp-shade')) this.close(); });
     $('.snp-prev').addEventListener('click', () => this.call('media_previous_track'));
     $('.snp-next').addEventListener('click', () => this.call('media_next_track'));
-    $('.snp-play').addEventListener('click', () => this.call('media_play_pause'));
+    // Play or pause by state: an idle player can only play (it resumes the last session).
+    $('.snp-play').addEventListener('click', () => this.call(this.state()?.state === 'playing' ? 'media_pause' : 'media_play'));
     $('.snp-bar').addEventListener('click', (e) => {
       const st = this.state(); const dur = st?.attributes?.media_duration;
       if (!dur) return;
@@ -128,6 +130,10 @@ class NowPlayingView {
     $('.snp-title').textContent = a.media_title || (st.state === 'idle' ? 'Nothing playing' : a.friendly_name || '');
     $('.snp-sub').textContent = [a.media_artist, a.media_album_name].filter(Boolean).join(' · ');
     $('.snp-play').innerHTML = svg(st.state === 'playing' ? ICONS.pause : ICONS.play);
+    // Only what the player can do right now (nothing to skip while idle).
+    const can = (bit) => ((a.supported_features || 0) & bit) !== 0;
+    $('.snp-prev').disabled = !can(16);
+    $('.snp-next').disabled = !can(32);
     $('.snp-dur').textContent = fmt(a.media_duration);
     const track = (a.media_content_id || '').startsWith('track:') ? a.media_content_id : null;
     if (track !== this.lyricsFor) this.loadLyrics(track);

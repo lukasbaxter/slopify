@@ -88,7 +88,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));
   registerServerInfo(app, db, { name: config.serverName || defaultServerName() });
-  registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
+  registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl, bluosGroups: config.bluosGroups });
   registerExplore(app, db, {
     slskdUrl: config.slskdUrl, slskdKey: config.slskdKey,
     slskdDownloadsDir: config.slskdDownloadsDir || undefined, musicDir,

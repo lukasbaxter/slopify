@@ -134,6 +134,12 @@
     },
     "nothing_to_resume_for": {
       "message": "{name} has nothing to resume yet. Play something first."
+    },
+    "group_not_slopify": {
+      "message": "{entity_id} is not a Slopify speaker. Group Slopify speakers with each other."
+    },
+    "group_failed": {
+      "message": "Could not change the speaker group: {error}"
     }
   }
 }

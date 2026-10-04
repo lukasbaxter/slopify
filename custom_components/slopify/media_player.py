@@ -182,6 +182,12 @@ def active_now_playing(account: Account) -> tuple[str | None, dict[str, Any] | N
     return (s.active_id, np) if isinstance(np, dict) else (None, None)
 
 
+def on_devices(now_playing: dict[str, Any] | None) -> list[str]:
+    """The speakers a report's music is on: the one picked and its group."""
+    device = as_dict((now_playing or {}).get("device"))
+    return [str(x) for x in [device.get("id"), *(device.get("members") or [])] if x]
+
+
 def session_handoff(account: Account) -> dict[str, Any] | None:
     """The account's queue and playhead, from whatever plays or last played."""
     s = account.session
@@ -196,7 +202,10 @@ def session_handoff(account: Account) -> dict[str, Any] | None:
 async def move_session(account: Account, target: Target, *, playing: bool) -> None:
     """Move the account's music to an output, carrying on where it is."""
     active_id, np = active_now_playing(account)
-    if active_id and current_key(active_id, np, account.session.players) == target.key:
+    if active_id and (
+        current_key(active_id, np, account.session.players) == target.key
+        or (target.key.startswith("speaker:") and target.device_id in on_devices(np))
+    ):
         return
     payload = session_handoff(account)
     if payload is None:
@@ -284,6 +293,7 @@ class _SlopifyMedia(MediaPlayerEntity):
             tuple(self._attr_source_list or ()),
             self._attr_supported_features,
             bool((self._now_playing or {}).get("liked")),
+            tuple(getattr(self, "_attr_group_members", None) or ()),
         )
         if fingerprint != self._fingerprint:
             self._fingerprint = fingerprint
@@ -542,6 +552,7 @@ class SlopifySpeaker(_SlopifyMedia):
         super().__init__(entry)
         self._speaker_id = str(speaker["id"])
         self._speaker_name = str(speaker.get("name") or self._speaker_id)
+        self._kind = str(speaker.get("kind") or "")
         server = entry.data.get("server_id") or entry.unique_id
         self._attr_unique_id = f"{server}-speaker-{self._speaker_id}"
         self._attr_device_info = DeviceInfo(
@@ -574,7 +585,7 @@ class SlopifySpeaker(_SlopifyMedia):
         best: tuple[Account, str, dict[str, Any]] | None = None
         for account in accounts:
             active_id, np = active_now_playing(account)
-            if not active_id or np is None or as_dict(np.get("device")).get("id") != self._speaker_id:
+            if not active_id or np is None or self._speaker_id not in on_devices(np):
                 continue
             if best is None or (np.get("playing") and not best[2].get("playing")):
                 best = (account, active_id, np)
@@ -589,7 +600,46 @@ class SlopifySpeaker(_SlopifyMedia):
             self._attr_source = None
             received = time.monotonic()
         self._attr_supported_features = ALWAYS | (WHILE_ACTIVE if best else MediaPlayerEntityFeature(0))
+        me = next((d for d in server_speakers(self._data) if str(d["id"]) == self._speaker_id), {})
+        if me.get("kind", self._kind) == "bluos":
+            self._attr_supported_features |= MediaPlayerEntityFeature.GROUPING
+        group = [str(x) for x in me.get("group") or []]
+        self._attr_group_members = [e for e in (self._entity_of(x) for x in group) if e] if len(group) > 1 else []
         self._show(self._now_playing, active=bool(best), received=received)
+
+    def _registry_id(self, speaker_id: str) -> str:
+        return f"{self._entry.data.get('server_id') or self._entry.unique_id}-speaker-{speaker_id}"
+
+    def _entity_of(self, speaker_id: str) -> str | None:
+        if self.hass is None:
+            return None
+        return er.async_get(self.hass).async_get_entity_id("media_player", DOMAIN, self._registry_id(speaker_id))
+
+    def _speaker_of(self, entity_id: str) -> str:
+        entry = er.async_get(self.hass).async_get(entity_id)
+        prefix = self._registry_id("")
+        if entry is None or entry.platform != DOMAIN or not entry.unique_id.startswith(prefix):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="group_not_slopify",
+                translation_placeholders={"entity_id": entity_id},
+            )
+        return entry.unique_id[len(prefix) :]
+
+    async def async_join_players(self, group_members: list[str]) -> None:
+        """Group these speakers with this one: picking any of them plays them all."""
+        members = [self._speaker_of(e) for e in group_members if e != self.entity_id]
+        try:
+            await self._data.api.post("/api/speakers/groups", {"leader": self._speaker_id, "members": members})
+        except SlopifyError as err:
+            _raise(err, "group_failed", error=str(err))
+
+    async def async_unjoin_player(self) -> None:
+        """Take this speaker out of its group."""
+        try:
+            await self._data.api.post("/api/speakers/groups/unjoin", {"speaker": self._speaker_id})
+        except SlopifyError as err:
+            _raise(err, "group_failed", error=str(err))
 
     def _account_labelled(self, source: str) -> Account:
         wanted = (source or "").strip().casefold()

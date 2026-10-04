@@ -63,6 +63,10 @@ export const config = {
   // Announce the server on the LAN over mDNS (_slopify._tcp) so Home Assistant
   // and other apps can find it; SERVER_NAME is the name they show.
   mdns: env('MDNS', '1') !== '0',
+  // 'slopify' (default): BluOS speakers are only ever grouped by Slopify's
+  // speaker groups; a group made elsewhere (the BluOS app, another controller)
+  // is unlinked within a minute. 'keep' leaves such groups alone.
+  bluosGroups: env('BLUOS_GROUPS', 'slopify') === 'keep' ? 'keep' as const : 'slopify' as const,
   serverName: env('SERVER_NAME', ''),
   // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library
   // lacks are fetched through it. If slskd's finished-downloads folder is

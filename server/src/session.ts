@@ -17,7 +17,9 @@ import type { DB } from './db.js';
 import { userByToken } from './auth.js';
 import { token as newToken } from './ids.js';
 import { Discovery } from './speakers/discovery.js';
-import { ServerPlayer } from './speakers/player.js';
+import { linkedGroups, ServerPlayer } from './speakers/player.js';
+import { BluOSTransport } from './speakers/transports.js';
+import { speakerGroups } from './speakers/groups.js';
 
 export type Device = { id: string; name: string; kind: string } | null;
 export type Session = {
@@ -115,17 +117,23 @@ const wsSend = (ws: WebSocket) => (obj: unknown) => { try { if (ws.readyState ==
 const send = (c: Client, obj: unknown) => c.send(obj);
 const ofUser = (uid: string) => [...clients.values()].filter((c) => c.uid === uid);
 
-export type SessionOptions = { speakers?: boolean; publicUrl?: string };
+export type SessionOptions = { speakers?: boolean; publicUrl?: string; bluosGroups?: 'keep' | 'slopify' };
+
+const SpeakerJoin = z.object({ leader: z.string().min(1).max(128), members: z.array(z.string().min(1).max(128)).max(32) });
+const SpeakerUnjoin = z.object({ speaker: z.string().min(1).max(128) });
 
 export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptions = {}) {
   const log = (m: string) => app.log.error(m);
   const offsetsAll = () => Object.fromEntries((db.prepare("SELECT k, v FROM kv WHERE k LIKE 'offset:%'").all() as any[]).map((r) => [r.k.slice(7), Number(r.v)]));
+  const groups = speakerGroups(db);
+  // A server speaker in a group carries the group (itself first) for the apps.
+  const withGroup = (d: any) => { const g = groups.groupOf(String(d.id)); return g.length > 1 ? { ...d, group: g } : d; };
   const rosterFor = (self: Client, s: Session) => {
     const players: any[] = [], lanDevices: any[] = [];
     for (const c of ofUser(self.uid)) {
       if (c.id !== self.id) players.push({ id: c.id, name: c.name, kind: c.kind, canPlay: c.canPlay, nowPlaying: c.nowPlaying || null, sameNetwork: c.kind === 'server' || c.net === self.net });
       // The server's speakers are for everyone; a client's own only for clients on its network.
-      if (c.kind === 'server' || c.net === self.net) for (const d of c.devices || []) lanDevices.push({ ...d, viaClient: c.id });
+      if (c.kind === 'server' || c.net === self.net) for (const d of c.devices || []) lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
     }
     return { type: 'roster', players, lanDevices, activeClientId: s.active };
   };
@@ -161,6 +169,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     c.player = new ServerPlayer(uid, {
       db, discovery, publicUrl: opts.publicUrl || '', token: speakerToken(uid), log: (m) => app.log.info(m),
       report: (np) => handle(c, { type: 'nowplaying', nowPlaying: np }),
+      groupOf: (id) => groups.groupOf(id),
       scrobble: (trackId, at) => (app as any).scrobbleStart?.(uid, trackId, at),
       reportQueue: (rows) => handle(c, { type: 'queue', queue: rows }),
       claim: () => handle(c, { type: 'claim' }),
@@ -168,6 +177,53 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     clients.set(id, c);
     return c;
   };
+  // --- speaker groups ------------------------------------------------------------
+  groups.onChange(() => {
+    for (const uid of new Set([...clients.values()].map((c) => c.uid))) broadcastRoster(uid);
+    for (const c of clients.values()) void c.player?.regroup();
+  });
+  const auth = { preHandler: (app as any).requireUser };
+  app.get('/api/speakers/groups', auth, async () => ({ groups: groups.list() }));
+  app.post('/api/speakers/groups', auth, async (req, reply) => {
+    const b = SpeakerJoin.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'leader and members required' });
+    const ids = [b.data.leader, ...b.data.members];
+    for (const id of ids) {
+      const d = discovery?.get(id);
+      if (!d) return reply.code(404).send({ error: `no such speaker ${id}` });
+      if (d.kind !== 'bluos') return reply.code(400).send({ error: `${d.name} cannot be grouped: only BluOS speakers play in sync (group Chromecasts in Google Home)` });
+    }
+    groups.join(b.data.leader, b.data.members);
+    return { groups: groups.list() };
+  });
+  app.post('/api/speakers/groups/unjoin', auth, async (req, reply) => {
+    const b = SpeakerUnjoin.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'speaker required' });
+    groups.unjoin(b.data.speaker);
+    return { groups: groups.list() };
+  });
+
+  // Groups not made by Slopify are unlinked (BLUOS_GROUPS=slopify).
+  if (discovery && opts.bluosGroups === 'slopify') {
+    const sweep = async () => {
+      const byHost = new Map(discovery.list().filter((d) => d.kind === 'bluos').map((d) => [d.host, d]));
+      for (const d of byHost.values()) {
+        try {
+          const st = await new BluOSTransport(d).sync();
+          const ours = new Set(linkedGroups.get(d.id) || []);
+          for (const sl of st.slaves) {
+            if (ours.has(byHost.get(sl.host)?.id || '')) continue;
+            await new BluOSTransport(d).removeSlave(sl.host, sl.port);
+            app.log.info(`speaker groups: unlinked ${byHost.get(sl.host)?.name || sl.host} from ${d.name} (not a Slopify group)`);
+          }
+        } catch { /* unreachable now; next sweep */ }
+      }
+    };
+    const timer = setInterval(() => void sweep(), 60000); timer.unref();
+    setTimeout(() => void sweep(), 5000).unref();
+    app.addHook('onClose', async () => clearInterval(timer));
+  }
+
   app.decorate('speakers', { list: () => (discovery ? discovery.list().map((d) => ({ ...d, playing: [...clients.values()].some((c) => c.kind === 'server' && c.player?.device?.id === d.id && c.player.playing) })) : []) });
 
   // The next few tracks of whatever is playing get transcoded ahead of time

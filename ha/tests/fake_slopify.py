@@ -140,6 +140,14 @@ SPEAKER_KITCHEN = {
     "host": "10.0.0.5",
     "port": 8009,
 }
+SPEAKER_LOFT = {
+    "id": "bluos:10.0.0.7",
+    "kind": "bluos",
+    "name": "Loft",
+    "model": "BluOS",
+    "host": "10.0.0.7",
+    "port": 11000,
+}
 SPEAKER_DEN = {
     "id": "bluos:10.0.0.6",
     "kind": "bluos",
@@ -174,6 +182,8 @@ class FakeSlopify:
         self.others: dict[str, SimpleNamespace] = {}
         self.socket_user: dict[int, str] = {}
         self.commands_by_user: list[tuple[str, dict[str, Any]]] = []
+        self.groups: list[list[str]] = []
+        self.group_calls: list[tuple[str, dict[str, Any]]] = []
         self.url = ""
         self._runner: web.AppRunner | None = None
 
@@ -189,6 +199,8 @@ class FakeSlopify:
             app.router.add_post(f"{base}/api/auth/logout", self._logout)
             app.router.add_get(f"{base}/api/server", self._server)
             app.router.add_post(f"{base}/api/users/{{id}}/household-token", self._household_token)
+            app.router.add_post(f"{base}/api/speakers/groups", self._group_join)
+            app.router.add_post(f"{base}/api/speakers/groups/unjoin", self._group_unjoin)
             app.router.add_get(f"{base}/api/ws", self._ws)
             app.router.add_get(f"{base}/api/image/{{id}}", self._image)
             app.router.add_get(f"{base}/api/{{tail:.*}}", self._library)
@@ -216,7 +228,12 @@ class FakeSlopify:
     def roster(self, uid: str = USER_ID) -> dict[str, Any]:
         st = self.state(uid)
         server_client = f"server:{uid}"
-        lan = [{**d, "viaClient": d.get("viaClient", server_client)} for d in self.lan]
+
+        def grouped(d: dict[str, Any]) -> dict[str, Any]:
+            g = next((x for x in self.groups if d["id"] in x), None)
+            return {**d, "group": [d["id"], *[i for i in g if i != d["id"]]]} if g else d
+
+        lan = [{**grouped(d), "viaClient": d.get("viaClient", server_client)} for d in self.lan]
         server = {
             "id": server_client,
             "name": "Home speakers",
@@ -322,6 +339,35 @@ class FakeSlopify:
         return web.json_response(
             {"id": uid, "name": self.users[uid], "role": self._role(uid), "mustChangePassword": self.must_change}
         )
+
+    async def _rosters_to_all(self) -> None:
+        for uid in {USER_ID, *self.others}:
+            await self.broadcast(self.roster(uid), uid)
+
+    async def _group_join(self, request: web.Request) -> web.StreamResponse:
+        if not self._user(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        body = await request.json()
+        self.group_calls.append(("join", body))
+        ids = [body["leader"], *body["members"]]
+        kinds = {d["id"]: d["kind"] for d in self.lan}
+        if any(kinds.get(i) != "bluos" for i in ids):
+            return web.json_response({"error": "only BluOS speakers play in sync"}, status=400)
+        current = next((g for g in self.groups if body["leader"] in g), [body["leader"]])
+        merged = list(dict.fromkeys([*current, *body["members"]]))
+        self.groups = [[i for i in g if i not in merged] for g in self.groups if g is not current]
+        self.groups = [g for g in self.groups if len(g) > 1] + [merged]
+        await self._rosters_to_all()
+        return web.json_response({"groups": self.groups})
+
+    async def _group_unjoin(self, request: web.Request) -> web.StreamResponse:
+        if not self._user(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        body = await request.json()
+        self.group_calls.append(("unjoin", body))
+        self.groups = [g for g in ([i for i in g if i != body["speaker"]] for g in self.groups) if len(g) > 1]
+        await self._rosters_to_all()
+        return web.json_response({"groups": self.groups})
 
     async def _household_token(self, request: web.Request) -> web.StreamResponse:
         uid = self._user(request)

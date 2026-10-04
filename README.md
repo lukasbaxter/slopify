@@ -180,6 +180,7 @@ are the homelab defaults: music at `/music`, state in `/data`.
 | `LOGIN_RATE_MAX` | `10` | Login attempts per IP per minute |
 | `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
 | `MDNS` | `1` | Announce the server on the LAN (`_slopify._tcp`) so Home Assistant finds it; `0` = off |
+| `BLUOS_GROUPS` | `slopify` | BluOS speakers are grouped only by Slopify's speaker groups; a group made elsewhere (the BluOS app) is unlinked within a minute. `keep` leaves those alone |
 | `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under |
 | `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
 | `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |

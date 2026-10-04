@@ -7,7 +7,7 @@
 import type { DB } from '../db.js';
 import { mixFor, tracksByIds } from '../library.js';
 import type { Discovery, Speaker } from './discovery.js';
-import { transportFor, type Transport } from './transports.js';
+import { BluOSTransport, transportFor, type Transport } from './transports.js';
 
 type Row = { Id: string; Name: string; Artists: string[]; AlbumArtist: string; Album: string; AlbumId: string; RunTimeTicks: number; ArtistItems: { Id: string; Name: string }[]; AlbumArtists: { Id: string; Name: string }[]; UserData: { IsFavorite: boolean }; _queued: boolean; _codec?: string | null };
 const MIME: Record<string, string> = { flac: 'audio/flac', mp3: 'audio/mpeg', aac: 'audio/mp4', m4a: 'audio/mp4', alac: 'audio/mp4', ogg: 'audio/ogg', vorbis: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', aiff: 'audio/aiff' };
@@ -15,7 +15,13 @@ const MIME: Record<string, string> = { flac: 'audio/flac', mp3: 'audio/mpeg', aa
 export type PlayerDeps = {
   db: DB; discovery: Discovery; publicUrl: string; token: string;
   report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void; scrobble?: (trackId: string, at: number) => void;
+  // The speaker's group (itself first); alone, just itself.
+  groupOf?: (id: string) => string[];
 };
+
+// Groups Slopify has linked with BluOS sync right now: leader id -> member ids.
+// Anything else linked on the network is not Slopify's (see the group sweep).
+export const linkedGroups = new Map<string, string[]>();
 
 // One physical speaker, one driver: whichever account claimed a device last
 // owns it, and the previous owner's player is made to yield first, so two
@@ -25,6 +31,8 @@ const owners = new Map<string, ServerPlayer>();
 export class ServerPlayer {
   queue: Row[] = []; index = -1; original: Row[] = [];
   device: Speaker | null = null; transport: Transport | null = null;
+  // The rest of the device's group, playing along through BluOS sync.
+  members: Speaker[] = [];
   playing = false; anchor = { pos: 0, at: Date.now() }; duration = 0; volume: number | null = null; private volumeHeldUntil = 0;
   repeat: 'off' | 'all' | 'one' = 'off'; shuffle: 'off' | 'on' = 'off';
   private timer: NodeJS.Timeout | null = null; private starting = false; private ticking = false; private lastTick = 0;
@@ -53,7 +61,7 @@ export class ServerPlayer {
     return {
       itemId: t.Id, title: t.Name, artist: t.Artists?.join(', ') || t.AlbumArtist || '', album: t.Album || null, artUrl: this.url(`/api/image/${t.AlbumId || t.Id}?size=128`),
       albumId: t.AlbumId || null, artistId: t.ArtistItems?.[0]?.Id || null, artists: t.ArtistItems || [], liked: !!t.UserData?.IsFavorite,
-      device: { id: this.device.id, kind: this.device.kind, name: this.device.name }, queueIndex: this.index,
+      device: { id: this.device.id, kind: this.device.kind, name: [this.device, ...this.members].map((d) => d.name).join(' + '), members: this.members.map((d) => d.id) }, queueIndex: this.index,
       playing: this.playing, position: Math.max(0, this.position), duration: this.duration || t.RunTimeTicks / 10000000, volume: this.volume ?? 100, repeat: this.repeat, shuffle: this.shuffle, at: Date.now(),
     };
   }
@@ -128,6 +136,7 @@ export class ServerPlayer {
       await this.claimDevice(dev);
       this.device = dev;
       this.transport = transportFor(dev);
+      await this.formGroup();
     }
     const ids: string[] = Array.isArray(cmd.trackIds) ? cmd.trackIds : [];
     const rows = this.rowsFor(ids); if (!rows.length) return;
@@ -140,10 +149,50 @@ export class ServerPlayer {
     this.d.reportQueue(this.queue);
   }
   private async switchDevice(dev: Speaker) {
-    if (this.device && this.device.id !== dev.id && this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; this.releaseDevice(); }
+    if (this.device && this.device.id !== dev.id && this.transport) { await this.dissolveGroup(); await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; this.releaseDevice(); }
     await this.claimDevice(dev);
     this.device = dev;
     if (!this.transport) this.transport = transportFor(dev);
+    await this.formGroup();
+  }
+  // The device's group plays along: each member is claimed (whoever played on
+  // it lets go), taken out of any other BluOS group, and linked to the leader.
+  private async formGroup() {
+    const leader = this.device;
+    if (!leader) return;
+    const want = (this.d.groupOf?.(leader.id) ?? [leader.id]).slice(1)
+      .map((id) => this.d.discovery.get(id)).filter((d): d is Speaker => !!d && d.kind === 'bluos' && leader.kind === 'bluos');
+    const keep = new Set(want.map((d) => d.id));
+    for (const m of this.members.filter((m) => !keep.has(m.id))) await this.unlink(m);
+    const lt = this.transport as unknown as Partial<BluOSTransport> | null;
+    if (leader.kind === 'bluos' && lt?.standAlone) await lt.standAlone().catch((e: any) => this.d.log(`group: ${leader.name} stand alone: ${e.message}`));
+    const have = new Set(this.members.map((m) => m.id));
+    for (const m of want.filter((m) => !have.has(m.id))) {
+      await this.claimDevice(m);
+      try {
+        const t = new BluOSTransport(m);
+        await t.standAlone().catch(() => {});
+        await (this.transport as unknown as BluOSTransport).addSlave(m.host, m.port);
+        this.members.push(m);
+      } catch (e: any) { this.d.log(`group: could not add ${m.name} to ${leader.name}: ${e.message}`); if (owners.get(m.id) === this) owners.delete(m.id); }
+    }
+    if (this.members.length) linkedGroups.set(leader.id, this.members.map((m) => m.id)); else linkedGroups.delete(leader.id);
+  }
+  private async unlink(m: Speaker) {
+    const lt = this.transport as unknown as Partial<BluOSTransport> | null;
+    if (this.device?.kind === 'bluos' && lt?.removeSlave) await lt.removeSlave(m.host, m.port).catch(() => {});
+    this.members = this.members.filter((x) => x.id !== m.id);
+    if (owners.get(m.id) === this) owners.delete(m.id);
+  }
+  private async dissolveGroup() {
+    for (const m of [...this.members]) await this.unlink(m);
+    if (this.device) linkedGroups.delete(this.device.id);
+  }
+  // The household changed the groups while music plays here: follow.
+  async regroup() {
+    if (!this.transport || !this.device) return;
+    this.ops = this.ops.then(async () => { await this.formGroup(); this.report(); }).catch(() => {});
+    return this.ops;
   }
   // Latest claim wins: whoever held this speaker is stopped first (it yields
   // and reports its session not-playing), then the device is ours.
@@ -152,7 +201,10 @@ export class ServerPlayer {
     if (prev && prev !== this) await prev.yield().catch(() => {});
     owners.set(dev.id, this);
   }
-  private releaseDevice() { if (this.device && owners.get(this.device.id) === this) owners.delete(this.device.id); }
+  private releaseDevice() {
+    if (this.device && owners.get(this.device.id) === this) owners.delete(this.device.id);
+    for (const m of this.members) if (owners.get(m.id) === this) owners.delete(m.id);
+  }
   private async start(t: Row, startAt: number, play: boolean) {
     if (!this.transport || !t) return;
     this.starting = true;
@@ -215,6 +267,7 @@ export class ServerPlayer {
     this.volumeHeldUntil = Date.now() + 2000;
     this.report();
     if (this.transport) await this.transport.setVolume(this.volume);
+    for (const m of this.members) await new BluOSTransport(m).setVolume(this.volume).catch(() => {});
   }
   async next(auto: boolean) {
     if (!this.queue.length) return;
@@ -255,12 +308,13 @@ export class ServerPlayer {
   async yield() {
     this.stopPolling();
     this.cancelLogPlay();
+    await this.dissolveGroup();
     if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; }
     this.releaseDevice();
     this.setPos(this.position, false);
     this.d.report(null);
   }
-  async stopAll() { this.stopPolling(); this.cancelLogPlay(); if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; } this.releaseDevice(); }
+  async stopAll() { this.stopPolling(); this.cancelLogPlay(); await this.dissolveGroup(); if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; } this.releaseDevice(); }
 
   // Follow the speaker's own clock; move on when a track ends; notice when
   // someone paused or stopped it from the speaker's own app.

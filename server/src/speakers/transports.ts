@@ -254,6 +254,25 @@ export class BluOSTransport implements Transport {
     return { playing, state, title: tag(xml, 'title1'), artist: tag(xml, 'title2'), album: tag(xml, 'title3'), volume: muted ? (this.lastVolume ?? rawVol) : rawVol != null && rawVol >= 0 ? rawVol : null, muted, position, duration, canSeek: tag(xml, 'canSeek') === '1', streamUrl: tag(xml, 'streamUrl'), ended, coarse: true };
   }
   close() { /* nothing to hold */ }
+
+  // --- BluOS sync (grouping) -------------------------------------------------
+  // Who this unit follows, and who follows it.
+  async sync(): Promise<{ master: { host: string; port: number } | null; slaves: { host: string; port: number }[] }> {
+    const xml = await this.get('/SyncStatus');
+    const m = /<master(?:\s+port="(\d+)")?[^>]*>([^<]+)<\/master>/i.exec(xml);
+    const slaves = [...xml.matchAll(/<slave\s+id="([^"]+)"\s+port="(\d+)"/gi)].map((x) => ({ host: x[1], port: Number(x[2]) }));
+    return { master: m ? { host: m[2].trim(), port: Number(m[1] || BLUOS_DEFAULT_PORT) } : null, slaves };
+  }
+  addSlave(host: string, port: number) { return this.get(`/AddSlave?${new URLSearchParams({ slave: host, port: String(port) })}`); }
+  removeSlave(host: string, port: number) { return this.get(`/RemoveSlave?${new URLSearchParams({ slave: host, port: String(port) })}`); }
+  // Out of any group: away from its master, and its own followers let go.
+  async standAlone() {
+    const st = await this.sync();
+    if (st.master) await new BluOSTransport({ ...this.device, host: st.master.host, port: st.master.port }).removeSlave(this.device.host, this.device.port);
+    for (const sl of st.slaves) await this.removeSlave(sl.host, sl.port);
+  }
 }
+
+const BLUOS_DEFAULT_PORT = 11000;
 
 export function transportFor(device: Speaker): Transport { return device.kind === 'cast' ? new CastTransport(device) : new BluOSTransport(device); }

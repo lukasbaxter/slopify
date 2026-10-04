@@ -335,7 +335,7 @@ export function usePlayer(jf) {
     // A speaker this desktop can see itself is driven from here, not listed twice.
     .filter((d) => !remote || !localDevicesRef.current.some((x) => x.id === d.id))
     .filter((d, i, arr) => arr.findIndex((x) => x.id === d.id) === i)
-    .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : 'Chromecast', viaClient: d.viaClient }));
+    .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : 'Chromecast', viaClient: d.viaClient, group: d.group }));
 
   // Remote players from the relay, presented as selectable devices.
   const relayDevices = roster.players

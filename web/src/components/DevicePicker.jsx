@@ -110,12 +110,18 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
   const slaveHosts = new Set(
     devices.flatMap((d) => (d.slaves || []).map((s) => s.host))
   );
-  const visible = devices.filter((d) => !(d.kind === 'bluos' && (d.isSlave || slaveHosts.has(d.host))));
+  // Slopify's own speaker groups (the server's speakers carry `group`, the
+  // speaker itself first): one entry per group, any member plays them all.
+  const nameOf = new Map(devices.map((d) => [d.id, d.name]));
+  const groupLead = (d) => (d.group?.length > 1 ? [...d.group].sort()[0] : d.id);
+  const visible = devices.filter((d) => !(d.kind === 'bluos' && (d.isSlave || slaveHosts.has(d.host))) && groupLead(d) === d.id);
   const labelFor = (d) => {
+    if (d.group?.length > 1) return d.group.map((id) => nameOf.get(id) || id).join(' + ');
     if (d.kind !== 'bluos' || !d.slaves?.length) return d.name;
     return [d.name, ...d.slaves.map((s) => s.name)].join(' + ');
   };
   const subtitleFor = (d) => {
+    if (d.group?.length > 1) return `Group • ${d.group.length} speakers`;
     if (d.kind === 'bluos' && d.slaves?.length) {
       return `Grouped • ${d.slaves.length + 1} speakers`;
     }
@@ -133,7 +139,8 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
   const remoteCount = visible.length;
   const isBrowser = typeof window !== 'undefined' && !window.conduit;
   const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : 'Slopify');
-  const others = all.filter((d) => d.id !== active.id);
+  const isActive = (d) => d.id === active.id || (d.group || []).includes(active.id);
+  const others = all.filter((d) => !isActive(d));
 
   return (
     <div className="devicepicker" ref={ref}>
@@ -195,7 +202,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
               {g.items.map((d) => (
                 <button
                   key={d.id}
-                  className={`deviceitem ${d.id === active.id ? 'active' : ''}`}
+                  className={`deviceitem ${isActive(d) ? 'active' : ''}`}
                   onClick={() => { onSelect(d); setOpen(false); }}
                   role="menuitem"
                 >

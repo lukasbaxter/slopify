@@ -155,6 +155,25 @@ script:
         data: { source: "{{ source }}" }
 ```
 
+### Speaker groups
+
+Group BluOS speakers from Home Assistant: open a Slopify speaker, select the
+**group** button, and tick the speakers that should play with it (or call
+`media_player.join` / `media_player.unjoin`). Groups are kept by Slopify, so
+every app sees them: picking any speaker of a group plays the whole group, and
+two people can each play on their own group at the same time. While music
+plays on a group, Slopify links its speakers with BluOS's own sync so rooms
+stay in time, and unlinks them when the music leaves. Taking a speaker that
+someone else's music is on takes over that whole group.
+
+Only BluOS speakers can be grouped. Chromecasts cannot be kept in sync from
+outside; group them in Google Home, and the Google Home group shows up as a
+speaker of its own.
+
+By default, groups made anywhere else (the BluOS app, another controller) are
+unlinked within a minute, so Slopify's groups are the only ones. Set
+`BLUOS_GROUPS=keep` on the server to leave such groups alone.
+
 ### Moving the music
 
 Pick a **source** on the player card, or in an automation:

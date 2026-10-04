@@ -175,6 +175,8 @@ export class ServerPlayer {
   // ever taken from something else: a member busy with other music (its own
   // input, Spotify, someone else's Slopify) is left alone, unless someone
   // put it into this group on purpose while the music plays (takeBusy).
+  // Speakers being taken from us right now: never pulled back into the group.
+  private excluded = new Set<string>();
   private async busy(m: Speaker) {
     const o = owners.get(m.id);
     if (o && o !== this) return o.playing;
@@ -185,7 +187,7 @@ export class ServerPlayer {
   private async formGroup({ take = new Set<string>() }: { take?: Set<string> } = {}) {
     const leader = this.device;
     if (!leader) return;
-    const want = (this.d.groupOf?.(leader.id) ?? [leader.id]).slice(1)
+    const want = (this.d.groupOf?.(leader.id) ?? [leader.id]).slice(1).filter((id) => !this.excluded.has(id))
       .map((id) => this.d.discovery.get(id)).filter((d): d is Speaker => !!d && d.kind === 'bluos' && leader.kind === 'bluos');
     const keep = new Set(want.map((d) => d.id));
     for (const m of this.members.filter((m) => !keep.has(m.id))) await this.unlink(m);
@@ -234,10 +236,34 @@ export class ServerPlayer {
   }
   // Latest claim wins: whoever held this speaker is stopped first (it yields
   // and reports its session not-playing), then the device is ours.
+  // Latest claim wins, for that speaker only: whoever played on it gives up
+  // just this speaker and keeps playing on the rest of their group.
   private async claimDevice(dev: Speaker) {
     const prev = owners.get(dev.id);
-    if (prev && prev !== this) await prev.yield().catch(() => {});
+    if (prev && prev !== this) await prev.giveUp(dev.id).catch(() => {});
     owners.set(dev.id, this);
+  }
+  // Another account took one of our speakers. A member just leaves the group;
+  // the speaker the music started on hands the music to the next one in the
+  // group, which carries on from the same place. Nothing left: let go.
+  async giveUp(id: string) {
+    if (this.device?.id !== id) return this.dropMember(id);
+    const rest = this.members.filter((m) => m.id !== id);
+    if (!rest.length || !this.transport) return this.yield();
+    this.ops = this.ops.then(async () => {
+      const pos = this.position, playing = this.playing, track = this.current;
+      this.excluded.add(id);
+      try {
+        this.stopPolling();
+        await this.dissolveGroup();
+        await this.transport?.stop().catch(() => {}); this.transport?.close(); this.transport = null;
+        if (owners.get(id) === this) owners.delete(id);
+        this.device = null;
+        await this.switchDevice(rest[0]);
+        if (track) await this.start(track, pos, playing);
+      } finally { this.excluded.delete(id); }
+    }).catch((e: any) => this.d.log(`group: hand-off failed: ${e.message}`));
+    return this.ops;
   }
   private releaseDevice() {
     if (this.device && owners.get(this.device.id) === this) owners.delete(this.device.id);

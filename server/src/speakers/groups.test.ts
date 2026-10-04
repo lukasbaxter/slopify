@@ -140,17 +140,36 @@ describe('playing on speaker groups', () => {
     await lukas.stopAll();
   });
 
-  it("taking someone's speaker takes their group; leaving unlinks it", async () => {
+  it("taking a member of someone's group takes only that speaker", async () => {
     const lukas = player('lukas3'), henry = player('henry3');
     await lukas.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
     expect([...towers.slaves]).toEqual([node.port]);
     await henry.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
-    expect(lukas.transport).toBeNull(); // Lukas let go
-    expect([...towers.slaves]).toEqual([]);
-    expect([...node.slaves]).toEqual([towers.port]);
-    await henry.stopAll();
-    expect([...node.slaves]).toEqual([]);
-    expect(towers.master).toBeNull();
+    // Lukas plays on, on the Towers alone; Henry has the Node, without the busy Towers.
+    expect(lukas.transport).not.toBeNull();
+    expect(lukas.device?.id).toBe(sp(towers).id);
+    expect(lukas.members).toEqual([]);
+    expect(towers.slaves.size).toBe(0);
+    expect(henry.device?.id).toBe(sp(node).id);
+    expect(henry.members).toEqual([]);
+    await henry.stopAll(); await lukas.stopAll();
+    expect(node.master).toBeNull();
+  });
+
+  it("taking the speaker someone's music started on moves their music to the rest of their group", async () => {
+    const lukas = player('lukas6'), henry = player('henry6');
+    await lukas.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1', 't2'], index: 1, position: 0, playing: true });
+    expect([...towers.slaves]).toEqual([node.port]);
+    await henry.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
+    await lukas.execute({ action: 'noop' }); // let the hand-off finish
+    expect(lukas.device?.id).toBe(sp(node).id);
+    expect(lukas.current?.Id).toBe('t2');
+    expect(lukas.playing).toBe(true);
+    expect(node.master).toBeNull();
+    expect(henry.device?.id).toBe(sp(towers).id);
+    expect(henry.members).toEqual([]); // the Node is Lukas's now: left out
+    expect(towers.slaves.size).toBe(0);
+    await henry.stopAll(); await lukas.stopAll();
   });
 
   it('ungrouping while music plays takes the speaker out of the music', async () => {

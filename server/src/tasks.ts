@@ -31,8 +31,29 @@ export type Schedule =
   | { mode: 'weekly'; day: number; at: string }   // 0 = Sunday
   | { mode: 'watch' };                            // on file change, for tasks that watch a folder
 
-export type TaskCtx = { step: (text: string, progress?: number | null) => void; log: (m: string) => void };
-export type TaskDef = { id: string; name: string; description: string; schedule: Schedule; watchDir?: string; run: (ctx: TaskCtx) => Promise<string> };
+// A task's own knobs, edited from its menu in the dashboard. Declared with
+// their defaults beside the task; changed values persist in kv and are read
+// live, so turning a running task's power down takes effect on its next step.
+export type TaskSetting = { key: string; label: string; help?: string } & (
+  | { type: 'select'; options: { value: string; label: string }[]; default: string }
+  | { type: 'number'; min: number; max: number; unit?: string; default: number }
+  | { type: 'toggle'; default: boolean }
+);
+export type TaskCtx = {
+  step: (text: string, progress?: number | null) => void;
+  log: (m: string) => void;
+  setting: <T = any>(key: string) => T; // current value, saved or default
+};
+export type TaskDef = { id: string; name: string; description: string; schedule: Schedule; watchDir?: string; settings?: TaskSetting[]; run: (ctx: TaskCtx) => Promise<string> };
+
+// A setting value from the wire: coerced to the setting's type and range, or
+// undefined when it is not a valid value for it.
+export function parseSettingValue(s: TaskSetting, v: unknown): string | number | boolean | undefined {
+  if (s.type === 'toggle') return typeof v === 'boolean' ? v : undefined;
+  if (s.type === 'select') return typeof v === 'string' && s.options.some((o) => o.value === v) ? v : undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(s.max, Math.max(s.min, Math.round(n))) : undefined;
+}
 type LastRun = { started: number; ended: number; ok: boolean; summary?: string; error?: string };
 
 const kvGet = (db: DB, k: string) => (db.prepare('SELECT v FROM kv WHERE k = ?').get(k) as any)?.v as string | undefined;
@@ -88,6 +109,13 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   // hand edit) must degrade to "never ran" / "default schedule", not take the
   // whole tick - and the task list API - down with it.
   const last = (id: string): LastRun | null => { try { return JSON.parse(kvGet(db, `task:${id}`) || 'null'); } catch { return null; } };
+  const settingsOf = (d: TaskDef): Record<string, any> => {
+    let saved: Record<string, unknown> = {};
+    try { saved = JSON.parse(kvGet(db, `task:${d.id}:settings`) || '{}') || {}; } catch { /* corrupt row: defaults */ }
+    const out: Record<string, any> = {};
+    for (const s of d.settings || []) { const v = parseSettingValue(s, saved[s.key]); out[s.key] = v === undefined ? s.default : v; }
+    return out;
+  };
   const schedOf = (d: TaskDef): Schedule => {
     let raw: any = null;
     try { raw = JSON.parse(kvGet(db, `task:${d.id}:sched`) || 'null'); } catch { /* fall back to the default */ }
@@ -101,6 +129,7 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
     const ctx: TaskCtx = {
       step: (text, progress = null) => { state.step = text; state.progress = progress; },
       log: (m) => app.log.info(`task ${def.id}: ${m}`),
+      setting: (key) => settingsOf(def)[key],
     };
     def.run(ctx)
       .then((summary) => kvSet(db, `task:${def.id}`, JSON.stringify({ started: state.started, ended: now(), ok: true, summary } satisfies LastRun)))
@@ -177,6 +206,7 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
     return {
       id: d.id, name: d.name, description: d.description,
       schedule: s, canWatch: Boolean(d.watchDir), next: nextRun(s, last(d.id), now()),
+      settings: (() => { const v = settingsOf(d); return (d.settings || []).map((x) => ({ ...x, value: v[x.key] })); })(),
       running: running.get(d.id) ?? null, last: last(d.id),
     };
   };
@@ -186,6 +216,22 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
     if (!def) return reply.code(404).send({ error: 'no such task' });
     if (!start(def)) return reply.code(409).send({ error: 'already running' });
     return { started: true };
+  });
+  app.put('/api/admin/tasks/:id/settings', admin, async (req: any, reply) => {
+    const def = defs.find((d) => d.id === req.params.id);
+    if (!def) return reply.code(404).send({ error: 'no such task' });
+    const values = req.body?.values;
+    if (!values || typeof values !== 'object') return reply.code(400).send({ error: 'values required' });
+    const next = settingsOf(def);
+    for (const [k, v] of Object.entries(values)) {
+      const s = (def.settings || []).find((x) => x.key === k);
+      if (!s) return reply.code(400).send({ error: `no setting ${k}` });
+      const parsed = parseSettingValue(s, v);
+      if (parsed === undefined) return reply.code(400).send({ error: `not a valid value for ${s.label}` });
+      next[k] = parsed;
+    }
+    kvSet(db, `task:${def.id}:settings`, JSON.stringify(next));
+    return taskOut(def);
   });
   app.put('/api/admin/tasks/:id/schedule', admin, async (req: any, reply) => {
     const def = defs.find((d) => d.id === req.params.id);
@@ -264,6 +310,14 @@ async function room(lidarr: Lidarr, target: number): Promise<number> {
   return target - (await lidarr.wantedCount());
 }
 
+// How hard a chore leans on the NAS: a pause between files.
+const PACE = (def: string): TaskSetting => ({
+  key: 'pace', label: 'Pace', type: 'select', default: def,
+  help: 'How hard this leans on the music share while it runs.',
+  options: [{ value: 'gentle', label: 'Gentle' }, { value: 'normal', label: 'Normal' }, { value: 'fast', label: 'Fast' }],
+});
+const paceMs = (pace: string, normal: number) => (pace === 'gentle' ? Math.max(25, normal * 5) : pace === 'fast' ? 0 : normal);
+
 export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const db = o.db;
   const f = o.fetcher ?? fetch;
@@ -295,20 +349,35 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const scan: TaskDef = {
     id: 'scan', name: 'Scan library', schedule: { mode: 'daily', at: '04:00' }, watchDir: o.musicDir,
     description: 'Walk the music folder for new, changed and removed files',
+    settings: [PACE('normal')],
     run: async (ctx) => {
       ctx.step('Walking the library');
-      const r = await (app as any).runScanAwaited();
-      return `${r.files} files, ${r.added} added, ${r.changed} changed, ${r.removed} removed`;
+      const p = (app as any).runScanAwaited({ pauseMs: paceMs(ctx.setting('pace'), o.pauseMs) });
+      // The walk reports its file count; show it while it goes.
+      const tick = setInterval(() => { const c = (app as any).scanning?.(); if (c) ctx.step(`${c.files.toLocaleString()} files walked`); }, 1000);
+      try {
+        const r = await p;
+        return `${r.files} files, ${r.added} added, ${r.changed} changed, ${r.removed} removed`;
+      } finally { clearInterval(tick); }
     },
   };
 
   const enrich: TaskDef = {
     id: 'enrich', name: 'Fetch lyrics & artwork', schedule: { mode: 'interval', hours: o.enrichEveryH },
     description: 'Lyrics, artist pictures and album covers for whatever is still missing',
+    settings: [
+      { key: 'lyrics', label: 'Lyrics', type: 'toggle', default: true },
+      { key: 'artists', label: 'Artist pictures', type: 'toggle', default: true },
+      { key: 'covers', label: 'Album covers', type: 'toggle', default: true },
+      { key: 'genres', label: 'Genres', type: 'toggle', default: true },
+    ],
     run: async (ctx) => {
       if ((app as any).enrichRunning?.()) return 'already running (a scan started it)';
       ctx.step('Fetching');
-      await (app as any).runEnrich();
+      await (app as any).runEnrich({
+        lyrics: ctx.setting('lyrics'), artists: ctx.setting('artists'), covers: ctx.setting('covers'), genres: ctx.setting('genres'),
+        onPhase: (name: string) => ctx.step(name),
+      });
       return 'pass finished';
     },
   };
@@ -316,6 +385,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const heads: TaskDef = {
     id: 'heads', name: 'Cut song heads', schedule: { mode: 'daily', at: '05:00' },
     description: 'Mirror the first seconds of every song to the cache so playback starts at SSD speed',
+    settings: [PACE('normal')],
     run: async (ctx) => {
       if (!o.headsEnabled) return 'heads are off (HEADS=0)';
       // A file ffmpeg cannot cut today cannot cut it tomorrow either (a
@@ -332,7 +402,8 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         try { await buildHead(db, o.cacheDir, r.id, r.path, r.size, r.duration_ms, o.headSeconds); done++; }
         catch (e: any) { failed++; bad[r.path] = Date.now(); if (samples.length < 3) samples.push(r.path); if (failed <= 5) ctx.log(`${r.path}: ${e.message}`); }
         if ((done + failed) % 50 === 0) { ctx.step(`${(done + failed).toLocaleString()} of ${rows.length.toLocaleString()}`, (done + failed) / rows.length); kvSet(db, 'task:heads:failed', JSON.stringify(bad)); }
-        if (o.pauseMs) await sleep(o.pauseMs);
+        const pause = paceMs(ctx.setting('pace'), o.pauseMs);
+        if (pause) await sleep(pause);
       }
       kvSet(db, 'task:heads:failed', JSON.stringify(bad));
       return `${done.toLocaleString()} heads cut${failed ? `, ${failed} failed (e.g. ${samples.join(', ')})` : ''}${skipped ? `, ${skipped} skipped as recently failed` : ''}`;
@@ -343,11 +414,12 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   // artists for the most played ones, their best album queued in Lidarr.
   const discovery: TaskDef = {
     id: 'discovery', name: 'Discover new music', schedule: { mode: 'weekly', day: 0, at: '06:00' },
+    settings: [{ key: 'perRun', label: 'Albums per run', type: 'number', min: 1, max: 50, default: o.discoveryPerRun }],
     description: 'Queue an album each from artists similar to the most played ones that the library lacks',
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
-      const cap = Math.min(await room(lidarr, o.wantedTarget), o.discoveryPerRun);
+      const cap = Math.min(await room(lidarr, o.wantedTarget), ctx.setting<number>('perRun'));
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const seen = new Map<string, number>(Object.entries(JSON.parse(kvGet(db, 'task:discovery:seen') || '{}')));
       for (const [k, t] of seen) if (Date.now() - t > 90 * 86400000) seen.delete(k);
@@ -396,17 +468,21 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   // flooding the wanted list past what a person's own request can jump.
   const backlog: TaskDef = {
     id: 'backlog', name: 'Fill in discographies', schedule: { mode: 'interval', hours: o.backlogEveryH },
+    settings: [
+      { key: 'perRun', label: 'Albums per run', type: 'number', min: 1, max: 100, default: o.backlogPerRun },
+      { key: 'artistsPerRun', label: 'Artists per run', type: 'number', min: 1, max: 50, default: o.backlogArtistsPerRun },
+    ],
     description: 'Queue missing studio albums and EPs of the most played artists, a few at a time',
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
-      const cap = Math.min(await room(lidarr, o.wantedTarget), o.backlogPerRun);
+      const cap = Math.min(await room(lidarr, o.wantedTarget), ctx.setting<number>('perRun'));
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const done = JSON.parse(kvGet(db, 'task:backlog:done') || '{}') as Record<string, number>;
       const pending = await lidarr.statuses();
       let n = 0, artists = 0, full = false;
       for (const a of topPlayedArtists(10 * 365 * 86400000, 500)) {
-        if (artists >= o.backlogArtistsPerRun || n >= cap || full) break;
+        if (artists >= ctx.setting<number>('artistsPerRun') || n >= cap || full) break;
         if (done[a.id] && Date.now() - done[a.id] < 14 * 86400000) continue;
         ctx.step(a.name, n / cap);
         let complete = true;
@@ -438,9 +514,11 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   // own tags so the album stays whole.
   const flac: TaskDef = {
     id: 'flac', name: 'Upgrade to FLAC', schedule: { mode: 'interval', hours: 1 },
+    settings: [{ key: 'perRun', label: 'Songs per run', type: 'number', min: 1, max: 200, default: o.flacPerRun }],
     description: 'Replace lossy tracks with a verified FLAC from Soulseek, most played first',
     run: async (ctx) => {
       if (!o.slskdUrl || !o.slskdKey || !o.slskdDownloadsDir) return 'slskd is not configured (SLSKD_URL / SLSKD_API_KEY / SLSKD_DOWNLOADS_DIR)';
+      const perRun = ctx.setting<number>('perRun');
       const sopts = { slskdUrl: o.slskdUrl, slskdKey: o.slskdKey };
       const exists = (p: string) => fsp.stat(p).then(() => true, () => false);
       // Each replacement is journaled in kv BEFORE the library changes: a
@@ -496,7 +574,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       let done = 0, failed = 0, tried = 0, blocked = 0;
       const plannedDests = new Set<string>();
       for (const t of rows) {
-        if (done >= o.flacPerRun || tried >= o.flacPerRun * 2) break;
+        if (done >= perRun || tried >= perRun * 2) break;
         // The duration is part of the key: a failed search for the radio
         // edit must not block the album version (same artist and title)
         // for the next 30 days.
@@ -511,7 +589,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         if (dest !== t.path && await exists(dest)) { ctx.log(`${dest}: already exists, not overwriting`); noteSkip(key); blocked++; continue; }
         if (tried) await sleep(8000); // stay under the account's search budget
         tried++;
-        ctx.step(`${t.artist} - ${t.title}`, done / o.flacPerRun);
+        ctx.step(`${t.artist} - ${t.title}`, done / perRun);
         let src: string | undefined, tmp: string | undefined;
         try {
           const dlStart = Date.now();

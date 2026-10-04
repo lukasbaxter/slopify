@@ -1,6 +1,6 @@
-# Build and push the Docker image to GHCR: :latest on every push to main,
-# plus :vX.Y.Z (and a refreshed :latest) on v* tags. CI (ci.yml) still
-# builds the image on PRs without pushing.
+# Build and push both images to GHCR on every push to main and on v* tags:
+# the slim one as :latest (+ :vX.Y.Z), the GPU one (lyric aligner) as :gpu
+# (+ :vX.Y.Z-gpu). CI (ci.yml) still builds the slim image on PRs.
 name: docker
 on:
   push:
@@ -12,7 +12,20 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: runtime
+            suffix: ''
+            latest: latest
+          - target: gpu
+            suffix: '-gpu'
+            latest: gpu
     steps:
+      # The gpu image is ~6 GB; the runner's default free space is tight.
+      - name: Free disk space
+        if: matrix.target == 'gpu'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -25,13 +38,14 @@ jobs:
         with:
           images: ghcr.io/lukasbaxter/slopify
           tags: |
-            type=raw,value=latest
-            type=ref,event=tag
+            type=raw,value=${{ matrix.latest }}
+            type=ref,event=tag,suffix=${{ matrix.suffix }}
       - uses: docker/build-push-action@v6
         with:
           context: .
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}

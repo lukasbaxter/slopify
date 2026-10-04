@@ -152,7 +152,8 @@ describe('built-in chores', () => {
     db, lidarr, cacheDir: '/tmp', musicDir: '/tmp', headsEnabled: false, headSeconds: 3, pauseMs: 0,
     enrichEveryH: 1, wantedTarget: 25, discoveryPerRun: 5, backlogEveryH: 6, backlogPerRun: 10, backlogArtistsPerRun: 5, flacPerRun: 40,
   });
-  const ctx = { step: () => {}, log: () => {} };
+  // A run context serving the task's declared setting defaults.
+  const ctxOf = (t: TaskDef) => ({ step: () => {}, log: () => {}, setting: (k: string) => t.settings?.find((x) => x.key === k)?.default as any });
 
   it('isStudio: albums and 4+ track EPs, never secondary-typed variants', () => {
     expect(isStudio({ rtype: 'Album', secondary: [], total_tracks: 10 })).toBe(true);
@@ -180,9 +181,9 @@ describe('built-in chores', () => {
       request: async (fid: string) => { requested.push(fid); return { id: 1, album_id: fid, artist: 'Tycho', title: fid, status: 'queued' }; },
     };
     const backlog = builtinTasks(adminApp() as any, opts(db, lidarr)).find((t) => t.id === 'backlog')!;
-    expect(await backlog.run(ctx)).toContain('1 albums queued');
+    expect(await backlog.run(ctxOf(backlog))).toContain('1 albums queued');
     expect(requested).toEqual(['mb-epoch']); // Dive is on the shelf, Live/Single/already-wanted skipped
-    expect(await backlog.run(ctx)).toContain('0 artists'); // done for 14 days
+    expect(await backlog.run(ctxOf(backlog))).toContain('0 artists'); // done for 14 days
   });
 
   it('discovery and backlog stand down when the wanted list is at target, and without Lidarr', async () => {
@@ -190,10 +191,10 @@ describe('built-in chores', () => {
     seed(db);
     const full: any = { enabled: true, wantedCount: async () => 25, statuses: async () => new Map() };
     const tasks = builtinTasks(adminApp() as any, opts(db, full));
-    expect(await tasks.find((t) => t.id === 'backlog')!.run(ctx)).toContain('full');
-    expect(await tasks.find((t) => t.id === 'discovery')!.run(ctx)).toContain('full');
+    expect(await tasks.find((t) => t.id === 'backlog')!.run(ctxOf(tasks.find((t) => t.id === 'backlog')!))).toContain('full');
+    expect(await tasks.find((t) => t.id === 'discovery')!.run(ctxOf(tasks.find((t) => t.id === 'discovery')!))).toContain('full');
     const none = builtinTasks(adminApp() as any, opts(db, { enabled: false }));
-    expect(await none.find((t) => t.id === 'discovery')!.run(ctx)).toContain('not configured');
+    expect(await none.find((t) => t.id === 'discovery')!.run(ctxOf(none.find((t) => t.id === 'discovery')!))).toContain('not configured');
   });
 
   it('a replaced file keeps the listener\'s traces: likes, playlists, plays and lyrics move to the new id', () => {
@@ -217,7 +218,7 @@ describe('built-in chores', () => {
   it('the flac chore stands down without slskd', async () => {
     const db = tmpdb('flacoff');
     const flac = builtinTasks(adminApp() as any, opts(db, { enabled: false })).find((t) => t.id === 'flac')!;
-    expect(await flac.run(ctx)).toContain('slskd is not configured');
+    expect(await flac.run(ctxOf(flac))).toContain('slskd is not configured');
   });
 
   // slskd configured but every call mocked dead: these runs must never reach it.
@@ -234,7 +235,7 @@ describe('built-in chores', () => {
     fs.writeFileSync(path.join(musicDir, 'al', '01.flac'), 'already here');
     db.prepare("UPDATE tracks SET codec = 'MPEG 1 Layer 3', duration_ms = 123456, path = ? WHERE id = 't1'").run(path.join(musicDir, 'al', '01.mp3'));
     const flac = builtinTasks(adminApp() as any, slskdOpts(db, musicDir)).find((t) => t.id === 'flac')!;
-    const summary = await flac.run(ctx);
+    const summary = await flac.run(ctxOf(flac));
     expect(summary).toContain('1 blocked by an existing file');
     expect(vi.mocked(slskdFind)).not.toHaveBeenCalled();
     expect(fs.readFileSync(path.join(musicDir, 'al', '01.flac'), 'utf8')).toBe('already here');
@@ -261,7 +262,7 @@ describe('built-in chores', () => {
         VALUES ('t-new', '/m/01.flac', 0, 0, 'A Walk', 'Tycho', '["Tycho"]', '["ar"]', 'al', 'Dive', 'Tycho', 0, 'FLAC')`).run();
     });
     const flac = builtinTasks(app as any, slskdOpts(db, '/m')).find((t) => t.id === 'flac')!;
-    const summary = await flac.run(ctx);
+    const summary = await flac.run(ctxOf(flac));
     expect(summary).toContain('recovered from the journal');
     expect(scanned).toEqual([['']]); // the library-root case rides through as rel ''
     expect((db.prepare("SELECT track_id FROM likes WHERE user_id = 'u1'").get() as any).track_id).toBe('t-new');
@@ -279,7 +280,7 @@ describe('built-in chores', () => {
     let calls = 0;
     app.decorate('scanFolders', async () => { calls++; throw new Error('NAS asleep'); });
     const flac = builtinTasks(app as any, slskdOpts(db, '/m')).find((t) => t.id === 'flac')!;
-    const summary = await flac.run(ctx);
+    const summary = await flac.run(ctxOf(flac));
     expect(summary).toContain('folder scans failed, kept journaled for recovery');
     expect(calls).toBe(2); // one retry, then give up until next run
     expect(JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'task:flac:journal'").get() as any).v)).toEqual([entry]);
@@ -288,6 +289,6 @@ describe('built-in chores', () => {
   it('the heads chore says so when heads are off', async () => {
     const db = tmpdb('heads');
     const heads = builtinTasks(adminApp() as any, opts(db, { enabled: false })).find((t) => t.id === 'heads')!;
-    expect(await heads.run(ctx)).toContain('HEADS=0');
+    expect(await heads.run(ctxOf(heads))).toContain('HEADS=0');
   });
 });

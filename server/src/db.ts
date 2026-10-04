@@ -127,6 +127,18 @@ const MIGRATIONS: string[] = [
   -- without this each count walked the whole plays table.
   CREATE INDEX plays_track ON plays(track_id);
   `,
+  `
+  -- What the lyric aligner decided per song (lyricsync.ts). lyrics_at is the
+  -- lyrics row's fetched_at when it was checked: new lyrics mean a new check.
+  -- original holds the lines it replaced, so every change can be undone.
+  CREATE TABLE lyric_align (
+    track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    state TEXT NOT NULL, score REAL, shift_ms INTEGER, lang TEXT,
+    lyrics_at INTEGER NOT NULL, original TEXT, original_kind TEXT, original_source TEXT,
+    error TEXT, checked_at INTEGER NOT NULL
+  );
+  CREATE INDEX lyric_align_state ON lyric_align(state);
+  `,
 ];
 
 export type DB = Database.Database;

@@ -1532,6 +1532,35 @@ button:disabled { cursor: default; }
 .task-sched select, .task-sched input { background: rgba(255, 255, 255, .08); color: var(--fg); border: 0; border-radius: 4px; padding: 5px 6px; font-size: 12px; font-family: inherit; color-scheme: dark; }
 .task-sched select:hover, .task-sched input:hover { background: rgba(255, 255, 255, .14); }
 .task-run { flex: none; white-space: nowrap; }
+.admin-list li.task-row { position: relative; overflow: visible; }
+/* Progress along the bottom edge of a running row; a sliding sliver when the
+   task cannot say how far it is. */
+.task-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 0 0 6px 6px; overflow: hidden; pointer-events: none; }
+.task-bar::after { content: ''; position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(var(--p, 0)); transition: transform .6s ease; }
+.task-bar[data-indeterminate]::after { transform: none; width: 30%; animation: task-slide 1.4s ease-in-out infinite; }
+@keyframes task-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .task-bar[data-indeterminate]::after { animation: none; width: 100%; opacity: .5; } }
+.task-menu { position: relative; flex: none; }
+.task-dots { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--fg-dim); }
+.task-dots:hover, .task-dots[aria-expanded="true"] { color: var(--fg); background: rgba(255, 255, 255, .1); }
+.task-dots:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.task-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 70; width: min(360px, calc(100vw - 32px)); background: var(--bg-elevated-hi); border-radius: var(--r-art, 8px); box-shadow: 0 16px 24px rgba(0, 0, 0, .3), 0 6px 8px rgba(0, 0, 0, .2); padding: 12px; display: flex; flex-direction: column; gap: 10px; white-space: normal; }
+.task-pop-desc { margin: 0; font-size: 13px; color: var(--fg-dim); }
+.task-set { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; cursor: pointer; }
+.task-set > span:first-child { display: flex; flex-direction: column; min-width: 0; }
+.task-set small { color: var(--fg-dim); font-size: 12px; line-height: 1.35; }
+.task-set select, .task-set-num input { background: rgba(255, 255, 255, .08); color: var(--fg); border: 0; border-radius: 4px; padding: 5px 6px; font: inherit; font-size: 12px; color-scheme: dark; max-width: 180px; }
+.task-set-num { display: flex; align-items: center; gap: 6px; flex: none; }
+.task-set-num input { width: 64px; }
+.task-set-num em { font-style: normal; color: var(--fg-dim); font-size: 12px; }
+.task-switch { appearance: none; flex: none; width: 34px; height: 20px; border-radius: 10px; background: rgba(255, 255, 255, .25); position: relative; cursor: pointer; transition: background .15s; }
+.task-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.task-switch:checked { background: var(--accent); }
+.task-switch:checked::after { transform: translateX(14px); }
+.task-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.task-pop-stats { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--fg-dim); border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 10px; }
+.task-pop-stats .btn-secondary { align-self: flex-start; padding: 5px 12px; font-size: 12px; }
+.task-pop-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--fg); }
 /* A squeezed desktop window: wrap the row like the phone does instead of
    pushing Run now out of the card. */
 @media (max-width: 860px) {

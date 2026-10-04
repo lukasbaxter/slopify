@@ -104,6 +104,13 @@ export const config = {
     backlogArtistsPerRun: Number(env('BACKLOG_ARTISTS_PER_RUN', '5')),
     flacPerRun: Number(env('FLAC_PER_RUN', '40')),
   },
+  // Lyric alignment on the GPU (the "Sync lyrics" task). Only the gpu image
+  // ships the Python side; elsewhere the task says so and stands down.
+  align: {
+    python: env('ALIGN_PYTHON', '/opt/align/bin/python'),
+    script: env('ALIGN_SCRIPT', ''), // default: aligner/align.py in the app
+    model: env('ALIGN_MODEL', 'turbo'),
+  },
   // Generated playlists: Claude through the Anthropic API.
   ai: {
     apiKey: env('ANTHROPIC_API_KEY', '') || undefined,

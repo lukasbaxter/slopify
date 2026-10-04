@@ -30,12 +30,96 @@ const TASK_ICONS = {
   discovery: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5 5-2z" /></svg>,
   backlog: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" /></svg>,
   flac: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9v6" /><path d="M7 6v12" /><path d="M11 10v4" /><path d="M18 19V7" /><path d="m14.5 10.5 3.5-3.5 3.5 3.5" /></svg>,
+  lyricsync: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>,
 };
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const HOURS = [[0.25, '15 min'], [0.5, '30 min'], [1, 'hour'], [2, '2 h'], [3, '3 h'], [6, '6 h'], [12, '12 h'], [24, '24 h']];
 
 // The schedule, editable in place: every N hours, daily or weekly at a
 // time, on file change (tasks that watch a folder), or off.
+// One of a task's own knobs. Selects and switches save as they change; a
+// number saves when you leave the field or press Enter.
+function TaskSetting({ s, onSave }) {
+  const [draft, setDraft] = useState(null);
+  const id = `task-set-${s.key}`;
+  if (s.type === 'toggle') {
+    return (
+      <label className="task-set task-set-toggle" htmlFor={id}>
+        <span><b>{s.label}</b>{s.help && <small>{s.help}</small>}</span>
+        <input id={id} type="checkbox" className="task-switch" checked={!!s.value} onChange={(e) => onSave(s.key, e.target.checked)} />
+      </label>
+    );
+  }
+  return (
+    <label className="task-set" htmlFor={id}>
+      <span><b>{s.label}</b>{s.help && <small>{s.help}</small>}</span>
+      {s.type === 'select' ? (
+        <select id={id} value={s.value} onChange={(e) => onSave(s.key, e.target.value)}>
+          {s.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      ) : (
+        <span className="task-set-num">
+          <input id={id} type="number" min={s.min} max={s.max} value={draft ?? s.value}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => { if (draft != null && draft !== '' && Number(draft) !== s.value) onSave(s.key, Number(draft)); setDraft(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+          {s.unit && <em>{s.unit}</em>}
+        </span>
+      )}
+    </label>
+  );
+}
+
+// The ⋯ menu on a task row: what the task does and its own settings. Sync
+// lyrics also shows what it has done so far, with a way to put it all back.
+function TaskMenu({ jf, t, onSettings, notify }) {
+  const [open, setOpen] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) { setConfirmUndo(false); return undefined; }
+    const down = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', down);
+    document.addEventListener('keydown', key);
+    if (t.id === 'lyricsync') jf._fetch('/api/admin/lyricsync').then(setStats).catch(() => {});
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const n = (state) => fmtN((stats?.states || []).find((x) => x.state === state)?.n || 0);
+  const undo = () => jf._fetch('/api/admin/lyricsync/undo', { method: 'POST' })
+    .then((r) => { notify?.(`Put back ${fmtN(r.restored)} songs' lyrics`); setConfirmUndo(false); return jf._fetch('/api/admin/lyricsync').then(setStats); })
+    .catch((e) => notify?.(`Could not undo: ${e.message}`));
+  return (
+    <span className="task-menu" ref={ref}>
+      <button type="button" className="task-dots" aria-label={`${t.name} settings`} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.5" /><circle cx="8" cy="8" r="1.5" /><circle cx="13" cy="8" r="1.5" /></svg>
+      </button>
+      {open && (
+        <div className="task-pop" role="dialog" aria-label={`${t.name} settings`}>
+          <p className="task-pop-desc">{t.description}</p>
+          {(t.settings || []).map((s) => <TaskSetting key={s.key} s={s} onSave={(k, v) => onSettings(t, { [k]: v })} />)}
+          {!t.settings?.length && <p className="task-pop-desc">Nothing to adjust for this one.</p>}
+          {t.id === 'lyricsync' && stats && (
+            <div className="task-pop-stats">
+              <span>{n('synced')} timed · {n('verified')} verified · {n('corrected')} corrected · {n('unsure')} unsure · {n('failed')} failed · {fmtN(stats.pending)} to check</span>
+              {!confirmUndo
+                ? <button type="button" className="btn-secondary" onClick={() => setConfirmUndo(true)}>Undo all changes…</button>
+                : (
+                  <span className="task-pop-confirm">
+                    Put every timed and corrected song back the way it was?
+                    <button type="button" className="btn-secondary" onClick={undo}>Put back</button>
+                    <button type="button" className="btn-secondary" onClick={() => setConfirmUndo(false)}>Keep</button>
+                  </span>
+                )}
+            </div>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function TaskSchedule({ t, onChange }) {
   const save = (schedule) => onChange(schedule);
   const s = t.schedule;
@@ -102,6 +186,14 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
       .then((out) => { taskSeq.current += 1; setTasks((ts) => (ts || []).map((x) => (x.id === out.id ? out : x))); })
       .catch((e) => { notify?.(`Could not change the schedule: ${e.message}`); taskSeq.current += 1; loadTasks(); });
   };
+  // Settings save the same way: shown at once, reconciled by the answer.
+  const onSettings = (task, values) => {
+    taskSeq.current += 1;
+    setTasks((ts) => (ts || []).map((x) => (x.id === task.id ? { ...x, settings: x.settings.map((s) => (s.key in values ? { ...s, value: values[s.key] } : s)) } : x)));
+    return jf._fetch(`/api/admin/tasks/${task.id}/settings`, { method: 'PUT', body: JSON.stringify({ values }) })
+      .then((out) => { taskSeq.current += 1; setTasks((ts) => (ts || []).map((x) => (x.id === out.id ? out : x))); })
+      .catch((e) => { notify?.(`Could not save that setting: ${e.message}`); taskSeq.current += 1; loadTasks(); });
+  };
   const loadUsers = () => jf.users().then((r) => setUsers(r.users || [])).catch(() => setUsers([]));
   useEffect(() => { loadUsers(); }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -158,6 +250,8 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
                 </span>
                 <TaskSchedule t={t} onChange={(schedule) => onSchedule(t, schedule)} />
                 <button type="button" className="btn-secondary task-run" disabled={!!busy || !!t.running} onClick={() => run(`run ${t.name}`, () => jf._fetch(`/api/admin/tasks/${t.id}/run`, { method: 'POST' }).then(loadTasks), `${t.name} started`)}>{t.running ? 'Running…' : 'Run now'}</button>
+                <TaskMenu jf={jf} t={t} notify={notify} onSettings={onSettings} />
+                {t.running && <span className="task-bar" style={{ '--p': t.running.progress != null ? Math.max(0.02, t.running.progress) : 0 }} data-indeterminate={t.running.progress == null ? '' : undefined} aria-hidden="true" />}
               </li>
             ))}
           </ul>

@@ -24,6 +24,7 @@ import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
 import { registerTasks, builtinTasks } from './tasks.js';
+import { lyricSyncTask, registerLyricSyncAdmin } from './lyricsync.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 
@@ -98,12 +99,16 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerSpotifyImport(app, db, dataDir);
   registerDownloads(app, db, { lidarr });
   registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
-  registerTasks(app, db, builtinTasks(app, {
+  registerTasks(app, db, [...builtinTasks(app, {
     db, lidarr, cacheDir, musicDir,
     headsEnabled: config.headsEnabled, headSeconds: config.headSeconds, pauseMs: config.scanPauseMs,
     slskdUrl: config.slskdUrl || undefined, slskdKey: config.slskdKey || undefined, slskdDownloadsDir: config.slskdDownloadsDir || undefined,
     ...config.tasks,
-  }));
+  }), lyricSyncTask(app, {
+    db, cacheDir, saveToLibrary: config.saveToLibrary,
+    python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
+  })]);
+  registerLyricSyncAdmin(app, db, { saveToLibrary: config.saveToLibrary });
 
   // No version on the unauthenticated health checks (don't hand scanners a
   // fingerprint); nothing in web/src consumes it.

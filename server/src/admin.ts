@@ -17,12 +17,12 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   const afterScan: (() => void)[] = [];
   app.decorate('afterScan', (fn: () => void) => { afterScan.push(fn); });
   let lastScan: Promise<any> | null = null;
-  const runScan = () => {
+  const runScan = (over: { pauseMs?: number } = {}) => {
     if (current) return current;
     current = { started: Date.now(), files: 0 };
     // The scan is "current" only while it walks the files; the enrichment it
     // kicks off afterwards can run for hours and must not block the next scan.
-    lastScan = scanLibrary(db, { musicDir, dataDir, ...scanOpts, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
+    lastScan = scanLibrary(db, { musicDir, dataDir, ...scanOpts, ...over, onProgress: (n) => { if (current) current.files = n; }, log: (m) => app.log.warn(m) })
       .then((r) => { app.log.info(`scan done: ${JSON.stringify(r)}`); current = null; for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } void runEnrich(); return r; },
         (e) => { app.log.error(`scan failed: ${e.message}`); current = null; throw e; });
     lastScan.catch(() => {}); // awaited by whoever asked; never unhandled
@@ -30,16 +30,23 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   };
   // Lyrics/identity for whatever the scan left unresolved; also on a timer for retries.
   let enriching = false;
-  const runEnrich = async () => {
+  type Parts = { artists?: boolean; covers?: boolean; genres?: boolean; lyrics?: boolean; onPhase?: (name: string) => void };
+  const runEnrich = async (parts: Parts = {}) => {
     if (enriching) return;
     enriching = true;
+    const on = (k: keyof Parts) => parts[k] !== false;
+    const phase = parts.onPhase ?? (() => {});
     try {
       const lib = { musicDir, saveToLibrary: scanOpts.saveToLibrary };
       // Keep going while there is work: a first run over a big library takes hours.
-      for (let i = 0; i < 40; i++) { const a = await artistImagesPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300, ...lib }); if (a.found + a.missing) app.log.info(`artist images: ${JSON.stringify(a)}`); if (a.found + a.missing < 300) break; }
-      for (let i = 0; i < 40; i++) { const c = await albumCoversPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300, ...lib }); if (c.found + c.missing) app.log.info(`album covers: ${JSON.stringify(c)}`); if (c.found + c.missing < 300) break; }
-      for (let i = 0; i < 40; i++) { const g = await albumGenresPass(db, { log: (m) => app.log.warn(m), max: 300 }); if (g.settled) app.log.info(`album genres: ${JSON.stringify(g)}`); if (g.settled < 300) break; }
-      for (let i = 0; i < 100; i++) { const r = await enrichPass(db, { log: (m) => app.log.warn(m), max: 500, ...lib }); if (r.done + r.missing + r.instrumental) app.log.info(`enrich: ${JSON.stringify(r)}`); if (r.done + r.missing + r.instrumental < 500) break; }
+      if (on('artists')) phase('Artist pictures');
+      for (let i = 0; on('artists') && i < 40; i++) { const a = await artistImagesPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300, ...lib }); if (a.found + a.missing) app.log.info(`artist images: ${JSON.stringify(a)}`); if (a.found + a.missing < 300) break; }
+      if (on('covers')) phase('Album covers');
+      for (let i = 0; on('covers') && i < 40; i++) { const c = await albumCoversPass(db, { log: (m) => app.log.warn(m), dataDir, max: 300, ...lib }); if (c.found + c.missing) app.log.info(`album covers: ${JSON.stringify(c)}`); if (c.found + c.missing < 300) break; }
+      if (on('genres')) phase('Genres');
+      for (let i = 0; on('genres') && i < 40; i++) { const g = await albumGenresPass(db, { log: (m) => app.log.warn(m), max: 300 }); if (g.settled) app.log.info(`album genres: ${JSON.stringify(g)}`); if (g.settled < 300) break; }
+      if (on('lyrics')) phase('Lyrics');
+      for (let i = 0; on('lyrics') && i < 100; i++) { const r = await enrichPass(db, { log: (m) => app.log.warn(m), max: 500, ...lib }); if (r.done + r.missing + r.instrumental) app.log.info(`enrich: ${JSON.stringify(r)}`); if (r.done + r.missing + r.instrumental < 500) break; }
     }
     catch (e: any) { app.log.error(`enrich failed: ${e.message}`); }
     finally { enriching = false; }
@@ -64,7 +71,7 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
   };
   app.decorate('runScan', runScan);
   // The Tasks dashboard runs a scan to completion and reports its result.
-  app.decorate('runScanAwaited', () => { runScan(); return lastScan; });
+  app.decorate('runScanAwaited', (over: { pauseMs?: number } = {}) => { runScan(over); return lastScan; });
   app.decorate('enrichRunning', () => enriching);
   app.decorate('scanFolders', scanFolders);
   app.decorate('runAfterScan', () => { for (const fn of afterScan) { try { fn(); } catch (e: any) { app.log.error(`after scan: ${e.message}`); } } });

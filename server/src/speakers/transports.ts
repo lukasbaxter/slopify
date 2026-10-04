@@ -156,6 +156,7 @@ export class BluOSTransport implements Transport {
   private metaSafe: { ok: boolean; probed: boolean; at: number } | null = null;
   private lastVolume: number | undefined;
   private wasPlaying = false;
+  private ownVol: { at: number; level: number | null; muted: boolean } | null = null;
   constructor(private device: Speaker) {}
   private get(path: string) { return requestRetry(this.device.host, this.device.port, path); }
 
@@ -214,7 +215,21 @@ export class BluOSTransport implements Transport {
     await this.get('/Clear').catch(() => {});
     return res;
   }
-  setVolume(level: number) { return this.get(`/Volume?level=${Math.max(0, Math.min(100, Math.round(level)))}`); }
+  setVolume(level: number) { this.ownVol = null; return this.get(`/Volume?level=${Math.max(0, Math.min(100, Math.round(level)))}`); }
+  // In a group, every member's /Status carries the group's volume (0 while
+  // the leader sits at 0), not the speaker's own: mirrored back, it snapped
+  // the slider to 0 after every change. /Volume is the speaker's own; it is
+  // read at most once a second (status() runs four times a second).
+  private async volumeOf(statusXml: string): Promise<{ level: number | null; muted: boolean }> {
+    const num = (v: string | null) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+    if (!/<groupName>/i.test(statusXml)) return { level: num(tag(statusXml, 'volume')), muted: tag(statusXml, 'mute') === '1' };
+    if (this.ownVol && Date.now() - this.ownVol.at < 1000) return this.ownVol;
+    try {
+      const xml = await this.get('/Volume');
+      this.ownVol = { at: Date.now(), level: num(tag(xml, 'volume')), muted: /\smute="1"/.test(xml) };
+    } catch { this.ownVol = { at: Date.now(), level: null, muted: false }; }
+    return this.ownVol;
+  }
   async seek(seconds: number) {
     if (!(await this.waitUntilSeekable())) throw Object.assign(new Error('BluOS stream is not seekable yet'), { code: 'ENOSEEK' });
     const target = Math.max(0, Math.round(seconds));
@@ -230,14 +245,13 @@ export class BluOSTransport implements Transport {
   async status(): Promise<Status> {
     const xml = await this.get('/Status');
     const state = tag(xml, 'state');
-    const rawVol = Number(tag(xml, 'volume') ?? 0);
-    const muted = tag(xml, 'mute') === '1';
-    if (!muted && Number.isFinite(rawVol)) this.lastVolume = rawVol;
+    const { level: rawVol, muted } = await this.volumeOf(xml);
+    if (!muted && rawVol != null && rawVol >= 0) this.lastVolume = rawVol;
     const playing = state === 'play' || state === 'stream';
     const position = Number(tag(xml, 'secs') ?? 0), duration = Number(tag(xml, 'totlen') ?? 0);
     // The stream ran out: stopped by itself near the end of what it was playing.
     const ended = this.wasPlaying && state === 'stop' && duration > 0 && position >= duration - 3;
-    return { playing, state, title: tag(xml, 'title1'), artist: tag(xml, 'title2'), album: tag(xml, 'title3'), volume: muted ? (this.lastVolume ?? rawVol) : rawVol, muted, position, duration, canSeek: tag(xml, 'canSeek') === '1', streamUrl: tag(xml, 'streamUrl'), ended, coarse: true };
+    return { playing, state, title: tag(xml, 'title1'), artist: tag(xml, 'title2'), album: tag(xml, 'title3'), volume: muted ? (this.lastVolume ?? rawVol) : rawVol != null && rawVol >= 0 ? rawVol : null, muted, position, duration, canSeek: tag(xml, 'canSeek') === '1', streamUrl: tag(xml, 'streamUrl'), ended, coarse: true };
   }
   close() { /* nothing to hold */ }
 }

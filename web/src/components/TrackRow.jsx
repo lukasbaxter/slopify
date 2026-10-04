@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { syncLyrics } from '../api/lyricsync.js';
+import { syncLyrics, useLyricJob } from '../api/lyricsync.js';
 import ContextMenu from './ContextMenu.jsx';
 import { FORMATS } from '../api/download.js';
 import { useLiked } from '../api/likes.js';
@@ -178,6 +178,7 @@ export default function TrackRow({
 }) {
   // {x, y} while the context menu is open (from the dots button or a right-click).
   const [menu, setMenu] = useState(null);
+  const lyricJob = useLyricJob(track?.Id);
   const phone = usePhone();
   const touch = useTouch();
   // From the like store, never from the row's UserData (which can be stale).
@@ -204,7 +205,7 @@ export default function TrackRow({
         : { label: 'Go to artist', icon: I.artist, onClick: () => onOpenArtist(artistsOf.find((a) => a.Id).Id) }
     ) : null,
     onOpenAlbum && track.AlbumId ? { label: 'Go to album', icon: I.album, onClick: () => onOpenAlbum(track.AlbumId) } : null,
-    jf ? { label: 'Sync Lyrics', icon: I.lyrics, onClick: () => syncLyrics(jf, track) } : null,
+    jf ? { label: lyricJob ? 'Syncing Lyrics…' : 'Sync Lyrics', icon: I.lyrics, disabled: Boolean(lyricJob), onClick: () => syncLyrics(jf, track) } : null,
     { label: 'Share', icon: I.share, onClick: () => shareItem({ kind: 'track', id: track.Id, title: track.Name, by: artistsOf.map((a) => a.Name).join(', ') }) },
     onDownload ? { sep: true } : null,
     onDownload ? { label: 'Download', icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: f.label, onClick: () => onDownload(track, f.id) })) } : null,

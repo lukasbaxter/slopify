@@ -8,7 +8,7 @@ import { seekHover } from '../api/seekHover.js';
 import { useLiked } from '../api/likes.js';
 import { useOffset } from '../api/offsets.js';
 import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph, I, shareItem } from './TrackRow.jsx';
-import { syncLyrics } from '../api/lyricsync.js';
+import { syncLyrics, useLyricJob } from '../api/lyricsync.js';
 import { usePhone, usePlayingFrom, slideOut, LyricsGlyph } from './Player.jsx';
 import { vibrantColor } from '../api/colors.js';
 
@@ -180,6 +180,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   // The full row object when the track is in our own queue (richer than the
   // session summary: ArtistItems, Album, ticks), else the summary shape.
   const fullTrack = player.current?.Id === nowPlaying?.itemId ? player.current : asTrack;
+  const npLyricJob = useLyricJob(nowPlaying?.itemId);
   const share = () => { if (nowPlaying?.itemId) shareItem({ kind: 'track', id: nowPlaying.itemId, title: nowPlaying.title, by: nowPlaying.artist }); };
   const goArtist = (id) => { close(); onOpenArtist(id); };
   const moreItems = asTrack ? [
@@ -197,7 +198,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
       : (artistsOf[0] || nowPlaying?.artistId) ? { label: 'Go to artist', icon: G.artist, onClick: () => goArtist(artistsOf[0]?.Id || nowPlaying.artistId) } : null,
     nowPlaying?.albumId && onOpenAlbum ? { label: 'Go to album', icon: G.album, onClick: () => { close(); onOpenAlbum(nowPlaying.albumId); } } : null,
     { sep: true },
-    nowPlaying?.itemId ? { label: 'Sync Lyrics', icon: I.lyrics, onClick: () => syncLyrics(jf, { Id: nowPlaying.itemId, Name: nowPlaying.title }) } : null,
+    nowPlaying?.itemId ? { label: npLyricJob ? 'Syncing Lyrics…' : 'Sync Lyrics', icon: I.lyrics, disabled: Boolean(npLyricJob), onClick: () => syncLyrics(jf, { Id: nowPlaying.itemId, Name: nowPlaying.title }) } : null,
     { label: 'Share', icon: G16.share, onClick: share },
   ] : [];
   const moreHeader = nowPlaying ? { image: nowPlaying.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: 120 }) : nowPlaying.artUrl || null, title: nowPlaying.title, sub: nowPlaying.artist || '' } : null;

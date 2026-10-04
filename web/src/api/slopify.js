@@ -259,7 +259,7 @@ export class Slopify {
   }
 
   syncLyrics(itemId) { return this._fetch(`/api/lyrics/${itemId}/sync`, { method: 'POST' }); }
-  lyricJobs(ids) { return this._fetch(`/api/lyrics/sync?ids=${ids.map(encodeURIComponent).join(',')}`); }
+  lyricJobs(ids, { mine = false } = {}) { return this._fetch(mine ? '/api/lyrics/sync?mine=1' : `/api/lyrics/sync?ids=${ids.map(encodeURIComponent).join(',')}`); }
   // Lyrics: [{ start: seconds | null, text }]. Empty for none / instrumental.
   async lyrics(itemId) {
     try {

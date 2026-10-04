@@ -1,3 +1,5 @@
+import LyricSyncStatus from './components/LyricSyncStatus.jsx';
+import { resumeLyricJobs, useLyricJobs } from './api/lyricsync.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Slopify, loadSession, persistSession, clearSession } from './api/slopify.js';
 import { usePlayer } from './player/usePlayer.js';
@@ -430,10 +432,16 @@ export default function App() {
     jf.followedArtists().then((a) => setFollowedArtists(a.items)).catch(() => {});
   }, [jf]);
 
-  const notify = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
-  // Components without a notify prop (a track row's Share) toast through here.
+  const syncing = useLyricJobs();
+  // Lyrics syncs this account started before a reload keep showing.
+  useEffect(() => { if (jf && me && !booting) resumeLyricJobs(jf); }, [jf, me, booting]);
+  // One timer: an older toast's timeout must not cut a newer one short.
+  const toastTimer = useRef(null);
+  const notify = (msg, ms = 2200) => { setToast(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), ms); };
+  // Components without a notify prop (a track row's Share, a lyrics sync
+  // finishing) toast through here: a string, or { text, ms }.
   useEffect(() => {
-    const on = (e) => { if (e.detail) notify(String(e.detail)); };
+    const on = (e) => { const d = e.detail; if (!d) return; if (typeof d === 'string') notify(d); else notify(String(d.text), d.ms); };
     window.addEventListener('slopify:toast', on);
     return () => window.removeEventListener('slopify:toast', on);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1292,7 +1300,8 @@ SHOWING: ${player.nowPlaying?.title?.slice(0,24) || 'nothing'}
 pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume}`}
         </div>
       )}
-      {toast && <div className="toast">{toast}</div>}
+      <LyricSyncStatus />
+      {toast && <div className={`toast ${syncing.length ? 'lifted' : ''}`}>{toast}</div>}
       {generating && (
         <GeneratePlaylist jf={jf} onClose={() => setGenerating(false)}
           onDone={async (r, { hidden, error } = {}) => {

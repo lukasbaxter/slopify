@@ -3,6 +3,17 @@ import { useOffset } from '../api/offsets.js';
 import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph } from './TrackRow.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import { isLiked } from '../api/likes.js';
+import { syncLyrics, useLyricJob, jobLabel } from '../api/lyricsync.js';
+
+// This song's lyrics being synced: what stage it is at.
+function SyncBanner({ job }) {
+  return (
+    <p className="lyrics-syncing" role="status" aria-live="polite">
+      <span className="lyricsync-spin" aria-hidden="true" />
+      <span><b>Syncing these lyrics</b> · {jobLabel(job)}</span>
+    </p>
+  );
+}
 import { usePhone, usePlayingFrom, slideOut } from './Player.jsx';
 
 const Close = () => (
@@ -284,6 +295,8 @@ export function Lyrics({ player, jf }) {
   // lyrics load and stay in sync even when we are mirroring another device
   // (where `current` is null but nowPlayingId still points at the song).
   const trackId = player.nowPlayingId;
+  const job = useLyricJob(trackId);
+  const askSync = () => syncLyrics(jf, { Id: trackId, Name: player.current?.Name || 'This song' });
   const [lines, setLines] = useState(null);
   const [state, setState] = useState('idle');
   const activeRef = useRef(null);
@@ -358,10 +371,12 @@ export function Lyrics({ player, jf }) {
   if (state === 'loading') return <p className="placeholder-note">Loading lyrics...</p>;
   if (state === 'idle') return <p className="placeholder-note">Play something to see lyrics.</p>;
   if (state === 'none') {
+    if (job) return <SyncBanner job={job} />;
     return (
-      <p className="placeholder-note">
-        Looks like we don&rsquo;t have the lyrics for this song.
-      </p>
+      <div className="placeholder-note">
+        <p>Looks like we don&rsquo;t have the lyrics for this song.</p>
+        <button type="button" className="lyrics-findsync" onClick={askSync}>Find and sync lyrics</button>
+      </div>
     );
   }
 
@@ -369,9 +384,11 @@ export function Lyrics({ player, jf }) {
 
   return (
     <div className={`lyrics ${synced ? 'synced' : 'unsynced'}`} ref={listRef}>
-      {!synced && (
-        <p className="qrow-sub" style={{ margin: '0 0 12px' }}>
+      {job && <SyncBanner job={job} />}
+      {!synced && !job && (
+        <p className="qrow-sub lyrics-unsynced-note">
           These lyrics aren&rsquo;t synced to the song yet.
+          <button type="button" className="lyrics-findsync" onClick={askSync}>Sync them</button>
         </p>
       )}
       {lines.map((l, i) => (

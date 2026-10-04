@@ -680,6 +680,20 @@ input[type="range"]:disabled { opacity: .4; }
 
 
 /* Spotify-style bottom toast ("Added to Liked Songs") */
+.toast.lifted { bottom: 150px; }
+.lyrics-syncing { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-size: 14px; color: var(--fg-dim); }
+.lyrics-syncing b { color: var(--fg); }
+.lyrics-findsync { margin-top: 12px; padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.3); color: var(--fg); font-weight: 700; font-size: 14px; background: none; cursor: pointer; }
+.lyrics-findsync:hover { border-color: var(--fg); transform: scale(1.02); }
+.lyrics-unsynced-note { margin: 0 0 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.lyrics-unsynced-note .lyrics-findsync { margin-top: 0; padding: 4px 12px; font-size: 13px; }
+/* Lyrics being synced: which song and what stage, above the player. */
+.lyricsync-pill { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 99; max-width: min(560px, calc(100vw - 32px)); display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 999px; background: var(--bg-elevated-hi, #2a2a2a); color: var(--fg); font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+.lyricsync-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-dim); }
+.lyricsync-text b { color: var(--fg); font-weight: 600; }
+.lyricsync-spin { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--accent); animation: lyricsync-spin .8s linear infinite; }
+@keyframes lyricsync-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lyricsync-spin { animation: none; border-color: var(--accent); } }
 .toast {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
   background: var(--accent); color: #000; font-size: 14px; font-weight: 500;

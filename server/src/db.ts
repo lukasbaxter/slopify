@@ -147,6 +147,10 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX lyric_jobs_state ON lyric_jobs(state, requested);
   `,
+  `
+  -- What a Sync Lyrics job is doing right now, for the app to show.
+  ALTER TABLE lyric_jobs ADD COLUMN step TEXT;
+  `,
 ];
 
 export type DB = Database.Database;

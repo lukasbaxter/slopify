@@ -106,7 +106,7 @@ export async function buildServer(opts: BuildOptions = {}) {
     ...config.tasks,
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,
-    python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model, writeModel: config.align.writeModel,
+    python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
   })]);
   registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 

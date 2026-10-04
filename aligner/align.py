@@ -9,14 +9,9 @@ Given a song and its lyric lines it finds when each line is sung. This is
 forced alignment: the words are already known and only their timing is
 searched for, so nothing is transcribed and nothing can be invented.
 
-It can also write lyrics for a song that has none (cmd "transcribe"): the
-large model, slower and more careful, with Whisper's known hallucinations
-("Thank you." in an instrumental gap, a line repeated forever) filtered out.
-
 Requests:
   {"id": 1, "path": "/music/a.flac", "lines": ["first line", ...], "language": null}
-  {"id": 2, "cmd": "transcribe", "path": "/music/a.flac", "language": null}
-  {"id": 3, "cmd": "vram"}
+  {"id": 2, "cmd": "vram"}
 Replies:
   {"id": 1, "ok": true, "lines": [{"start": ms|null, "end": ms|null, "prob": 0..1|null}, ...],
    "score": 0..1, "lang": "en", "ms": 1234}
@@ -70,77 +65,6 @@ def guess_language(text):
         if n > best_n:
             best, best_n = lang, n
     return best
-
-
-# Whisper fills silence and instrumental breaks with stock phrases learned
-# from subtitled video; none of these is ever a lyric line on its own.
-STOCK = re.compile(r"^(?:thank(?:s| you)(?: (?:so much|very much|for (?:watching|listening)))?|bye(?: bye)?|you|"
-                   r"(?:please )?subscribe.*|music|outro|intro|)$")
-
-
-def isolate_vocals(path, device):
-    """Demucs on its own, before Whisper's large model runs: together with
-    beam search they do not fit an 8 GB card, one after the other they do.
-    Returns 16 kHz mono vocals as Whisper takes them."""
-    import subprocess
-    import numpy as np
-    import torch
-    import torchaudio
-    from demucs.apply import apply_model
-    from demucs.pretrained import get_model as demucs_model
-    raw = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-f", "f32le", "-ac", "2", "-ar", "44100", "-"],
-                         capture_output=True, check=True).stdout
-    wav = torch.from_numpy(np.frombuffer(raw, dtype=np.float32).copy()).view(-1, 2).T
-    ref = wav.mean(0)
-    mean, std = ref.mean(), ref.std() + 1e-8
-    m = demucs_model("htdemucs").to(device).eval()
-    try:
-        with torch.no_grad():
-            src = apply_model(m, ((wav - mean) / std)[None].to(device), device=device, split=True, overlap=0.25, progress=False)[0]
-        vocals = (src[m.sources.index("vocals")] * std.to(device) + mean.to(device)).mean(0)
-        mono = torchaudio.functional.resample(vocals, 44100, 16000).float().cpu().numpy()
-    finally:
-        del m
-        if device == "cuda":
-            torch.cuda.empty_cache()
-    return mono
-
-
-def transcribe(model, req, separate, device):
-    t0 = time.time()
-    audio = isolate_vocals(req["path"], device) if separate else req["path"]
-    res = model.transcribe(
-        audio,
-        language=req.get("language"),
-        denoiser=None,
-        vad=True,                         # skip what is not voice at all
-        word_timestamps=True,
-        beam_size=5, best_of=5,           # slow and careful
-        temperature=(0.0, 0.2, 0.4),
-        condition_on_previous_text=False, # the cause of endless repeat loops
-        verbose=None,
-    )
-    if res is None:
-        raise ValueError("transcription failed")
-    res.split_by_length(max_words=14)     # lyric-sized lines; 10 cut phrases in half
-    lines, words = [], 0
-    run_text, run_len = None, 0
-    for seg in res.segments:
-        text = seg.text.strip()
-        key = re.sub(r"[^\w' ]+", "", text.lower()).strip()
-        ws = [w for w in (seg.words or []) if w.word.strip()]
-        probs = [float(w.probability) for w in ws if w.probability is not None]
-        p = sum(probs) / len(probs) if probs else 0.0
-        if not text or STOCK.match(key) or p < 0.45:
-            continue
-        # A chorus repeats; a line coming back nine times in a row is a loop.
-        run_len = run_len + 1 if key == run_text else 1
-        run_text = key
-        if run_len > 8:
-            continue
-        lines.append({"start": int(round(float(seg.start) * 1000)), "end": int(round(float(seg.end) * 1000)), "text": text, "prob": p})
-        words += len(ws)
-    return {"lines": lines, "words": words, "lang": getattr(res, "language", None), "ms": int((time.time() - t0) * 1000)}
 
 
 def reply(obj):
@@ -198,14 +122,10 @@ def main():
         reply({"ready": False, "error": "CUDA requested but no GPU is visible to the container"})
         return
     model_name = os.environ.get("ALIGN_MODEL", "turbo")
-    gen_name = os.environ.get("ALIGN_GEN_MODEL", "large-v3")
     separate = os.environ.get("ALIGN_SEPARATE", "1") != "0"
     import stable_whisper
     loaded = {}
 
-    # One model on the card at a time: aligning uses the fast one, writing
-    # lyrics the large one, and the 8 GB card holds only one of them alongside
-    # Demucs and whatever else is running.
     def get_model(name):
         if name not in loaded:
             loaded.clear()
@@ -215,8 +135,8 @@ def main():
             if device == "cuda":
                 # Whisper keeps fp32 weights and casts them to fp16 at every
                 # layer anyway; storing them in fp16 is the same arithmetic in
-                # half the memory (large-v3 alone is 6.2 GB in fp32). Its
-                # LayerNorm upcasts its input to fp32, so those stay fp32.
+                # half the memory, leaving more of a shared card to Jellyfin.
+                # Its LayerNorm upcasts its input to fp32, so those stay fp32.
                 for mod in m.modules():
                     if isinstance(mod, torch.nn.LayerNorm):
                         continue
@@ -227,9 +147,7 @@ def main():
         return loaded[name]
 
     t0 = time.time()
-    # A worker started only to write lyrics skips loading the align model.
-    if os.environ.get("ALIGN_PRELOAD", "1") != "0":
-        get_model(model_name)
+    get_model(model_name)
     reply({
         "ready": True, "device": device, "model": model_name, "separate": separate,
         "gpu": torch.cuda.get_device_name(0) if device == "cuda" else None,
@@ -249,10 +167,7 @@ def main():
             reply({"id": rid, "ok": True, "free": free, "total": total})
             continue
         try:
-            if req.get("cmd") == "transcribe":
-                reply({"id": rid, "ok": True, **transcribe(get_model(gen_name), req, separate, device)})
-            else:
-                reply({"id": rid, "ok": True, **align(get_model(model_name), req, separate)})
+            reply({"id": rid, "ok": True, **align(get_model(model_name), req, separate)})
         except Exception as e:  # one bad song must not end the run
             reply({"id": rid, "ok": False, "error": f"{type(e).__name__}: {e}"[:500]})
         finally:

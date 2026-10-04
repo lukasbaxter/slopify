@@ -35,7 +35,7 @@ describe('the group store', () => {
 });
 
 // Four BluOS units, each its own little HTTP server, keeping BluOS sync state.
-type Unit = { port: number; name: string; slaves: Set<number>; master: number | null; calls: string[]; state: string; native?: boolean };
+type Unit = { port: number; name: string; slaves: Set<number>; master: number | null; calls: string[]; state: string; native?: boolean; foreign?: boolean };
 const units: Unit[] = [];
 const byPort = (p: number) => units.find((u) => u.port === p)!;
 async function unit(name: string): Promise<Unit> {
@@ -48,7 +48,7 @@ async function unit(name: string): Promise<Unit> {
     if (url.pathname === '/Play') { u.state = 'stream'; u.native = false; }
     if (url.pathname === '/Pause' || url.pathname === '/Stop') u.state = 'pause';
     if (url.pathname === '/SyncStatus') return res.end(`<SyncStatus>${u.master ? `<master port="${u.master}">127.0.0.1</master>` : ''}${[...u.slaves].map((p) => `<slave id="127.0.0.1" port="${p}"></slave>`).join('')}</SyncStatus>`);
-    if (url.pathname === '/Status') return res.end(`<status><state>${u.state}</state><volume>30</volume><mute>0</mute><secs>1</secs><totlen>200</totlen><canSeek>1</canSeek></status>`);
+    if (url.pathname === '/Status') return res.end(`<status><state>${u.state}</state><volume>30</volume><mute>0</mute><secs>1</secs><totlen>200</totlen><canSeek>1</canSeek>${u.foreign ? '<service>Spotify</service><serviceName>Spotify</serviceName><streamUrl>Spotify:spotify_pcm01:pcm/44100/16/2/7</streamUrl>' : ''}</status>`);
     if (url.pathname === '/Volume') return res.end('<volume mute="0">30</volume>');
     res.end('<ok/>');
   });
@@ -92,6 +92,30 @@ describe('playing on speaker groups', () => {
     expect(reports.henry.device).toMatchObject({ id: sp(garage).id, members: [sp(pulse).id] });
     expect(linkedGroups.get(sp(node).id)).toEqual([sp(towers).id]);
     await lukas.stopAll(); await henry.stopAll();
+  });
+
+  it('lets go of a speaker another app takes over, without stopping it or its group', async () => {
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    groups.join(sp(node).id, [sp(towers).id]);
+    const lukas = player('lukas-lose');
+    try {
+      await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1', 't2'], index: 0, position: 0, playing: true });
+      expect([...node.slaves]).toEqual([towers.port]);
+      node.calls.length = 0; towers.calls.length = 0;
+      // Henry casts Spotify to the Node (and with it the group).
+      node.foreign = true; node.state = 'stream';
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(reports['lukas-lose']).toBeNull(); // the session lets go, paused where it was
+      expect(node.calls.filter((c) => /^\/(Play|Stop|Pause|RemoveSlave)/.test(c))).toEqual([]);
+      expect(towers.calls.filter((c) => /^\/(Play|Stop|Pause)/.test(c))).toEqual([]);
+      expect(towers.master).toBe(node.port); // the group keeps playing Spotify
+    } finally {
+      node.foreign = false; node.state = 'stop';
+      await lukas.stopAll();
+      groups.unjoin(sp(node).id); groups.unjoin(sp(towers).id);
+      for (const g of saved) groups.join(g[0], g.slice(1));
+    }
   });
 
   it("picking one speaker leaves a group member that is busy with other music alone", async () => {

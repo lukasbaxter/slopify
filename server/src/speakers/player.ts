@@ -379,6 +379,21 @@ export class ServerPlayer {
     this.setPos(this.position, false);
     this.d.report(null);
   }
+  // The speaker was taken by another app: let go of it WITHOUT touching it
+  // (no stop, no unlinking the group: the other app plays on all of it now)
+  // and leave the session paused where it was.
+  private foreignReads = 0;
+  private async lose(by: string) {
+    this.d.log(`speaker ${this.device?.name || '?'}: taken by ${by}; Slopify lets go without stopping it`);
+    this.foreignReads = 0;
+    this.stopPolling();
+    this.cancelLogPlay();
+    this.releaseDevice();
+    this.members = []; // still linked for the other app: not ours to unlink
+    if (this.transport) { this.transport.close(); this.transport = null; }
+    this.setPos(this.position, false);
+    this.d.report(null);
+  }
   async stopAll() { this.stopPolling(); this.cancelLogPlay(); await this.dissolveGroup(); if (this.transport) { await this.transport.stop().catch(() => {}); this.transport.close(); this.transport = null; } this.releaseDevice(); }
 
   // Follow the speaker's own clock; move on when a track ends; notice when
@@ -408,6 +423,16 @@ export class ServerPlayer {
     // The transport lost the device under us (socket error, receiver hung
     // up): release the session cleanly, never relaunch on a dead connection.
     if (s.gone) { await this.yield(); return; }
+    // Another app took the speaker (Spotify, AirPlay, the BluOS app): what it
+    // plays is no longer our stream. Twice in a row, so a reading from the
+    // moment our own stream starts never counts.
+    // Strict on purpose: it takes a service name AND a stream address that is
+    // not ours (Spotify reports 'Spotify:spotify_pcm01:...'); a speaker that
+    // reports nothing about our own stream can never look taken.
+    const foreign = (s.state === 'play' || s.state === 'stream') && !!s.service && !/^(url)?$/i.test(s.service)
+      && !!s.streamUrl && !s.streamUrl.includes('/api/stream');
+    this.foreignReads = foreign ? this.foreignReads + 1 : 0;
+    if (this.foreignReads >= 2) { await this.lose(s.serviceName || s.service || 'another app'); return; }
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
     // does not always know a stream's length).

@@ -1161,6 +1161,10 @@ export function usePlayer(jf) {
       anchorAt(localBaseRef.current + el.currentTime, nowPlaying);
     };
     const onPause = followSystem(false), onPlay = followSystem(true);
+    // Breadcrumb for a debugger on the phone: every seek the element sees,
+    // ours or the system's (window.__slopifyMediaLog).
+    const onSeeked = () => { const log = (window.__slopifyMediaLog ||= []); log.push(`${new Date().toISOString().slice(11, 19)} element seeked to ${el.currentTime.toFixed(1)} base=${localBaseRef.current}`); if (log.length > 30) log.shift(); };
+    el.addEventListener('seeked', onSeeked);
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('ended', onEnded);
     el.addEventListener('loadedmetadata', onDuration);
@@ -1204,6 +1208,7 @@ export function usePlayer(jf) {
     return () => {
       clearInterval(watchdog);
       clearInterval(reconcile);
+      el.removeEventListener('seeked', onSeeked);
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('loadedmetadata', onDuration);
@@ -1846,6 +1851,14 @@ export function usePlayer(jf) {
     }
   };
   msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync };
+  // The last lock-screen actions and where they went, for a debugger attached
+  // to the phone (window.__slopifyMediaLog).
+  const msNote = (m) => {
+    if (typeof window === 'undefined') return;
+    const log = (window.__slopifyMediaLog ||= []);
+    log.push(`${new Date().toISOString().slice(11, 19)} ${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
+    if (log.length > 30) log.shift();
+  };
   // Lock screen / headset buttons: previous and next TRACK, never 10-second
   // skips (with seekbackward/seekforward set, iOS replaces the track buttons
   // with skips and greys them out).
@@ -1855,9 +1868,9 @@ export function usePlayer(jf) {
     const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* action unsupported */ } };
     on('play', () => { if (msRefs.current.playing) msRefs.current.resync(); else msRefs.current.toggle(); });
     on('pause', () => { if (!msRefs.current.playing) msRefs.current.resync(); else msRefs.current.toggle(); });
-    on('previoustrack', () => msRefs.current.previous());
-    on('nexttrack', () => msRefs.current.next());
-    on('seekto', (d) => { if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });
+    on('previoustrack', () => { msNote('previoustrack'); msRefs.current.previous(); });
+    on('nexttrack', () => { msNote('nexttrack'); msRefs.current.next(); });
+    on('seekto', (d) => { msNote(`seekto ${d?.seekTime} fast=${!!d?.fastSeek}`); if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });
     on('seekbackward', null); on('seekforward', null);
   };
   useEffect(() => {

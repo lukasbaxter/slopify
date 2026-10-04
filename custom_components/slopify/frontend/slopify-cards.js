@@ -247,11 +247,22 @@ class SlopifyNowPlayingCard extends HTMLElement {
   }
 }
 
-if (!customElements.get('slopify-now-playing')) {
-  customElements.define('slopify-now-playing', SlopifyNowPlayingCard);
-  window.customCards = window.customCards || [];
+// Home Assistant's frontend can replace the element registry while it boots;
+// a card defined just before that is lost. Define it again whenever it is
+// missing during startup (a fresh subclass each time: a registry refuses a
+// constructor it has already seen).
+const TAG = 'slopify-now-playing';
+const ensureDefined = () => {
+  if (customElements.get(TAG)) return;
+  try { customElements.define(TAG, class extends SlopifyNowPlayingCard {}); } catch { /* defined meanwhile */ }
+};
+ensureDefined();
+let checks = 0;
+const keepDefined = setInterval(() => { ensureDefined(); if (++checks > 60) clearInterval(keepDefined); }, 500);
+window.customCards = window.customCards || [];
+if (!window.customCards.some((c) => c.type === TAG)) {
   window.customCards.push({
-    type: 'slopify-now-playing',
+    type: TAG,
     name: 'Slopify Now Playing',
     description: 'The media control card; tap it for a full-screen Now Playing view with the cover, controls and synced lyrics.',
   });

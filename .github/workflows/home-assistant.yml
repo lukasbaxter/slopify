@@ -1,0 +1,32 @@
+# The Home Assistant integration (custom_components/slopify): its tests against
+# the pinned Home Assistant, lint, and the two validators that decide whether
+# Home Assistant and HACS accept it.
+name: home-assistant
+on:
+  push:
+    branches: [main]
+    paths: ['custom_components/**', 'ha/**', 'hacs.json', 'ruff.toml', 'server/src/session.ts', '.github/workflows/home-assistant.yml']
+  pull_request:
+    paths: ['custom_components/**', 'ha/**', 'hacs.json', 'ruff.toml', 'server/src/session.ts', '.github/workflows/home-assistant.yml']
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.14' }
+      - run: pip install -r ha/requirements_test.txt ruff
+      - run: ruff check custom_components ha && ruff format --check custom_components ha
+      - run: pytest
+        working-directory: ha
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration

@@ -179,6 +179,8 @@ are the homelab defaults: music at `/music`, state in `/data`.
 | `TRUST_PROXY` | `1` | How many proxy hops to trust for the client IP (`true`/`false`/hop count). Keep `1` behind a single nginx; rate limits key on the resulting IP. |
 | `LOGIN_RATE_MAX` | `10` | Login attempts per IP per minute |
 | `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
+| `MDNS` | `1` | Announce the server on the LAN (`_slopify._tcp`) so Home Assistant finds it; `0` = off |
+| `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under |
 | `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
 | `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
 | `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |
@@ -193,6 +195,14 @@ are the homelab defaults: music at `/music`, state in `/data`.
 | `AI_MODEL` | `claude-opus-5` | Model for Generated playlists |
 | `ALIGN_MODEL` | `turbo` | Whisper model that lines lyrics up (gpu image) |
 | `ALIGN_PYTHON` / `ALIGN_SCRIPT` | gpu image paths | Where the aligner lives, if you run it outside the gpu image |
+
+## Home Assistant
+
+The `custom_components/slopify` integration (installable with HACS) adds each
+account's session as a media player: live state, every control, moving the
+music between speakers and apps, the library in the media browser, search,
+and `play_media`. Home Assistant finds the server on its own. Setup and
+automation examples: [`docs/home-assistant.md`](docs/home-assistant.md).
 
 ## What works today
 

@@ -27,6 +27,7 @@ import { registerTasks, builtinTasks } from './tasks.js';
 import { lyricSyncTask, registerLyricSync } from './lyricsync.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
+import { defaultServerName, registerServerInfo } from './advertise.js';
 
 export const VERSION = '0.1.0';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   const heads = config.headsEnabled ? { cacheDir, seconds: config.headSeconds } : undefined;
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));
+  registerServerInfo(app, db, { name: config.serverName || defaultServerName() });
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl });
   registerExplore(app, db, {
     slskdUrl: config.slskdUrl, slskdKey: config.slskdKey,

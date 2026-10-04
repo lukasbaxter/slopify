@@ -1,0 +1,14 @@
+{
+  "domain": "slopify",
+  "name": "Slopify",
+  "codeowners": ["@lukasbaxter"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/lukasbaxter/slopify/blob/main/docs/home-assistant.md",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/lukasbaxter/slopify/issues",
+  "requirements": [],
+  "version": "1.0.0",
+  "zeroconf": ["_slopify._tcp.local."]
+}

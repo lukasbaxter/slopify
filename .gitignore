@@ -8,3 +8,11 @@ fixtures/music/
 test-results/
 playwright-report/
 test/.probe/
+
+# Python (Home Assistant integration + its tests)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

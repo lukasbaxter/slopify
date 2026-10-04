@@ -1,0 +1,3 @@
+# Home Assistant's own test harness, pinned to the Home Assistant release the
+# integration is tested against (it pulls in that exact homeassistant).
+pytest-homeassistant-custom-component==0.13.367

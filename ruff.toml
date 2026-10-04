@@ -1,0 +1,17 @@
+# Python here is the Home Assistant integration (custom_components/slopify)
+# and its tests (ha/); the aligner keeps its own style.
+target-version = "py313"
+line-length = 120
+extend-exclude = ["aligner", "node_modules"]
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "ASYNC", "RUF", "PL", "I"]
+ignore = ["E501", "PLR0913", "PLR2004", "PLR0911", "PLR0912", "PLR0915", "RUF001", "RUF002", "RUF003", "PLC0415"]
+
+[lint.isort]
+force-sort-within-sections = true
+known-first-party = ["custom_components"]
+combine-as-imports = true
+
+[lint.per-file-ignores]
+"ha/tests/*" = ["PLR0917", "ASYNC109", "ASYNC110", "PLW0108"]

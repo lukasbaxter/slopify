@@ -18,6 +18,19 @@ const CAST_PORT = 8009;
 export const BLUOS_PORT = 11000;
 const SWEEP_EVERY = 60 * 1000;
 
+// The LAN's own IPv4 (not a VPN's, not link-local); mDNS sockets are pinned
+// to it so multicast does not wander into a tunnel. Same interface filter as
+// the sweep: a Docker bridge carries a private address too.
+export function lanAddress(): string | undefined {
+  for (const [name, list] of Object.entries(os.networkInterfaces())) for (const a of list || []) {
+    if (/^(br-|docker|veth|virbr|wg|tailscale|tun|tap)/.test(name)) continue;
+    if (a.family !== 'IPv4' || a.internal) continue;
+    if (a.address.startsWith('169.254.') || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address)) continue;
+    if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) return a.address;
+  }
+  return undefined;
+}
+
 export class Discovery {
   devices = new Map<string, Speaker>();
   private bonjour: Bonjour | null = null;
@@ -27,22 +40,9 @@ export class Discovery {
   private sweeping = false;
   constructor(private onChange: (list: Speaker[]) => void, private log: (m: string) => void = () => {}) {}
 
-  // The LAN's own IPv4 (not a VPN's, not link-local); the mDNS socket is
-  // pinned to it so multicast does not wander into a tunnel. Same interface
-  // filter as the sweep: a Docker bridge carries a private address too.
-  private lanAddress(): string | undefined {
-    for (const [name, list] of Object.entries(os.networkInterfaces())) for (const a of list || []) {
-      if (/^(br-|docker|veth|virbr|wg|tailscale|tun|tap)/.test(name)) continue;
-      if (a.family !== 'IPv4' || a.internal) continue;
-      if (a.address.startsWith('169.254.') || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address)) continue;
-      if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) return a.address;
-    }
-    return undefined;
-  }
-
   start() {
     if (this.bonjour) return;
-    const iface = this.lanAddress();
+    const iface = lanAddress();
     try { this.bonjour = new Bonjour((iface ? { interface: iface } : undefined) as any); }
     catch (e: any) { this.log(`mdns: ${e.message}`); return; }
     const cast = this.bonjour.find({ type: 'googlecast' }, (s) => this.add(this.fromCast(s)));

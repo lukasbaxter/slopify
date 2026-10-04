@@ -22,12 +22,14 @@
     "castv2-client": "^1.2.0",
     "fastify": "^5.0.0",
     "fflate": "^0.8.3",
+    "multicast-dns": "^7.2.5",
     "music-metadata": "^10.0.0",
     "sharp": "^0.33.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
+    "@types/multicast-dns": "^7.2.4",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",

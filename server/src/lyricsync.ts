@@ -28,7 +28,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { parseLrc, type LyricLine } from './lyrics.js';
-import { lrclibLookup, storeLyricsFromRecord } from './enrich.js';
+import { lrclibLookup } from './enrich.js';
 import { fromNetease, fromGenius, titleVariants, type Candidate, type Fetch } from './lyricsources.js';
 import type { TaskDef, TaskCtx } from './tasks.js';
 

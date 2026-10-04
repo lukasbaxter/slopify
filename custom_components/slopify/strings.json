@@ -1,0 +1,126 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Connect to Slopify",
+        "description": "Sign in with your Slopify account. Home Assistant keeps a sign-in token, never your password; it shows up as \"Home Assistant\" in Slopify's list of signed-in devices, where you can revoke it.",
+        "data": {
+          "url": "Server address",
+          "username": "Username",
+          "password": "Password",
+          "verify_ssl": "Verify the HTTPS certificate"
+        },
+        "data_description": {
+          "url": "The address you open Slopify at in your browser, with the port if it has one.",
+          "username": "Your Slopify username. Each account gets its own player in Home Assistant.",
+          "password": "Your Slopify password.",
+          "verify_ssl": "Turn off only for a server with a self-signed certificate."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in to Slopify again",
+        "description": "The saved sign-in for {username} on {url} no longer works (it was signed out, or the password changed). Sign in again to reconnect.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "username": "The same account as before.",
+          "password": "Your Slopify password."
+        }
+      },
+      "reconfigure": {
+        "title": "Change the Slopify server address",
+        "description": "Use this when the server moved or got a new address. Sign in again as the same account.",
+        "data": {
+          "url": "Server address",
+          "username": "Username",
+          "password": "Password",
+          "verify_ssl": "Verify the HTTPS certificate"
+        },
+        "data_description": {
+          "url": "The address you open Slopify at.",
+          "username": "The same account as before.",
+          "password": "Your Slopify password.",
+          "verify_ssl": "Turn off only for a server with a self-signed certificate."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "That is not a web address. Use the address you open Slopify at in your browser.",
+      "cannot_connect": "Nothing answered at that address. Check the address and port, and that Home Assistant can reach the server.",
+      "not_slopify": "Something answered at that address, but it is not a Slopify server.",
+      "invalid_auth": "Wrong username or password.",
+      "password_change_required": "This account has to change its password first. Sign in to the Slopify app, set a new password, then try again here.",
+      "too_many_attempts": "Too many sign-in attempts. Wait a minute and try again.",
+      "unknown": "Unexpected error. The Home Assistant log has the details."
+    },
+    "abort": {
+      "already_configured": "This Slopify account is already set up.",
+      "not_ipv4": "Only servers found at an IPv4 address can be set up from discovery. Add Slopify by hand instead.",
+      "wrong_account": "That is a different Slopify account. Sign in as the account this entry was set up with, or add the other account separately.",
+      "reauth_successful": "Signed in again.",
+      "reconfigure_successful": "The server address was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Slopify options",
+        "data": {
+          "default_source": "Where to start playing"
+        },
+        "data_description": {
+          "default_source": "Used by Play and play media when nothing is playing anywhere. \"Where it last played\" picks the speaker the music was last on."
+        }
+      }
+    }
+  },
+  "entity": {
+    "media_player": {
+      "session": {
+        "state_attributes": {
+          "liked": {
+            "name": "Liked"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Slopify did not accept the saved sign-in."
+    },
+    "cannot_connect": {
+      "message": "Cannot reach Slopify at {url}: {error}"
+    },
+    "not_connected": {
+      "message": "Not connected to Slopify right now. Home Assistant keeps trying to reconnect."
+    },
+    "nothing_playing": {
+      "message": "Nothing is playing on Slopify right now."
+    },
+    "nothing_to_resume": {
+      "message": "There is nothing to resume yet. Play something first."
+    },
+    "no_source": {
+      "message": "Nothing is playing, so Slopify does not know where to play. Pick a source, pass one as extra: source, or set \"Where to start playing\" in the Slopify integration options."
+    },
+    "unknown_source": {
+      "message": "There is no source called \"{source}\". Available: {sources}."
+    },
+    "no_announce": {
+      "message": "Slopify cannot play announcements."
+    },
+    "unsupported_media": {
+      "message": "Slopify only plays music from its own library; it cannot play \"{media_id}\"."
+    },
+    "media_not_found": {
+      "message": "Nothing in the Slopify library matches \"{media_id}\"."
+    },
+    "request_failed": {
+      "message": "Slopify request failed: {error}"
+    }
+  }
+}

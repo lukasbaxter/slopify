@@ -1,5 +1,6 @@
 import { buildServer } from './app.js';
 import { config } from './config.js';
+import { advertise, defaultServerName } from './advertise.js';
 
 const app = await buildServer();
 // A full scan at boot if asked; recurring scans are a scheduled task now (tasks.ts).
@@ -15,12 +16,13 @@ if (ingest) {
 // finish; a 10s force-exit covers a wedged socket (idle websockets, a stuck
 // NAS read) that would otherwise hang the container until Docker's kill.
 let closing = false;
+let unannounce: () => Promise<void> = async () => {};
 const shutdown = (sig: string) => {
   if (closing) return; // a second signal: the force-exit timer is already armed
   closing = true;
   app.log.info(`${sig} received, shutting down`);
   setTimeout(() => process.exit(1), 10000).unref();
-  app.close().then(() => process.exit(0), (e) => { app.log.error(e); process.exit(1); });
+  unannounce().catch(() => {}).then(() => app.close()).then(() => process.exit(0), (e) => { app.log.error(e); process.exit(1); });
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
@@ -39,6 +41,7 @@ process.on('uncaughtException', (err) => {
 
 try {
   await app.listen({ port: config.port, host: config.host });
+  if (config.mdns) unannounce = advertise(app, (app as any).db, { port: config.port, name: config.serverName || defaultServerName() });
 } catch (err) {
   app.log.error(err);
   process.exit(1);

@@ -27,6 +27,9 @@ jobs:
   hacs:
     runs-on: ubuntu-latest
     steps:
+      # No license chosen for the repository yet; HACS installs it as a
+      # custom repository regardless (the check gates the default store).
       - uses: hacs/action@main
         with:
           category: integration
+          ignore: license

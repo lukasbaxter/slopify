@@ -29,7 +29,8 @@ import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 import { defaultServerName, registerServerInfo } from './advertise.js';
 
-export const VERSION = '0.1.0';
+// The release this server is (package.json, bumped with every tagged release).
+export const VERSION: string = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0.0.0'; } })();
 const here = path.dirname(fileURLToPath(import.meta.url));
 // server/dist/app.js or server/src/app.ts -> repo root
 export const repoRoot = path.resolve(here, '..', '..');

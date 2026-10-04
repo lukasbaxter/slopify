@@ -1,10 +1,21 @@
 # Slopify in Home Assistant
 
-The Slopify integration puts your Slopify playback session in Home
-Assistant as a media player. One player per Slopify account. It shows
-whatever that account is playing, wherever it is playing (the web app, a
-phone, the desktop app, or a Chromecast / BluOS speaker the server drives),
-and controls it there.
+The Slopify integration puts your Slopify playback in Home Assistant as media
+players:
+
+- **One player per account.** It shows whatever that account is playing,
+  wherever it is playing (the web app, a phone, the desktop app, or a
+  Chromecast / BluOS speaker the server drives), and controls it there.
+- **One player per speaker** the Slopify server drives. It shows whose music
+  is on it and controls it, and its sources are your household's accounts:
+  pick **Slopify - <name>** and that person's music moves onto the speaker,
+  carrying on where it was (or resuming their last session).
+
+Sign in as an **admin** and the integration follows the whole household:
+every account on the server gets its player and appears as a source on every
+speaker, under its Slopify profile name. Accounts you add or remove in
+Slopify appear and disappear in Home Assistant within a minute. Sign in as a
+regular account and the integration follows just that account.
 
 - **Controls**: play, pause, next, previous, seek, volume, mute, shuffle,
   repeat, clear the queue.
@@ -57,10 +68,19 @@ Home Assistant signs in once and keeps only a sign-in token, never your
 password. In the Slopify app the token shows up as **Home Assistant** under
 your signed-in devices, where you can revoke it at any time.
 
-To follow several accounts (everyone in the house), add the integration once
-per account. Each gets its own player, named `media_player.slopify_<username>`.
+Signed in as an admin, every account gets its own player, named
+`media_player.slopify_<profile name>`, and every speaker gets
+`media_player.<speaker>_slopify`. Home Assistant asks Slopify for a sign-in
+per account; each account sees it as **Home Assistant (household)** in its
+list of signed-in devices. Someone who revokes it is signed in again on the
+next check: to stop following the household, turn it off in the options (or
+sign Home Assistant in as a regular account). A regular account can still be
+added as its own entry; the admin entry then leaves that account to it.
 
 ### Options
+
+**Follow every account on the server** (admin sign-ins only, on by default):
+see above.
 
 **Where to start playing** decides where Play and play media start the music
 when nothing is playing anywhere:
@@ -89,6 +109,51 @@ zero, and unmute brings it back to where it was.
 
 The player also has a `liked` attribute: whether the current song is in your
 Liked Songs.
+
+### Speakers
+
+Each speaker player shows whose music is on it (its source reads
+**Slopify - <name>**), with every control, and **Play** on an idle speaker
+brings the signed-in account's music there. Picking **Slopify - <name>** as
+its source moves that account's music onto it. **Play media** on a speaker
+plays there as whoever is playing on it (else the signed-in account).
+
+To offer the household on cards of speakers another integration provides (a
+Bluesound or Cast entity with its own sources), read the list from the Slopify
+speaker and route the choice back to it, for example with a
+[universal media player](https://www.home-assistant.io/integrations/universal/):
+
+```yaml
+media_player:
+  - platform: universal
+    name: Kitchen
+    children: [media_player.kitchen_bluesound]
+    attributes:
+      source_list: sensor.kitchen_sources|source_list
+    commands:
+      select_source:
+        action: script.kitchen_source
+        data: { source: "{{ source }}" }
+template:
+  - sensor:
+      - name: Kitchen sources
+        state: ok
+        attributes:
+          source_list: >-
+            {{ (state_attr('media_player.kitchen_bluesound', 'source_list') or [])
+               + (state_attr('media_player.kitchen_slopify', 'source_list') or []) }}
+script:
+  kitchen_source:
+    fields: { source: {} }
+    sequence:
+      - action: media_player.select_source
+        target:
+          entity_id: >-
+            {{ 'media_player.kitchen_slopify'
+               if source in (state_attr('media_player.kitchen_slopify', 'source_list') or [])
+               else 'media_player.kitchen_bluesound' }}
+        data: { source: "{{ source }}" }
+```
 
 ### Moving the music
 

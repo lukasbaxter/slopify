@@ -1,8 +1,12 @@
-"""The Slopify session as a Home Assistant media player.
+"""Slopify sessions and speakers as Home Assistant media players.
 
-One entity per account. It shows whatever the account is playing, on any app
-or speaker, and controls it there; its sources are the outputs the session can
-move to (speakers and the apps that can play).
+Account players: one per followed account. Each shows whatever that account
+is playing, on any app or speaker, and controls it there; its sources are the
+outputs that account's session can move to.
+
+Speaker players: one per speaker the Slopify server drives. Each shows whose
+music is on it, controls it, and offers the followed accounts as its sources:
+picking "Slopify - <name>" moves that account's music onto the speaker.
 """
 
 from __future__ import annotations
@@ -27,14 +31,15 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from . import SlopifyConfigEntry
+from . import Account, SlopifyConfigEntry, SlopifyData, account_label
 from .api import CannotConnect, SlopifyError
 from .const import BROWSE_IMAGE_SIZE, CONF_DEFAULT_SOURCE, DEFAULT_SOURCE_LAST, DOMAIN, PLAYER_IMAGE_SIZE
-from .library import Library, MediaNotFound, UnsupportedMedia, valid_image_id
+from .library import Library, MediaNotFound, Playable, UnsupportedMedia, valid_image_id
 from .model import Target, as_dict, current_key, handoff, last_speaker_key, position_now, targets
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,14 +49,13 @@ PARALLEL_UPDATES = 0
 # should be is the same playback, not a jump: the card keeps its own clock.
 POSITION_SLACK = 1.5
 
-ALWAYS = (
-    MediaPlayerEntityFeature.PLAY
-    | MediaPlayerEntityFeature.PLAY_MEDIA
+BROWSING = (
+    MediaPlayerEntityFeature.PLAY_MEDIA
     | MediaPlayerEntityFeature.MEDIA_ENQUEUE
     | MediaPlayerEntityFeature.BROWSE_MEDIA
     | MediaPlayerEntityFeature.SEARCH_MEDIA
-    | MediaPlayerEntityFeature.SELECT_SOURCE
 )
+ALWAYS = MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.SELECT_SOURCE | BROWSING
 WHILE_ACTIVE = (
     MediaPlayerEntityFeature.PAUSE
     | MediaPlayerEntityFeature.STOP
@@ -72,66 +76,196 @@ async def async_setup_entry(
     entry: SlopifyConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add the session player for this account."""
-    async_add_entities([SlopifyPlayer(entry)])
+    """Add a player per followed account and per server speaker, now and as they appear."""
+    data = entry.runtime_data
+    # Players of accounts no longer followed (household turned off, account
+    # deleted while Home Assistant was down) go, devices with them.
+    ent_reg, dev_reg = er.async_get(hass), dr.async_get(hass)
+    for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if ent.domain == "media_player" and "-speaker-" not in ent.unique_id and ent.unique_id not in data.accounts:
+            ent_reg.async_remove(ent.entity_id)
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        ids = {i[1] for i in device.identifiers if i[0] == DOMAIN}
+        if ids and not any("-speaker-" in i or i in data.accounts for i in ids):
+            dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+    async_add_entities([SlopifyPlayer(entry, a) for a in data.accounts.values()])
+
+    @callback
+    def added(account: Account) -> None:
+        async_add_entities([SlopifyPlayer(entry, account)])
+
+    @callback
+    def removed(account: Account) -> None:
+        ent_reg = er.async_get(hass)
+        if entity_id := ent_reg.async_get_entity_id("media_player", DOMAIN, account.user_id):
+            ent_reg.async_remove(entity_id)
+        dev_reg = dr.async_get(hass)
+        if device := dev_reg.async_get_device(identifiers={(DOMAIN, account.user_id)}):
+            dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+
+    data.on_added.append(added)
+    data.on_removed.append(removed)
+
+    speakers: set[str] = set()
+
+    @callback
+    def new_speakers() -> None:
+        found = [d for d in server_speakers(data) if d["id"] not in speakers]
+        if found:
+            speakers.update(d["id"] for d in found)
+            async_add_entities([SlopifySpeaker(entry, d) for d in found])
+
+    data.listeners.append(new_speakers)
+    entry.async_on_unload(lambda: data.listeners.remove(new_speakers))
+    new_speakers()
 
 
-class SlopifyPlayer(MediaPlayerEntity):
-    """The account's playback session."""
+def server_speakers(data: SlopifyData) -> list[dict[str, Any]]:
+    """The speakers the Slopify server itself drives."""
+    seen: dict[str, dict[str, Any]] = {}
+    for d in data.session.lan_devices:
+        if str(d.get("viaClient", "")).startswith("server:"):
+            seen.setdefault(str(d["id"]), d)
+    return list(seen.values())
+
+
+class PositionClock:
+    """Playhead for Home Assistant: rewritten only when it jumps.
+
+    Positions are extrapolated from when a report arrived (never from the
+    sender's clock), and steady playback keeps the anchor, so the state is
+    not rewritten every second.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the clock."""
+        self.position: int | None = None
+        self.updated_at: datetime | None = None
+        self._track: str | None = None
+        self._playing = False
+
+    def update(self, item: str | None, now_playing: dict[str, Any] | None, received: float, playing: bool) -> None:
+        """Take a report of `now_playing`, received at monotonic time `received`."""
+        if not item or not now_playing:
+            self.position = self.updated_at = self._track = None
+            return
+        now = dt_util.utcnow()
+        pos = position_now(now_playing, time.monotonic() - received)
+        expected = None
+        if self.position is not None and self.updated_at is not None:
+            expected = self.position + ((now - self.updated_at).total_seconds() if self._playing else 0.0)
+        if self._track != item or self._playing != playing or expected is None or abs(expected - pos) > POSITION_SLACK:
+            self.position, self.updated_at = round(pos), now
+            self._track, self._playing = item, playing
+
+
+def _raise(err: Exception, key: str, **placeholders: str) -> None:
+    error = HomeAssistantError if key in ("request_failed", "not_connected") else ServiceValidationError
+    raise error(translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders or None) from err
+
+
+async def send(account: Account, to: str | None, command: dict[str, Any]) -> None:
+    """A command to the client making the account's sound."""
+    if not to:
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="nothing_playing")
+    try:
+        await account.session.command(to, command)
+    except CannotConnect as err:
+        _raise(err, "not_connected")
+
+
+def active_now_playing(account: Account) -> tuple[str | None, dict[str, Any] | None]:
+    """The account's active client and what it reports, if anything plays."""
+    s = account.session
+    active = next((p for p in s.players if p.get("id") == s.active_id), None)
+    np = active.get("nowPlaying") if active else None
+    return (s.active_id, np) if isinstance(np, dict) else (None, None)
+
+
+def session_handoff(account: Account) -> dict[str, Any] | None:
+    """The account's queue and playhead, from whatever plays or last played."""
+    s = account.session
+    active_id, np = active_now_playing(account)
+    if active_id and np is not None:
+        return handoff(
+            np, s.queues.get(active_id, []), time.monotonic() - s.np_received.get(active_id, time.monotonic())
+        )
+    return handoff(s.remembered, s.remembered_queue, 0.0)
+
+
+async def move_session(account: Account, target: Target, *, playing: bool) -> None:
+    """Move the account's music to an output, carrying on where it is."""
+    active_id, np = active_now_playing(account)
+    if active_id and current_key(active_id, np, account.session.players) == target.key:
+        return
+    payload = session_handoff(account)
+    if payload is None:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="nothing_to_resume_for",
+            translation_placeholders={"name": account.name},
+        )
+    await send(
+        account, target.client_id, {"action": "transfer", "deviceId": target.device_id, **payload, "playing": playing}
+    )
+
+
+async def resolve(library: Library, media_type: str, media_id: str, **kwargs: Any) -> Playable:
+    """The songs a play_media request means, with Home Assistant errors."""
+    if kwargs.get("announce"):
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_announce")
+    try:
+        what = await library.resolve(media_type, media_id)
+    except UnsupportedMedia as err:
+        _raise(err, "unsupported_media", media_id=media_id)
+    except MediaNotFound as err:
+        _raise(err, "media_not_found", media_id=media_id)
+    except SlopifyError as err:
+        _raise(err, "request_failed", error=str(err))
+    if not what.track_ids:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="media_not_found",
+            translation_placeholders={"media_id": media_id},
+        )
+    return what
+
+
+class _SlopifyMedia(MediaPlayerEntity):
+    """What account and speaker players share: now playing, controls, library."""
 
     _attr_has_entity_name = True
-    _attr_name = None
-    _attr_translation_key = "session"
     _attr_device_class = MediaPlayerDeviceClass.SPEAKER
     _attr_media_content_type = MediaType.MUSIC
     _attr_should_poll = False
 
     def __init__(self, entry: SlopifyConfigEntry) -> None:
-        """Initialize the player."""
         self._entry = entry
         self._data = entry.runtime_data
-        self._session = self._data.session
-        self._library = Library(self._data.api, self.get_browse_image_url)
-        username = entry.data.get("username") or "Slopify"
-        self._attr_unique_id = entry.unique_id
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(entry.unique_id))},
-            name=f"Slopify {username}",
-            manufacturer="Slopify",
-            model="Playback session",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url=self._data.api.url,
-        )
-        self._targets: list[Target] = []
-        self._now_playing: dict[str, Any] | None = None
-        self._np_elapsed_from = 0.0
-        self._active_id: str | None = None
-        self._anchor_track: str | None = None
-        self._anchor_playing = False
+        self._clock = PositionClock()
         self._unmute_level = 0.5
         self._fingerprint: tuple[Any, ...] | None = None
-        self._refresh()
+        # Whose music this player shows right now, and its active client.
+        self._account: Account | None = None
+        self._active_id: str | None = None
+        self._now_playing: dict[str, Any] | None = None
+        self._libraries: dict[str, Library] = {}
 
-    async def async_added_to_hass(self) -> None:
-        """Follow the session."""
-        self._data.listeners.append(self._on_change)
-        self.async_on_remove(lambda: self._data.listeners.remove(self._on_change))
-        self._on_change()
+    def _library_for(self, account: Account) -> Library:
+        if account.user_id not in self._libraries:
+            self._libraries[account.user_id] = Library(account.api, self.get_browse_image_url)
+        return self._libraries[account.user_id]
 
-    # --- following the session ------------------------------------------------
+    @property
+    def _library(self) -> Library:
+        return self._library_for(self._account or self._data.main)
 
     @callback
     def _on_change(self) -> None:
         if self.hass is None:
             return
         self._refresh()
-        fingerprint = self._make_fingerprint()
-        if fingerprint != self._fingerprint:
-            self._fingerprint = fingerprint
-            self.async_write_ha_state()
-
-    def _make_fingerprint(self) -> tuple[Any, ...]:
-        return (
+        fingerprint = (
             self.available,
             self._attr_state,
             self._attr_media_content_id,
@@ -151,31 +285,16 @@ class SlopifyPlayer(MediaPlayerEntity):
             self._attr_supported_features,
             bool((self._now_playing or {}).get("liked")),
         )
+        if fingerprint != self._fingerprint:
+            self._fingerprint = fingerprint
+            self.async_write_ha_state()
 
     def _refresh(self) -> None:
-        """Read the session into the entity's attributes."""
-        s = self._session
-        self._attr_available = s.connected
-        self._targets = targets(s.players, s.lan_devices)
-        self._attr_source_list = [t.name for t in self._targets]
+        raise NotImplementedError
 
-        active = next((p for p in s.players if p.get("id") == s.active_id), None)
-        np = active.get("nowPlaying") if active and isinstance(active.get("nowPlaying"), dict) else None
-        if np is not None:
-            self._active_id = s.active_id
-            self._now_playing = np
-            self._np_elapsed_from = s.np_received.get(s.active_id or "", time.monotonic())
-            state = MediaPlayerState.PLAYING if np.get("playing") else MediaPlayerState.PAUSED
-        else:
-            # Nothing is making sound: show what played last, ready to resume.
-            self._active_id = None
-            self._now_playing = s.remembered if isinstance(s.remembered, dict) else None
-            self._np_elapsed_from = s.remembered_received
-            state = MediaPlayerState.IDLE
-        self._attr_state = state
-        self._attr_supported_features = ALWAYS | (WHILE_ACTIVE if self._active_id else MediaPlayerEntityFeature(0))
-
-        np = self._now_playing or {}
+    def _show(self, np: dict[str, Any] | None, *, active: bool, received: float) -> None:
+        """Fill the media attributes from a nowPlaying report."""
+        np = np or {}
         item = np.get("itemId") if isinstance(np.get("itemId"), str) else None
         self._attr_media_content_id = f"track:{item}" if item else None
         self._attr_media_title = np.get("title") or None
@@ -187,8 +306,7 @@ class SlopifyPlayer(MediaPlayerEntity):
         self._attr_media_duration = (
             round(float(duration)) if isinstance(duration, (int, float)) and duration > 0 else None
         )
-
-        if self._active_id:
+        if active:
             volume = np.get("volume")
             self._attr_volume_level = (
                 max(0.0, min(1.0, float(volume) / 100)) if isinstance(volume, (int, float)) else None
@@ -199,83 +317,35 @@ class SlopifyPlayer(MediaPlayerEntity):
                 RepeatMode(np["repeat"]) if np.get("repeat") in ("off", "all", "one") else RepeatMode.OFF
             )
         else:
-            self._attr_volume_level = None
-            self._attr_is_volume_muted = None
-            self._attr_shuffle = None
-            self._attr_repeat = None
+            self._attr_volume_level = self._attr_is_volume_muted = None
+            self._attr_shuffle = self._attr_repeat = None
+        self._clock.update(item, np if item else None, received, self._attr_state == MediaPlayerState.PLAYING)
+        self._attr_media_position = self._clock.position
+        self._attr_media_position_updated_at = self._clock.updated_at
 
-        key = current_key(self._active_id, np if self._active_id else None, s.players)
-        target = next((t for t in self._targets if t.key == key), None)
-        device = as_dict(np.get("device"))
-        self._attr_source = target.name if target else (device.get("name") if self._active_id else None)
-
-        self._update_position(item, state)
-
-    def _update_position(self, item: str | None, state: MediaPlayerState) -> None:
-        if not item or not self._now_playing:
-            self._attr_media_position = None
-            self._attr_media_position_updated_at = None
-            self._anchor_track = None
-            return
-        now = dt_util.utcnow()
-        pos = position_now(self._now_playing, time.monotonic() - self._np_elapsed_from)
-        playing = state == MediaPlayerState.PLAYING
-        was = self._attr_media_position
-        at: datetime | None = self._attr_media_position_updated_at
-        expected = None
-        if was is not None and at is not None:
-            expected = was + ((now - at).total_seconds() if self._anchor_playing else 0.0)
-        if (
-            self._anchor_track != item
-            or self._anchor_playing != playing
-            or expected is None
-            or abs(expected - pos) > POSITION_SLACK
-        ):
-            self._attr_media_position = round(pos)
-            self._attr_media_position_updated_at = now
-            self._anchor_track = item
-            self._anchor_playing = playing
-
-    # --- artwork ----------------------------------------------------------------
+    # --- artwork --------------------------------------------------------------
 
     async def async_get_media_image(self) -> tuple[bytes | None, str | None]:
-        """Artwork of what is playing, fetched with this account's sign-in."""
+        """Artwork of what is playing, fetched with that account's sign-in."""
         image = self._attr_media_image_hash
         if not image:
             return None, None
-        return await self._data.api.image(image, PLAYER_IMAGE_SIZE)
+        return await (self._account or self._data.main).api.image(image, PLAYER_IMAGE_SIZE)
 
     async def async_get_browse_image(
-        self,
-        media_content_type: str,
-        media_content_id: str,
-        media_image_id: str | None = None,
+        self, media_content_type: str, media_content_id: str, media_image_id: str | None = None
     ) -> tuple[bytes | None, str | None]:
         """Artwork for the media browser."""
-        if not valid_image_id(media_image_id):
+        if not media_image_id or not valid_image_id(media_image_id):
             return None, None
-        return await self._data.api.image(str(media_image_id), BROWSE_IMAGE_SIZE)
+        return await (self._account or self._data.main).api.image(media_image_id, BROWSE_IMAGE_SIZE)
 
-    # --- controls ---------------------------------------------------------------
+    # --- controls -------------------------------------------------------------
 
-    async def _send(self, command: dict[str, Any], to: str | None = None) -> None:
-        target = to or self._active_id
-        if not target:
+    async def _send(self, command: dict[str, Any]) -> None:
+        if self._account is None:
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="nothing_playing")
-        try:
-            await self._session.command(target, command)
-        except CannotConnect as err:
-            raise HomeAssistantError(translation_domain=DOMAIN, translation_key="not_connected") from err
-
-    async def async_media_play(self) -> None:
-        """Play, or resume the last session where it is best heard."""
-        if self.state == MediaPlayerState.PAUSED:
-            await self._send({"action": "toggle"})
-        elif self.state == MediaPlayerState.IDLE:
-            payload = handoff(self._now_playing, self._session.remembered_queue, 0.0)
-            if payload is None:
-                raise ServiceValidationError(translation_domain=DOMAIN, translation_key="nothing_to_resume")
-            await self._transfer(self._start_target(), payload, playing=True)
+        await send(self._account, self._active_id, command)
 
     async def async_media_pause(self) -> None:
         """Pause."""
@@ -323,7 +393,87 @@ class SlopifyPlayer(MediaPlayerEntity):
         """Remove the songs added to the queue (the playing list stays)."""
         await self._send({"action": "queueClear"})
 
-    # --- outputs ----------------------------------------------------------------
+    # --- library ----------------------------------------------------------------
+
+    async def async_browse_media(
+        self, media_content_type: MediaType | str | None = None, media_content_id: str | None = None
+    ) -> BrowseMedia:
+        """The library, for the media browser."""
+        try:
+            return await self._library.browse(media_content_id)
+        except MediaNotFound as err:
+            _raise(err, "media_not_found", media_id=str(media_content_id))
+        except SlopifyError as err:
+            _raise(err, "request_failed", error=str(err))
+        raise AssertionError  # unreachable: _raise always raises
+
+    async def async_search_media(self, query: SearchMediaQuery) -> SearchMedia:
+        """Search the library."""
+        try:
+            return await self._library.search(query)
+        except SlopifyError as err:
+            _raise(err, "request_failed", error=str(err))
+        raise AssertionError
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Whether the current song is liked."""
+        np = self._now_playing or {}
+        return {"liked": bool(np.get("liked"))} if np.get("itemId") else {}
+
+
+class SlopifyPlayer(_SlopifyMedia):
+    """One account's playback session."""
+
+    _attr_name = None
+    _attr_translation_key = "session"
+
+    def __init__(self, entry: SlopifyConfigEntry, account: Account) -> None:
+        """Initialize the player."""
+        super().__init__(entry)
+        self._me = account
+        self._account = account
+        self._attr_unique_id = account.user_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, account.user_id)},
+            name=f"Slopify {account.name}",
+            manufacturer="Slopify",
+            model="Playback session",
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url=account.api.url,
+        )
+        self._targets: list[Target] = []
+        self._np_received = 0.0
+        self._refresh()
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the session."""
+        self._me.listeners.append(self._on_change)
+        self.async_on_remove(lambda: self._me.listeners.remove(self._on_change))
+        self._on_change()
+
+    def _refresh(self) -> None:
+        s = self._me.session
+        self._attr_available = s.connected
+        self._targets = targets(s.players, s.lan_devices)
+        self._attr_source_list = [t.name for t in self._targets]
+        active_id, np = active_now_playing(self._me)
+        if active_id and np is not None:
+            self._active_id, self._now_playing = active_id, np
+            self._np_received = s.np_received.get(active_id, time.monotonic())
+            self._attr_state = MediaPlayerState.PLAYING if np.get("playing") else MediaPlayerState.PAUSED
+        else:
+            # Nothing is making sound: show what played last, ready to resume.
+            self._active_id = None
+            self._now_playing = s.remembered if isinstance(s.remembered, dict) else None
+            self._np_received = s.remembered_received
+            self._attr_state = MediaPlayerState.IDLE
+        self._attr_supported_features = ALWAYS | (WHILE_ACTIVE if self._active_id else MediaPlayerEntityFeature(0))
+        self._show(self._now_playing, active=bool(self._active_id), received=self._np_received)
+        key = current_key(self._active_id, self._now_playing if self._active_id else None, s.players)
+        target = next((t for t in self._targets if t.key == key), None)
+        device = as_dict((self._now_playing or {}).get("device"))
+        self._attr_source = target.name if target else (device.get("name") if self._active_id else None)
 
     def _target_named(self, name: str) -> Target:
         wanted = (name or "").strip().casefold()
@@ -342,76 +492,38 @@ class SlopifyPlayer(MediaPlayerEntity):
         default = self._entry.options.get(CONF_DEFAULT_SOURCE, DEFAULT_SOURCE_LAST)
         if default != DEFAULT_SOURCE_LAST and default in by_key:
             return by_key[default]
-        last = last_speaker_key(self._session.remembered)
+        last = last_speaker_key(self._me.session.remembered)
         if last in by_key:
             return by_key[last]
         if len(self._targets) == 1:
             return self._targets[0]
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_source")
 
-    async def _transfer(self, target: Target, payload: dict[str, Any], *, playing: bool) -> None:
-        await self._send(
-            {"action": "transfer", "deviceId": target.device_id, **payload, "playing": playing},
-            to=target.client_id,
-        )
+    async def async_media_play(self) -> None:
+        """Play, or resume the last session where it is best heard."""
+        if self.state == MediaPlayerState.PAUSED:
+            await self._send({"action": "toggle"})
+        elif self.state == MediaPlayerState.IDLE:
+            await move_session(self._me, self._start_target(), playing=True)
 
     async def async_select_source(self, source: str) -> None:
         """Move the session to another output, carrying on where it is."""
-        target = self._target_named(source)
-        s = self._session
-        if self._active_id:
-            if current_key(self._active_id, self._now_playing, s.players) == target.key:
-                return
-            payload = handoff(
-                self._now_playing, s.queues.get(self._active_id, []), time.monotonic() - self._np_elapsed_from
-            )
-        else:
-            payload = handoff(self._now_playing, s.remembered_queue, 0.0)
-        if payload is None:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="nothing_to_resume")
-        await self._transfer(target, payload, playing=self.state != MediaPlayerState.PAUSED)
-
-    # --- library ----------------------------------------------------------------
+        await move_session(self._me, self._target_named(source), playing=self.state != MediaPlayerState.PAUSED)
 
     async def async_play_media(self, media_type: MediaType | str, media_id: str, **kwargs: Any) -> None:
         """Play an album, artist, playlist, song, genre, share link or search."""
-        if kwargs.get("announce"):
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_announce")
-        try:
-            what = await self._library.resolve(str(media_type or ""), media_id)
-        except UnsupportedMedia as err:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="unsupported_media",
-                translation_placeholders={"media_id": media_id},
-            ) from err
-        except MediaNotFound as err:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="media_not_found",
-                translation_placeholders={"media_id": media_id},
-            ) from err
-        except SlopifyError as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="request_failed",
-                translation_placeholders={"error": str(err)},
-            ) from err
-        if not what.track_ids:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="media_not_found",
-                translation_placeholders={"media_id": media_id},
-            )
-
+        what = await resolve(self._library, str(media_type or ""), media_id, **kwargs)
         extra = kwargs.get("extra") or {}
         source = extra.get("source") if isinstance(extra, dict) else None
         enqueue = kwargs.get(ATTR_MEDIA_ENQUEUE)
         songs = {"trackIds": what.track_ids, "index": what.index, "position": 0}
-        if source:
-            await self._transfer(self._target_named(str(source)), songs, playing=True)
-        elif not self._active_id:
-            await self._transfer(self._start_target(), songs, playing=True)
+        if source or not self._active_id:
+            target = self._target_named(str(source)) if source else self._start_target()
+            await send(
+                self._me,
+                target.client_id,
+                {"action": "transfer", "deviceId": target.device_id, **songs, "playing": True},
+            )
         elif enqueue in (MediaPlayerEnqueue.ADD, MediaPlayerEnqueue.NEXT):
             # A song picked inside an album or playlist adds that song alone.
             picked = what.track_ids[what.index : what.index + 1] if "#" in media_id else what.track_ids
@@ -419,40 +531,111 @@ class SlopifyPlayer(MediaPlayerEntity):
         else:
             await self._send({"action": "play", "trackIds": what.track_ids, "index": what.index, "startAt": 0})
 
-    async def async_browse_media(
-        self,
-        media_content_type: MediaType | str | None = None,
-        media_content_id: str | None = None,
-    ) -> BrowseMedia:
-        """The library, for the media browser."""
-        try:
-            return await self._library.browse(media_content_id)
-        except MediaNotFound as err:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="media_not_found",
-                translation_placeholders={"media_id": str(media_content_id)},
-            ) from err
-        except SlopifyError as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="request_failed",
-                translation_placeholders={"error": str(err)},
-            ) from err
 
-    async def async_search_media(self, query: SearchMediaQuery) -> SearchMedia:
-        """Search the library."""
-        try:
-            return await self._library.search(query)
-        except SlopifyError as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="request_failed",
-                translation_placeholders={"error": str(err)},
-            ) from err
+class SlopifySpeaker(_SlopifyMedia):
+    """A speaker the Slopify server drives, shared by everyone it follows."""
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Whether the current song is liked."""
-        np = self._now_playing or {}
-        return {"liked": bool(np.get("liked"))} if np.get("itemId") else {}
+    _attr_translation_key = "speaker"
+
+    def __init__(self, entry: SlopifyConfigEntry, speaker: dict[str, Any]) -> None:
+        """Initialize the speaker player."""
+        super().__init__(entry)
+        self._speaker_id = str(speaker["id"])
+        self._speaker_name = str(speaker.get("name") or self._speaker_id)
+        server = entry.data.get("server_id") or entry.unique_id
+        self._attr_unique_id = f"{server}-speaker-{self._speaker_id}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{server}-speaker-{self._speaker_id}")},
+            name=self._speaker_name,
+            manufacturer="Slopify",
+            model="Chromecast speaker" if speaker.get("kind") == "cast" else "BluOS speaker",
+        )
+        self._refresh()
+
+    async def async_added_to_hass(self) -> None:
+        """Follow every account's session."""
+        self._data.listeners.append(self._on_change)
+        self.async_on_remove(lambda: self._data.listeners.remove(self._on_change))
+        self._on_change()
+
+    def _accounts(self) -> list[Account]:
+        rest = sorted((a for a in self._data.accounts.values() if not a.main), key=lambda a: a.name.casefold())
+        return [self._data.main, *rest]
+
+    def _target(self, account: Account) -> Target:
+        return Target(f"speaker:{self._speaker_id}", self._speaker_name, f"server:{account.user_id}", self._speaker_id)
+
+    def _refresh(self) -> None:
+        here = {str(d["id"]) for d in server_speakers(self._data)}
+        self._attr_available = self._data.session.connected and self._speaker_id in here
+        accounts = self._accounts()
+        self._attr_source_list = [account_label(a) for a in accounts]
+        # Whose music is on this speaker: playing beats paused.
+        best: tuple[Account, str, dict[str, Any]] | None = None
+        for account in accounts:
+            active_id, np = active_now_playing(account)
+            if not active_id or np is None or as_dict(np.get("device")).get("id") != self._speaker_id:
+                continue
+            if best is None or (np.get("playing") and not best[2].get("playing")):
+                best = (account, active_id, np)
+        if best:
+            self._account, self._active_id, self._now_playing = best
+            self._attr_state = MediaPlayerState.PLAYING if best[2].get("playing") else MediaPlayerState.PAUSED
+            self._attr_source = account_label(best[0])
+            received = best[0].session.np_received.get(best[1], time.monotonic())
+        else:
+            self._account = self._active_id = self._now_playing = None
+            self._attr_state = MediaPlayerState.IDLE
+            self._attr_source = None
+            received = time.monotonic()
+        self._attr_supported_features = ALWAYS | (WHILE_ACTIVE if best else MediaPlayerEntityFeature(0))
+        self._show(self._now_playing, active=bool(best), received=received)
+
+    def _account_labelled(self, source: str) -> Account:
+        wanted = (source or "").strip().casefold()
+        for account in self._accounts():
+            if account_label(account).casefold() == wanted or account.name.casefold() == wanted:
+                return account
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="unknown_source",
+            translation_placeholders={"source": source, "sources": ", ".join(self._attr_source_list or []) or "none"},
+        )
+
+    async def async_select_source(self, source: str) -> None:
+        """Bring that account's music to this speaker."""
+        account = self._account_labelled(source)
+        playing = not (account is self._account and self.state == MediaPlayerState.PAUSED)
+        await move_session(account, self._target(account), playing=playing)
+
+    async def async_media_play(self) -> None:
+        """Resume what is paused here, or bring the main account's music here."""
+        if self.state == MediaPlayerState.PAUSED:
+            await self._send({"action": "toggle"})
+        elif self.state == MediaPlayerState.IDLE:
+            await move_session(self._data.main, self._target(self._data.main), playing=True)
+
+    async def async_play_media(self, media_type: MediaType | str, media_id: str, **kwargs: Any) -> None:
+        """Play something here, as whoever is playing here (else the main account)."""
+        account = self._account or self._data.main
+        what = await resolve(self._library_for(account), str(media_type or ""), media_id, **kwargs)
+        if self._account is not None and kwargs.get(ATTR_MEDIA_ENQUEUE) in (
+            MediaPlayerEnqueue.ADD,
+            MediaPlayerEnqueue.NEXT,
+        ):
+            picked = what.track_ids[what.index : what.index + 1] if "#" in media_id else what.track_ids
+            await self._send({"action": "enqueue", "trackIds": picked})
+            return
+        target = self._target(account)
+        await send(
+            account,
+            target.client_id,
+            {
+                "action": "transfer",
+                "deviceId": target.device_id,
+                "trackIds": what.track_ids,
+                "index": what.index,
+                "position": 0,
+                "playing": True,
+            },
+        )

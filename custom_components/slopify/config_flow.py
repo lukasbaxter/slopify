@@ -42,6 +42,7 @@ from .api import (
 from .const import (
     CLIENT_NAME,
     CONF_DEFAULT_SOURCE,
+    CONF_HOUSEHOLD,
     CONF_TOKEN,
     CONF_USER_ID,
     DEFAULT_SOURCE_LAST,
@@ -227,7 +228,7 @@ class SlopifyConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class SlopifyOptionsFlow(OptionsFlow):
-    """Where play_media and Play start when nothing is playing."""
+    """Where Play starts when nothing plays, and whether to follow the household."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Pick the default source."""
@@ -242,16 +243,14 @@ class SlopifyOptionsFlow(OptionsFlow):
             options.append(
                 SelectOptionDict(value=current, label=f"{current.split(':', 1)[-1]} (not available right now)")
             )
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_DEFAULT_SOURCE, default=current): SelectSelector(
-                        SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN)
-                    )
-                }
-            ),
-        )
+        fields: dict[Any, Any] = {
+            vol.Required(CONF_DEFAULT_SOURCE, default=current): SelectSelector(
+                SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN)
+            )
+        }
+        if runtime is None or runtime.admin:
+            fields[vol.Required(CONF_HOUSEHOLD, default=self.config_entry.options.get(CONF_HOUSEHOLD, True))] = bool
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(fields))
 
 
 def _title(data: Mapping[str, Any]) -> str:

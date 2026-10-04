@@ -152,6 +152,10 @@ class SlopifyApi:
         """GET a JSON resource."""
         return await self._request("GET", path, params={k: str(v) for k, v in params.items() if v is not None} or None)
 
+    async def post(self, path: str, body: Any = None) -> Any:
+        """POST JSON, answer JSON."""
+        return await self._request("POST", path, json=body if body is not None else {})
+
     async def health(self) -> None:
         """Check that a Slopify server answers at this address."""
         try:

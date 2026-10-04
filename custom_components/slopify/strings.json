@@ -69,10 +69,12 @@
       "init": {
         "title": "Slopify options",
         "data": {
-          "default_source": "Where to start playing"
+          "default_source": "Where to start playing",
+          "household": "Follow every account on the server"
         },
         "data_description": {
-          "default_source": "Used by Play and play media when nothing is playing anywhere. \"Where it last played\" picks the speaker the music was last on."
+          "default_source": "Used by Play and play media when nothing is playing anywhere. \"Where it last played\" picks the speaker the music was last on.",
+          "household": "Only for an admin sign-in. Every Slopify account gets its own player, accounts added or removed in Slopify appear and disappear here, and every speaker player offers each account as a source."
         }
       }
     }
@@ -80,6 +82,14 @@
   "entity": {
     "media_player": {
       "session": {
+        "state_attributes": {
+          "liked": {
+            "name": "Liked"
+          }
+        }
+      },
+      "speaker": {
+        "name": "Slopify",
         "state_attributes": {
           "liked": {
             "name": "Liked"
@@ -121,6 +131,9 @@
     },
     "request_failed": {
       "message": "Slopify request failed: {error}"
+    },
+    "nothing_to_resume_for": {
+      "message": "{name} has nothing to resume yet. Play something first."
     }
   }
 }

@@ -71,3 +71,23 @@ describe('auth', () => {
     expect((await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${user}` } })).statusCode).toBe(401);
   });
 });
+
+describe('household sign-ins', () => {
+  it('an admin gets one sign-in per account, visible to that account; others cannot', async () => {
+    const admin = (await login('admin', 'correct horse battery')).json().token;
+    const H = { authorization: `Bearer ${admin}` };
+    const code = (await app.inject({ method: 'POST', url: '/api/invites', headers: H })).json().code;
+    const reg = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { invite: code, username: 'hh-member', password: 'member password 1' } })).json();
+    const uid = reg.user.id;
+    const a = await app.inject({ method: 'POST', url: `/api/users/${uid}/household-token`, headers: H, payload: { device: 'Home Assistant' } });
+    expect(a.statusCode).toBe(200);
+    const b = await app.inject({ method: 'POST', url: `/api/users/${uid}/household-token`, headers: H, payload: { device: 'Home Assistant' } });
+    expect(b.json().token).toBe(a.json().token);
+    const me = await app.inject({ url: '/api/auth/me', headers: { authorization: `Bearer ${a.json().token}` } });
+    expect(me.json().name).toBe('hh-member');
+    const devices = (await app.inject({ url: '/api/auth/devices', headers: { authorization: `Bearer ${reg.token}` } })).json().devices;
+    expect(devices.map((d: any) => d.device)).toContain('Home Assistant (household)');
+    expect((await app.inject({ method: 'POST', url: `/api/users/${uid}/household-token`, headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/users/nope/household-token', headers: H })).statusCode).toBe(404);
+  });
+});

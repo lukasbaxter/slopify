@@ -7,6 +7,7 @@ import asyncio
 from collections.abc import Callable
 import json
 import secrets
+from types import SimpleNamespace
 from typing import Any
 
 from aiohttp import WSMsgType, web
@@ -18,6 +19,8 @@ def hid(n: int) -> str:
 
 
 USER_ID = "a" * 32
+HENRY_ID = "b" * 32
+VICTORIA_ID = "c" * 32
 SERVER_ID = "5" * 32
 SERVER_CLIENT = f"server:{USER_ID}"
 
@@ -165,6 +168,12 @@ class FakeSlopify:
         self.queues: dict[str, list[dict[str, Any]]] = {}
         self.session: dict[str, Any] | None = None
         self.requests: list[str] = []
+        # Household: other accounts and their sessions (the main account's live on self).
+        self.admin = False
+        self.users: dict[str, str] = {USER_ID: "lukas", HENRY_ID: "henrybaxter", VICTORIA_ID: "victoria"}
+        self.others: dict[str, SimpleNamespace] = {}
+        self.socket_user: dict[int, str] = {}
+        self.commands_by_user: list[tuple[str, dict[str, Any]]] = []
         self.url = ""
         self._runner: web.AppRunner | None = None
 
@@ -179,6 +188,7 @@ class FakeSlopify:
             app.router.add_get(f"{base}/api/auth/me", self._me)
             app.router.add_post(f"{base}/api/auth/logout", self._logout)
             app.router.add_get(f"{base}/api/server", self._server)
+            app.router.add_post(f"{base}/api/users/{{id}}/household-token", self._household_token)
             app.router.add_get(f"{base}/api/ws", self._ws)
             app.router.add_get(f"{base}/api/image/{{id}}", self._image)
             app.router.add_get(f"{base}/api/{{tail:.*}}", self._library)
@@ -198,25 +208,32 @@ class FakeSlopify:
 
     # --- session ------------------------------------------------------------------
 
-    def roster(self) -> dict[str, Any]:
-        lan = [{**d, "viaClient": d.get("viaClient", SERVER_CLIENT)} for d in self.lan]
+    def state(self, uid: str = USER_ID) -> Any:
+        if uid == USER_ID:
+            return self
+        return self.others.setdefault(uid, SimpleNamespace(players=[], active=None, queues={}, session=None))
+
+    def roster(self, uid: str = USER_ID) -> dict[str, Any]:
+        st = self.state(uid)
+        server_client = f"server:{uid}"
+        lan = [{**d, "viaClient": d.get("viaClient", server_client)} for d in self.lan]
         server = {
-            "id": SERVER_CLIENT,
+            "id": server_client,
             "name": "Home speakers",
             "kind": "server",
             "canPlay": False,
             "nowPlaying": None,
             "sameNetwork": True,
         }
-        players = [server, *[p for p in self.players if p["id"] != SERVER_CLIENT]]
-        for p in self.players:
-            if p["id"] == SERVER_CLIENT:
+        players = [server, *[p for p in st.players if p["id"] != server_client]]
+        for p in st.players:
+            if p["id"] == server_client:
                 players[0] = {**server, **p}
-        return {"type": "roster", "players": players, "lanDevices": lan, "activeClientId": self.active}
+        return {"type": "roster", "players": players, "lanDevices": lan, "activeClientId": st.active}
 
-    async def broadcast(self, msg: dict[str, Any]) -> None:
+    async def broadcast(self, msg: dict[str, Any], uid: str = USER_ID) -> None:
         for ws in list(self.sockets):
-            if not ws.closed:
+            if not ws.closed and self.socket_user.get(id(ws)) == uid:
                 await ws.send_json(msg)
 
     async def set_roster(
@@ -225,22 +242,29 @@ class FakeSlopify:
         players: list[dict[str, Any]] | None = None,
         lan: list[dict[str, Any]] | None = None,
         active: str | type[...] | None = ...,
+        uid: str = USER_ID,
     ) -> None:
+        st = self.state(uid)
         if players is not None:
-            self.players = players
-        if lan is not None:
-            self.lan = lan
+            st.players = players
         if active is not ...:
-            self.active = active  # type: ignore[assignment]
-        await self.broadcast(self.roster())
+            st.active = active
+        if lan is not None:
+            # The server's speakers are everyone's.
+            self.lan = lan
+            for other in {USER_ID, *self.others}:
+                if other != uid:
+                    await self.broadcast(self.roster(other), other)
+        await self.broadcast(self.roster(uid), uid)
 
-    async def send_queue(self, sender: str, rows: list[dict[str, Any]]) -> None:
-        self.queues[sender] = rows
-        await self.broadcast({"type": "queue", "from": sender, "queue": rows})
+    async def send_queue(self, sender: str, rows: list[dict[str, Any]], uid: str = USER_ID) -> None:
+        self.state(uid).queues[sender] = rows
+        await self.broadcast({"type": "queue", "from": sender, "queue": rows}, uid)
 
-    async def send_session(self, np: dict[str, Any] | None, rows: list[dict[str, Any]]) -> None:
-        self.session = {"type": "session", "nowPlaying": np, "queue": rows, "at": 1}
-        await self.broadcast(self.session)
+    async def send_session(self, np: dict[str, Any] | None, rows: list[dict[str, Any]], uid: str = USER_ID) -> None:
+        st = self.state(uid)
+        st.session = {"type": "session", "nowPlaying": np, "queue": rows, "at": 1}
+        await self.broadcast(st.session, uid)
 
     async def drop_sockets(self, code: int = 1001) -> None:
         for ws in list(self.sockets):
@@ -248,6 +272,9 @@ class FakeSlopify:
 
     def commands(self) -> list[dict[str, Any]]:
         return [m for m in self.received if m.get("type") == "command"]
+
+    def commands_of(self, uid: str) -> list[dict[str, Any]]:
+        return [m for u, m in self.commands_by_user if u == uid]
 
     async def wait_for(self, check: Callable[[], Any], timeout: float = 5.0) -> Any:
         async with asyncio.timeout(timeout):
@@ -276,16 +303,36 @@ class FakeSlopify:
         return web.json_response(
             {
                 "token": token,
-                "user": {"id": USER_ID, "name": "lukas", "role": "user", "mustChangePassword": self.must_change},
+                "user": {
+                    "id": USER_ID,
+                    "name": "lukas",
+                    "role": self._role(USER_ID),
+                    "mustChangePassword": self.must_change,
+                },
             }
         )
 
+    def _role(self, uid: str) -> str:
+        return "admin" if uid == USER_ID and self.admin else "user"
+
     async def _me(self, request: web.Request) -> web.StreamResponse:
-        if not self._user(request):
+        uid = self._user(request)
+        if not uid:
             return web.json_response({"error": "unauthorized"}, status=401)
         return web.json_response(
-            {"id": USER_ID, "name": "lukas", "role": "user", "mustChangePassword": self.must_change}
+            {"id": uid, "name": self.users[uid], "role": self._role(uid), "mustChangePassword": self.must_change}
         )
+
+    async def _household_token(self, request: web.Request) -> web.StreamResponse:
+        uid = self._user(request)
+        if not uid or self._role(uid) != "admin":
+            return web.json_response({"error": "admin only"}, status=403 if uid else 401)
+        target = request.match_info["id"]
+        if target not in self.users:
+            return web.json_response({"error": "no such user"}, status=404)
+        token = f"hh-{target[:6]}"
+        self.tokens[token] = target
+        return web.json_response({"token": token})
 
     async def _logout(self, request: web.Request) -> web.StreamResponse:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -314,21 +361,24 @@ class FakeSlopify:
         if hello.get("type") != "hello" or hello.get("token") not in self.tokens:
             await ws.close(code=4003, message=b"bad token")
             return ws
+        uid = self.tokens[hello["token"]]
+        st = self.state(uid)
         self.hellos.append(hello)
         self.sockets.append(ws)
-        await ws.send_json(
-            {"type": "hello-ok", "clientId": hello["clientId"], "userId": USER_ID, "offsets": {}, "now": 1}
-        )
-        await ws.send_json(self.roster())
-        for sender, rows in self.queues.items():
+        self.socket_user[id(ws)] = uid
+        await ws.send_json({"type": "hello-ok", "clientId": hello["clientId"], "userId": uid, "offsets": {}, "now": 1})
+        await ws.send_json(self.roster(uid))
+        for sender, rows in st.queues.items():
             await ws.send_json({"type": "queue", "from": sender, "queue": rows})
-        if not self.active and self.session:
-            await ws.send_json(self.session)
+        if not st.active and st.session:
+            await ws.send_json(st.session)
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
                 continue
             data = json.loads(msg.data)
             self.received.append(data)
+            if data.get("type") == "command":
+                self.commands_by_user.append((uid, data))
             if data.get("type") == "ping":
                 await ws.send_json({"type": "pong", "now": 1})
         if ws in self.sockets:
@@ -343,6 +393,12 @@ class FakeSlopify:
             return web.json_response({"error": "password change required"}, status=403)
         path = "/" + request.match_info["tail"]
         self.requests.append(f"GET {path}")
+        if path == "/users":
+            if self._role(user) != "admin":
+                return web.json_response({"error": "admin only"}, status=403)
+            return web.json_response(
+                {"users": [{"id": k, "name": v, "role": self._role(k)} for k, v in self.users.items()]}
+            )
         q = request.query
         tracks = lambda ids: [TRACKS[i] for i in ids]  # noqa: E731
         if path == "/albums":

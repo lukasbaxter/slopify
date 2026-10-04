@@ -9,6 +9,8 @@ DOMAIN: Final = "slopify"
 CONF_TOKEN: Final = "token"
 CONF_USER_ID: Final = "user_id"
 CONF_DEFAULT_SOURCE: Final = "default_source"
+# Admin sign-ins follow every account on the server (on unless turned off).
+CONF_HOUSEHOLD: Final = "household"
 
 # Sentinel for "no default source": start where the session last played.
 DEFAULT_SOURCE_LAST: Final = "last"

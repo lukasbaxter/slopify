@@ -118,6 +118,23 @@ export function registerAuth(app: FastifyInstance, db: DB) {
     if (!r.changes) return reply.code(404).send({ error: 'no such user' });
     return { ok: true };
   });
+  // A household controller signed in as an admin (Home Assistant) follows every
+  // account's session: it gets a sign-in per account, listed in that account's
+  // devices as "<device> (household)" so its owner can see and revoke it. One
+  // per account and device; asking again returns the same one.
+  const Household = z.object({ device: z.string().min(1).max(60).default('Home Assistant') });
+  app.post('/api/users/:id/household-token', { preHandler: (app as any).requireAdmin }, async (req, reply) => {
+    const body = Household.safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'device must be 1-60 characters' });
+    const id = (req.params as any).id as string;
+    if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) return reply.code(404).send({ error: 'no such user' });
+    const device = `${body.data.device} (household)`;
+    const have = db.prepare("SELECT token FROM tokens WHERE user_id = ? AND device = ? AND kind = 'household'").get(id, device) as { token: string } | undefined;
+    if (have) return { token: have.token };
+    const t = newToken();
+    db.prepare("INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES (?, ?, ?, 'household', ?, ?)").run(t, id, device, Date.now(), Date.now());
+    return { token: t };
+  });
   app.post('/api/invites', { preHandler: (app as any).requireAdmin }, async () => {
     const code = newToken();
     db.prepare('INSERT INTO kv (k, v) VALUES (?, ?)').run(`invite:${code}`, String(Date.now() + INVITE_TTL));

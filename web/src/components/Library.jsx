@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePhone, I as MI, shareLink } from './TrackRow.jsx';
+import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePhone, I as MI, shareItem } from './TrackRow.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { vibrantColor } from '../api/colors.js';
@@ -544,9 +544,14 @@ export default function Library({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [albums.length, artists.length]);
 
+  useEffect(() => {
+    if (!detail?.highlightId || !detail.tracks?.length) return;
+    requestAnimationFrame(() => document.querySelector('.trackrow.hi')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  }, [detail?.highlightId, detail?.tracks?.length]);
   const rowProps = (tracks, i, extra = {}, ctx = null) => ({
     track: tracks[i], n: i + 1, jf,
     active: player.nowPlayingId === tracks[i].Id,
+    highlight: detail?.highlightId === tracks[i].Id,
     isPlaying: player.playing,
     onPlay: () => player.playQueue(tracks, i, ctx),
     onToggle: () => player.toggle(),
@@ -931,7 +936,6 @@ export default function Library({
                   items={[
                     { label: 'Change photo', icon: MI.photo, onClick: () => profileFileRef.current?.click() },
                     { label: 'Settings', icon: MI.gear, onClick: () => onOpenSettings?.() },
-                    { label: 'Share', icon: MI.share, onClick: () => shareLink(item.Name) },
                   ]} />
               )}
               <input ref={profileFileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadAvatar(f); e.target.value = ''; }} />
@@ -1131,7 +1135,7 @@ export default function Library({
               ] } : null,
               lead ? { label: 'Go to artist', icon: MI.artist, onClick: () => onOpenArtistById(lead.Id) } : null,
               kind === 'Album' ? { label: item.UserData?.IsFavorite ? 'Remove from Your Library' : 'Save to Your Library', icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
-              { label: 'Share', icon: MI.share, onClick: () => shareLink(item.Name) },
+              kind === 'Album' || isArtist ? { label: 'Share', icon: MI.share, onClick: () => shareItem({ kind: isArtist ? 'artist' : 'album', id: item.Id, title: item.Name, by: isArtist ? null : lead?.Name }) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Edit details', icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Delete', icon: MI.trash, danger: true, onClick: () => { if (window.confirm(`Delete "${item.Name}"?`)) onDeletePlaylist(item); } } : null,

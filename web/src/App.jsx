@@ -431,6 +431,12 @@ export default function App() {
   }, [jf]);
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
+  // Components without a notify prop (a track row's Share) toast through here.
+  useEffect(() => {
+    const on = (e) => { if (e.detail) notify(String(e.detail)); };
+    window.addEventListener('slopify:toast', on);
+    return () => window.removeEventListener('slopify:toast', on);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshPlaylists = async () => {
     try {
@@ -581,6 +587,28 @@ export default function App() {
       setDetail((d) => (d && d.item?.Id === albumId ? { ...d, item: meta || d.item, tracks: trackList.items, loading: false } : d));
     } catch { setDetail((d) => (d && d.item?.Id === albumId ? { ...d, loading: false, loadFailed: true } : d)); }
   };
+
+  // A shared link (/?album=…, /?artist=…, /?track=…) opens once signed in;
+  // a song opens its album with the song's row lit. The parameter is then
+  // dropped from the address so a reload does not open it again.
+  useEffect(() => {
+    if (booting || !jf || !me) return;
+    const q = new URLSearchParams(window.location.search);
+    const album = q.get('album'), artist = q.get('artist'), track = q.get('track');
+    if (!album && !artist && !track) return;
+    ['album', 'artist', 'track'].forEach((k) => q.delete(k));
+    const rest = q.toString();
+    try { window.history.replaceState(window.history.state, '', window.location.pathname + (rest ? `?${rest}` : '')); } catch { /* sandboxed */ }
+    if (album) openAlbumById(album);
+    else if (artist) openArtistById(artist);
+    else {
+      jf.itemById(track).then(async (t) => {
+        if (!t?.AlbumId) return;
+        await openAlbumById(t.AlbumId);
+        setDetail((d) => (d && d.item?.Id === t.AlbumId ? { ...d, highlightId: track } : d));
+      }).catch(() => notify("That song isn't in this library"));
+    }
+  }, [booting, jf, me]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openArtistById = async (artistId, known = null) => {
     setView('home');

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ContextMenu from './ContextMenu.jsx';
-import { Heart, LikedCover, usePhone, I as MI } from './TrackRow.jsx';
+import { Heart, LikedCover, usePhone, I as MI, shareItem } from './TrackRow.jsx';
 
 const ICONS = {
   home: 'M12 3 3 10v11h6v-6h6v6h6V10z',
@@ -87,12 +87,14 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     { sep: true },
     { label: pinned.has(e.id) ? 'Unpin album' : 'Pin album', onClick: () => togglePin(e.id) },
     e.item.AlbumArtists?.[0]?.Id ? { label: 'Go to artist', onClick: () => onOpenArtist?.(e.item.AlbumArtists[0].Id) } : null,
+    { label: 'Share', onClick: () => shareItem({ kind: 'album', id: e.id, title: e.item.Name, by: e.item.AlbumArtists?.[0]?.Name || e.item.AlbumArtist }) },
     { label: 'Remove from Your Library', onClick: () => onFollowAlbum?.(e.item, false) },
   ] : e.kind === 'artist' ? [
     { label: 'Add to queue', onClick: () => playEntry(e, true) },
     { label: 'Play', onClick: () => playEntry(e) },
     { sep: true },
     { label: pinned.has(e.id) ? 'Unpin artist' : 'Pin artist', onClick: () => togglePin(e.id) },
+    { label: 'Share', onClick: () => shareItem({ kind: 'artist', id: e.id, title: e.item.Name }) },
     { label: 'Unfollow', onClick: async () => { await jf.setFavorite(e.id, false).catch(() => {}); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); } },
   ] : [
     { label: 'Add to queue', onClick: () => playEntry(e, true) },

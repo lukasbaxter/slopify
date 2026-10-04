@@ -31,14 +31,22 @@ export function usePhone() {
   return phone;
 }
 
-// "Share" on the phone: the system share sheet when there is one, else the
-// page link goes to the clipboard.
-export async function shareLink(title) {
-  const url = window.location.href;
+// Share a song, album or artist: a link that opens it in Slopify for anyone
+// with an account here (/?album=<id>, /?artist=<id>, /?track=<id>; App opens
+// it after sign-in). Phones get the system share sheet, desktops a copied
+// link and a toast. Playlists are not shareable: they would need permissions.
+export const shareUrl = (kind, id) => { const u = new URL('/', window.location.origin); u.searchParams.set(kind, id); return u.toString(); };
+export async function shareItem({ kind, id, title, by }) {
+  const url = shareUrl(kind, id);
+  const toast = (m) => window.dispatchEvent(new CustomEvent('slopify:toast', { detail: m }));
   try {
-    if (navigator.share) { await navigator.share({ title, url }); return 'shared'; }
-    await navigator.clipboard.writeText(url); return 'copied';
-  } catch { return null; }
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    if (coarse && navigator.share) { await navigator.share({ title: by ? `${title} — ${by}` : title, url }); return; }
+    await navigator.clipboard.writeText(url);
+    toast('Link copied');
+  } catch (e) {
+    if (e?.name !== 'AbortError') toast('Could not copy the link'); // AbortError: the share sheet was dismissed
+  }
 }
 
 export const PlayGlyph = ({ size = 20 }) => (
@@ -194,6 +202,7 @@ export default function TrackRow({
         : { label: 'Go to artist', icon: I.artist, onClick: () => onOpenArtist(artistsOf.find((a) => a.Id).Id) }
     ) : null,
     onOpenAlbum && track.AlbumId ? { label: 'Go to album', icon: I.album, onClick: () => onOpenAlbum(track.AlbumId) } : null,
+    { label: 'Share', icon: I.share, onClick: () => shareItem({ kind: 'track', id: track.Id, title: track.Name, by: artistsOf.map((a) => a.Name).join(', ') }) },
     onDownload ? { sep: true } : null,
     onDownload ? { label: 'Download', icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: f.label, onClick: () => onDownload(track, f.id) })) } : null,
   ];

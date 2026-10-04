@@ -7,7 +7,7 @@ import DevicePicker, { useThrottledVolume } from './DevicePicker.jsx';
 import { seekHover } from '../api/seekHover.js';
 import { useLiked } from '../api/likes.js';
 import { useOffset } from '../api/offsets.js';
-import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph, I } from './TrackRow.jsx';
+import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph, I, shareItem } from './TrackRow.jsx';
 import { usePhone, usePlayingFrom, slideOut, LyricsGlyph } from './Player.jsx';
 import { vibrantColor } from '../api/colors.js';
 
@@ -179,14 +179,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   // The full row object when the track is in our own queue (richer than the
   // session summary: ArtistItems, Album, ticks), else the summary shape.
   const fullTrack = player.current?.Id === nowPlaying?.itemId ? player.current : asTrack;
-  const share = async () => {
-    if (!nowPlaying) return;
-    const text = `${nowPlaying.title}${nowPlaying.artist ? ` — ${nowPlaying.artist}` : ''}`;
-    try {
-      if (navigator.share) await navigator.share({ title: nowPlaying.title, text });
-      else await navigator.clipboard?.writeText(text);
-    } catch { /* the user dismissed the share sheet */ }
-  };
+  const share = () => { if (nowPlaying?.itemId) shareItem({ kind: 'track', id: nowPlaying.itemId, title: nowPlaying.title, by: nowPlaying.artist }); };
   const goArtist = (id) => { close(); onOpenArtist(id); };
   const moreItems = asTrack ? [
     player.addToQueue ? { label: 'Add to queue', icon: G16.queue, onClick: () => player.addToQueue([fullTrack]) } : null,

@@ -86,6 +86,23 @@ describe('lidarr client', () => {
     expect(again.status).toBe('exists');
   });
 
+  it('a first request for a new artist stays wanted even though updating the artist resets its albums (as Lidarr does)', async () => {
+    const { state, fetcher } = fakeLidarr();
+    // Lidarr: saving an artist re-applies its monitoring to every album.
+    const resetting: any = async (url: string, init?: any) => {
+      const r = await fetcher(url, init);
+      const p = new URL(url).pathname.replace('/api/v1', '');
+      if (p.startsWith('/artist/') && init?.method === 'PUT') for (const a of state.albums) a.monitored = false;
+      return r;
+    };
+    const l = client(resetting);
+    await l.discography('Porter Robinson'); // the artist is new to Lidarr, unmonitored
+    const r = await l.request('mb-worlds');
+    expect(r.status).toBe('queued');
+    expect(state.albums[0].monitored).toBe(true);
+    expect(state.artists[0].monitored).toBe(true);
+  });
+
   it('retry fires AlbumSearch', async () => {
     const { state, fetcher } = fakeLidarr();
     const l = client(fetcher);

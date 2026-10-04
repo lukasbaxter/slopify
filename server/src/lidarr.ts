@@ -235,11 +235,20 @@ export function lidarrClient(opts: LidarrOptions) {
       }
       const out = { id: album.id as number, album_id: fid, artist: album.artist?.artistName || '', title: album.title as string };
       if ((album.statistics?.trackFileCount ?? 0) >= (album.statistics?.totalTrackCount || 1)) return { ...out, status: 'exists' };
-      if (!album.monitored) await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [album.id], monitored: true }) });
-      // The wanted list only lists albums of monitored artists.
+      // The wanted list only lists albums of monitored artists. The artist
+      // first: updating it afterwards reset the album's own flag (a first
+      // request for a new artist came back "queued" with nothing wanted).
       if (!album.artist?.monitored) {
         await api(`/artist/${album.artist.id}`, { method: 'PUT', body: JSON.stringify({ ...album.artist, monitored: true, monitorNewItems: 'none' }) });
         cache.delete('artists');
+      }
+      // Then the album, read back until Lidarr says it stuck.
+      for (let i = 0; i < 3; i++) {
+        await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [album.id], monitored: true }) });
+        const now = await api(`/album/${album.id}`).catch(() => null);
+        if (now?.monitored) break;
+        if (i === 2) { log(`lidarr: ${out.artist} - ${out.title} would not stay monitored`); throw new Error('Lidarr did not take the request, try again shortly'); }
+        await new Promise((r) => setTimeout(r, 1500));
       }
       if (opts.searchOnRequest) await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [album.id] }) }).catch((e: any) => log(`lidarr search cmd: ${e.message}`));
       cache.delete('activity');

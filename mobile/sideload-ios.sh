@@ -18,7 +18,8 @@
 #   EXPO_PUBLIC_SLOPIFY_URL=https://music.example.com/ ./sideload-ios.sh
 set -eu
 cd "$(dirname "$0")"
-export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+# Xcode itself, when the command line points at the bare Command Line Tools.
+case "${DEVELOPER_DIR:-$(xcode-select -p 2>/dev/null)}" in *CommandLineTools*|'') export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer;; esac
 export LANG="${LANG:-en_US.UTF-8}"
 
 DEVICE="${DEVICE:-$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && /paired/ { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-F]{8}-[0-9A-F]{16}$/) { print $i; exit } }')}"

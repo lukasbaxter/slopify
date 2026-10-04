@@ -114,10 +114,26 @@ jobs:
           name: android
           path: Slopify-*.apk
           if-no-files-found: error
+  # The iPhone app, unsigned, for SideStore / AltStore (they sign it on the
+  # phone), plus the source SideStore reads to offer it as an update. The
+  # source is a release asset, so its address never changes:
+  # releases/latest/download/sidestore-source.json
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: mobile/build-ipa.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: mobile/dist/*
+          if-no-files-found: error
   publish:
-    # always() so a broken/skipped android job never blocks the desktop
+    # always() so a broken/skipped android or ios job never blocks the desktop
     # artifacts from reaching the release; desktop itself must have passed.
-    needs: [desktop, android]
+    needs: [desktop, android, ios]
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.desktop.result == 'success'
     steps:

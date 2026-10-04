@@ -1,7 +1,7 @@
 # Slopify
 
 Self-hosted music: one container and your music folder give your household
-Spotify-style apps (web, Android, Mac, Windows) with a shared session across
+Spotify-style apps (web, Android, iPhone, Mac, Windows) with a shared session across
 them, Chromecast and BluOS speakers driven by the server, and a Home Assistant
 integration.
 
@@ -65,6 +65,7 @@ spelled out there.
 - [Downloads with Lidarr and slskd](docs/downloads.md): discographies, requests, the Tasks list.
 - [Sync lyrics on a GPU](docs/lyric-sync.md): the GPU image.
 - [Home Assistant](docs/home-assistant.md): the integration, installed with HACS.
+- [iPhone](docs/iphone.md): the Home Screen web app, or the app through SideStore.
 
 ## What it does
 

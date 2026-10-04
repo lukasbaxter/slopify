@@ -57,18 +57,23 @@ export function advertise(app: FastifyInstance, db: DB, opts: { port: number; na
   const id = serverId(db);
   const rec = records({ name: opts.name, id, port: opts.port, address });
   let mdns: ReturnType<typeof makeMdns>;
-  try { mdns = makeMdns({ interface: address, reuseAddr: true }); }
+  // Bound to every address: a socket bound to the interface's own address
+  // (multicast-dns's default when given one) never receives multicast on
+  // Linux, so it would announce once and then never hear a query.
+  try { mdns = makeMdns({ interface: address, bind: '0.0.0.0', reuseAddr: true }); }
   catch (e: any) { app.log.warn(`mdns advertise: ${e.message}`); return async () => {}; }
   mdns.on('error', (e: any) => app.log.warn(`mdns advertise: ${e?.message || e}`));
   const lower = (s: string) => s.toLowerCase();
-  mdns.on('query', (q: any) => {
+  mdns.on('query', (q: any, rinfo: any) => {
+    // A one-shot query from some other port wants its answer sent straight back.
+    const respond = (res: any) => (rinfo && rinfo.port !== 5353 ? mdns.respond(res, rinfo) : mdns.respond(res));
     for (const question of q.questions || []) {
       const name = lower(question.name || ''), type = question.type;
       const any = type === 'ANY';
-      if (name === lower(TYPE) && (type === 'PTR' || any)) { mdns.respond({ answers: rec.answers, additionals: rec.additionals }); return; }
-      if (name === lower(SERVICES) && (type === 'PTR' || any)) { mdns.respond({ answers: [{ name: SERVICES, type: 'PTR', ttl: 4500, data: TYPE }] }); return; }
-      if (name === lower(rec.instance) && (type === 'SRV' || type === 'TXT' || any)) { mdns.respond({ answers: rec.additionals.filter((r) => r.name === rec.instance), additionals: rec.additionals.filter((r) => r.type === 'A') }); return; }
-      if (name === lower(rec.host) && (type === 'A' || any)) { mdns.respond({ answers: rec.additionals.filter((r) => r.type === 'A') }); return; }
+      if (name === lower(TYPE) && (type === 'PTR' || any)) { respond({ answers: rec.answers, additionals: rec.additionals }); return; }
+      if (name === lower(SERVICES) && (type === 'PTR' || any)) { respond({ answers: [{ name: SERVICES, type: 'PTR', ttl: 4500, data: TYPE }] }); return; }
+      if (name === lower(rec.instance) && (type === 'SRV' || type === 'TXT' || any)) { respond({ answers: rec.additionals.filter((r) => r.name === rec.instance), additionals: rec.additionals.filter((r) => r.type === 'A') }); return; }
+      if (name === lower(rec.host) && (type === 'A' || any)) { respond({ answers: rec.additionals.filter((r) => r.type === 'A') }); return; }
     }
   });
   // Announce at start (twice, a second apart, as the spec asks) so anything

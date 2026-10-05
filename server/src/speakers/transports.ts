@@ -216,6 +216,15 @@ export class BluOSTransport implements Transport {
     return res;
   }
   setVolume(level: number) { this.ownVol = null; return this.get(`/Volume?level=${Math.max(0, Math.min(100, Math.round(level)))}`); }
+  // This speaker's own level, even while it leads a group: tell_slaves=0 so
+  // a leader does not pass the change on (the group's balance is set per
+  // speaker by the player), and /Volume reads the speaker's own, not the group's.
+  setOwnVolume(level: number) { this.ownVol = null; return this.get(`/Volume?level=${Math.max(0, Math.min(100, Math.round(level)))}&tell_slaves=0`); }
+  async ownVolume(): Promise<number | null> {
+    const xml = await this.get('/Volume');
+    const v = Number(tag(xml, 'volume'));
+    return Number.isFinite(v) && v >= 0 ? v : null;
+  }
   // In a group, every member's /Status carries the group's volume (0 while
   // the leader sits at 0), not the speaker's own: mirrored back, it snapped
   // the slider to 0 after every change. /Volume is the speaker's own; it is

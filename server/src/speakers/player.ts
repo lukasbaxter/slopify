@@ -52,6 +52,7 @@ export class ServerPlayer {
   repeat: 'off' | 'all' | 'one' = 'off'; shuffle: 'off' | 'on' = 'off';
   private timer: NodeJS.Timeout | null = null; private starting = false; private ticking = false; private lastTick = 0;
   private lastRead: { pos: number; at: number } | null = null;
+  private groupReadAt = 0;
   private busyUntil = 0; // a seek/toggle in flight: the poll leaves the clock alone until then
   private ops: Promise<void> = Promise.resolve();
   private playLogTimer: NodeJS.Timeout | null = null;
@@ -224,6 +225,10 @@ export class ServerPlayer {
     return this.ops;
   }
   holdVolume(level: number) {
+    // One speaker of a group set on its own: the group's level is re-read
+    // (its loudest speaker) rather than taken from that one.
+    this.balance = null;
+    if (this.grouped()) { this.volumeHeldUntil = 0; this.groupReadAt = 0; return; }
     this.volume = Math.max(0, Math.min(100, Math.round(level)));
     this.volumeHeldUntil = Date.now() + 2000;
     this.report();
@@ -331,8 +336,30 @@ export class ServerPlayer {
     // settle, and BluOS briefly reads 0 mid-change).
     this.volumeHeldUntil = Date.now() + 2000;
     this.report();
-    if (this.transport) await this.transport.setVolume(this.volume);
-    for (const m of this.members) await new BluOSTransport(m).setVolume(this.volume).catch(() => {});
+    if (!this.grouped()) { this.d.log(`speaker ${this.device?.name || '?'}: volume ${this.volume}`); if (this.transport) await this.transport.setVolume(this.volume); return; }
+    // A group: its level is its loudest speaker, and a change scales every
+    // speaker by the same ratio, so the household's balance (one speaker
+    // quieter, one muted at 0) survives. Every speaker used to be set to the
+    // same number, which woke a speaker muted on purpose. The levels a drag
+    // started from are kept for the whole drag, so rounding at a low level
+    // cannot flatten the balance on the way back up.
+    const now = Date.now();
+    if (!this.balance || now - this.balance.at > 3000) {
+      const levels = await this.groupLevels();
+      this.balance = { at: now, top: Math.max(0, ...levels.map((x) => x.level ?? 0)), levels };
+    }
+    this.balance.at = now;
+    const { top, levels } = this.balance;
+    const L = this.volume;
+    const to = levels.map(({ sp, level }) => ({ sp, level, next: level == null || top <= 0 ? L : Math.round((level * L) / top) }));
+    this.d.log(`speaker ${this.device?.name || '?'}: group volume ${L} (${to.map((x) => `${x.sp.name} ${x.level ?? '?'}->${x.next}`).join(', ')})`);
+    await Promise.all(to.map(({ sp, next }) => new BluOSTransport(sp).setOwnVolume(next).catch(() => {})));
+  }
+  private balance: { at: number; top: number; levels: { sp: Speaker; level: number | null }[] } | null = null;
+  private grouped() { return this.device?.kind === 'bluos' && this.members.length > 0; }
+  // Each speaker's own level (leader first).
+  private groupLevels() {
+    return Promise.all([this.device as Speaker, ...this.members].map(async (sp) => ({ sp, level: await new BluOSTransport(sp).ownVolume().catch(() => null) })));
   }
   async next(auto: boolean) {
     if (!this.queue.length) return;
@@ -435,7 +462,15 @@ export class ServerPlayer {
     const readAt = (t0 + Date.now()) / 2;
     // Mirror the speaker's own volume (someone used the dial or the BluOS
     // app), but never a muted reading and never right after we set it.
-    if (typeof s.volume === 'number' && !s.muted && Date.now() > this.volumeHeldUntil) this.volume = s.volume;
+    if (this.grouped()) {
+      // A group reads as its loudest speaker (each speaker's own level, once
+      // a second): the leader's own level is only one of them.
+      if (Date.now() > this.volumeHeldUntil && Date.now() - this.groupReadAt > 1000) {
+        this.groupReadAt = Date.now();
+        const levels = (await this.groupLevels()).map((x) => x.level).filter((v): v is number => v != null);
+        if (levels.length && Date.now() > this.volumeHeldUntil) this.volume = Math.max(...levels);
+      }
+    } else if (typeof s.volume === 'number' && !s.muted && Date.now() > this.volumeHeldUntil) this.volume = s.volume;
     // The transport lost the device under us (socket error, receiver hung
     // up): release the session cleanly, never relaunch on a dead connection.
     if (s.gone) { await this.yield(); return; }

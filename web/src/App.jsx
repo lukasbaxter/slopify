@@ -946,6 +946,7 @@ export default function App() {
     if (!window.ReactNativeWebView) return undefined;
     const onStep = (e) => {
       const step = Number(e.detail?.step) || 0; if (!step) return;
+      (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} volume button ${step > 0 ? 'up' : 'down'} (session at ${Math.round(player.volume ?? 0)})`);
       // Presses in quick succession build on the level the last one asked
       // for: the device's reported volume lags them, and stepping from it
       // kept every burst within one step of where it started.

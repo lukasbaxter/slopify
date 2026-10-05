@@ -35,11 +35,11 @@ describe('the group store', () => {
 });
 
 // Four BluOS units, each its own little HTTP server, keeping BluOS sync state.
-type Unit = { port: number; name: string; slaves: Set<number>; master: number | null; calls: string[]; state: string; native?: boolean; foreign?: boolean };
+type Unit = { port: number; name: string; slaves: Set<number>; master: number | null; calls: string[]; state: string; native?: boolean; foreign?: boolean; vol: number };
 const units: Unit[] = [];
 const byPort = (p: number) => units.find((u) => u.port === p)!;
 async function unit(name: string): Promise<Unit> {
-  const u: Unit = { port: 0, name, slaves: new Set(), master: null, calls: [], state: 'stop' };
+  const u: Unit = { port: 0, name, slaves: new Set(), master: null, calls: [], state: 'stop', vol: 30 };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url || '/', 'http://x'); u.calls.push(url.pathname + url.search);
     const slave = Number(url.searchParams.get('port'));
@@ -49,7 +49,7 @@ async function unit(name: string): Promise<Unit> {
     if (url.pathname === '/Pause' || url.pathname === '/Stop') u.state = 'pause';
     if (url.pathname === '/SyncStatus') return res.end(`<SyncStatus>${u.master ? `<master port="${u.master}">127.0.0.1</master>` : ''}${[...u.slaves].map((p) => `<slave id="127.0.0.1" port="${p}"></slave>`).join('')}</SyncStatus>`);
     if (url.pathname === '/Status') return res.end(`<status><state>${u.state}</state><volume>30</volume><mute>0</mute><secs>1</secs><totlen>200</totlen><canSeek>1</canSeek>${u.foreign ? '<service>Spotify</service><serviceName>Spotify</serviceName><streamUrl>Spotify:spotify_pcm01:pcm/44100/16/2/7</streamUrl>' : ''}</status>`);
-    if (url.pathname === '/Volume') return res.end('<volume mute="0">30</volume>');
+    if (url.pathname === '/Volume') { const l = url.searchParams.get('level'); if (l != null) u.vol = Number(l); return res.end(`<volume mute="0">${u.vol}</volume>`); }
     res.end('<ok/>');
   });
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
@@ -186,8 +186,9 @@ describe('playing on speaker groups', () => {
     await lukas.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
     towers.calls.length = 0; node.calls.length = 0;
     await lukas.execute({ action: 'setVolume', level: 25 });
-    expect(towers.calls).toContain('/Volume?level=25');
-    expect(node.calls).toContain('/Volume?level=25');
+    // Equal levels (30 each): both land on 25; the leader does not pass it on.
+    expect(towers.calls).toContain('/Volume?level=25&tell_slaves=0');
+    expect(node.calls).toContain('/Volume?level=25&tell_slaves=0');
     await lukas.stopAll();
   });
 
@@ -233,4 +234,28 @@ describe('playing on speaker groups', () => {
     expect(lukas.members).toEqual([]);
     await lukas.stopAll();
   });
+  it('the group slider keeps the balance: a speaker muted at 0 stays muted, a drag down and back up comes back', async () => {
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    groups.join(sp(pulse).id, [sp(towers).id, sp(node).id]);
+    const p = player('lukas-vol');
+    try {
+      await p.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      // The household's balance: Pulse 13, Towers muted, Node 25. The group reads as its loudest.
+      pulse.vol = 13; towers.vol = 0; node.vol = 25;
+      (p as any).volumeHeldUntil = 0; (p as any).groupReadAt = 0; await (p as any).tick();
+      expect(reports['lukas-vol'].volume).toBe(25);
+      // One drag: down to 5, then back up to 25.
+      await p.execute({ action: 'setVolume', level: 5 });
+      expect([pulse.vol, towers.vol, node.vol]).toEqual([3, 0, 5]);
+      await p.execute({ action: 'setVolume', level: 25 });
+      expect([pulse.vol, towers.vol, node.vol]).toEqual([13, 0, 25]);
+      // Up past it scales too, and the leader never passes its change on.
+      await p.execute({ action: 'setVolume', level: 50 });
+      expect([pulse.vol, towers.vol, node.vol]).toEqual([26, 0, 50]);
+      expect(pulse.calls.filter((c) => c.startsWith('/Volume?level')).every((c) => c.includes('tell_slaves=0'))).toBe(true);
+      expect(reports['lukas-vol'].volume).toBe(50);
+    } finally { await p.stopAll(); for (const id of [sp(pulse).id, sp(towers).id, sp(node).id]) groups.unjoin(id); for (const g of saved) groups.join(g[0], g.slice(1)); }
+  });
+
 });

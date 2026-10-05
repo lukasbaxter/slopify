@@ -974,10 +974,13 @@ export default function App() {
     };
     const t = setTimeout(report, 3000), t2 = setTimeout(report, 30000);
     // Back from the lock screen / another app: what the keep-alive did meanwhile.
-    const vis = () => { if (document.visibilityState === 'visible') report(); };
+    // And again a few seconds on: what happened right after it came back.
+    const vis = () => { if (document.visibilityState === 'visible') { report(); setTimeout(report, 4000); setTimeout(report, 12000); } };
+    const appstate = (e) => (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} app ${e.detail?.state}`);
+    window.addEventListener('slopify:appstate', appstate);
     window.addEventListener('resize', report);
     document.addEventListener('visibilitychange', vis);
-    return () => { clearTimeout(t); clearTimeout(t2); window.removeEventListener('resize', report); document.removeEventListener('visibilitychange', vis); };
+    return () => { clearTimeout(t); clearTimeout(t2); window.removeEventListener('resize', report); document.removeEventListener('visibilitychange', vis); window.removeEventListener('slopify:appstate', appstate); };
   }, [isMobile, player.relay]);
 
   // Test hook: drive playback/transfer from the headless test. Gated on ?debug.

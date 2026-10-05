@@ -817,7 +817,7 @@ export function usePlayer(jf) {
       if (!playing) relayRef.current?.claim();
       if (dev.kind === 'local') {
         const el = audioRef.current;
-        if (playing) el.pause();
+        if (playing) { mediaLog('toggle pause'); el.pause(); }
         else {
           webAudioRef.current?.ctx.resume?.().catch(() => {});
           // Back from the lock screen the element can be dead: its stream cut
@@ -1254,7 +1254,7 @@ export function usePlayer(jf) {
       if (!el.getAttribute('src') || el.ended || transitionRef.current || Date.now() < ownUntilRef.current) { disagree = 0; return; }
       const sounding = !el.paused;
       if (sounding === playingRef.current) { disagree = 0; return; }
-      if (++disagree >= 2) { disagree = 0; followSystem(sounding)(); }
+      if (++disagree >= 2) { disagree = 0; mediaLog(`reconcile: element ${sounding ? 'playing' : 'paused'}, app said ${playingRef.current ? 'playing' : 'paused'}`); followSystem(sounding)(); }
     }, 1000);
     // Stall watchdog: meant to be playing, not paused, and the clock has not
     // moved for 3 s with the whole song in memory, 6 s without (the stream
@@ -1837,6 +1837,7 @@ export function usePlayer(jf) {
 
   // Stop local audio and remote-device playback because another client took over.
   yieldRef.current = () => {
+    mediaLog('yield: another device took over');
     const dev = deviceRef.current;
     if (dev.kind === 'local') { const el = audioRef.current; if (el) el.pause(); }
     else if (dev.kind !== 'relay' && remote) remote.pause(dev).catch(() => {});
@@ -1957,6 +1958,7 @@ export function usePlayer(jf) {
     // app never sends it at all); a real lock-screen tap arrives a second late.
     const playPause = (wantPlaying) => () => {
       const r = msRefs.current;
+      msNote(`lock screen ${wantPlaying ? 'play' : 'pause'}`);
       if (r.playing === wantPlaying) { r.resync(); return; }
       if (!r.remote) { r.toggle(); return; }
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);

@@ -20,6 +20,17 @@ const remotePauseHold = (() => {
   return { start(fn) { cancel(); timer = setTimeout(() => { timer = null; fn(); }, 1000); }, cancel };
 })();
 
+// Breadcrumbs for what happened while nobody could look (the phone locked):
+// the element's own events, lock-screen actions, recoveries. Read by a
+// debugger as window.__slopifyMediaLog and sent with the phone's diag report
+// when the app comes back to the screen.
+export function mediaLog(m) {
+  if (typeof window === 'undefined') return;
+  const log = (window.__slopifyMediaLog ||= []);
+  log.push(`${new Date().toISOString().slice(11, 19)}${typeof document !== 'undefined' && document.hidden ? ' bg' : ''} ${m}`);
+  if (log.length > 60) log.shift();
+}
+
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
@@ -407,6 +418,7 @@ export function usePlayer(jf) {
             new Promise((r) => setTimeout(() => r('timeout'), 4000)),
           ]);
           if (outcome === 'abort' || (gen != null && startGenRef.current !== gen)) return; // a newer start took over
+          mediaLog(`swap to spare ${track.Id.slice(0, 6)}: ${outcome}`);
           const swapped = outcome === 'ok';
           if (!swapped) {
             // Not unlocked, a bad buffered stream, or a play() iOS is holding:
@@ -432,6 +444,7 @@ export function usePlayer(jf) {
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
         el.dataset.track = track.Id;
         el.src = (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0 });
+        mediaLog(`load ${track.Id.slice(0, 6)} at ${Math.round(seekSeconds)} from ${el.src.startsWith('blob:') ? 'memory' : 'network'}`);
         el.volume = volume / 100;
         if (seekSeconds > 0 && !transcoded) {
           // The seek has to land BEFORE play(), otherwise playback audibly
@@ -798,7 +811,23 @@ export function usePlayer(jf) {
       if (dev.kind === 'local') {
         const el = audioRef.current;
         if (playing) el.pause();
-        else { webAudioRef.current?.ctx.resume?.().catch(() => {}); await el.play(); }
+        else {
+          webAudioRef.current?.ctx.resume?.().catch(() => {});
+          // Back from the lock screen the element can be dead: its stream cut
+          // off while iOS had the app suspended, or a play() iOS is holding.
+          // Play then did nothing and only skipping away and back (a fresh
+          // load) brought the song back. Do that load here, at the playhead.
+          const dead = !el.getAttribute('src') || el.error || el.readyState === 0 || el.networkState === 3;
+          const outcome = dead ? 'dead' : await Promise.race([
+            el.play().then(() => 'ok', (e) => (e?.name === 'AbortError' ? 'abort' : 'fail')),
+            new Promise((r) => setTimeout(() => r('timeout'), 3000)),
+          ]);
+          mediaLog(`toggle play: ${outcome} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
+          if (outcome !== 'ok' && outcome !== 'abort' && current) {
+            el.pause();
+            await startOn(dev, current, positionRef.current);
+          }
+        }
       } else if (playing) {
         await remote.pause(dev);
       } else {
@@ -995,7 +1024,11 @@ export function usePlayer(jf) {
       // 'play' command would loop: the target still sees THIS client as active
       // and would route the command straight back, restarting the song here at
       // 0:00 (the exact bug this replaces).
-      const viaRelay = nextDevice.kind === 'relay' || (nextDevice.viaClient && !remote);
+      // A speaker the server lists is always the server's to drive, the
+      // desktop included: it carries no address, so driving it from here
+      // dialed localhost and failed with a bare "AggregateError".
+      const viaServer = String(nextDevice.viaClient || '').startsWith('server:');
+      const viaRelay = nextDevice.kind === 'relay' || (nextDevice.viaClient && (!remote || viaServer));
       if (viaRelay && relayRef.current) {
         const act = activePlayerRef.current;
         // The WHOLE session queue moves with the track, so "next" on the
@@ -1191,8 +1224,14 @@ export function usePlayer(jf) {
     const onPause = followSystem(false), onPlay = followSystem(true);
     // Breadcrumb for a debugger on the phone: every seek the element sees,
     // ours or the system's (window.__slopifyMediaLog).
-    const onSeeked = () => { const log = (window.__slopifyMediaLog ||= []); log.push(`${new Date().toISOString().slice(11, 19)} element seeked to ${el.currentTime.toFixed(1)} base=${localBaseRef.current}`); if (log.length > 30) log.shift(); };
+    const onSeeked = () => mediaLog(`element seeked to ${el.currentTime.toFixed(1)} base=${localBaseRef.current}`);
     el.addEventListener('seeked', onSeeked);
+    // The rest of the element's life, for the same log: which of these came
+    // last before the phone went quiet is what a lock-screen stop looks like.
+    const tag = () => `${(el.dataset.track || '-').slice(0, 6)} t=${el.currentTime.toFixed(1)}`;
+    const trail = ['play', 'playing', 'pause', 'waiting', 'stalled', 'ended', 'error', 'emptied', 'abort'];
+    const onTrail = (e) => mediaLog(`el ${e.type} ${tag()}${e.type === 'error' ? ` code=${el.error?.code}` : ''}`);
+    for (const t of trail) el.addEventListener(t, onTrail);
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('ended', onEnded);
     el.addEventListener('loadedmetadata', onDuration);
@@ -1225,6 +1264,7 @@ export function usePlayer(jf) {
       const id = el.dataset.track; if (!id) return;
       if (Date.now() - stuckSince < (wholeFor(id) ? 3000 : 6000)) return; // from memory it cannot fail, so sooner
       stuckSince = 0; recovering = true;
+      mediaLog(`watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
       const url = wholeFor(id) || jf.playbackUrl(id);
       ownUntilRef.current = Date.now() + 10000;
       el.src = url;
@@ -1236,6 +1276,7 @@ export function usePlayer(jf) {
     return () => {
       clearInterval(watchdog);
       clearInterval(reconcile);
+      for (const t of trail) el.removeEventListener(t, onTrail);
       el.removeEventListener('seeked', onSeeked);
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('ended', onEnded);
@@ -1244,6 +1285,17 @@ export function usePlayer(jf) {
       el.removeEventListener('play', onPlay);
     };
   }, [activeEl, next, anchorAt]);
+
+  // Screen off / back on: what the element looked like at that moment.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const snap = () => {
+      const el = audioRef.current;
+      mediaLog(`${document.visibilityState}: device=${deviceRef.current?.kind} playing=${playingRef.current} el=${el ? `${(el.dataset.track || '-').slice(0, 6)} paused=${el.paused} t=${el.currentTime.toFixed(1)} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}` : '-'}`);
+    };
+    document.addEventListener('visibilitychange', snap);
+    return () => document.removeEventListener('visibilitychange', snap);
+  }, []);
 
   // Remote devices have to be polled; they do not push state to us. Polling
   // alone makes the clock jump in 2s steps, so the poll only moves an anchor
@@ -1883,12 +1935,7 @@ export function usePlayer(jf) {
   msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
-  const msNote = (m) => {
-    if (typeof window === 'undefined') return;
-    const log = (window.__slopifyMediaLog ||= []);
-    log.push(`${new Date().toISOString().slice(11, 19)} ${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
-    if (log.length > 30) log.shift();
-  };
+  const msNote = (m) => mediaLog(`${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
   // Lock screen / headset buttons: previous and next TRACK, never 10-second
   // skips (with seekbackward/seekforward set, iOS replaces the track buttons
   // with skips and greys them out).

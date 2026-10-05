@@ -321,6 +321,16 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         break;
       }
       case 'claim': {
+        // A reconnecting client re-asserting the claim it held before the drop
+        // (a locked phone, a server restart). If another connected device took
+        // the session meanwhile, that one keeps it: the comer is the one that
+        // yields, never the device that is playing now.
+        if (msg.reassert && s.active && s.active !== me.id && clients.get(String(s.active))) {
+          app.log.info(`session: ${me.name} came back; ${clients.get(String(s.active))!.name} has the session, so ${me.name} yields`);
+          send(me, { type: 'command', from: String(s.active), command: { action: 'yield' } });
+          broadcastRoster(me.uid);
+          break;
+        }
         // "Play here": this client becomes the one making sound; the others yield.
         if (s.active !== me.id) { app.log.info(`session: ${me.name} claims playback from ${clients.get(String(s.active))?.name || s.active || 'nobody'}`); s.lastEventTs = now; s.active = me.id; s.rev++; s.updatedAt = now; }
         for (const c of ofUser(me.uid)) if (c.id !== me.id) send(c, { type: 'command', from: me.id, command: { action: 'yield' } });

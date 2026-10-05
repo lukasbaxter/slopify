@@ -79,8 +79,11 @@ export class SessionLink {
         // still verifying the token was dropped -- which is how the desktop's
         // speaker list went missing from the web player after a restart.
         // Re-assert the claim first so the server re-marks us active before
-        // any roster goes out, then flush whatever we last knew.
-        if (this._claimed) this._send({ type: 'claim' });
+        // any roster goes out, then flush whatever we last knew. Only a
+        // re-assert: if another device took over while we were away (a
+        // locked phone misses the yield), the server keeps it there and
+        // yields us instead.
+        if (this._claimed) this._send({ type: 'claim', reassert: true });
         if (this._pending.devices.length) this.reportDevices(this._pending.devices);
         if (this._pending.nowPlaying) this.reportNowPlaying(this._pending.nowPlaying);
         if (this._pending.queue) this.reportQueue(this._pending.queue);
@@ -106,7 +109,7 @@ export class SessionLink {
         this.onCommand(m.command, m.from);
       }
     };
-    ws.onclose = () => { this.connected = false; this.rosterSeen = false; clearInterval(this._ping); this._retry(); };
+    ws.onclose = () => { if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed`); this.connected = false; this.rosterSeen = false; clearInterval(this._ping); this._retry(); };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
 

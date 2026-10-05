@@ -91,4 +91,30 @@ describe('ws client ids across accounts', () => {
     expect(seen.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_1');
     laptop.ws.terminate();
   });
+  it('a device coming back with an old claim yields to the one that took over, instead of pausing it', async () => {
+    const phone = await hello('tokA', 'c_phone_2');
+    phone.ws.send(JSON.stringify({ type: 'claim' }));
+    await new Promise((r) => setTimeout(r, 50));
+    // The phone locks and drops off; the laptop takes the session meanwhile.
+    phone.ws.terminate();
+    const laptop = await hello('tokA', 'c_laptop_2');
+    const atLaptop: any[] = []; laptop.ws.on('message', (d: any) => atLaptop.push(JSON.parse(String(d))));
+    laptop.ws.send(JSON.stringify({ type: 'claim' }));
+    await new Promise((r) => setTimeout(r, 50));
+    // The phone reconnects and re-asserts the claim it still remembers.
+    const back = await hello('tokA', 'c_phone_2');
+    const atPhone: any[] = []; back.ws.on('message', (d: any) => atPhone.push(JSON.parse(String(d))));
+    back.ws.send(JSON.stringify({ type: 'claim', reassert: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(atLaptop.filter((m) => m.type === 'command' && m.command?.action === 'yield')).toEqual([]);
+    expect(atPhone.some((m) => m.type === 'command' && m.command?.action === 'yield')).toBe(true);
+    expect(atLaptop.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_2');
+    // With nobody else holding it, a re-assert still takes the session (server restart, own reconnect).
+    laptop.ws.terminate();
+    await new Promise((r) => setTimeout(r, 100));
+    back.ws.send(JSON.stringify({ type: 'claim', reassert: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(atPhone.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_phone_2');
+    back.ws.terminate();
+  });
 });

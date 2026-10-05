@@ -181,8 +181,11 @@ const handle = (channel, fn) => {
       }
       return { ok: true, value };
     } catch (err) {
-      trace(`${channel} FAILED: ${err?.message}`);
-      return { ok: false, error: err?.message || String(err) };
+      trace(`${channel} FAILED: ${err?.message || err}`);
+      // A failed connect to every address of a name is an AggregateError with
+      // no message of its own: show what each attempt said instead.
+      const msg = err?.message || (err?.errors || []).map((e) => e?.message).filter(Boolean).join('; ') || String(err);
+      return { ok: false, error: msg };
     }
   });
 };

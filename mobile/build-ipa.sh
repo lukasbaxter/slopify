@@ -15,6 +15,8 @@ export LANG="${LANG:-en_US.UTF-8}"
 [ -d ios ] || CI=1 npx expo prebuild -p ios --no-install
 [ -d ios/Pods ] || (cd ios && pod install)
 
+# The bundled JS reports which build it is (diag), so a test can be matched to a release.
+export EXPO_PUBLIC_SLOPIFY_SHELL="$VERSION"
 xcodebuild -workspace ios/Slopify.xcworkspace -scheme Slopify -configuration Release \
   -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/build \
   CODE_SIGNING_ALLOWED=NO -quiet

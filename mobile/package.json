@@ -15,12 +15,16 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "postinstall": "patch-package"
   },
   "private": true,
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/lukasbaxter/slopify.git"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

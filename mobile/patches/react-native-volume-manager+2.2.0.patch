@@ -1,0 +1,19 @@
+diff --git a/node_modules/react-native-volume-manager/ios/VolumeManager.m b/node_modules/react-native-volume-manager/ios/VolumeManager.m
+index 5bcd2ce..d285834 100644
+--- a/node_modules/react-native-volume-manager/ios/VolumeManager.m
++++ b/node_modules/react-native-volume-manager/ios/VolumeManager.m
+@@ -338,10 +338,10 @@ RCT_EXPORT_METHOD(enableInSilenceMode:(BOOL)enabled) {
+ }
+ 
+ - (void)applicationWillEnterForeground:(NSNotification *)notification {
+-  if (hasListeners) {
+-    AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+-    [audioSession setActive:YES error:nil];
+-  }
++  // Slopify: no re-activation here. The app's session activating on every
++  // return to the app interrupted the WebView's playback session (iOS logs it
++  // as the app INTERRUPTING com.apple.WebKit): a pause and gap each time the
++  // app came forward. The session stays active from addVolumeListener.
+ }
+ 
+ @end

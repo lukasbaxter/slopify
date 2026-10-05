@@ -21,7 +21,7 @@ const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || 'https://music.baxtergroup.io
 // behind an entitlement, so the model it is.
 const DEVICE_NAME = (Platform.OS === 'android' && Device.deviceName) || Device.modelName || (Platform.OS === 'ios' ? 'iPhone' : 'Android phone');
 const DEVICE_FORM = Device.deviceType === Device.DeviceType.TABLET ? 'tablet' : 'phone';
-const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS })}; true;`;
+const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev' })}; true;`;
 
 // iOS: a music player's audio session. The volume listener switches the
 // session to Ambient as the module starts (only then: VolumeManager init),

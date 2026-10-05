@@ -599,6 +599,34 @@ input[type="range"]:disabled { opacity: .4; }
 /* ---------- device picker ---------- */
 
 .devicepicker { position: relative; }
+/* The green device name never pushes into the buttons next to it: the picker
+   shrinks to the room it has and a long name scrolls (Marquee). */
+.fs-output .devicepicker, .fs-phone-device .devicepicker { min-width: 0; max-width: 100%; display: flex; }
+.fs-output .devicebtn svg { flex: none; }
+.devicebtn { min-width: 0; }
+.devicebtn-name { min-width: 0; }
+.devicebtn-name.marquee { text-overflow: clip !important; }
+/* "Playing on <speakers>": the desktop's green bar and the phone's mini player. */
+.playing-elsewhere svg, .player-elsewhere svg { flex: none; }
+.elsewhere-text { min-width: 0; display: block; white-space: nowrap; }
+/* Long titles scroll instead of truncating: 30px/s, a 2s hold at each end, fade on the right. */
+.marquee { overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.marquee-inner { display: inline-block; will-change: transform; }
+/* Two mask layers (intersected): a right fade that is always on, and a left
+   fade parked outside the box at rest that slides in once the text moves. */
+.marquee.overflow {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 20px), linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 20px), linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  -webkit-mask-size: calc(100% + 20px) 100%, 100% 100%; mask-size: calc(100% + 20px) 100%, 100% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: -20px 0, 0 0; mask-position: -20px 0, 0 0;
+  -webkit-mask-composite: source-in; mask-composite: intersect;
+  animation: marquee-mask var(--marquee-dur, 8s) linear infinite alternate;
+}
+.marquee.overflow .marquee-inner { animation: marquee var(--marquee-dur, 8s) linear infinite alternate; }
+@keyframes marquee { 0%, 25% { transform: translateX(0); } 75%, 100% { transform: translateX(var(--marquee-dist, 0)); } }
+@keyframes marquee-mask { 0%, 25% { -webkit-mask-position: -20px 0, 0 0; mask-position: -20px 0, 0 0; } 28%, 100% { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } }
+
 .devicebtn { display: flex; align-items: center; gap: 6px; color: #ffffffb3; padding: 6px; border-radius: var(--r-art); }
 .devicebtn:hover { color: var(--fg); }
 .devicebtn.casting { color: var(--accent); }
@@ -917,7 +945,9 @@ button:disabled { cursor: default; }
 .fs-lyrics { scrollbar-width: none; }
 .fs-lyrics::-webkit-scrollbar { display: none; }
 .fs-lyrics .lyric-line, .fs-lyrics p { font-size: 28px; }
-.fs-bottom { display: grid; grid-template-columns: 1fr auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 20px 24px; padding: 28px 48px 48px; }
+/* minmax(0, 1fr): a side column never grows past its share, so a long device
+   name shrinks (and scrolls) instead of sliding under the transport buttons. */
+.fs-bottom { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; gap: 20px 24px; padding: 28px 48px 48px; }
 .fs-meta { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .fs-thumb { width: 64px; height: 64px; border-radius: 6px; object-fit: cover; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
 .fs-title { font-size: 28px; font-weight: 800; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -930,8 +960,9 @@ button:disabled { cursor: default; }
 .fs-seek input { flex: 1; }
 .fs-meta { grid-column: 1; grid-row: 2; }
 .fs-controls { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 24px; color: #ffffffb3; }
-.fs-output { grid-column: 3; grid-row: 2; justify-self: end; display: flex; align-items: center; gap: 14px; min-width: 0; color: #ffffffb3; }
-.fs-output .devicebtn { padding: 4px 6px 4px 0; font-size: 13px; gap: 6px; max-width: 260px; color: #ffffffb3; }
+.fs-output { grid-column: 3; grid-row: 2; justify-self: end; display: flex; align-items: center; gap: 14px; min-width: 0; max-width: 100%; color: #ffffffb3; }
+.fs-output .fs-volume { flex: none; }
+.fs-output .devicebtn { padding: 4px 6px 4px 0; font-size: 13px; gap: 6px; max-width: min(260px, 100%); color: #ffffffb3; }
 .fs-output .devicebtn.with-name.casting .devicebtn-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-output .devicebtn:hover, .fs-output .devicebtn:hover .devicebtn-name { color: #fff; }
 .fs-output .devicebtn.casting, .fs-output .devicebtn.casting .devicebtn-name { color: var(--accent); }

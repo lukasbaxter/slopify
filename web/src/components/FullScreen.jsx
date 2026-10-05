@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Marquee from './Marquee.jsx';
 import { Lyrics } from './RightPanel.jsx';
 import Visualizer, { EQ_STYLES, GRADIENTS, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
 import ContextMenu from './ContextMenu.jsx';
@@ -35,29 +36,6 @@ const G16 = {
   radio: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z" /><path d="M3.05 3.05a7 7 0 0 0 0 9.9l1.06-1.06a5.5 5.5 0 0 1 0-7.78L3.05 3.05zm9.9 0-1.06 1.06a5.5 5.5 0 0 1 0 7.78l1.06 1.06a7 7 0 0 0 0-9.9z" /></svg>,
   share: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5 5 4.5l1.06 1.06L7.25 4.37V10h1.5V4.37l1.19 1.19L11 4.5 8 1.5z" /><path d="M3 7h3v1.5H4.5v5h7v-5H10V7h3v8H3V7z" /></svg>,
 };
-/**
- * A single line that marquee-scrolls when its text overflows (Spotify's
- * long-title treatment): measured once per text/width change, then a pure
- * CSS animation with a 2s pause at each end and a fade at the right edge.
- */
-function Marquee({ text, className }) {
-  const box = useRef(null), inner = useRef(null);
-  const [dist, setDist] = useState(0);
-  useEffect(() => {
-    const b = box.current, i = inner.current; if (!b || !i) return undefined;
-    const measure = () => setDist(Math.max(0, i.scrollWidth - b.clientWidth));
-    measure();
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    ro?.observe(b);
-    return () => ro?.disconnect();
-  }, [text]);
-  const dur = 4 + dist / 30; // 30px/s plus the two pauses
-  return (
-    <div ref={box} className={`${className} marquee ${dist > 0 ? 'overflow' : ''}`} style={dist > 0 ? { '--marquee-dist': `-${dist + 24}px`, '--marquee-dur': `${dur}s` } : undefined}>
-      <span ref={inner} className="marquee-inner">{text}</span>
-    </div>
-  );
-}
 const HeartPath = ({ on }) => (on
   ? <path d="M15.724 4.22A4.313 4.313 0 0 0 12.192.814a4.269 4.269 0 0 0-3.622 1.13.837.837 0 0 1-1.14 0 4.272 4.272 0 0 0-6.21 5.855l5.916 7.05a1.128 1.128 0 0 0 1.727 0l5.916-7.05a4.228 4.228 0 0 0 .945-3.577z" />
   : <path d="M1.69 2A4.582 4.582 0 0 1 8 2.023 4.583 4.583 0 0 1 11.88.817h.002a4.618 4.618 0 0 1 3.782 3.65v.003a4.543 4.543 0 0 1-1.011 3.84L9.35 14.629a1.765 1.765 0 0 1-2.093.464 1.762 1.762 0 0 1-.605-.463L1.348 8.309A4.582 4.582 0 0 1 1.689 2zm3.158.252A3.082 3.082 0 0 0 2.49 7.337l.005.005L7.8 13.664a.264.264 0 0 0 .311.069.262.262 0 0 0 .09-.069l5.312-6.33a3.043 3.043 0 0 0 .68-2.573 3.118 3.118 0 0 0-2.551-2.463 3.079 3.079 0 0 0-2.612.816l-.007.007a1.501 1.501 0 0 1-2.045 0l-.009-.008a3.082 3.082 0 0 0-2.121-.861z" />);

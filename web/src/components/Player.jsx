@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Marquee from './Marquee.jsx';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
 import DevicePicker, { useThrottledVolume, DeviceIcon } from './DevicePicker.jsx';
 import { usePhone, Heart, ShuffleGlyph, ArtistLinks } from './TrackRow.jsx';
@@ -156,7 +157,7 @@ export function PlayingElsewhereBar({ player }) {
   return (
     <div className="playing-elsewhere">
       {form ? <DeviceIcon kind="relay" form={form} size={15} /> : <CastGlyph />}
-      <span>Playing on {label}</span>
+      <Marquee as="span" className="elsewhere-text" text={`Playing on ${label}`} />
     </div>
   );
 }
@@ -280,7 +281,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
             <div className="player-title">{nowPlaying?.title || 'Nothing playing'}</div>
             {/* Phone, sound elsewhere: Spotify puts the device line inside the card, in green. */}
             {phone && elsewhere ? (
-              <div className="player-artist player-elsewhere"><CastGlyph /><span>Playing on {elsewhere}</span></div>
+              <div className="player-artist player-elsewhere"><CastGlyph /><Marquee as="span" className="elsewhere-text" text={`Playing on ${elsewhere}`} /></div>
             ) : (
             <div className="player-artist">
               {/* Phone: plain text, so a tap anywhere on the card opens now

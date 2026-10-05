@@ -1,4 +1,5 @@
 import { clientIdentity } from '../api/deviceName.js';
+import Marquee from './Marquee.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import QualityBadge from './QualityBadge.jsx';
 import { LOCAL_DEVICE } from '../player/usePlayer.js';
@@ -164,7 +165,8 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
         title={`Playing on ${active.name}`}
       >
         <ConnectIcon />
-        <span className="devicebtn-name">{labelFor(active)}</span>
+        {/* A long name (a speaker group) scrolls rather than spilling over the buttons beside it. */}
+        <Marquee as="span" className="devicebtn-name" text={labelFor(active)} />
       </button>
 
       {open && phone && <div className="ctxmenu-scrim" onClick={(e) => { e.stopPropagation(); close(); }} onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); close(); }} />}

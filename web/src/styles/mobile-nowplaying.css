@@ -27,24 +27,6 @@
   /* The cover sits on the same 24pt gutter as the text below it, flat (no shadow). */
   .fs-art { width: 100%; max-width: 100%; height: auto; max-height: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: none; object-fit: cover; }
   .fs-art.ph { width: 100%; background: rgba(255,255,255,.08); }
-  /* Long titles scroll instead of truncating: 30px/s, a 2s hold at each end, fade on the right. */
-  .marquee { overflow: hidden; white-space: nowrap; text-overflow: clip; }
-  .marquee-inner { display: inline-block; will-change: transform; }
-  /* Two mask layers (intersected): a right fade that is always on, and a left
-     fade parked outside the box at rest that slides in once the text moves. */
-  .marquee.overflow {
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 20px), linear-gradient(90deg, #000 calc(100% - 28px), transparent);
-    mask-image: linear-gradient(90deg, transparent, #000 20px), linear-gradient(90deg, #000 calc(100% - 28px), transparent);
-    -webkit-mask-size: calc(100% + 20px) 100%, 100% 100%; mask-size: calc(100% + 20px) 100%, 100% 100%;
-    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-    -webkit-mask-position: -20px 0, 0 0; mask-position: -20px 0, 0 0;
-    -webkit-mask-composite: source-in; mask-composite: intersect;
-    animation: marquee-mask var(--marquee-dur, 8s) linear infinite alternate;
-  }
-  .marquee.overflow .marquee-inner { animation: marquee var(--marquee-dur, 8s) linear infinite alternate; }
-  @keyframes marquee { 0%, 25% { transform: translateX(0); } 75%, 100% { transform: translateX(var(--marquee-dist, 0)); } }
-  @keyframes marquee-mask { 0%, 25% { -webkit-mask-position: -20px 0, 0 0; mask-position: -20px 0, 0 0; } 28%, 100% { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } }
-
   /* The bottom block: 24 above the title, 16 to the seek bar, 8 to the
      transport, 24 to the bottom row, then the home-indicator inset. */
   .fs-bottom { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 24px 24px calc(16px + env(safe-area-inset-bottom)); flex: none; }

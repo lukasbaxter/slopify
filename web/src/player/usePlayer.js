@@ -37,6 +37,18 @@ export function mediaLog(m) {
   if (log.length > 60) log.shift();
 }
 
+// Coming back from the lock screen, iOS pauses the playing element as the
+// app's audio session switches back (logged on the phone: 'visible', then
+// within a second an 'el pause' nobody asked for). A system pause in that
+// window is undone; the app's own pauses mark ownPauseAt so they never are.
+let comingBackUntil = 0;
+let ownPauseAt = 0;
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') comingBackUntil = Date.now() + 3000; });
+  window.addEventListener('slopify:appstate', (e) => { if (e.detail?.state === 'active') comingBackUntil = Math.max(comingBackUntil, Date.now() + 2000); });
+}
+const ownPause = (el) => { ownPauseAt = Date.now(); el.pause(); };
+
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
@@ -817,7 +829,7 @@ export function usePlayer(jf) {
       if (!playing) relayRef.current?.claim();
       if (dev.kind === 'local') {
         const el = audioRef.current;
-        if (playing) { mediaLog('toggle pause'); el.pause(); }
+        if (playing) { mediaLog('toggle pause'); ownPause(el); }
         else {
           webAudioRef.current?.ctx.resume?.().catch(() => {});
           // Back from the lock screen the element can be dead: its stream cut
@@ -1082,7 +1094,7 @@ export function usePlayer(jf) {
         // bar.
         if (!act) {
           const dev = deviceRef.current;
-          if (dev.kind === 'local') { const el = audioRef.current; if (el) el.pause(); }
+          if (dev.kind === 'local') { const el = audioRef.current; if (el) ownPause(el); }
           else if (dev.kind !== 'relay' && remote) remote.stop(dev).catch(() => {});
           setPlaying(false);
           anchorRef.current = { pos: positionRef.current, at: Date.now(), playing: false };
@@ -1224,6 +1236,12 @@ export function usePlayer(jf) {
       if (deviceRef.current.kind !== 'local' || transitionRef.current) return;
       if (el !== audioRef.current || !el.getAttribute('src') || el.ended || Date.now() < ownUntilRef.current) return;
       if (playingRef.current === nowPlaying) return;
+      const now = Date.now();
+      if (!nowPlaying && playingRef.current && now < comingBackUntil && now - ownPauseAt > 1500) {
+        mediaLog('unlock pause from iOS: resuming');
+        el.play().catch((e) => mediaLog(`unlock resume failed: ${e?.name}`));
+        return;
+      }
       playingRef.current = nowPlaying;
       setPlaying(nowPlaying);
       anchorAt(localBaseRef.current + el.currentTime, nowPlaying);
@@ -1839,7 +1857,7 @@ export function usePlayer(jf) {
   yieldRef.current = () => {
     mediaLog('yield: another device took over');
     const dev = deviceRef.current;
-    if (dev.kind === 'local') { const el = audioRef.current; if (el) el.pause(); }
+    if (dev.kind === 'local') { const el = audioRef.current; if (el) ownPause(el); }
     else if (dev.kind !== 'relay' && remote) remote.pause(dev).catch(() => {});
     setPlaying(false);
     anchorRef.current = { pos: positionRef.current, at: Date.now(), playing: false };
@@ -1937,7 +1955,7 @@ export function usePlayer(jf) {
     const el = audioRef.current;
     if (msLocal && el && el.getAttribute('src')) {
       if (shownPlaying && el.paused) el.play().catch(() => {});
-      else if (!shownPlaying && !el.paused) el.pause();
+      else if (!shownPlaying && !el.paused) ownPause(el);
     }
   };
   msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote };

@@ -21,9 +21,11 @@ const note = (m) => { log.push(`${Math.round(performance.now() / 1000)}s${typeof
 
 export const KEEPALIVE_SECONDS = 20 * 60;
 
+const SRC = () => new URL('keepalive.wav', document.baseURI).href;
+
 function element() {
   if (el) return el;
-  el = new Audio(new URL('keepalive.wav', document.baseURI).href);
+  el = new Audio(SRC());
   // preload none: with 'auto' every page load pulled the whole 9.6 MB file
   // (measured on a 5 Mbps link); it is only fetched once it has to play.
   el.preload = 'none'; el.setAttribute('playsinline', '');
@@ -82,9 +84,20 @@ export function keepAlive(on, position = 0) {
       try { a.currentTime = p; } catch { /* not seekable */ }
       lastT = -1; lastAt = 0;
     }
+    // Unloaded when it last stopped (below): give it its media back first.
+    if (!a.getAttribute('src')) { a.src = SRC(); lastT = -1; lastAt = 0; frozen = false; note('reloaded'); }
     if (a.paused) a.play().then(() => { unlocked = true; }).catch((e) => { note(`play ${e?.name}`); if (!unlocked) arm(); });
   } else if (!a.paused && !pauseTimer) {
-    pauseTimer = setTimeout(() => { pauseTimer = null; if (!wanted && !a.paused) a.pause(); }, 2000);
+    // Stopped AND unloaded. A merely paused stand-in still counted to WebKit:
+    // when this phone took the music back, the stand-in's pause 2 s later was
+    // the last state change, and WebKit told iOS "paused" (isPlaying = false)
+    // while the real player played: the lock screen's random pause icon.
+    // Without media it can produce no audio and WebKit leaves it out.
+    pauseTimer = setTimeout(() => {
+      pauseTimer = null;
+      if (wanted || a.paused) return;
+      a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded');
+    }, 2000);
   }
 }
 

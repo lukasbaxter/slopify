@@ -53,6 +53,12 @@ export class ServerPlayer {
   private timer: NodeJS.Timeout | null = null; private starting = false; private ticking = false; private lastTick = 0;
   private lastRead: { pos: number; at: number } | null = null;
   private groupReadAt = 0;
+  // How far into the current track playback got (seconds). A BluOS speaker
+  // that finishes a track resets its counter to 0 a moment before it reports
+  // 'stop'; the clock followed it, and the end then read as a stop from the
+  // speaker's own app (Summer Madness, 2026-10-05: frozen at 0:00.75 and the
+  // queue went quiet). The end is judged by this instead.
+  private reached = 0;
   private busyUntil = 0; // a seek/toggle in flight: the poll leaves the clock alone until then
   private ops: Promise<void> = Promise.resolve();
   private playLogTimer: NodeJS.Timeout | null = null;
@@ -83,6 +89,8 @@ export class ServerPlayer {
   }
   private report() { this.d.report(this.nowPlaying()); }
   private setPos(pos: number, playing = this.playing) { this.anchor = { pos: Math.max(0, pos), at: Date.now() }; this.playing = playing; this.lastRead = null; }
+  // A deliberate move (a track start, a seek): the furthest point starts over.
+  private moveTo(pos: number, playing = this.playing) { this.reached = Math.max(0, pos); this.setPos(pos, playing); }
 
   // Commands arrive fire-and-forget: run them one at a time so a second
   // command never interleaves with a transfer or seek still mid-flight.
@@ -280,13 +288,13 @@ export class ServerPlayer {
     this.starting = true;
     try {
       this.duration = t.RunTimeTicks / 10000000;
-      this.setPos(startAt, play);
+      this.moveTo(startAt, play);
       this.report();
       const t0 = Date.now();
       await this.transport.play(this.url(`/api/stream/${t.Id}`), this.meta(t), startAt);
       this.d.log(`speaker ${this.device?.name}: playing ${t.Name} from ${Math.round(startAt)}s after ${Date.now() - t0} ms`);
       if (!play) await this.transport.pause().catch(() => {});
-      this.setPos(startAt, play);
+      this.moveTo(startAt, play);
       if (play) this.armLogPlay(t.Id);
     } finally { this.starting = false; }
     this.report();
@@ -323,10 +331,10 @@ export class ServerPlayer {
     // Readings taken mid-seek are the old position: hold the poll off until
     // the transport settles (BluOS verifies the landing itself) or 8 s.
     this.busyUntil = Date.now() + 8000;
-    this.setPos(pos); this.report();
+    this.moveTo(pos); this.report();
     try {
       await this.transport.seek(pos);
-      this.setPos(pos); this.report();
+      this.moveTo(pos); this.report();
     } finally { this.busyUntil = 0; }
   }
   async setVolume(level: number) {
@@ -371,7 +379,7 @@ export class ServerPlayer {
     // Songs that go with the last one are appended and play on; only when
     // there is nothing to add does it park at the start of the last track.
     if (this.extend()) return this.skipTo(n);
-    if (auto && this.transport) { this.setPos(0, false); this.report(); }
+    if (auto && this.transport) { this.moveTo(0, false); this.report(); }
   }
   private extend() {
     const cur = this.current; if (!cur) return false;
@@ -457,6 +465,7 @@ export class ServerPlayer {
     if (!this.transport || this.starting || !this.current) return;
     if (Date.now() < this.busyUntil) return;
     const t0 = Date.now();
+    if (this.playing) this.reached = Math.max(this.reached, this.position);
     const s = await this.transport.status();
     if (Date.now() < this.busyUntil) return; // a seek/toggle started while we read: stale
     const readAt = (t0 + Date.now()) / 2;
@@ -487,16 +496,20 @@ export class ServerPlayer {
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
     // does not always know a stream's length).
-    const nearEnd = this.duration > 0 && this.position >= this.duration - 3;
+    // A jump back from somewhere short of the end is a scrub (the BluOS app):
+    // the furthest point starts over there. Only the end's reset to 0 is kept.
+    if (this.duration > 0 && this.reached < this.duration - 5 && s.position + 10 < this.reached) this.reached = s.position;
+    const got = Math.max(this.position, this.reached);
+    const nearEnd = this.duration > 0 && got >= this.duration - 3;
     // 'ended' is only believed near the end: Cast reports FINISHED for an
     // external stop too, and skipping ahead on that would relaunch a
     // speaker someone just silenced. Anything else is an external stop.
-    const atEnd = this.duration > 0 && (this.position >= this.duration - 5 || this.position >= this.duration * 0.95);
+    const atEnd = this.duration > 0 && (got >= this.duration - 5 || got >= this.duration * 0.95);
     if (s.ended && !atEnd) { await this.yield(); return; }
     if (s.ended || (s.state === 'stop' && this.playing && nearEnd)) { await this.next(true); return; }
     if (s.state === 'IDLE' || s.state === 'stop') {
       // Stopped from the speaker itself (or the stream failed): show it paused where it was.
-      if (this.playing) { this.setPos(this.position, false); this.report(); }
+      if (this.playing) { this.d.log(`speaker ${this.device?.name || '?'}: stopped at ${Math.round(this.position)}s of ${Math.round(this.duration)}s (reached ${Math.round(this.reached)}s), not the end: paused`); this.setPos(this.position, false); this.report(); }
       return;
     }
     // Lyrics follow this clock, so it has to match what is coming out of

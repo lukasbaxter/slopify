@@ -154,3 +154,39 @@ describe('speaker arbitration and command order', () => {
     expect(order).toEqual(['seek:in', 'seek:out', 'pause']);
   });
 });
+
+describe('BluOS end of track', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000); });
+  afterEach(() => { vi.useRealTimers(); });
+  const bluos = (seq: any[], calls: string[] = []) => ({
+    async play() { calls.push('play'); }, async seek() {}, resume: async () => {}, pause: async () => {},
+    async stop() { calls.push('stop'); }, setVolume: async () => {}, close: () => {},
+    async status() { return { volume: 30, coarse: true, duration: 257, ...(seq.length > 1 ? seq.shift() : seq[0]) }; },
+  });
+
+  it('a track that ran out moves on, even when the speaker reset its counter before saying stop', async () => {
+    const p = custom();
+    p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };
+    p.queue = [row, row2]; p.index = 0; p.duration = 257;
+    p.playing = true; p.anchor = { pos: 255.5, at: Date.now() }; p.reached = 255.5;
+    const calls: string[] = [];
+    // What the Node said at the end of Summer Madness: counter back to 0 while
+    // still 'stream', then 'stop' at 0.
+    p.transport = bluos([{ playing: true, state: 'stream', position: 0 }, { playing: false, state: 'stop', position: 0 }], calls);
+    await p.tick(); await vi.advanceTimersByTimeAsync(250); await p.tick();
+    expect(p.index).toBe(1);
+    expect(calls).toContain('play');
+    await p.stopAll();
+  });
+
+  it('a stop in the middle is still a stop from the speaker: paused, not skipped', async () => {
+    const p = custom();
+    p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };
+    p.queue = [row, row2]; p.index = 0; p.duration = 257;
+    p.playing = true; p.anchor = { pos: 120, at: Date.now() }; p.reached = 120;
+    p.transport = bluos([{ playing: false, state: 'stop', position: 0 }]);
+    await p.tick();
+    expect(p.index).toBe(0);
+    expect(p.playing).toBe(false);
+  });
+});

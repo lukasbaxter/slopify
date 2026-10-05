@@ -13,6 +13,7 @@ const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
 // doing nothing. The visualizer analyses its silent shadow copy there instead.
 const IS_IOS = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 export const ROUTES_WEB_AUDIO = !IS_IOS;
+const STAY_ON_LOCK_SCREEN_MS = 2 * 60 * 60 * 1000;
 // A lock-screen play/pause meant for another device, held for a moment and
 // dropped if the app is closing (see the Media Session handlers).
 const remotePauseHold = (() => {
@@ -1951,20 +1952,42 @@ export function usePlayer(jf) {
   const msRemote = !msLocal && !!nowPlaying;
   const msRefs = useRef({});
   const lastToldRef = useRef('');
+  // Phone app: the lock-screen player stays for 2 hours after the last music
+  // anywhere on the account. Without sound iOS suspends the app within a
+  // minute, the player leaves the lock screen and nothing can bring it back
+  // (a suspended app runs no code). So while nothing plays the silent
+  // stand-in keeps running: the app stays connected, and music started on any
+  // device shows up on the lock screen with working controls.
+  const stayUntilRef = useRef(0);
+  if (shownPlaying) stayUntilRef.current = Date.now() + STAY_ON_LOCK_SCREEN_MS;
+  const [, setStayTick] = useState(0);
+  useEffect(() => {
+    const left = stayUntilRef.current - Date.now();
+    if (shownPlaying || left <= 0) return undefined;
+    const t = setTimeout(() => { mediaLog('lock screen hold: 2 h without music, letting go'); setStayTick((n) => n + 1); }, left + 100);
+    return () => clearTimeout(t);
+  }, [shownPlaying]);
+  const staying = IN_PHONE_APP && IS_IOS && (msLocal || msRemote) && Date.now() < stayUntilRef.current;
+  // The stand-in plays for a session playing elsewhere, and (phone app, within
+  // the 2 hours) whenever this phone is not making the sound itself.
+  const standIn = (msRemote && shownPlaying) || (staying && !(msLocal && shownPlaying));
+  // Held by the stand-in while paused: iOS may show the pause button then (it
+  // sees silent media playing), so a press of either button means play.
+  const holding = standIn && !shownPlaying;
   // Lock-screen play and pause ask for a state; they used to both toggle, so
   // once the app and the sound disagreed each tap went the wrong way. A tap
   // for the state we are already in re-syncs the sound and the icon instead.
   const msResync = () => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     try { if (ms) ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
-    keepAlive(msRemote && shownPlaying, shownPosition);
+    keepAlive(standIn, shownPosition);
     const el = audioRef.current;
     if (msLocal && el && el.getAttribute('src')) {
       if (shownPlaying && el.paused) el.play().catch(() => {});
       else if (!shownPlaying && !el.paused) ownPause(el);
     }
   };
-  msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote };
+  msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
   const msNote = (m) => mediaLog(`${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
@@ -1983,6 +2006,7 @@ export function usePlayer(jf) {
     const playPause = (wantPlaying) => () => {
       const r = msRefs.current;
       msNote(`lock screen ${wantPlaying ? 'play' : 'pause'}`);
+      if (r.holding && !r.playing) { msNote('play (held by the stand-in)'); r.toggle(); return; }
       if (r.playing === wantPlaying) { r.resync(); return; }
       if (!r.remote) { r.toggle(); return; }
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);
@@ -2018,9 +2042,10 @@ export function usePlayer(jf) {
   }, [nowPlaying?.itemId, nowPlaying?.title, nowPlaying?.artId, msLocal, msRemote, jf]);
   useEffect(() => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
-    // The keep-alive only stands in while the sound is elsewhere; this
-    // device's own playback carries the session by itself.
-    keepAlive(msRemote && shownPlaying, shownPosition);
+    // The keep-alive stands in while the sound is elsewhere, and in the phone
+    // app while nothing plays (the 2-hour hold); this device's own playback
+    // carries the session by itself.
+    keepAlive(standIn, shownPosition);
     if (!ms || (!msLocal && !msRemote)) return;
     try { ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
     // What the lock screen is told, each time it changes (not every second).
@@ -2034,7 +2059,7 @@ export function usePlayer(jf) {
       try { ms.setPositionState({ duration: shownDuration, playbackRate: 1, position: Math.min(Math.max(0, shownPosition || 0), shownDuration) }); } catch { /* invalid state */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownPlaying, Math.floor(shownPosition || 0), shownDuration, nowPlaying?.itemId, msLocal, msRemote]);
+  }, [shownPlaying, Math.floor(shownPosition || 0), shownDuration, nowPlaying?.itemId, msLocal, msRemote, standIn]);
   // The session's queue: the active player's published one while mirroring.
   // Its index only counts when it points at the track that is actually
   // playing (the queue and now-playing arrive as separate messages).

@@ -76,15 +76,41 @@ export function useThrottledVolume(volume, onChange, throttled = true) {
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   return [drag != null ? drag : volume, move, end];
 }
+// iOS gives a range input's drag to the scrolling sheet around it as soon as
+// the finger moves a little up or down (touch-action: none does not stop it):
+// the drag just ended and the sheet scrolled. So the slider takes the touch
+// itself: a non-passive touchmove that cancels the scroll, and the level read
+// from the finger's x (anywhere on the bar, not only on the knob).
+export function useTouchSlider(move, end) {
+  const ref = useRef(null);
+  const cb = useRef({ move, end }); cb.current = { move, end };
+  useEffect(() => {
+    const el = ref.current; if (!el) return undefined;
+    const at = (t) => {
+      const r = el.getBoundingClientRect();
+      const min = Number(el.min || 0), max = Number(el.max || 100);
+      return Math.round(min + Math.max(0, Math.min(1, (t.clientX - r.left) / r.width)) * (max - min));
+    };
+    const start = (e) => { if (e.touches.length !== 1) return; e.preventDefault(); cb.current.move(at(e.touches[0])); };
+    const drag = (e) => { if (e.touches.length !== 1) return; e.preventDefault(); cb.current.move(at(e.touches[0])); };
+    const stop = () => cb.current.end();
+    el.addEventListener('touchstart', start, { passive: false });
+    el.addEventListener('touchmove', drag, { passive: false });
+    el.addEventListener('touchend', stop); el.addEventListener('touchcancel', stop);
+    return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', drag); el.removeEventListener('touchend', stop); el.removeEventListener('touchcancel', stop); };
+  }, []);
+  return ref;
+}
 function SheetVolume({ volume, onChange }) {
   const [shown, move, end] = useThrottledVolume(volume, onChange);
+  const touch = useTouchSlider(move, end);
   return (
     <div className="dm-volume" title={`Volume ${shown}%`}>
       <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.642 3.642 0 0 1-1.33-4.967 3.639 3.639 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.139 2.139 0 0 0 0 3.7l5.8 3.35V2.8l-5.8 3.35z" /></svg>
       <input
-        type="range" min="0" max="100" value={shown} aria-label="Speaker volume"
+        ref={touch} type="range" min="0" max="100" value={shown} aria-label="Speaker volume"
         onChange={(e) => move(Number(e.target.value))}
-        onPointerUp={end} onPointerCancel={end} onTouchEnd={end} onTouchCancel={end} onKeyUp={end}
+        onPointerUp={end} onPointerCancel={end} onKeyUp={end}
         style={{ '--pct': `${shown}%` }}
       />
       <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.642 3.642 0 0 1-1.33-4.967 3.639 3.639 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.139 2.139 0 0 0 0 3.7l5.8 3.35V2.8l-5.8 3.35zm8.683 4.29V5.56a2.75 2.75 0 0 1 0 4.88z" /><path d="M11.5 13.614a5.752 5.752 0 0 0 0-11.228v1.55a4.252 4.252 0 0 1 0 8.127v1.55z" /></svg>

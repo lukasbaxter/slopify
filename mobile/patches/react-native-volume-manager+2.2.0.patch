@@ -1,8 +1,79 @@
 diff --git a/node_modules/react-native-volume-manager/ios/VolumeManager.m b/node_modules/react-native-volume-manager/ios/VolumeManager.m
-index 5bcd2ce..d285834 100644
+index 5bcd2ce..641f930 100644
 --- a/node_modules/react-native-volume-manager/ios/VolumeManager.m
 +++ b/node_modules/react-native-volume-manager/ios/VolumeManager.m
-@@ -338,10 +338,10 @@ RCT_EXPORT_METHOD(enableInSilenceMode:(BOOL)enabled) {
+@@ -1,4 +1,5 @@
+ #import <AVFoundation/AVFoundation.h>
++#import <objc/message.h>
+ #import <VolumeManager.h>
+ #import <AVKit/AVRoutePickerView.h>
+ 
+@@ -56,6 +57,7 @@
+ 
+ @implementation VolumeManager {
+   bool hasListeners;
++  bool sysVolSeen;
+   CustomVolumeView *customVolumeView;
+   AVAudioSession *audioSession;
+   MPVolumeView *hiddenVolumeView;
+@@ -70,6 +72,7 @@
+   if (self) {
+     audioSession = [AVAudioSession sharedInstance];
+     [self addVolumeListener];
++    [self subscribeSystemVolume];
+   }
+   [self initVolumeView];
+   return self;
+@@ -179,6 +182,40 @@ RCT_EXPORT_MODULE(VolumeManager)
+                     context:nil];
+ }
+ 
++// Slopify: the system-wide volume change, from AVSystemController. outputVolume
++// KVO only reports while THIS app's audio session is active, and the WebView's
++// playback session interrupts it (iOS log: "com.apple.WebKit 'MediaPlayback'
++// INTERRUPTING Slopify"), so the hardware buttons went unheard. The system
++// notification arrives whatever the session state. Once it is seen, KVO
++// stays quiet so a press is not reported twice.
++- (void)subscribeSystemVolume {
++  Class avsc = NSClassFromString(@"AVSystemController");
++  SEL sharedSel = NSSelectorFromString(@"sharedAVSystemController");
++  SEL setAttr = NSSelectorFromString(@"setAttribute:forKey:error:");
++  if (avsc && [avsc respondsToSelector:sharedSel]) {
++    id shared = ((id (*)(id, SEL))objc_msgSend)(avsc, sharedSel);
++    if (shared && [shared respondsToSelector:setAttr]) {
++      NSError *err = nil;
++      ((BOOL (*)(id, SEL, id, id, NSError **))objc_msgSend)(shared, setAttr, @[ @"SystemVolumeDidChange" ], @"AVSystemController_SubscribeToNotificationsAttribute", &err);
++    }
++  }
++  NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
++  [nc addObserver:self selector:@selector(systemVolumeDidChange:) name:@"SystemVolumeDidChange" object:nil];
++  [nc addObserver:self selector:@selector(systemVolumeDidChange:) name:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil];
++}
++
++- (void)systemVolumeDidChange:(NSNotification *)notification {
++  NSDictionary *info = notification.userInfo;
++  id category = info[@"AudioCategory"] ?: info[@"AVSystemController_AudioCategoryNotificationParameter"];
++  if ([category isKindOfClass:[NSString class]] && [category rangeOfString:@"Ringtone"].location != NSNotFound) return;
++  id volume = info[@"Volume"] ?: info[@"AVSystemController_AudioVolumeNotificationParameter"];
++  if (![volume isKindOfClass:[NSNumber class]]) return;
++  sysVolSeen = YES;
++  if (hasListeners) {
++    [self sendEventWithName:@"RNVMEventVolume" body:@{@"volume" : volume}];
++  }
++}
++
+ - (void)removeVolumeListener {
+   [audioSession removeObserver:self forKeyPath:@"outputVolume"];
+ }
+@@ -187,6 +224,7 @@ RCT_EXPORT_MODULE(VolumeManager)
+                       ofObject:(id)object
+                         change:(NSDictionary<NSString *, id> *)change
+                        context:(void *)context {
++  if (sysVolSeen) return; // Slopify: the system notification reports it
+   if (object == [AVAudioSession sharedInstance] &&
+       [keyPath isEqualToString:@"outputVolume"]) {
+     float newValue = [change[@"new"] floatValue];
+@@ -338,10 +376,10 @@ RCT_EXPORT_METHOD(enableInSilenceMode:(BOOL)enabled) {
  }
  
  - (void)applicationWillEnterForeground:(NSNotification *)notification {

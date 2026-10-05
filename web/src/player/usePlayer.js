@@ -1945,6 +1945,7 @@ export function usePlayer(jf) {
   const msLocal = !relayTarget && device?.kind === 'local' && !!current;
   const msRemote = !msLocal && !!nowPlaying;
   const msRefs = useRef({});
+  const lastToldRef = useRef('');
   // Lock-screen play and pause ask for a state; they used to both toggle, so
   // once the app and the sound disagreed each tap went the wrong way. A tap
   // for the state we are already in re-syncs the sound and the icon instead.
@@ -2017,6 +2018,9 @@ export function usePlayer(jf) {
     keepAlive(msRemote && shownPlaying, shownPosition);
     if (!ms || (!msLocal && !msRemote)) return;
     try { ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
+    // What the lock screen is told, each time it changes (not every second).
+    const told = `${shownPlaying ? 'playing' : 'paused'} ${msLocal ? 'local' : 'remote'} ${nowPlaying?.itemId?.slice(0, 6) || '-'}`;
+    if (told !== lastToldRef.current) { lastToldRef.current = told; mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState})`); }
     // iOS reads the action handlers when the media starts or stops: set
     // before the keep-alive element played, they were sometimes ignored and
     // the lock screen showed 10-second skips instead of previous / next.

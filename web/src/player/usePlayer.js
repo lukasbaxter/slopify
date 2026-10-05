@@ -1515,8 +1515,13 @@ export function usePlayer(jf) {
       // playlist and buffers ahead, so the skip is a swap, not a load.
       // Not while hidden: the swap only happens in the foreground, so a
       // locked phone would download every next track for nothing.
+      // Not on iPhone/iPad either: a paused element holding a song is one
+      // WebKit may pick as the page's Now Playing, and it then tells iOS
+      // "paused" while the song plays (phone syslog: the spare got the next
+      // song as the app went to the background, and mediaremoted flipped to
+      // Paused 150 ms later). The next song is in memory there anyway.
       const spare = spareRef.current;
-      if (spare && !document.hidden && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
+      if (spare && !IS_IOS && !document.hidden && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
         spare.dataset.track = ahead[0];
         spare.src = wholeFor(ahead[0]) || jf.playbackUrl(ahead[0]);
         try { spare.load(); } catch { /* not unlocked yet */ }

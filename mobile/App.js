@@ -24,9 +24,11 @@ const DEVICE_FORM = Device.deviceType === Device.DeviceType.TABLET ? 'tablet' : 
 const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS })}; true;`;
 
 // iOS: a music player's audio session. The volume listener switches the
-// session to Ambient, which iOS silences when the phone locks (and with the
-// ring switch); Playback keeps the music going with the screen off. Set
-// again whenever the app comes forward, since the listener re-arms Ambient.
+// session to Ambient as the module starts (only then: VolumeManager init),
+// which iOS silences when the phone locks (and with the ring switch);
+// Playback keeps the music going with the screen off. Set once, after the
+// listener. Not again on every return to the app: resetting the category
+// while a song plays made iOS pause it for a moment at each unlock.
 const musicSession = () => {
   if (Platform.OS !== 'ios') return;
   VolumeManager.setCategory('Playback', false).catch(() => {});
@@ -69,7 +71,6 @@ export default function App() {
       setTimeout(musicSession, 300);
     })();
     const appState = AppState.addEventListener('change', (s) => {
-      if (s === 'active') musicSession();
       // The page holds lock-screen play/pause for other devices briefly and
       // drops it when the app is leaving (iOS pauses that session on close).
       web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: ${JSON.stringify(s)} } })); true;`);

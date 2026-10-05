@@ -27,11 +27,15 @@ const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME,
 // session to Ambient as the module starts (only then: VolumeManager init),
 // which iOS silences when the phone locks (and with the ring switch);
 // Playback keeps the music going with the screen off. Set once, after the
-// listener. Not again on every return to the app: resetting the category
-// while a song plays made iOS pause it for a moment at each unlock.
+// listener. Mixable: this is the APP's session, not the one the music plays
+// in (WebKit has its own). The library re-activates it each time the app
+// comes forward, and as non-mixable Playback that activation interrupted
+// WebKit's: the phone's log at an unlock read "Slopify(…) 'MediaPlayback'
+// INTERRUPTING com.apple.WebKit(…)", then WebKit "stopping playing" (the
+// pause and gap after unlocking).
 const musicSession = () => {
   if (Platform.OS !== 'ios') return;
-  VolumeManager.setCategory('Playback', false).catch(() => {});
+  VolumeManager.setCategory('Playback', true).catch(() => {});
 };
 
 export default function App() {

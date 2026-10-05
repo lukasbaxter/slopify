@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { paletteColors } from '../api/colors.js';
 import Calibrate from './Calibrate.jsx';
 import { createShadow } from '../api/shadowStream.js';
+import { ROUTES_WEB_AUDIO } from '../player/usePlayer.js';
 
 // The visualizer is a graphic-EQ family (audioMotion-analyzer, the spectrum
 // engine Feishin ships). Settings come from the full-screen tab's ⋯ menu and
@@ -56,6 +57,9 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   // look at the desktop app) counts as remote even if a paused local queue
   // is still around, so the shadow stream is what gets analysed.
   const local = !player.mirroring && player.device?.kind === 'local' && !!player.current;
+  // Tapping the element needs it routed through Web Audio, which iOS never is:
+  // there the shadow copy stands in for local playback too.
+  const tap = local && ROUTES_WEB_AUDIO;
   const trackId = player.nowPlayingId;
   const cfg = settings || DEFAULT_VIZ;
   const style = EQ_STYLES.find((x) => x.id === cfg.style) || EQ_STYLES[0];
@@ -79,7 +83,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   // the delay against this.
   const reported = (at = Date.now()) => { const c = clockRef.current; return c.pos + (c.playing ? (at - c.at) / 1000 : 0); };
   useEffect(() => {
-    if (!active || local) { shadowRef.current?.stop(); return undefined; }
+    if (!active || tap) { shadowRef.current?.stop(); return undefined; }
     const sh = shadow();
     if (!sh) return undefined;
     // What is coming out of the speaker right now: reported minus its delay.
@@ -112,9 +116,9 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
     tick();
     const t = setInterval(tick, 250);
     return () => { clearInterval(t); sh.onPlaying(null); };
-  }, [active, local, trackId, player.playing, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, tap, trackId, player.playing, offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const graph = () => { const wa = local ? player.webAudio() : shadow(); wa?.ctx?.resume?.(); return wa; };
+  const graph = () => { const wa = tap ? player.webAudio() : shadow(); wa?.ctx?.resume?.(); return wa; };
 
   // Graphic EQ engine.
   useEffect(() => {
@@ -146,7 +150,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
       } catch (e) { if (alive) { console.error('visualizer', e); setState('error'); } }
     })();
     return () => { alive = false; offSource?.(); try { amRef.current?.destroy(); } catch {} amRef.current = null; };
-  }, [active, local, style.id, cfg.gradient]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, tap, style.id, cfg.gradient]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Match album art": three colours from the cover, re-registered on every track.
   const artUrl = player.nowPlaying?.artId ? jf.imageUrl(player.nowPlaying.artId, { maxHeight: 200 }) : player.nowPlaying?.artUrl || null;
   useEffect(() => {

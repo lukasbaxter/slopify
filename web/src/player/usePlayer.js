@@ -7,6 +7,12 @@ import { createTrackCache } from './trackCache.js';
 // among possibly several (the relay numbers those for the OTHER clients).
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
+// iPhone / iPad: the element plays straight to the speaker, never through Web
+// Audio. Locked, a track change left the element playing (clock running) into
+// a graph iOS had stopped: silence, the lock screen showing paused, and play
+// doing nothing. The visualizer analyses its silent shadow copy there instead.
+const IS_IOS = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+export const ROUTES_WEB_AUDIO = !IS_IOS;
 // A lock-screen play/pause meant for another device, held for a moment and
 // dropped if the app is closing (see the Media Session handlers).
 const remotePauseHold = (() => {
@@ -194,6 +200,7 @@ export function usePlayer(jf) {
   const webAudioRef = useRef(null);
   const webAudio = useCallback(() => {
     if (webAudioRef.current) { webAudioRef.current.ctx.resume?.().catch(() => {}); return webAudioRef.current; }
+    if (!ROUTES_WEB_AUDIO) return null;
     const el = audioRef.current; if (!el) return null;
     const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return null;
     const ctx = new Ctx({ latencyHint: 'playback' });

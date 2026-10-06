@@ -119,7 +119,7 @@ const weighted = <T>(rnd: () => number, xs: T[], w: (x: T) => number) => {
   return xs.length - 1;
 };
 
-export async function playlistRecommendations(db: DB, playlistId: string, uid: string, o: Opts & { n?: number; seed?: number; budgetMs?: number } = {}): Promise<TrackRow[]> {
+export async function playlistRecommendations(db: DB, playlistId: string, uid: string, o: Opts & { n?: number; seed?: number; budgetMs?: number; onMiss?: () => void } = {}): Promise<TrackRow[]> {
   const n = o.n ?? 10;
   const deadline = Date.now() + (o.budgetMs ?? 4000);
   const idx = artistIndex(db);
@@ -139,8 +139,12 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
   // background warm fills the rest for next time.
   const rel = async (id: string) => {
     const hit = cachedRel(db, id); if (hit || Date.now() > deadline) return hit;
-    const a = artist(id); return a.name ? deezerRelated(db, { id, name: a.name }, { ...o, deadline }) : null;
+    const a = artist(id); if (!a.name) return null;
+    missed = true;
+    // Past the budget the page goes without; the answer still lands in the cache.
+    return Promise.race([deezerRelated(db, { id, name: a.name }, { ...o, deadline }), new Promise<null>((r) => setTimeout(() => r(null), Math.max(0, deadline - Date.now())))]);
   };
+  let missed = false;
 
   // The playlist's artists, weighted by share of its songs (a feature counts
   // as part of a song).
@@ -226,13 +230,14 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
     per.set(a, (per.get(a) || 0) + 1); seen.add(key); fromSrc.set(main(a), (fromSrc.get(main(a)) || 0) + 1);
     out.push(t);
   }
+  if (missed) o.onMiss?.();
   return out;
 }
 
 // Fill the Deezer cache for every playlist's artists and the artists they
 // point to, so the first open of a playlist does not wait on Deezer.
-export async function warmPlaylistReco(db: DB, o: Opts = {}): Promise<number> {
-  const seeds = (db.prepare(`SELECT DISTINCT t.artist_ids FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id`).all() as { artist_ids: string }[])
+export async function warmPlaylistReco(db: DB, o: Opts & { playlistId?: string } = {}): Promise<number> {
+  const seeds = (db.prepare(`SELECT DISTINCT t.artist_ids FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id${o.playlistId ? ' WHERE pt.playlist_id = ?' : ''}`).all(...(o.playlistId ? [o.playlistId] : [])) as { artist_ids: string }[])
     .flatMap((r) => JSON.parse(r.artist_ids) as string[]);
   const nameOf = db.prepare('SELECT name FROM artists WHERE id = ?');
   const todo = [...new Set(seeds)];
@@ -241,7 +246,7 @@ export async function warmPlaylistReco(db: DB, o: Opts = {}): Promise<number> {
     if (done.has(id)) return null; done.add(id);
     if (cachedRel(db, id)) return cachedRel(db, id);
     const name = (nameOf.get(id) as any)?.name; if (!name) return null;
-    fetched++; return deezerRelated(db, { id, name }, { ...o, background: true });
+    fetched++; return deezerRelated(db, { id, name }, { ...o, background: o.background ?? true });
   };
   const next: string[] = [];
   for (const id of todo) { const r = await visit(id); for (const x of r?.related || []) if (x.id) next.push(x.id); }
@@ -256,7 +261,10 @@ export function registerPlaylistReco(app: FastifyInstance, db: DB, o: Opts & { w
     const p = db.prepare('SELECT id FROM playlists WHERE id = ? AND user_id = ?').get((req.params as any).id, uid) as { id: string } | undefined;
     if (!p) return reply.code(404).send({ error: 'no such playlist' });
     const q = req.query as any;
-    const items = await playlistRecommendations(db, p.id, uid, { ...o, n: Math.min(Number(q.limit) || 10, 30), seed: Number(q.seed) || 0 });
+    // A playlist Deezer has not been asked about yet: fetch its circle now, at
+    // page priority, so a Refresh a few seconds later has all of it.
+    const onMiss = () => { void warmPlaylistReco(db, { ...o, playlistId: p.id, background: false }).catch(() => {}); };
+    const items = await playlistRecommendations(db, p.id, uid, { ...o, n: Math.min(Number(q.limit) || 10, 30), seed: Number(q.seed) || 0, onMiss });
     return { items: items.map(trackOut) };
   });
   if (!o.warm) return;

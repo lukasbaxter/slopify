@@ -17,12 +17,12 @@
 // Deezer answers are kept in ext_cache for two weeks and warmed in the
 // background for every playlist's artists, so opening a playlist is quick.
 import type { FastifyInstance } from 'fastify';
-import type { DB } from './db.js';
+import { libraryVersion, type DB } from './db.js';
 import { TRACK_SELECT, trackOut, type TrackRow } from './library.js';
 
 type Fetcher = typeof fetch;
 type Rel = { fans: number | null; related: { name: string; id: string | null }[] };
-type Opts = { fetcher?: Fetcher; log?: (m: string) => void };
+type Opts = { fetcher?: Fetcher; log?: (m: string) => void; background?: boolean; deadline?: number };
 
 const TTL = 14 * 24 * 60 * 60 * 1000;
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
@@ -32,13 +32,34 @@ const ALT_TAKE = /\b(live|sped ?up|slowed|instrumental|inst|remix|acapella|a cap
 // Tags too broad to say anything about a scene.
 const BROAD = new Set(['other', 'pop', 'hiphop', 'rap', 'rb', 'electronic', 'electronica', 'dance', 'rock', 'alternative', 'unknown', 'misc', 'music', 'soundtrack', 'filmsgames', 'world']);
 
-// Deezer calls go through one slow lane: their limit is 50 per 5 s per IP.
-let lane: Promise<unknown> = Promise.resolve();
-const throttled = <T>(fn: () => Promise<T>): Promise<T> => {
-  const run = lane.then(fn, fn);
-  lane = run.then(() => new Promise((r) => setTimeout(r, 130)), () => new Promise((r) => setTimeout(r, 130)));
-  return run;
+// Deezer calls go through one slow lane (their limit is 50 per 5 s per IP).
+// A page waiting on an answer goes ahead of the background warm.
+const queues: { hi: (() => void)[]; lo: (() => void)[] } = { hi: [], lo: [] };
+let pumping = false;
+const pump = () => {
+  if (pumping) return;
+  const next = queues.hi.shift() || queues.lo.shift(); if (!next) return;
+  pumping = true; next();
+  setTimeout(() => { pumping = false; pump(); }, 130);
 };
+const throttled = <T>(fn: () => Promise<T>, background = false): Promise<T> => new Promise((resolve, reject) => {
+  (background ? queues.lo : queues.hi).push(() => { fn().then(resolve, reject); });
+  pump();
+});
+
+// Which tracks credit which artist, built once per library version: the
+// scoring asks about ~150 artists and a LIKE scan of the tracks is 35 ms each.
+let index: { v: string; byArtist: Map<string, { id: string; genres: string; artist_ids: string }[]> } | null = null;
+function artistIndex(db: DB) {
+  const v = libraryVersion(db);
+  if (index?.v === v) return index.byArtist;
+  const byArtist = new Map<string, { id: string; genres: string; artist_ids: string }[]>();
+  for (const r of db.prepare('SELECT id, genres, artist_ids FROM tracks').iterate() as Iterable<{ id: string; genres: string; artist_ids: string }>) {
+    for (const a of JSON.parse(r.artist_ids) as string[]) { let l = byArtist.get(a); if (!l) byArtist.set(a, l = []); l.push(r); }
+  }
+  index = { v, byArtist };
+  return byArtist;
+}
 
 function cachedRel(db: DB, artistId: string): Rel | null {
   const row = db.prepare('SELECT json, at FROM ext_cache WHERE k = ?').get(`dzrel:${artistId}`) as { json: string; at: number } | undefined;
@@ -51,10 +72,13 @@ function cachedRel(db: DB, artistId: string): Rel | null {
 export async function deezerRelated(db: DB, a: { id: string; name: string }, o: Opts = {}): Promise<Rel | null> {
   const hit = cachedRel(db, a.id); if (hit) return hit;
   const f = o.fetcher || fetch;
-  const json = (url: string) => throttled(() => f(url, { signal: AbortSignal.timeout(8000) }).then(async (r) => {
+  const json = (url: string) => throttled(async () => {
+    // Its turn came too late for the page that asked: skip, uncached.
+    if (o.deadline && Date.now() > o.deadline) throw new Error('out of time');
+    const r = await f(url, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`);
     const j = await r.json() as any; if (j?.error) throw new Error(`deezer ${j.error.message || j.error.type}`); return j;
-  }));
+  }, o.background);
   try {
     const s = await json(`https://api.deezer.com/search/artist?q=${encodeURIComponent(a.name)}&limit=5`);
     const dz = (s.data || []).find((x: any) => norm(x.name) === norm(a.name));
@@ -69,7 +93,7 @@ export async function deezerRelated(db: DB, a: { id: string; name: string }, o: 
     }
     db.prepare('INSERT INTO ext_cache (k, json, at) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET json = excluded.json, at = excluded.at').run(`dzrel:${a.id}`, JSON.stringify(out), Date.now());
     return out;
-  } catch (e: any) { o.log?.(`related ${a.name}: ${e.message}`); return null; }
+  } catch (e: any) { if (e.message !== 'out of time') o.log?.(`related ${a.name}: ${e.message}`); return null; }
 }
 
 const tagsOf = (genres: string[]) => {
@@ -97,7 +121,9 @@ const weighted = <T>(rnd: () => number, xs: T[], w: (x: T) => number) => {
 
 export async function playlistRecommendations(db: DB, playlistId: string, uid: string, o: Opts & { n?: number; seed?: number; budgetMs?: number } = {}): Promise<TrackRow[]> {
   const n = o.n ?? 10;
-  const deadline = Date.now() + (o.budgetMs ?? 8000);
+  const deadline = Date.now() + (o.budgetMs ?? 4000);
+  const idx = artistIndex(db);
+  const byArtist = (a: string) => idx.get(a) || [];
   const rows = db.prepare(`${TRACK_SELECT} JOIN playlist_tracks pt ON pt.track_id = t.id WHERE pt.playlist_id = ?`).all(playlistId) as TrackRow[];
   if (!rows.length) return [];
   const have = new Set(rows.map((r) => r.id));
@@ -113,7 +139,7 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
   // background warm fills the rest for next time.
   const rel = async (id: string) => {
     const hit = cachedRel(db, id); if (hit || Date.now() > deadline) return hit;
-    const a = artist(id); return a.name ? deezerRelated(db, { id, name: a.name }, o) : null;
+    const a = artist(id); return a.name ? deezerRelated(db, { id, name: a.name }, { ...o, deadline }) : null;
   };
 
   // The playlist's artists, weighted by share of its songs (a feature counts
@@ -140,7 +166,7 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
   // (a star with 300 features would otherwise drag in every guest).
   for (const p of top) {
     const co = new Set<string>();
-    for (const t of db.prepare('SELECT artist_ids FROM tracks WHERE artist_ids LIKE ?').all(`%"${p}"%`) as { artist_ids: string }[]) for (const b of JSON.parse(t.artist_ids)) co.add(b);
+    for (const t of byArtist(p)) for (const b of JSON.parse(t.artist_ids)) co.add(b);
     co.delete(p);
     for (const b of co) add(b, p, w.get(p)! * 0.25 / Math.sqrt(co.size));
   }
@@ -157,7 +183,7 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
   const med = lf.length ? lf[lf.length >> 1] : null;
   const artistTags = (a: string) => {
     const m = new Map<string, number>();
-    for (const t of db.prepare('SELECT genres FROM tracks WHERE artist_ids LIKE ? LIMIT 400').all(`%"${a}"%`) as { genres: string }[]) for (const g of tagsOf(JSON.parse(t.genres))) m.set(g, (m.get(g) || 0) + 1);
+    for (const t of byArtist(a).slice(0, 400)) for (const g of tagsOf(JSON.parse(t.genres))) m.set(g, (m.get(g) || 0) + 1);
     return m;
   };
   const final = new Map<string, number>();
@@ -179,7 +205,8 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
   const rnd = prng(o.seed ?? 0);
   const pool: { s: number; a: string; t: TrackRow }[] = [];
   for (const a of [...final].sort((x, y) => y[1] - x[1]).slice(0, 40).map(([a]) => a)) {
-    const ts = (db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ?`).all(`%"${a}"%`) as TrackRow[])
+    const ids = byArtist(a).slice(0, 900).map((x) => x.id);
+    const ts = (ids.length ? db.prepare(`${TRACK_SELECT} WHERE t.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as TrackRow[] : [])
       .filter((t) => !have.has(t.id) && !disliked.has(t.id) && !titles.has(songKey(t)) && !ALT_TAKE.test(t.title))
       .map((t) => {
         const ids = JSON.parse(t.artist_ids) as string[];
@@ -214,7 +241,7 @@ export async function warmPlaylistReco(db: DB, o: Opts = {}): Promise<number> {
     if (done.has(id)) return null; done.add(id);
     if (cachedRel(db, id)) return cachedRel(db, id);
     const name = (nameOf.get(id) as any)?.name; if (!name) return null;
-    fetched++; return deezerRelated(db, { id, name }, o);
+    fetched++; return deezerRelated(db, { id, name }, { ...o, background: true });
   };
   const next: string[] = [];
   for (const id of todo) { const r = await visit(id); for (const x of r?.related || []) if (x.id) next.push(x.id); }

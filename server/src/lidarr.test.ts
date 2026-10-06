@@ -11,6 +11,7 @@ function fakeLidarr() {
     queue: [] as any[],          // raw /queue records
     lookup: null as any[] | null, // overrides /artist/lookup when set
     calls: [] as string[],
+    onRefresh: {} as Record<number, any[]>, // albums a RefreshArtist of that artist adds
     nextId: 1,
   };
   // /queue and /wanted/missing page like the real thing.
@@ -47,7 +48,13 @@ function fakeLidarr() {
     if (p === '/album/monitor') { const b = JSON.parse(init.body); for (const a of state.albums) if (b.albumIds.includes(a.id)) a.monitored = b.monitored; return json({}); }
     if (p === '/queue') return json(paged(state.queue, u));
     if (p === '/wanted/missing') return json(paged(state.albums.filter((a) => a.monitored && !a.statistics.trackFileCount).map((a) => ({ id: a.id, foreignAlbumId: a.foreignAlbumId })), u));
-    if (p === '/command') return json({ id: 99 });
+    if (p === '/command') {
+      const b = JSON.parse(init.body);
+      // A refresh brings in what the artist's (new) profile allows.
+      if (b.name === 'RefreshArtist') for (const id of b.artistIds || []) for (const al of state.onRefresh[id] || []) state.albums.push(al);
+      return json({ id: 99 });
+    }
+    if (p === '/command/99') return json({ id: 99, status: 'completed' });
     if (p.startsWith('/album/')) return json(state.albums.find((a) => a.id === Number(p.split('/')[2])));
     throw new Error(`unexpected ${method} ${p}`);
   };
@@ -68,6 +75,22 @@ describe('lidarr client', () => {
     const d = await l.discography('Porter Robinson');
     expect(state.artists[0]).toMatchObject({ monitored: false, rootFolderPath: '/music', qualityProfileId: 3, metadataProfileId: 2, addOptions: { monitor: 'none', searchForMissingAlbums: false } });
     expect(d.releases).toEqual([{ album_id: 'mb-worlds', artist: 'Porter Robinson', title: 'Worlds', rtype: 'Album', year: '2014', date: '2014-08-12', image: 'http://img/worlds', total_tracks: 12, secondary: [] }]);
+  });
+
+  it('an artist already in Lidarr on another metadata profile moves onto the configured one and is refreshed before its releases are read', async () => {
+    const { state, fetcher } = fakeLidarr();
+    const artist = { id: 50, artistName: 'AWOLNATION', foreignArtistId: 'fa-awol', metadataProfileId: 1, images: [] };
+    state.artists.push(artist);
+    state.albums.push(fakeAlbum(51, { title: 'Run', artist }));
+    state.onRefresh[50] = [fakeAlbum(52, { title: 'Back From Earth', albumType: 'EP', artist })];
+    const d = await client(fetcher).discography('AWOLNATION');
+    expect(state.artists[0].metadataProfileId).toBe(2);
+    expect(state.calls).toContain('PUT /artist/50');
+    expect(d.releases.map((r) => r.title).sort()).toEqual(['Back From Earth', 'Run']);
+    // already on it: left alone
+    state.calls.length = 0;
+    await client(fetcher).discography('AWOLNATION');
+    expect(state.calls.filter((c) => c.startsWith('PUT') || c.startsWith('POST'))).toEqual([]);
   });
 
   it('request monitors the album AND its artist (the wanted list needs both), and reports what is already on disk as exists', async () => {

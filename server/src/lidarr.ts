@@ -113,7 +113,7 @@ export function lidarrClient(opts: LidarrOptions) {
     const have = (await allArtists()).find((a: any) => from?.foreignArtistId
       ? a.foreignArtistId === from.foreignArtistId || (norm(a.artistName) === norm(name) && !a.foreignArtistId)
       : norm(a.artistName) === norm(name));
-    if (have) return have;
+    if (have) return fitProfile(have);
     // The lookup's first result is only trusted when its name at least
     // contains (or is contained by) the requested one; anything farther off
     // would add a stranger to the library.
@@ -121,7 +121,7 @@ export function lidarrClient(opts: LidarrOptions) {
     const cand = from ?? await api(`/artist/lookup?term=${encodeURIComponent(name)}`, { timeoutMs: 30000 })
       .then((r: any[]) => (r || []).find((a) => norm(a.artistName) === norm(name)) || (r || []).find(close) || null);
     if (!cand) return null;
-    if (cand.id) return cand; // the lookup already knew it
+    if (cand.id) return fitProfile(cand); // the lookup already knew it
     const added = await api('/artist', {
       method: 'POST',
       body: JSON.stringify({
@@ -137,6 +137,31 @@ export function lidarrClient(opts: LidarrOptions) {
     cache.delete('artists');
     log(`lidarr: added ${added.artistName} (unmonitored)`);
     return added;
+  };
+
+  // An artist already in Lidarr (added by hand, or an older setup) may sit
+  // on another metadata profile than the configured one - Lidarr's default
+  // lists studio albums only, so the artist page's "not in your library"
+  // came up empty for an artist whose albums were all here. When a profile
+  // is configured, move the artist onto it and wait for the refresh that
+  // fetches the releases it now allows (they are read right after).
+  const fitProfile = async (artist: any) => {
+    if (!opts.metadataProfile || !artist?.id) return artist;
+    const want = await profileId('metadataprofile', opts.metadataProfile);
+    if (!want || artist.metadataProfileId === want) return artist;
+    const moved = await api(`/artist/${artist.id}`, { method: 'PUT', body: JSON.stringify({ ...artist, metadataProfileId: want }) });
+    cache.delete('artists');
+    log(`lidarr: ${artist.artistName} moved to metadata profile ${want}`);
+    try {
+      const cmd = await api('/command', { method: 'POST', body: JSON.stringify({ name: 'RefreshArtist', artistIds: [artist.id] }) });
+      const until = Date.now() + 60000;
+      while (Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const c = await api(`/command/${cmd.id}`);
+        if (['completed', 'failed', 'aborted', 'cancelled'].includes(c?.status)) break;
+      }
+    } catch (e: any) { log(`lidarr refresh ${artist.artistName}: ${e.message}`); }
+    return moved ?? artist;
   };
 
   // A fresh artist's albums arrive with its first metadata refresh: poll a bit.

@@ -303,6 +303,13 @@ export class Slopify {
       playlists: pls.items.filter((x) => x.Name.toLowerCase().includes(term.toLowerCase())),
     };
   }
+  // Songs for a playlist's "Recommended", from the playlist's circle of
+  // artists (server: playlistreco.ts). seed = the Refresh generation.
+  async playlistRecommended(playlistId, { limit = 10, seed = 0 } = {}) {
+    const r = await this._fetch(`/api/playlists/${playlistId}/recommended?limit=${limit}&seed=${seed}`);
+    const dis = this._dislikes || {};
+    return (r.items || []).map(rowTrack).filter((t) => !dis[t.Id]);
+  }
   async instantMix(itemId, limit = 100) {
     const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}`);
     const out = (r.items || []).map(rowTrack);

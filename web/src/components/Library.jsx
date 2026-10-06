@@ -323,10 +323,10 @@ export default function Library({
     relaySimilar(jf, it.Id, it.Name).then((r) => { if (alive) setSimil((d) => ({ ...d, [it.Id]: r.artists || [] })); }).catch(() => {});
     return () => { alive = false; };
   }, [detail?.item?.Id, detail?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Playlist page "Recommended": ten songs to add, seeded from what is
-  // already in the playlist (Jellyfin instant mixes off a few random members,
-  // merged, minus anything the playlist has or the user dislikes). Keyed by
-  // playlist id + a generation counter so Refresh reseeds.
+  // Playlist page "Recommended": ten songs to add from the playlist's own
+  // circle of artists (the server ranks them, minus anything the playlist has
+  // or the user dislikes). Keyed by playlist id + a generation counter so
+  // Refresh reseeds.
   const [reco, setReco] = useState({}); // playlistId -> { gen, items: [] | null }
   const [recoGen, setRecoGen] = useState({});
   useEffect(() => {
@@ -338,16 +338,9 @@ export default function Library({
     setReco((m) => ({ ...m, [it.Id]: { gen, items: null } }));
     (async () => {
       const have = new Set((detail.tracks || []).map((t) => t.Id));
-      const pool = (detail.tracks || []).filter((t) => t.UserData?.Likes !== false);
-      const seeds = [...pool].sort(() => Math.random() - 0.5).slice(0, 3);
       let out = [];
-      if (seeds.length) {
-        const mixes = await Promise.all(seeds.map((t) => jf.instantMix(t.Id, 30).catch(() => [])));
-        const seen = new Set();
-        // Interleave the mixes so one seed does not dominate the ten.
-        for (let i = 0; out.length < 40 && mixes.some((m) => m.length > i); i += 1) {
-          for (const m of mixes) { const t = m[i]; if (t && !have.has(t.Id) && !seen.has(t.Id)) { seen.add(t.Id); out.push(t); } }
-        }
+      if (have.size) {
+        out = await jf.playlistRecommended(it.Id, { limit: 10, seed: gen });
       } else {
         out = await jf.topTracks({ limit: 40 }).catch(() => []);
         out = out.filter((t) => !have.has(t.Id));

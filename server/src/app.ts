@@ -18,6 +18,7 @@ import websocket from '@fastify/websocket';
 import { registerSession } from './session.js';
 import { registerExplore } from './explore.js';
 import { registerDiscover } from './discover.js';
+import { registerPlaylistReco } from './playlistreco.js';
 import { registerJobs } from './jobs.js';
 import { registerAi } from './ai.js';
 import { registerSpotifyImport } from './spotifyImport.js';
@@ -97,6 +98,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   });
   const lidarr = lidarrClient({ ...config.lidarr, log: (m) => app.log.info(m) });
   registerDiscover(app, db, { lidarr, log: (m) => app.log.info(m) });
+  registerPlaylistReco(app, db, { log: (m) => app.log.info(m), warm: process.env.NODE_ENV !== 'test' });
   registerJobs(app);
   app.decorate('ai', registerAi(app, db, { ...config.ai, lidarr }));
   registerSpotifyImport(app, db, dataDir);

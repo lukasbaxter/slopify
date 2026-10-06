@@ -226,6 +226,12 @@ export class Slopify {
   recentlyPlayedAlbums({ limit = 8 } = {}) { return this._home().then((h) => ({ items: (h.recentAlbums || []).slice(0, limit).map(rowAlbum) })); }
   topTracks({ limit = 50 } = {}) { return this._home().then((h) => (h.topTracks || []).slice(0, limit).map(rowTrack)); }
   recentlyAddedAlbums({ limit = 8 } = {}) { return this._home().then((h) => ({ items: (h.newestAlbums || []).slice(0, limit).map(rowAlbum) })); }
+  // "Your Top Songs <year>" from the account's own plays (live + imported).
+  topSongYears() {
+    return this._cachedFor('topSongs', 10 * 60 * 1000, () => this._fetch(`/api/top-songs?tzo=${new Date().getTimezoneOffset()}`))
+      .then((r) => (r.years || []).map((y) => ({ year: y.year, songs: y.songs, plays: y.plays, top: y.top ? rowTrack(y.top) : null })));
+  }
+  async topSongs(year) { return ((await this._fetch(`/api/top-songs/${year}?tzo=${new Date().getTimezoneOffset()}`)).items || []).map(rowTrack); }
   async lastPlayedTrack() { const h = await this._fetch('/api/history?limit=1'); const t = h.items?.[0]?.track; return t ? rowTrack(t) : null; }
 
   _artist(artistId) { return this._cached(`artist:${artistId}`, () => this._fetch(`/api/artists/${artistId}`)); }

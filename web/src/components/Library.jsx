@@ -5,7 +5,7 @@ import { ctxOf } from '../api/context.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
-import Home from './Home.jsx';
+import Home, { topSongsSub } from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
@@ -219,6 +219,16 @@ export default function Library({
     setDetail({ item: { Id: id, Name: `Daily Mix ${n}`, Type: 'Playlist', _mix: true, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: `${seed.Name} and more` }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.instantMix(seed.Id, 50);
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
+    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+  };
+  // Your Top Songs <year>: the year's most played songs (server ranks the
+  // account's own plays), shown like a Daily Mix.
+  const openTopSongs = async (y, color) => {
+    const id = `top:${y.year}`;
+    setDetail({ item: { Id: id, Name: `Your Top Songs ${y.year}`, Type: 'Playlist', _mix: true, _art: y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 464, full: true }) : null, _color: color, _sub: topSongsSub(y.year) }, tracks: [], kind: 'Playlist', loading: true });
+    try {
+      const items = await jf.topSongs(y.year);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
     } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
@@ -1801,6 +1811,7 @@ export default function Library({
       onOpenArtist={onOpenArtistById}
       onOpenRadar={openRadar}
       onOpenMix={openMix}
+      onOpenTopSongs={openTopSongs}
     />
   );
 }

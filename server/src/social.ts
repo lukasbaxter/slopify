@@ -168,6 +168,28 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     const out = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artistId: a.artist_id, year: a.year, trackCount: a.track_count, cover: a.cover_hash });
     return { recentAlbums: recentAlbumIds.map((id) => byId.get(id)).filter(Boolean).map(out), topTracks: tracksByIds(db, topIds), newestAlbums: newest.map(out) };
   });
+  // Your Top Songs <year>: the most played songs of each calendar year, from
+  // the account's own plays only (live and imported Spotify history alike),
+  // back to the first year there is any. Years are local to the browser (tzo).
+  const TOP_SONGS_MIN = 10; // distinct songs before a year gets a playlist
+  app.get('/api/top-songs', auth, async (req) => {
+    const u = uid(req); const shift = (Number((req.query as any).tzo) || 0) * 60000;
+    const rows = db.prepare(`WITH per AS (
+        SELECT CAST(strftime('%Y', (p.at - ?) / 1000, 'unixepoch') AS INTEGER) y, p.track_id, COUNT(*) n, MAX(p.at) last
+        FROM plays p JOIN tracks t ON t.id = p.track_id WHERE p.user_id = ? GROUP BY y, p.track_id),
+      ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY y ORDER BY n DESC, last DESC) r, COUNT(*) OVER (PARTITION BY y) songs, SUM(n) OVER (PARTITION BY y) plays FROM per)
+      SELECT y, track_id, songs, plays FROM ranked WHERE r = 1 ORDER BY y DESC`).all(shift, u) as any[];
+    const top = new Map(tracksByIds(db, rows.map((r) => r.track_id)).map((t) => [t.id, t]));
+    return { years: rows.filter((r) => r.songs >= TOP_SONGS_MIN).map((r) => ({ year: r.y, songs: r.songs, plays: r.plays, top: top.get(r.track_id) || null })) };
+  });
+  app.get('/api/top-songs/:year', auth, async (req, reply) => {
+    const y = Number((req.params as any).year); if (!Number.isInteger(y) || y < 1970 || y > 9999) return reply.code(400).send({ error: 'year required' });
+    const shift = (Number((req.query as any).tzo) || 0) * 60000;
+    const ids = (db.prepare(`SELECT p.track_id, COUNT(*) n, MAX(p.at) last FROM plays p JOIN tracks t ON t.id = p.track_id
+      WHERE p.user_id = ? AND p.at >= ? AND p.at < ? GROUP BY p.track_id ORDER BY n DESC, last DESC LIMIT 100`)
+      .all(uid(req), Date.UTC(y, 0, 1) + shift, Date.UTC(y + 1, 0, 1) + shift) as any[]).map((r) => r.track_id);
+    return { year: y, items: tracksByIds(db, ids) };
+  });
   // Listening history: a page of recent plays, or the stats for a range
   // (streams, minutes, top tracks/artists/albums/genres, per-day counts,
   // and the same numbers for the range before it).

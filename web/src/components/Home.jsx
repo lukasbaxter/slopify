@@ -31,6 +31,8 @@ function greeting() {
 // label at the bottom. One palette entry per mix, rotating.
 const MIX_COLORS = ['#e8115b', '#1e3264', '#8d67ab', '#e13300', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07'];
 
+export const topSongsSub = (year) => year === new Date().getFullYear() ? `Your most played songs of ${year} so far` : `The songs you played most in ${year}`;
+
 function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder }) {
   return (
     <div className="card mixcard" onClick={onOpen} role="button" tabIndex={0}
@@ -106,17 +108,19 @@ function Card({ title, subtitle, image, round, onOpen, onPlay }) {
  * mixes are. Discover Weekly and Release Radar need listening data we do not
  * have and are labelled placeholders.
  */
-export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix }) {
+export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs }) {
   const [recent, setRecent] = useState(() => jf?.persisted('home.recent') || []);
   const [added, setAdded] = useState(() => jf?.persisted('home.added') || []);
   const [topArtists, setTopArtists] = useState(() => jf?.persisted('home.topArtists') || []);
   const [recentArtists, setRecentArtists] = useState(() => jf?.persisted('home.recentArtists') || []);
+  const [topYears, setTopYears] = useState(() => jf?.persisted('home.topYears') || []);
 
   // All of this is the account's real history (Jellyfin play counts and last
   // played dates), nothing sampled from the library.
   useEffect(() => {
     if (!jf) return;
     jf.recentlyPlayedAlbums({ limit: 16 }).then((r) => { setRecent(r.items); jf._persist('home.recent', r.items); }).catch(() => {});
+    jf.topSongYears().then((y) => { setTopYears(y); jf._persist('home.topYears', y); }).catch(() => {});
     jf.recentlyAddedAlbums({ limit: 16 }).then((r) => { setAdded(r.items); jf._persist('home.added', r.items); }).catch(() => {});
     jf.topTracks({ limit: 200 }).then((top) => {
       const score = new Map(), last = new Map();
@@ -140,6 +144,10 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
   };
   const playMix = async (seed) => {
     const items = await jf.instantMix(seed.Id);
+    if (items.length) player.playQueue(items, 0);
+  };
+  const playTopSongs = async (year) => {
+    const items = await jf.topSongs(year);
     if (items.length) player.playQueue(items, 0);
   };
   const playLiked = async () => {
@@ -231,6 +239,16 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           <MixTile label="Release Radar" sub="New releases from the artists you play most." color="#8d67ab"
             image={topArtists[0] ? jf.imageUrl(topArtists[0].Id, { maxHeight: 320 }) : null} onOpen={onOpenRadar} onPlay={onOpenRadar} />
         </Shelf>}
+
+        {showMusic && topYears.length > 0 && (
+          <Shelf title="Your Top Songs">
+            {topYears.map((y, i) => (
+              <MixTile key={y.year} label={`Your Top Songs ${y.year}`} sub={topSongsSub(y.year)}
+                image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={MIX_COLORS[i % MIX_COLORS.length]}
+                onOpen={() => onOpenTopSongs(y, MIX_COLORS[i % MIX_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
+            ))}
+          </Shelf>
+        )}
 
         {showMusic && recent.length > 0 && (
           <Shelf title="Recently played" onSeeAll={() => onSeeAll('albums')}>

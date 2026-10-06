@@ -127,6 +127,17 @@ describe('likes, playlists, plays, home, prefs', () => {
     expect(h.recentAlbums.length).toBe(1); expect(h.topTracks[0].id).toBe(ids[2]); expect(h.newestAlbums.length).toBe(5);
     expect((await get('/api/history')).json().items[0].track.id).toBe(ids[2]);
   });
+  it('builds Top Songs per year from plays, in local time', async () => {
+    const at = (s: string) => Date.parse(s);
+    for (const [i, s] of [[1, '2019-03-01T10:00Z'], [1, '2019-04-01T10:00Z'], [3, '2019-05-01T10:00Z'], [1, '2020-01-01T03:00Z']] as const)
+      await send('POST', '/api/plays', { trackId: ids[i], at: at(s), client: 'spotify' });
+    // 03:00 UTC on Jan 1 2020 is still 2019 at UTC-7 (tzo 420).
+    expect((await get('/api/top-songs/2019?tzo=420')).json().items.map((t: any) => t.id)).toEqual([ids[1], ids[3]]);
+    expect((await get('/api/top-songs/2019')).json().items.map((t: any) => t.id)).toEqual([ids[1], ids[3]]);
+    expect((await get('/api/top-songs/2020')).json().items.map((t: any) => t.id)).toEqual([ids[1]]);
+    expect((await get('/api/top-songs')).json().years).toEqual([]); // under 10 songs a year: no playlist
+    expect((await get('/api/top-songs/abc')).statusCode).toBe(400);
+  });
   it('patches prefs', async () => {
     await send('PATCH', '/api/prefs', { quality: 'aac-160' }); await send('PATCH', '/api/prefs', { theme: 'dark' });
     expect((await get('/api/prefs')).json()).toEqual({ quality: 'aac-160', theme: 'dark' });

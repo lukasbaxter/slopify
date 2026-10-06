@@ -80,7 +80,7 @@ describe('Sync Lyrics on a song', () => {
     }
     return ok('<div data-lyrics-container="true">[Verse 1]<br/>first sung line<br/>second sung line<br/>third sung line<br/>fourth sung line</div>');
   };
-  const setup = (opts: { env?: Record<string, string>; settings?: Record<string, any>; gpu?: () => Promise<any>; python?: string } = {}) => {
+  const setup = (opts: { env?: Record<string, string>; settings?: Record<string, any>; gpu?: () => Promise<any>; python?: string; gpuWaitMs?: number } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-lyricsync-'));
     const db = openDb(dir);
     db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('ar', 'A', 'a')").run();
@@ -116,7 +116,7 @@ describe('Sync Lyrics on a song', () => {
     app.decorate('requireUser', async () => {});
     app.decorate('requireAdmin', async () => {});
     const task = lyricSyncTask(app, {
-      db, cacheDir: dir, saveToLibrary: true, python: opts.python ?? process.execPath, script: FAKE, model: 'fake', pollMs: 5,
+      db, cacheDir: dir, saveToLibrary: true, python: opts.python ?? process.execPath, script: FAKE, model: 'fake', pollMs: 5, gpuWaitMs: opts.gpuWaitMs,
       gpu: opts.gpu ?? (async () => ({ freeMb: 8000, totalMb: 8188, encoders: 0 })),
       lrclib: lrclibWith({ lrclibsong: 'one\ntwo\nthree\nfour' }) as any, web: web as any,
     });
@@ -212,6 +212,14 @@ describe('Sync Lyrics on a song', () => {
     expect((await jobs('plain')).plain.state).toBe('done');
   });
 
+  it('a GPU that never frees up: the waiting songs are answered after the limit, nothing waits forever', async () => {
+    const { task, ctx, ask, jobs } = setup({ gpuWaitMs: 30, gpu: async () => ({ freeMb: 500, totalMb: 8188, encoders: 0 }) });
+    await ask('plain'); await ask('off');
+    expect(await task.run(ctx as any)).toMatch(/stopped: the GPU was short of memory/);
+    const j = await jobs('plain', 'off');
+    expect(j.plain).toMatchObject({ state: 'failed' }); expect(j.off).toMatchObject({ state: 'failed' });
+    expect(j.plain.result).toMatch(/Try again later/);
+  });
   it('a server without the GPU image answers every waiting song instead of leaving it queued', async () => {
     const { task, ctx, ask, jobs } = setup({ python: '/nope/python' });
     await ask('plain');

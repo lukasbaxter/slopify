@@ -44,7 +44,10 @@ export type TaskCtx = {
   log: (m: string) => void;
   setting: <T = any>(key: string) => T; // current value, saved or default
 };
-export type TaskDef = { id: string; name: string; description: string; schedule: Schedule; watchDir?: string; settings?: TaskSetting[]; run: (ctx: TaskCtx) => Promise<string> };
+// alongside: runs on demand next to the scheduled chores and never holds them
+// up (Sync Lyrics: a song can wait a long time for GPU memory, and while it
+// waited no scan, enrich or upgrade ran).
+export type TaskDef = { id: string; name: string; description: string; schedule: Schedule; watchDir?: string; settings?: TaskSetting[]; alongside?: boolean; run: (ctx: TaskCtx) => Promise<string> };
 
 // A setting value from the wire: coerced to the setting's type and range, or
 // undefined when it is not a valid value for it.
@@ -105,6 +108,8 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   const admin = { preHandler: (app as any).requireAdmin };
   const now = opts.now ?? Date.now;
   const running = new Map<string, { started: number; step: string; progress: number | null }>();
+  // A scheduled chore in progress (one at a time); 'alongside' tasks do not count.
+  const busy = () => [...running.keys()].some((id) => !defs.find((d) => d.id === id)?.alongside);
   // kv holds JSON this process wrote, but a corrupt row (a crashed write, a
   // hand edit) must degrade to "never ran" / "default schedule", not take the
   // whole tick - and the task list API - down with it.
@@ -155,13 +160,13 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
             // so events that arrive while a scan or enrich (or any task) is
             // busy are its own footsteps, not new music: ignore them, or
             // watch mode retriggers itself forever.
-            if (running.size || (app as any).enrichRunning?.() || (app as any).scanning?.()) return;
+            if (busy() || (app as any).enrichRunning?.() || (app as any).scanning?.()) return;
             if (debounce.has(def.id)) return;
             debounce.set(def.id, setTimeout(() => {
               debounce.delete(def.id);
               // Same one-at-a-time gate as the clock: with something already
               // running, stand down - the next change re-arms the debounce.
-              if (!running.size) start(def);
+              if (!busy()) start(def);
             }, 2 * 60 * 1000).unref());
           });
           w.on('error', (e) => {
@@ -189,7 +194,7 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   let rr = -1;
   const tick = () => {
     if (process.env.NODE_ENV !== 'test') syncWatchers(); // recreate any watcher dropped by an error
-    if (running.size || !defs.length) return;
+    if (busy() || !defs.length) return;
     for (let i = 1; i <= defs.length; i++) {
       const idx = (rr + i) % defs.length;
       const def = defs[idx];

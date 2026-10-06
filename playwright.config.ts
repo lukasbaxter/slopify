@@ -9,7 +9,7 @@ export default defineConfig({
   webServer: {
     // NODE_ENV=test keeps the background tasks tick off; SAVE_TO_LIBRARY=0
     // stops enrichment from hitting live LrcLib/Deezer or writing sidecars.
-    command: 'rm -rf /tmp/slopify-e2e-data && npm run build && NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR=fixtures/music DATA_DIR=/tmp/slopify-e2e-data PORT=8080 LOG_LEVEL=warn LOGIN_RATE_MAX=1000 node server/dist/index.js',
+    command: 'rm -rf /tmp/slopify-e2e-data && npm run build && NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR=fixtures/music DATA_DIR=/tmp/slopify-e2e-data PORT=8080 LOG_LEVEL=warn LOGIN_RATE_MAX=1000 RATE_MAX=100000 node server/dist/index.js',
     url: 'http://localhost:8080/healthz',
     reuseExistingServer: false,
     timeout: 120000,

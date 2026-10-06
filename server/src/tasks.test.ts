@@ -60,6 +60,21 @@ describe('tasks framework', () => {
     await app.close();
   });
 
+  it('an alongside task (Sync Lyrics) that is still waiting never holds up the scheduled chores', async () => {
+    const db = tmpdb('alongside');
+    const ran: string[] = [];
+    let release: () => void = () => {};
+    const defs: TaskDef[] = [
+      { id: 'lyricsync', name: 'L', description: '', schedule: { mode: 'off' }, alongside: true, run: () => new Promise((r) => { release = () => r('ok'); }) },
+      { id: 'scan', name: 'S', description: '', schedule: { mode: 'interval', hours: 1 }, run: async () => { ran.push('scan'); return 'ok'; } },
+    ];
+    const app = adminApp();
+    const { tick } = registerTasks(app, db, defs);
+    expect((app as any).startTask('lyricsync')).toBe(true); // waiting for the GPU
+    tick(); await new Promise((r) => setTimeout(r, 20));
+    expect(ran).toEqual(['scan']);
+    release(); await app.close();
+  });
   it('the tick is round-robin: when both are due at every tick, turns alternate instead of the first starving the second', async () => {
     const db = tmpdb('rr');
     let t = new Date('2026-10-03T12:00:00').getTime();

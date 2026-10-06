@@ -67,8 +67,8 @@ export async function buildServer(opts: BuildOptions = {}) {
   // sends when the app's own JS attaches them — no cookies, so a foreign
   // origin's request arrives unauthenticated, same as curl.
   await app.register(cors, { origin: true });
-  await app.register(rateLimit, { max: 600, timeWindow: '1 minute' });
-  await app.register(websocket);
+  await app.register(rateLimit, { max: config.rateMax, timeWindow: '1 minute' });
+  await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
   // Light security headers. CSP is deliberately skipped: the SPA relies on
   // inline scripts/styles and a workable policy would break it.
   app.addHook('onSend', async (_req, reply) => {

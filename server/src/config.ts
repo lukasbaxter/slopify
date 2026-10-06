@@ -58,6 +58,7 @@ export const config = {
   adminPass: env('ADMIN_PASS', 'admin'),
   logLevel: env('LOG_LEVEL', 'info'),
   loginRateMax: Number(env('LOGIN_RATE_MAX', '10')), // per IP per minute; raised for the E2E suite
+  rateMax: Number(env('RATE_MAX', '600')), // all requests, per IP per minute; raised for the E2E suite (one IP plays every device)
   // Find and drive Chromecast / BluOS speakers on the server's network (needs host networking in Docker).
   speakers: env('SPEAKERS', '1') !== '0',
   // Announce the server on the LAN over mDNS (_slopify._tcp) so Home Assistant

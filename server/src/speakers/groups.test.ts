@@ -94,6 +94,26 @@ describe('playing on speaker groups', () => {
     await lukas.stopAll(); await henry.stopAll();
   });
 
+  it('a regroup or a re-pick of the same speaker keeps the members linked', async () => {
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    groups.join(sp(node).id, [sp(towers).id]);
+    const p = player('lukas-regroup');
+    try {
+      await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      expect(towers.master).toBe(node.port);
+      // Someone edits an unrelated group: every player regroups.
+      groups.join(sp(garage).id, [sp(pulse).id]);
+      await p.regroup();
+      expect(towers.master).toBe(node.port);
+      expect(p.members.map((m: Speaker) => m.id)).toEqual([sp(towers).id]);
+      // Picking the speaker that is already playing.
+      await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t2'], index: 0, position: 0, playing: true });
+      expect(towers.master).toBe(node.port);
+      expect([...node.slaves]).toEqual([towers.port]);
+    } finally { await p.stopAll(); for (const id of [sp(node).id, sp(towers).id, sp(garage).id, sp(pulse).id]) groups.unjoin(id); for (const g of saved) groups.join(g[0], g.slice(1)); }
+  });
+
   it('a server shutdown never stops a speaker another app took over', async () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);

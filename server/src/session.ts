@@ -387,8 +387,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       // No frame we send or expect comes near 1 MiB: close before even parsing one.
       if ((typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > 1024 * 1024) { ws.close(1009, 'too large'); return; }
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
+      // Anyone can open this socket before signing in: a frame that is not an
+      // object ('null', a number) or a token that is not a string used to throw
+      // in this listener, and an uncaught throw takes the whole server down.
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
       if (!self) {
-        if (msg.type !== 'hello' || !msg.token) return;
+        if (msg.type !== 'hello' || typeof msg.token !== 'string' || !msg.token || msg.token.length > 256) return;
         const who = userByToken(db, msg.token);
         if (!who) { ws.close(4003, 'bad token'); return; }
         clearTimeout(timeout);
@@ -430,7 +434,8 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         return;
       }
       if (typeof msg.type !== 'string' || !KNOWN.has(msg.type)) return;
-      handle(self, msg);
+      // One bad message must never cost everyone's music: it is dropped and logged.
+      try { handle(self, msg); } catch (e: any) { app.log.warn(`session: ${self.name}: ${msg.type} message failed: ${e?.message}`); }
     });
     ws.on('close', () => {
       clearTimeout(timeout);

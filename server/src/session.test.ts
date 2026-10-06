@@ -66,6 +66,22 @@ describe('ws client ids across accounts', () => {
     ws.send(JSON.stringify({ type: 'hello', token, clientId, instance: `i_${token}`, kind: 'web' }));
     return { ws, ok: await got, closed: () => closed };
   };
+  it('junk frames before or after sign-in never throw (an uncaught throw stopped the whole server)', async () => {
+    const errs: any[] = []; const onErr = (e: any) => errs.push(e);
+    process.on('uncaughtException', onErr);
+    try {
+      const raw = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+      await new Promise((r) => raw.on('open', r));
+      for (const f of ['null', '5', '"x"', '[]', JSON.stringify({ type: 'hello', token: true }), JSON.stringify({ type: 'hello', token: {} }), JSON.stringify({ type: 'hello', token: 'x'.repeat(5000) })]) raw.send(f);
+      await new Promise((r) => setTimeout(r, 150));
+      const ok = await hello('tokA', 'c_junk_1');
+      for (const f of ['null', '7', JSON.stringify({ type: 'nowplaying', nowPlaying: 'x' }), JSON.stringify({ type: 'queue', queue: 'x' }), JSON.stringify({ type: 'command', to: {}, command: null })]) ok.ws.send(f);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(errs).toEqual([]);
+      expect(ok.closed()).toBe(false);
+      raw.terminate(); ok.ws.terminate();
+    } finally { process.off('uncaughtException', onErr); }
+  });
   it('another account cannot take over a connected client id', async () => {
     const a = await hello('tokA', 'c_crossacct1');
     const b = await hello('tokB', 'c_crossacct1');

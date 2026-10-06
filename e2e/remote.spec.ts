@@ -136,3 +136,66 @@ test('closing the phone app never pauses the laptop; a lock-screen pause still d
   await phone.waitForTimeout(1500);
   await expect.poll(() => toggles, { timeout: 4000 }).toBe(1);
 });
+
+test('the 2-hour hold: closing the phone app never starts the paused music; a real lock-screen tap does', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  const desk = await device(browser, false);
+  // The iPhone app: its user agent and the shell's flag, so the hold applies.
+  const pctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 SlopifyMobile/0.1' });
+  await pctx.addInitScript(() => {
+    (window as any).slopifyShell = { deviceName: 'Test iPhone', deviceForm: 'phone', platform: 'ios', version: 'test' };
+    const ms = navigator.mediaSession as any; const handlers: Record<string, any> = {};
+    (window as any).__ms = handlers;
+    const orig = ms.setActionHandler.bind(ms);
+    ms.setActionHandler = (a: string, fn: any) => { handlers[a] = fn; try { orig(a, fn); } catch { /* unsupported */ } };
+  });
+  const phone = await pctx.newPage(); await login(phone); await waitForLibrary(phone);
+  let toggles = 0;
+  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && p.includes('"action":"toggle"')) toggles += 1; }));
+  await phone.reload(); await waitForLibrary(phone);
+  await openAlbum(desk, 'First Light');
+  await desk.locator('.trackrow').nth(0).dblclick();
+  await expect.poll(() => nowTitle(phone), { timeout: 20000 }).toContain('River Harbour');
+  await expect.poll(() => phone.evaluate(() => navigator.mediaSession.playbackState), { timeout: 10000 }).toBe('playing');
+  // The laptop pauses: the phone holds the paused session on its lock screen.
+  await desk.locator('.player button[title="Pause"]').first().click();
+  await expect.poll(() => phone.evaluate(() => navigator.mediaSession.playbackState), { timeout: 10000 }).toBe('paused');
+  // iOS pauses the stand-in as the app closes: must not start the laptop.
+  await phone.evaluate(() => { (window as any).__ms.pause(); window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: 'background' } })); });
+  await phone.waitForTimeout(1600);
+  expect(toggles).toBe(0);
+  // A real tap on the held lock screen: plays, a moment later.
+  await phone.evaluate(() => (window as any).__ms.pause());
+  await expect.poll(() => toggles, { timeout: 4000 }).toBe(1);
+});
+
+test('a quick drag on the device sheet volume slider never skips; a swipe on the mini player still does', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  const desk = await device(browser, false);
+  const pctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true });
+  const phone = await pctx.newPage(); await login(phone); await waitForLibrary(phone);
+  let skips = 0;
+  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"action":"next"') || p.includes('"action":"previous"')) skips += 1; }));
+  await phone.reload(); await waitForLibrary(phone);
+  await openAlbum(desk, 'First Light');
+  await desk.locator('.trackrow').nth(0).dblclick();
+  await expect.poll(() => phone.evaluate(() => document.body.textContent?.includes('Playing on')), { timeout: 20000 }).toBe(true);
+  // A quick sideways swipe, as touch events on the element (the device sheet
+  // opens inside the mini player's .player-row on the phone).
+  const swipe = (sel: string) => phone.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement; const r = el.getBoundingClientRect();
+    const y = r.top + r.height / 2; const x0 = r.left + r.width * 0.25;
+    const at = (x: number) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+    el.dispatchEvent(new TouchEvent('touchstart', { touches: [at(x0)], changedTouches: [at(x0)], bubbles: true, cancelable: true }));
+    for (let i = 1; i <= 5; i++) el.dispatchEvent(new TouchEvent('touchmove', { touches: [at(x0 + i * 30)], changedTouches: [at(x0 + i * 30)], bubbles: true, cancelable: true }));
+    el.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [at(x0 + 150)], bubbles: true, cancelable: true }));
+  }, sel);
+  await phone.locator('.player-row .devicebtn').first().click();
+  await expect(phone.locator('.dm-volume input[type=range]')).toBeVisible();
+  await swipe('.dm-volume input[type=range]');
+  await phone.waitForTimeout(800);
+  expect(skips).toBe(0);
+  await phone.keyboard.press('Escape'); await phone.mouse.click(5, 5); await phone.waitForTimeout(400);
+  await swipe('.player-row');
+  await expect.poll(() => skips, { timeout: 3000 }).toBe(1);
+});

@@ -9,7 +9,17 @@ import { createRequire } from 'node:module';
 import type { Speaker } from './discovery.js';
 
 const require = createRequire(import.meta.url);
-const { Client, DefaultMediaReceiver } = require('castv2-client');
+const castv2 = require('castv2-client');
+// Swappable for tests (a fake receiver).
+export const castDeps = { Client: castv2.Client, DefaultMediaReceiver: castv2.DefaultMediaReceiver };
+// castv2-client has no timeouts of its own: a request to a receiver that went
+// away is never answered, and one hung status read froze the account's player
+// (its poll and every later command). Every call is bounded.
+export const CAST_TIMEOUT_MS = 8000;
+function bounded<T>(p: Promise<T>, what: string, ms = CAST_TIMEOUT_MS): Promise<T> {
+  let t: ReturnType<typeof setTimeout>;
+  return Promise.race([p, new Promise<T>((_, reject) => { t = setTimeout(() => reject(Object.assign(new Error(`Cast ${what} timed out`), { code: 'ECASTTIMEOUT' })), ms); })]).finally(() => clearTimeout(t));
+}
 
 export type PlayMeta = { title?: string; artist?: string; album?: string; artwork?: string; artworkFallback?: string; contentType?: string };
 export type Status = { playing: boolean; state: string | null; title?: string | null; artist?: string | null; album?: string | null; position: number; duration: number; volume: number | null; muted?: boolean; streamUrl?: string | null; ended?: boolean; gone?: boolean; canSeek?: boolean; coarse?: boolean; service?: string | null; serviceName?: string | null; inputId?: string | null; image?: string | null };
@@ -34,17 +44,22 @@ export class CastTransport implements Transport {
 
   private async connect() {
     if (this.player) return this.player;
-    const client = new Client();
+    const client = new castDeps.Client();
     this.client = client;
     this.gone = false;
-    await new Promise<void>((resolve, reject) => {
+    await bounded(new Promise<void>((resolve, reject) => {
       const onError = (err: any) => { client.removeListener('error', onError); reject(err); };
       client.once('error', onError);
       client.connect(this.device.host, () => { client.removeListener('error', onError); resolve(); });
-    });
+    }), 'connect').catch((e) => { this.close(); throw e; });
     client.on('error', () => { this.gone = true; this.close(); });
     client.on('close', () => { this.player = null; this.gone = true; });
-    this.player = await promisify(client.launch, client)(DefaultMediaReceiver);
+    const player = await bounded(promisify(client.launch, client)(castDeps.DefaultMediaReceiver), 'launch').catch((e) => { this.close(); throw e; });
+    // The receiver app closed (its idle timeout, or another app cast to the
+    // device): this media session is over. Without this the player object
+    // stayed and every request went to a session that no longer exists.
+    player.on?.('close', () => { if (this.player === player) { this.player = null; this.gone = true; } });
+    this.player = player;
     return this.player;
   }
 
@@ -62,7 +77,7 @@ export class CastTransport implements Transport {
     };
     const opts: any = { autoplay: true };
     if (startAt > 0) opts.currentTime = Math.max(0, Math.floor(startAt));
-    const status = await promisify(player.load, player)(media, opts);
+    const status = await bounded(promisify(player.load, player)(media, opts), 'load');
     // A receiver that cannot play (TV off, stream unreachable) still ACKs the load, then flips to IDLE/ERROR.
     const settled: any = await new Promise((resolve) => {
       const onStatus = (s: any) => { if (s.playerState === 'PLAYING' || s.playerState === 'BUFFERING' || (s.playerState === 'IDLE' && s.idleReason === 'ERROR')) done(s); };
@@ -71,45 +86,54 @@ export class CastTransport implements Transport {
       setTimeout(() => done(null), 6000);
     });
     if (settled && settled.playerState === 'IDLE' && settled.idleReason === 'ERROR') throw Object.assign(new Error(`${this.device.name} could not play this. If it drives a TV, check the TV is on.`), { code: 'ECASTLOAD' });
-    await promisify(player.getStatus, player)().catch(() => {}); // refresh the media session id
+    await bounded(promisify(player.getStatus, player)(), 'status').catch(() => {}); // refresh the media session id
     this.lastState = 'PLAYING';
     return settled || status;
   }
   private async withPlayer(method: string, ...args: any[]) {
     const player = await this.connect();
-    try { return await promisify(player[method], player)(...args); }
+    try { return await bounded(promisify(player[method], player)(...args), method); }
     catch (err: any) {
+      if (err?.code === 'ECASTTIMEOUT') { this.lost(); throw err; }
       if (!/INVALID_MEDIA_SESSION_ID/.test(err?.message || '')) throw err;
-      const s = await promisify(player.getStatus, player)().catch(() => null);
+      const s = await bounded(promisify(player.getStatus, player)(), 'status').catch(() => null);
       if (!s || !s.mediaSessionId) return null;
-      return promisify(player[method], player)(...args);
+      return bounded(promisify(player[method], player)(...args), method);
     }
   }
+  // A receiver that stopped answering: treat the connection as gone, so the
+  // player releases the session instead of waiting on it.
+  private lost() { this.gone = true; this.close(); }
   resume() { return this.withPlayer('play'); }
   pause() { return this.withPlayer('pause'); }
   seek(seconds: number) { return this.withPlayer('seek', Math.max(0, Math.round(seconds))); }
   async stop() {
+    // Nothing of ours is on the device (never connected, or the session is
+    // gone): there is nothing to stop. Connecting only to stop launched the
+    // receiver app again, which can turn a TV on and end whatever is on it now.
+    if (!this.player || this.gone) { this.close(); return null; }
     try {
-      if (!this.player) await this.connect();
       return await this.withPlayer('stop');
     } catch {
-      try { if (this.client) await promisify(this.client.stop, this.client)(this.player); } catch { /* fall through */ }
+      try { if (this.client) await bounded(promisify(this.client.stop, this.client)(this.player), 'stop'); } catch { /* fall through */ }
       this.close();
       return null;
     }
   }
   async setVolume(level: number) {
     await this.connect();
-    return promisify(this.client.setVolume, this.client)({ level: Math.max(0, Math.min(1, level / 100)) });
+    return bounded(promisify(this.client.setVolume, this.client)({ level: Math.max(0, Math.min(1, level / 100)) }), 'volume');
   }
   private async receiverVolume(): Promise<{ level: number | null; muted: boolean }> {
     if (!this.client) return { level: null, muted: false };
-    try { const st: any = await new Promise((resolve) => this.client.getStatus((e: any, x: any) => resolve(e ? null : x))); return { level: typeof st?.volume?.level === 'number' ? Math.round(st.volume.level * 100) : null, muted: !!st?.volume?.muted }; }
+    try { const st: any = await bounded(new Promise((resolve) => this.client.getStatus((e: any, x: any) => resolve(e ? null : x))), 'receiver status').catch(() => null); return { level: typeof st?.volume?.level === 'number' ? Math.round(st.volume.level * 100) : null, muted: !!st?.volume?.muted }; }
     catch { return { level: null, muted: false }; }
   }
   async status(): Promise<Status> {
     if (!this.player) { const v = await this.receiverVolume(); return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: v.level, muted: v.muted, gone: this.gone }; }
-    const s = await this.withPlayer('getStatus');
+    let s: any;
+    try { s = await this.withPlayer('getStatus'); }
+    catch (e: any) { if (e?.code === 'ECASTTIMEOUT' || this.gone) return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: null, gone: true }; throw e; }
     if (!s) { const v = await this.receiverVolume(); return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: v.level, muted: v.muted, ended: !this.gone && this.lastState === 'PLAYING', gone: this.gone }; }
     const md = s.media?.metadata || {};
     const ended = s.playerState === 'IDLE' && s.idleReason === 'FINISHED';
@@ -287,10 +311,13 @@ export class BluOSTransport implements Transport {
   addSlave(host: string, port: number) { return this.get(`/AddSlave?${new URLSearchParams({ slave: host, port: String(port) })}`); }
   removeSlave(host: string, port: number) { return this.get(`/RemoveSlave?${new URLSearchParams({ slave: host, port: String(port) })}`); }
   // Out of any group: away from its master, and its own followers let go.
-  async standAlone() {
+  // Out of any group it is a member of, and rid of its own slaves, except the
+  // ones in `keep` ("host:port"): a leader re-forming its group keeps the
+  // members it already has (dropping them all left them unlinked and silent).
+  async standAlone(keep: Set<string> = new Set()) {
     const st = await this.sync();
     if (st.master) await new BluOSTransport({ ...this.device, host: st.master.host, port: st.master.port }).removeSlave(this.device.host, this.device.port);
-    for (const sl of st.slaves) await this.removeSlave(sl.host, sl.port);
+    for (const sl of st.slaves) if (!keep.has(`${sl.host}:${sl.port}`)) await this.removeSlave(sl.host, sl.port);
   }
 }
 

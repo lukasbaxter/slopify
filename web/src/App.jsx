@@ -109,6 +109,10 @@ function MenuIco({ d }) {
   return <svg className="menu-ico" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>;
 }
 
+// Touches inside these are never a mini-player swipe (they sit inside
+// .player-row on the phone: the device sheet, its menus, sliders).
+const NOT_A_SWIPE = '.devicemenu, .ctxmenu, .ctxmenu-scrim, input, .dm-volume';
+
 export default function App() {
   const [jf, setJf] = useState(null);
   const [devices, setDevices] = useState([]);
@@ -1053,7 +1057,9 @@ export default function App() {
   useEffect(() => {
     if (!isMobile) return undefined;
     let start = null;
-    const down = (e) => { const t = e.touches?.[0]; start = t && e.target.closest?.('.player-row') ? { x: t.clientX, y: t.clientY, at: Date.now() } : null; };
+    // The device sheet opens inside .player-row: its volume slider and rows
+    // are not the mini player (a quick slider drag used to skip the track).
+    const down = (e) => { const t = e.touches?.[0]; start = t && e.target.closest?.('.player-row') && !e.target.closest?.(NOT_A_SWIPE) ? { x: t.clientX, y: t.clientY, at: Date.now() } : null; };
     const up = (e) => {
       if (!start) return; const t = e.changedTouches?.[0]; if (!t) { start = null; return; }
       const dx = t.clientX - start.x, dy = Math.abs(t.clientY - start.y);
@@ -1102,7 +1108,9 @@ export default function App() {
     let start = null, sheet = null;
     const down = (e) => {
       const t = e.touches?.[0];
-      sheet = t && e.touches.length === 1 ? e.target.closest?.('.devicemenu, .ctxmenu-fixed:not(.ctxmenu-sub)') : null;
+      // A slider in the sheet (speaker volume, smoothing) owns its drag: a
+      // drag drifting downward used to pull the sheet, or close it.
+      sheet = t && e.touches.length === 1 && !e.target.closest?.('input, .dm-volume, .ctxslider') ? e.target.closest?.('.devicemenu, .ctxmenu-fixed:not(.ctxmenu-sub)') : null;
       start = sheet && sheet.scrollTop <= 0 ? { y: t.clientY, at: Date.now() } : null;
     };
     const move = (e) => {

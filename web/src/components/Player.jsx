@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Marquee from './Marquee.jsx';
+// Same list as App's swipe-to-skip (kept here: App imports this file).
+const NOT_A_SWIPE = '.devicemenu, .ctxmenu, .ctxmenu-scrim, input, .dm-volume';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
 import DevicePicker, { useThrottledVolume, DeviceIcon } from './DevicePicker.jsx';
 import { usePhone, Heart, ShuffleGlyph, ArtistLinks } from './TrackRow.jsx';
@@ -217,7 +219,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
   // ±80px, then snaps back or flies out. No React state: direct style writes.
   const nowRef = useRef(null);
   const swipe = useRef(null);
-  const onTouchStart = (e) => { const t = e.touches?.[0]; swipe.current = t && e.touches.length === 1 ? { x: t.clientX, y: t.clientY, at: Date.now(), moving: false } : null; };
+  const onTouchStart = (e) => { const t = e.touches?.[0]; swipe.current = t && e.touches.length === 1 && !e.target.closest?.(NOT_A_SWIPE) ? { x: t.clientX, y: t.clientY, at: Date.now(), moving: false } : null; };
   const onTouchMove = (e) => {
     const s = swipe.current, el = nowRef.current; if (!s || !el) return;
     const t = e.touches[0]; const dx = t.clientX - s.x, dy = t.clientY - s.y;

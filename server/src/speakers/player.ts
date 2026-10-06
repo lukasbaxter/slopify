@@ -201,7 +201,12 @@ export class ServerPlayer {
     const keep = new Set(want.map((d) => d.id));
     for (const m of this.members.filter((m) => !keep.has(m.id))) await this.unlink(m);
     const lt = this.transport as unknown as Partial<BluOSTransport> | null;
-    if (leader.kind === 'bluos' && lt?.standAlone) await lt.standAlone().catch((e: any) => this.d.log(`group: ${leader.name} stand alone: ${e.message}`));
+    // The leader leaves any other group and drops slaves it should not have,
+    // but keeps the members it already has: a regroup (any group edit in the
+    // house) or a re-pick of the same speaker used to unlink them all, and only
+    // newcomers were added back, so the existing members went silent.
+    const stay = new Set(this.members.map((m) => `${m.host}:${m.port}`));
+    if (leader.kind === 'bluos' && lt?.standAlone) await lt.standAlone(stay).catch((e: any) => this.d.log(`group: ${leader.name} stand alone: ${e.message}`));
     const have = new Set(this.members.map((m) => m.id));
     for (const m of want.filter((m) => !have.has(m.id))) {
       if (!take.has(m.id) && (await this.busy(m))) { this.d.log(`group: ${m.name} is playing something else; ${leader.name} plays without it`); continue; }

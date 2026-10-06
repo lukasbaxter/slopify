@@ -32,6 +32,7 @@ environment values for them only seed the defaults.
 | `LOG_LEVEL` | `info` | Fastify log level |
 | `TRUST_PROXY` | `1` | How many proxy hops to trust for the client IP (`true`/`false`/hop count). Keep `1` behind a single nginx; rate limits key on the resulting IP. |
 | `LOGIN_RATE_MAX` | `10` | Login attempts per IP per minute |
+| `RATE_MAX` | `600` | All API requests per IP per minute |
 | `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
 | `MDNS` | `1` | Announce the server on the LAN (`_slopify._tcp`) so Home Assistant finds it; `0` = off |
 | `BLUOS_GROUPS` | `slopify` | BluOS speakers are grouped only by Slopify's speaker groups; a group made elsewhere (the BluOS app) is unlinked within a minute. `keep` leaves those alone |

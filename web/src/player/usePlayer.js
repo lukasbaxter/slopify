@@ -1280,7 +1280,7 @@ export function usePlayer(jf) {
     // starved: a dead zone, or a connection that hung). Restart the same song at the same spot: from memory when the
     // whole song is in, else on a fresh connection. iOS never recovers a
     // hung HLS connection by itself; in the car that was minutes of silence.
-    let lastT = -1, stuckSince = 0, recovering = false;
+    let lastT = -1, stuckSince = 0, recovering = false, recoveryCancel = null;
     const watchdog = setInterval(() => {
       const t = el.currentTime;
       if (recovering || deviceRef.current.kind !== 'local' || !playingRef.current || el !== audioRef.current || el.paused || el.ended
@@ -1294,13 +1294,26 @@ export function usePlayer(jf) {
       const url = wholeFor(id) || jf.playbackUrl(id);
       ownUntilRef.current = Date.now() + 10000;
       el.src = url;
-      new Promise((res) => { el.addEventListener('loadedmetadata', res, { once: true }); setTimeout(res, 8000); })
-        .then(() => { try { el.currentTime = t; } catch { /* not seekable yet */ } return el.play(); })
+      // The wait below can outlive the song: a skip, a pause, an element swap
+      // or this effect's cleanup in those 8 s. Only the same element, still the
+      // active one, on the same song and still meant to be playing, is seeked
+      // and played; otherwise a new song jumped to the old one's spot, a pause
+      // was undone, or a spare started next to the active song.
+      let onMeta = null, waitTimer = null;
+      recoveryCancel = () => { if (onMeta) el.removeEventListener('loadedmetadata', onMeta); clearTimeout(waitTimer); recoveryCancel = null; recovering = false; };
+      new Promise((res) => { onMeta = res; el.addEventListener('loadedmetadata', res, { once: true }); waitTimer = setTimeout(res, 8000); })
+        .then(() => {
+          if (!recoveryCancel) return undefined; // cancelled meanwhile
+          if (el !== audioRef.current || el.dataset.track !== id || !playingRef.current || deviceRef.current.kind !== 'local') { mediaLog(`watchdog: ${id.slice(0, 6)} recovery dropped (moved on)`); return undefined; }
+          try { el.currentTime = t; } catch { /* not seekable yet */ }
+          return el.play();
+        })
         .catch(() => {})
-        .finally(() => { recovering = false; lastT = el.currentTime; });
+        .finally(() => { if (onMeta) el.removeEventListener('loadedmetadata', onMeta); clearTimeout(waitTimer); recoveryCancel = null; recovering = false; lastT = el.currentTime; });
     }, 1000);
     return () => {
       clearInterval(watchdog);
+      recoveryCancel?.();
       clearInterval(reconcile);
       for (const t of trail) el.removeEventListener(t, onTrail);
       el.removeEventListener('seeked', onSeeked);
@@ -2006,7 +2019,15 @@ export function usePlayer(jf) {
     const playPause = (wantPlaying) => () => {
       const r = msRefs.current;
       msNote(`lock screen ${wantPlaying ? 'play' : 'pause'}`);
-      if (r.holding && !r.playing) { msNote('play (held by the stand-in)'); r.toggle(); return; }
+      // Held by the stand-in (the 2-hour hold): either button means play. It
+      // waits a second and is dropped if the app is going away, like a remote
+      // play/pause: iOS sends the stand-in a 'pause' as the app is closed or
+      // switched from, and acting on it at once started the paused music.
+      if (r.holding && !r.playing) {
+        msNote('play (held by the stand-in, waiting a second)');
+        remotePauseHold.start(() => { msNote('sent'); if (msRefs.current.holding && !msRefs.current.playing) msRefs.current.toggle(); });
+        return;
+      }
       if (r.playing === wantPlaying) { r.resync(); return; }
       if (!r.remote) { r.toggle(); return; }
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);

@@ -159,7 +159,12 @@ export type LyricSyncOptions = {
   lrclib?: Parameters<typeof lrclibLookup>[1]; // injectable for tests
   web?: Fetch;                                  // NetEase / Genius, injectable for tests
   pollMs?: number;                              // how often a paused run looks again
+  gpuWaitMs?: number;                           // the longest a song waits for the card
 };
+// Waiting for the card has an end: past it the waiting songs are answered
+// ("the GPU was busy") and the run stops, instead of waiting forever.
+const GPU_WAIT_MS = 30 * 60e3;
+class GpuBusy extends Error {}
 type Outcome = { ok: boolean; message: string };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -216,12 +221,14 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
       ctx.step(`Resting (${power} GPU power) until ${hhmm(Date.now() + POWER[power].restMs)}`);
       await sleep(POWER[power].restMs);
     }
+    const waitFrom = Date.now();
     for (;;) {
       const g = await gpu();
       const encoding = POWER[ctx.setting<Power>('power')]?.yieldToEncoders && g && g.encoders > 0;
       const squeezed = g && (aligner ? g.freeMb < SQUEEZED_MB : g.freeMb < ALIGN_NEEDS_MB);
       if (!encoding && !squeezed) return;
       unload();
+      if (Date.now() - waitFrom >= (o.gpuWaitMs ?? GPU_WAIT_MS)) throw new GpuBusy(encoding ? 'the GPU was busy with Jellyfin or Immich' : `the GPU was short of memory (${g!.freeMb} MB free)`);
       ctx.step(encoding ? 'Waiting: the GPU is busy with Jellyfin or Immich' : `Waiting for GPU memory (${g!.freeMb} MB free)`);
       await sleep(o.pollMs ?? 60e3);
     }
@@ -371,7 +378,16 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
         };
         let out: Outcome;
         try { out = await syncOne(jobCtx, job.id); }
-        catch (e: any) { unload(); out = { ok: false, message: `Couldn't sync: ${e.message}` }; }
+        catch (e: any) {
+          unload();
+          if (e instanceof GpuBusy) {
+            // Everyone still waiting gets the same answer; nothing is left queued.
+            const msg = `Couldn't sync: ${e.message} for ${Math.round((o.gpuWaitMs ?? GPU_WAIT_MS) / 60e3)} minutes. Try again later.`;
+            db.prepare("UPDATE lyric_jobs SET state = 'failed', result = ?, step = NULL, finished = ? WHERE state IN ('queued','running')").run(msg, Date.now());
+            return `stopped: ${e.message}`;
+          }
+          out = { ok: false, message: `Couldn't sync: ${e.message}` };
+        }
         db.prepare('UPDATE lyric_jobs SET state = ?, result = ?, step = NULL, finished = ? WHERE track_id = ?').run(out.ok ? 'done' : 'failed', out.message, Date.now(), job.id);
         done++;
       }
@@ -380,7 +396,7 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
   };
 
   return {
-    id: 'lyricsync', name: 'Sync lyrics', schedule: { mode: 'off' },
+    id: 'lyricsync', name: 'Sync lyrics', schedule: { mode: 'off' }, alongside: true,
     description: 'Works through the songs you pick with Sync Lyrics: finds their lyrics (LrcLib, NetEase, Genius) and lines them up with the vocals',
     settings: [
       { key: 'power', label: 'GPU power', type: 'select', default: 'normal',

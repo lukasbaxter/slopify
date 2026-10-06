@@ -43,6 +43,32 @@ const MB_UA = 'Slopify/0.1 (self-hosted music server; https://github.com/lukasba
 // Words people add to a soundtrack search that no release title carries.
 const SOUNDTRACK_WORDS = /\b(original\s+)?(motion\s+picture\s+|video\s+game\s+|game\s+)?(soundtracks?|ost|score)\b/gi;
 
+// Game series people search by their initials; titles spell them out.
+const ABBREVIATIONS: Record<string, string> = {
+  gta: 'grand theft auto', nfs: 'need for speed', cod: 'call of duty', rdr: 'red dead redemption',
+  ff: 'final fantasy', mgs: 'metal gear solid', gow: 'god of war', tlou: 'the last of us', botw: 'breath of the wild', totk: 'tears of the kingdom',
+};
+const ROMAN = ['', 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
+
+// A MusicBrainz title query in which every word must match (any-word
+// matching let a lone "V" find every album called "V"); a number also
+// matches its roman numeral, and series initials their full name.
+export function titleQuery(q: string): string {
+  const words = q.replace(SOUNDTRACK_WORDS, ' ').replace(/[+\-&|!(){}[\]^"~*?:\\/.,']/g, ' ').toLowerCase().split(/\s+/).filter(Boolean);
+  const terms: string[] = [];
+  for (const w of words) {
+    const m = /^([a-z]+?)(\d{1,2})$/.exec(w); // "gta5"
+    for (const part of m && ABBREVIATIONS[m[1]] ? [m[1], m[2]] : [w]) {
+      if (ABBREVIATIONS[part]) terms.push(`"${ABBREVIATIONS[part]}"`);
+      else if (/^\d+$/.test(part) && Number(part) >= 1 && Number(part) <= 10) terms.push(`(${part} OR ${ROMAN[Number(part)]})`);
+      else if (ROMAN.includes(part) && part) terms.push(`(${part} OR ${ROMAN.indexOf(part)})`);
+      else if (part === 'and' || part === 'or' || part === 'not') continue; // operators to Lucene
+      else terms.push(part);
+    }
+  }
+  return terms.join(' AND ');
+}
+
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 // Only real URLs leave this module: Lidarr swaps an added artist's remote
 // image for its own /MediaCover path, which no browser here can reach.
@@ -263,7 +289,7 @@ export function lidarrClient(opts: LidarrOptions) {
     },
 
     async compilations(q: string): Promise<Release[]> {
-      const words = q.replace(SOUNDTRACK_WORDS, ' ').replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, ' ').trim();
+      const words = titleQuery(q);
       if (!words) return [];
       const lucene = `releasegroup:(${words}) AND arid:${VARIOUS_ARTISTS}`;
       try {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
-import { lidarrClient, registerLidarrHook } from './lidarr.js';
+import { lidarrClient, registerLidarrHook, titleQuery } from './lidarr.js';
 
 // A tiny Lidarr: answers the API routes the client uses, remembers what was
 // POSTed/PUT so the tests can assert the protocol.
@@ -108,10 +108,19 @@ describe('lidarr client', () => {
       { id: 'rg-weak', title: 'Unrelated', score: 40, 'secondary-types': ['Compilation'] },
     ];
     const r = await client(fetcher).search('grand theft auto v soundtrack');
-    expect(state.calls).toContain('MB releasegroup:(grand theft auto v) AND arid:89ad4ac3-39f7-470e-963a-56509c546377');
+    expect(state.calls).toContain('MB releasegroup:(grand AND theft AND auto AND (v OR 5)) AND arid:89ad4ac3-39f7-470e-963a-56509c546377');
     expect(r.map((x) => [x.album_id, x.artist, x.rtype])).toEqual([['mb-own', 'Frank Ocean', 'Album'], ['rg-ost', 'Various Artists', 'Soundtrack'], ['rg-comp', 'Various Artists', 'Compilation']]);
     expect(r[1]).toMatchObject({ year: '2013', image: 'https://coverartarchive.org/release-group/rg-ost/front-250' });
     expect(r[2].image).toBeNull(); // no cover in the archive
+  });
+
+  it('title queries: every word required, numbers match roman numerals, game initials spelled out', () => {
+    expect(titleQuery('gta v soundtrack')).toBe('"grand theft auto" AND (v OR 5)');
+    expect(titleQuery('GTA5 OST')).toBe('"grand theft auto" AND (5 OR v)');
+    expect(titleQuery('Guardians of the Galaxy')).toBe('guardians AND of AND the AND galaxy');
+    expect(titleQuery('kill bill: vol. 1 original motion picture soundtrack')).toBe('kill AND bill AND vol AND (1 OR i)');
+    expect(titleQuery('rock and roll')).toBe('rock AND roll');
+    expect(titleQuery('soundtrack')).toBe('');
   });
 
   it('a request for a Various Artists release adds the album itself (no artist refresh lists it) and monitors it', async () => {

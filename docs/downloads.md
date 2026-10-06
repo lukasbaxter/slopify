@@ -34,6 +34,18 @@ albums become playable seconds later instead of at the next library scan.
 Artists Slopify adds to Lidarr while browsing stay unmonitored; only a
 Request monitors an album.
 
+## Soundtracks and compilations
+
+Lidarr's album search leaves out everything credited to "Various Artists"
+(movie and game soundtracks, compilations), and no artist refresh lists
+those releases. The Everywhere search adds them straight from MusicBrainz
+(soundtracks first; words like "soundtrack" or "OST" in the query are
+ignored), and requesting one adds that single album to Lidarr's Various
+Artists entry. If you use Soularr, add `search_blacklist = Various Artists`
+under `[Search Settings]` in its config.ini: with `album_prepend_artist`
+on, it would otherwise search Soulseek for "Various Artists <title>",
+which almost no shared folder is named after.
+
 ## Tasks
 
 Settings → Admin has a Tasks list, Jellyfin-style: every recurring chore

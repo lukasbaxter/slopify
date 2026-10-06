@@ -11,7 +11,9 @@ function fakeLidarr() {
     queue: [] as any[],          // raw /queue records
     lookup: null as any[] | null, // overrides /artist/lookup when set
     calls: [] as string[],
-    onRefresh: {} as Record<number, any[]>, // albums a RefreshArtist of that artist adds
+    onRefresh: {} as Record<number, any[]>,
+    mb: [] as any[],                // MusicBrainz release-group search answer
+    albumLookup: null as any[] | null, // overrides /album/lookup when set // albums a RefreshArtist of that artist adds
     nextId: 1,
   };
   // /queue and /wanted/missing page like the real thing.
@@ -21,6 +23,8 @@ function fakeLidarr() {
   };
   const fetcher: any = async (url: string, init?: any) => {
     const u = new URL(url);
+    if (u.hostname === 'coverartarchive.org') return { ok: !url.includes('rg-comp'), status: url.includes('rg-comp') ? 404 : 200 };
+    if (u.hostname === 'musicbrainz.org') { state.calls.push(`MB ${u.searchParams.get('query')}`); return { ok: true, status: 200, json: async () => ({ 'release-groups': state.mb }) }; }
     const p = u.pathname.replace('/api/v1', '');
     const method = init?.method || 'GET';
     state.calls.push(`${method} ${p}${u.search}`);
@@ -44,6 +48,8 @@ function fakeLidarr() {
       const ids = u.searchParams.getAll('albumIds').map(Number);
       return json(state.albums.filter((a) => ids.includes(a.id)));
     }
+    if (p.startsWith('/album/lookup') && state.albumLookup) return json(state.albumLookup);
+    if (p === '/album' && method === 'POST') { const a = { ...JSON.parse(init.body), id: state.nextId++, statistics: { totalTrackCount: 62, trackFileCount: 0 } }; state.albums.push(a); return json(a); }
     if (p.startsWith('/album/lookup')) return json(state.albums.length ? state.albums : [{ foreignAlbumId: 'mb-worlds', title: 'Worlds', artist: { artistName: 'Porter Robinson', foreignArtistId: 'fa-1', images: [] } }]);
     if (p === '/album/monitor') { const b = JSON.parse(init.body); for (const a of state.albums) if (b.albumIds.includes(a.id)) a.monitored = b.monitored; return json({}); }
     if (p === '/queue') return json(paged(state.queue, u));
@@ -91,6 +97,33 @@ describe('lidarr client', () => {
     state.calls.length = 0;
     await client(fetcher).discography('AWOLNATION');
     expect(state.calls.filter((c) => c.startsWith('PUT') || c.startsWith('POST'))).toEqual([]);
+  });
+
+  it('search adds Various Artists soundtracks from MusicBrainz (Lidarr leaves them out), soundtrack words stripped, soundtracks first', async () => {
+    const { state, fetcher } = fakeLidarr();
+    state.albums.push(fakeAlbum(1, { foreignAlbumId: 'mb-own', title: 'Grand Theft Auto V', artist: { id: 2, artistName: 'Frank Ocean' } }));
+    state.mb = [
+      { id: 'rg-comp', title: 'The Music of Grand Theft Auto V', score: 100, 'primary-type': 'Album', 'secondary-types': ['Compilation'], 'first-release-date': '2013-09-24' },
+      { id: 'rg-ost', title: 'The Music of Grand Theft Auto V, Volume 3: The Soundtrack', score: 90, 'primary-type': 'Album', 'secondary-types': ['Soundtrack'], 'first-release-date': '2013-12-17' },
+      { id: 'rg-weak', title: 'Unrelated', score: 40, 'secondary-types': ['Compilation'] },
+    ];
+    const r = await client(fetcher).search('grand theft auto v soundtrack');
+    expect(state.calls).toContain('MB releasegroup:(grand theft auto v) AND arid:89ad4ac3-39f7-470e-963a-56509c546377');
+    expect(r.map((x) => [x.album_id, x.artist, x.rtype])).toEqual([['mb-own', 'Frank Ocean', 'Album'], ['rg-ost', 'Various Artists', 'Soundtrack'], ['rg-comp', 'Various Artists', 'Compilation']]);
+    expect(r[1]).toMatchObject({ year: '2013', image: 'https://coverartarchive.org/release-group/rg-ost/front-250' });
+    expect(r[2].image).toBeNull(); // no cover in the archive
+  });
+
+  it('a request for a Various Artists release adds the album itself (no artist refresh lists it) and monitors it', async () => {
+    const { state, fetcher } = fakeLidarr();
+    const va = { id: 7, artistName: 'Various Artists', foreignArtistId: '89ad4ac3-39f7-470e-963a-56509c546377', metadataProfileId: 2, monitored: false, images: [] };
+    state.artists.push(va);
+    state.albumLookup = [{ foreignAlbumId: 'rg-gta', title: 'The Music of Grand Theft Auto V', artist: { artistName: 'Various Artists', foreignArtistId: va.foreignArtistId, images: [] } }];
+    const r = await client(fetcher).request('rg-gta');
+    expect(r).toMatchObject({ status: 'queued', artist: 'Various Artists', title: 'The Music of Grand Theft Auto V' });
+    expect(state.calls).toContain('POST /album');
+    expect(state.albums.find((a) => a.foreignAlbumId === 'rg-gta')).toMatchObject({ artistId: 7, monitored: true, addOptions: { searchForNewAlbum: false } });
+    expect(state.artists[0].monitored).toBe(true);
   });
 
   it('request monitors the album AND its artist (the wanted list needs both), and reports what is already on disk as exists', async () => {

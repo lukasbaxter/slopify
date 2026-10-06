@@ -34,6 +34,15 @@ export type AlbumState = {
 
 type QueueEntry = { state: 'downloading' | 'failed'; detail: string | null; protocol?: string | null };
 
+// MusicBrainz's "Various Artists". Lidarr's album search leaves its releases
+// out (movie and game soundtracks, compilations), and no artist refresh ever
+// lists them: they exist in Lidarr only once added one by one.
+export const VARIOUS_ARTISTS = '89ad4ac3-39f7-470e-963a-56509c546377';
+const MB_UA = 'Slopify/0.1 (self-hosted music server; https://github.com/lukasbaxter/slopify)';
+
+// Words people add to a soundtrack search that no release title carries.
+const SOUNDTRACK_WORDS = /\b(original\s+)?(motion\s+picture\s+|video\s+game\s+|game\s+)?(soundtracks?|ost|score)\b/gi;
+
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 // Only real URLs leave this module: Lidarr swaps an added artist's remote
 // image for its own /MediaCover path, which no browser here can reach.
@@ -239,10 +248,51 @@ export function lidarrClient(opts: LidarrOptions) {
       };
     },
 
-    // Album search across Lidarr's metadata (the search page's "Everywhere").
+    // Album search across Lidarr's metadata (the search page's "Everywhere"),
+    // plus the Various Artists releases it leaves out, straight from
+    // MusicBrainz: soundtracks first. Lidarr knows those by id, so a
+    // request for one goes through the same path.
     async search(q: string): Promise<Release[]> {
-      const r = await api(`/album/lookup?term=${encodeURIComponent(q)}`, { timeoutMs: 30000 }).catch((e: any) => { log(`lidarr search "${q}": ${e.message}`); return []; });
-      return (r || []).map(releaseOf);
+      const [own, va] = await Promise.all([
+        api(`/album/lookup?term=${encodeURIComponent(q)}`, { timeoutMs: 30000 }).catch((e: any) => { log(`lidarr search "${q}": ${e.message}`); return []; }),
+        this.compilations(q),
+      ]);
+      const out: Release[] = (own || []).map(releaseOf);
+      const seen = new Set(out.map((r) => r.album_id));
+      return [...out, ...va.filter((r) => !seen.has(r.album_id))];
+    },
+
+    async compilations(q: string): Promise<Release[]> {
+      const words = q.replace(SOUNDTRACK_WORDS, ' ').replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, ' ').trim();
+      if (!words) return [];
+      const lucene = `releasegroup:(${words}) AND arid:${VARIOUS_ARTISTS}`;
+      try {
+        const r = await f(`https://musicbrainz.org/ws/2/release-group?query=${encodeURIComponent(lucene)}&limit=15&fmt=json`, {
+          headers: { 'User-Agent': MB_UA, Accept: 'application/json' }, signal: AbortSignal.timeout(10000),
+        });
+        if (!r.ok) throw new Error(`musicbrainz ${r.status}`);
+        const j = await r.json() as any;
+        const st = (g: any) => Number((g['secondary-types'] || []).includes('Soundtrack'));
+        const groups = ((j['release-groups'] || []) as any[])
+          .filter((g) => (g.score ?? 0) >= 60)
+          .sort((a, b) => st(b) - st(a) || (b.score ?? 0) - (a.score ?? 0))
+          .slice(0, 8);
+        // Many compilations have no cover in the archive: a dead link would
+        // show as a broken image, so only covers that answer are kept.
+        const covers = await Promise.all(groups.map((g) => f(`https://coverartarchive.org/release-group/${g.id}/front-250`, { method: 'HEAD', signal: AbortSignal.timeout(4000) })
+          .then((r) => r.ok).catch(() => false)));
+        return groups
+          .map((g, i) => {
+            const secondary: string[] = g['secondary-types'] || [];
+            const date = String(g['first-release-date'] || '');
+            return {
+              album_id: g.id, artist: 'Various Artists', title: g.title,
+              rtype: secondary.includes('Soundtrack') ? 'Soundtrack' : secondary.includes('Compilation') ? 'Compilation' : g['primary-type'] || 'Album',
+              year: date.slice(0, 4), date, image: covers[i] ? `https://coverartarchive.org/release-group/${g.id}/front-250` : null,
+              total_tracks: 0, secondary,
+            };
+          });
+      } catch (e: any) { log(`musicbrainz search "${q}": ${e.message}`); return []; }
     },
 
     // Request a release group: make sure its artist is in Lidarr, monitor the
@@ -253,8 +303,15 @@ export function lidarrClient(opts: LidarrOptions) {
       if (!album) {
         const look = ((await api(`/album/lookup?term=lidarr:${encodeURIComponent(fid)}`, { timeoutMs: 30000 })) || [])[0];
         if (!look) throw new Error('no such release');
-        await ensureArtist(look.artist?.artistName || '', look.artist);
+        const artist = await ensureArtist(look.artist?.artistName || '', look.artist);
+        // A Various Artists release is in no artist's catalog: add it
+        // itself. Anyone else's albums arrive with the artist's refresh.
+        if (artist?.id && look.artist?.foreignArtistId === VARIOUS_ARTISTS) {
+          await api('/album', { method: 'POST', body: JSON.stringify({ ...look, artistId: artist.id, artist, monitored: false, addOptions: { searchForNewAlbum: false } }), timeoutMs: 60000 });
+          log(`lidarr: added ${look.title} (Various Artists)`);
+        }
         const until = Date.now() + 30000;
+        album = await albumByForeign(fid);
         while (!album && Date.now() < until) { await new Promise((r) => setTimeout(r, 2000)); album = await albumByForeign(fid); }
         if (!album) throw new Error('Lidarr is still fetching the artist, try again shortly');
       }

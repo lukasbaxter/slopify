@@ -75,6 +75,21 @@ describe('tasks framework', () => {
     expect(ran).toEqual(['scan']);
     release(); await app.close();
   });
+  it('a due alongside task (the download watcher) starts on the clock even while a long scan holds the line', async () => {
+    const db = tmpdb('alongside-due');
+    const ran: string[] = [];
+    let release: () => void = () => {};
+    const defs: TaskDef[] = [
+      { id: 'scan', name: 'S', description: '', schedule: { mode: 'interval', hours: 1 }, run: () => new Promise((r) => { ran.push('scan'); release = () => r('ok'); }) },
+      { id: 'downloads', name: 'D', description: '', schedule: { mode: 'interval', hours: 0.25 }, alongside: true, run: async () => { ran.push('downloads'); return 'ok'; } },
+    ];
+    const app = adminApp();
+    const { tick } = registerTasks(app, db, defs);
+    tick(); await new Promise((r) => setTimeout(r, 20));
+    tick(); await new Promise((r) => setTimeout(r, 20));
+    expect(ran.sort()).toEqual(['downloads', 'scan']);
+    release(); await app.close();
+  });
   it('the tick is round-robin: when both are due at every tick, turns alternate instead of the first starving the second', async () => {
     const db = tmpdb('rr');
     let t = new Date('2026-10-03T12:00:00').getTime();

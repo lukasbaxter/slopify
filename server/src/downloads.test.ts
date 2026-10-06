@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { ADDING_GRACE_MS, downloadOut, recordRequest, registerDownloads, STUCK_MS } from './downloads.js';
+import { ADDING_GRACE_MS, cleanStaging, downloadOut, givenUp, recordRequest, registerDownloads, STUCK_MS, watchDownloads } from './downloads.js';
 import type { AlbumState } from './lidarr.js';
 
 const album = (o: Partial<AlbumState>): AlbumState => ({
@@ -109,5 +109,101 @@ describe('downloads', () => {
     const items = (await app.inject({ url: '/api/downloads?scope=all' })).json().items;
     expect(items.map((x: any) => [x.id, x.state, x.mine]).sort()).toEqual([[5, 'adding', true], [9, 'queued', false]]);
     await app.close();
+  });
+
+  // The 2026-10-05 loop: "Piano Concerto No. 1" wanted, Soularr kept fetching
+  // the near-identical "No. 4", Lidarr filed it there, 144 rounds in 2 days.
+  it('watcher: downloads that keep landing in another album give the wanted one up, with the reason shown', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw-')));
+    const t0 = 1_800_000_000_000;
+    let monitored = true;
+    const calls: string[] = [];
+    const imports: any[] = [];
+    const lidarr: any = {
+      enabled: true,
+      all: async () => (monitored ? [album({ id: 1, album_id: 'mb1', artistId: 9, title: 'Concerto No. 1', total: 6 })] : []),
+      albums: async (ids: number[]) => ids.map((i) => album({ id: i, album_id: 'mb1', artistId: 9, title: 'Concerto No. 1', total: 6, monitored })),
+      importsSince: async () => imports,
+      unmonitor: async (id: number) => { calls.push(`unmonitor ${id}`); monitored = false; },
+      retry: async (id: number) => { calls.push(`retry ${id}`); monitored = true; },
+    };
+    recordRequest(db, 'u1', { id: 1, album_id: 'mb1', artist: 'A', title: 'Concerto No. 1' }, 'request');
+    await watchDownloads(db, lidarr, { giveUpMs: 12 * 3600e3, now: t0 });
+    // one import into album 2 is not a pattern yet
+    for (let i = 0; i < 6; i++) imports.push({ albumId: 2, album: 'Concerto No. 4', at: t0 + 10 * 60e3 + i * 1000 });
+    expect((await watchDownloads(db, lidarr, { giveUpMs: 12 * 3600e3, now: t0 + STUCK_MS + 60e3 })).gaveUp).toEqual([]);
+    // a second round is
+    for (let i = 0; i < 6; i++) imports.push({ albumId: 2, album: 'Concerto No. 4', at: t0 + 21 * 60e3 + i * 1000 });
+    const r = await watchDownloads(db, lidarr, { giveUpMs: 12 * 3600e3, now: t0 + STUCK_MS + 120e3 });
+    expect(r.gaveUp).toEqual(['A - Concerto No. 1']);
+    expect(calls).toEqual(['unmonitor 1']);
+    expect(givenUp(db).has('mb1')).toBe(true);
+    const app = appWith(db, lidarr);
+    const it1 = (await app.inject({ url: '/api/downloads' })).json().items[0];
+    expect(it1).toMatchObject({ state: 'failed', reason: 'downloads kept turning out to be a different album ("Concerto No. 4")' });
+    expect(it1.finished).toBeGreaterThan(0);
+    // still listed under Everyone after it left the wanted list
+    expect((await app.inject({ url: '/api/downloads?scope=all' })).json().items.map((x: any) => x.id)).toEqual([1]);
+    // Retry puts it back and forgets the verdict
+    expect((await app.inject({ method: 'POST', url: '/api/downloads/1/retry' })).json()).toEqual({ ok: true, id: 1 });
+    expect(givenUp(db).has('mb1')).toBe(false);
+    await app.close();
+  });
+
+  it('watcher: imports into another wanted or requested album are not "wrong"', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw2-')));
+    const t0 = 1_800_000_000_000;
+    const imports = [0, 11, 22].map((m) => ({ albumId: 2, album: 'Other', at: t0 + m * 60e3 + 60e3 }));
+    const lidarr: any = {
+      enabled: true,
+      all: async () => [album({ id: 1, album_id: 'mb1', artistId: 9 }), album({ id: 2, album_id: 'mb2', artistId: 9, done: 3 })],
+      importsSince: async () => imports,
+      unmonitor: async () => { throw new Error('must not give up'); },
+    };
+    await watchDownloads(db, lidarr, { giveUpMs: 12 * 3600e3, now: t0 });
+    expect((await watchDownloads(db, lidarr, { giveUpMs: 12 * 3600e3, now: t0 + 3600e3 })).gaveUp).toEqual([]);
+  });
+
+  it('watcher: no new song for the give-up time takes it off the wanted list; a new song resets the clock', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw3-')));
+    const t0 = 1_800_000_000_000; const H = 3600e3;
+    let done = 0; let monitored = true; const calls: string[] = [];
+    const lidarr: any = {
+      enabled: true,
+      all: async () => (monitored ? [album({ id: 5, album_id: 'mb5', done, total: 10 })] : []),
+      importsSince: async () => [],
+      unmonitor: async (id: number) => { calls.push(`unmonitor ${id}`); monitored = false; },
+    };
+    await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 });
+    done = 2;
+    await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 11 * H });
+    expect((await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 20 * H })).gaveUp).toEqual([]);
+    const r = await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 24 * H });
+    expect(r.gaveUp).toEqual(['A - T']);
+    expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 5').get() as any).reason).toBe('stopped at 2 of 10 songs, nothing new for 13 hours');
+    // a fresh request clears the verdict
+    recordRequest(db, 'u1', { id: 5, album_id: 'mb5' }, 'request');
+    expect(givenUp(db).size).toBe(0);
+  });
+
+  it('staging cleanup: spent and empty folders go, fresh downloads and failed imports stay', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-stg-'));
+    const now = Date.now();
+    const mk = (rel: string, file: string | null, ageMs: number) => {
+      const p = path.join(dir, rel); fs.mkdirSync(p, { recursive: true });
+      const t = new Date(now - ageMs);
+      if (file) { fs.writeFileSync(path.join(p, file), 'x'.repeat(10)); fs.utimesSync(path.join(p, file), t, t); }
+      fs.utimesSync(p, t, t);
+    };
+    mk('Old Album (1994)', '01.flac', 3 * 86400e3);
+    mk('Empty Single', null, 2 * 3600e3);
+    mk('Just Emptied', null, 60e3);
+    mk('In Progress', '01.flac', 60e3);
+    mk('failed_imports/Band - Thing (2000)', '01.flac', 30 * 86400e3);
+    const r = await cleanStaging(dir, { now });
+    expect(r.removed).toBe(2);
+    expect(r.bytes).toBe(10);
+    expect(fs.readdirSync(dir).sort()).toEqual(['In Progress', 'Just Emptied', 'failed_imports']);
+    expect(r.failed).toEqual([{ name: 'Band - Thing (2000)', bytes: 10 }]);
   });
 });

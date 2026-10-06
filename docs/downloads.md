@@ -51,6 +51,19 @@ studio albums and EPs of the artists you actually play). The background
 chores never fill Lidarr's wanted list past `TASKS_WANTED_TARGET` (default
 25), so a person's own request is always near the front of the line.
 
+**Watch downloads** (every 15 min, runs beside the others so a long scan
+never holds it up) keeps the wanted list honest. A Soulseek watcher like
+Soularr retries every wanted album forever, and cannot tell when Lidarr
+filed what it fetched under a different album of the same artist. This task
+takes an album off the wanted list (unmonitors it in Lidarr) when its
+downloads keep landing in another album, or when no new song has arrived
+for the "Give up after" setting (12 h by default). The Downloads page shows
+it under Failed with the reason; Retry or a new Request puts it back, and
+the discovery/backlog chores skip it. With `SLSKD_DOWNLOADS_DIR` set it also
+clears spent folders from slskd's download folder (empty ones after an
+hour, anything untouched for two days) and lists what sits in
+`failed_imports` without deleting it.
+
 There is also **Upgrade to FLAC** (`FLAC_PER_RUN` per run). **Warning:**
 setting the three slskd envs (`SLSKD_URL`, `SLSKD_API_KEY`,
 `SLSKD_DOWNLOADS_DIR`) enables it, hourly by default, and it **replaces

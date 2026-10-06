@@ -43,7 +43,7 @@ function Row({ d, onRetry, retrying, onPlay, onOpen }) {
         <div className="dl-line">
           {d.state === 'downloading' && d.via === 'torrent' && <span>Torrent • {d.detail}</span>}
           {d.state === 'downloading' && d.via !== 'torrent' && <span>{d.done} of {d.total} {songs}{d.started ? ` • started ${ago(d.started)}` : ''}</span>}
-          {d.state === 'stuck' && <span className="dl-warn">No progress for {mins(Date.now() - (d.progressAt || d.started || Date.now()))} • {d.done} of {d.total} {songs}</span>}
+          {d.state === 'stuck' && <span className="dl-warn">{d.reason || `No progress for ${mins(Date.now() - (d.progressAt || d.started || Date.now()))}`} • {d.done} of {d.total} {songs}</span>}
           {d.state === 'queued' && <span>{d.queuePos ? `#${d.queuePos} in line` : 'In line'}{d.requested ? ` • requested ${ago(d.requested)}` : ''}</span>}
           {d.state === 'failed' && <span className="dl-warn">{d.reason || 'Failed'}{d.finished ? ` • ${ago(d.finished)}` : ''}</span>}
           {d.state === 'adding' && <span>Downloaded • adding to your library…</span>}
@@ -119,7 +119,7 @@ export default function Downloads({ jf, notify, onPlay, onOpen }) {
           return (
             <section key={k} className="dl-section">
               <h2>{label} <span>{list.length}</span></h2>
-              {k === 'stuck' && <p className="dl-hint">No new song for {mins(data.stuckAfterMs)} or more. Usually the Soulseek user went offline; Retry puts it back at the front of the line.</p>}
+              {k === 'stuck' && <p className="dl-hint">No new song for {mins(data.stuckAfterMs)} or more. Soulseek keeps looking; if nothing turns up it moves to Failed with the reason. Retry also tries torrents.</p>}
               {shown.map((d) => <Row key={d.id} d={d} onRetry={retry} retrying={retrying === d.id} onPlay={onPlay} onOpen={onOpen} />)}
             </section>
           );

@@ -27,7 +27,7 @@ export type Release = { album_id: string; artist: string; title: string; rtype: 
 
 // An album's live state for the Downloads page.
 export type AlbumState = {
-  id: number; album_id: string; artist: string; title: string; rtype: string; year: string; image: string | null;
+  id: number; album_id: string; artist: string; artistId?: number; title: string; rtype: string; year: string; image: string | null;
   total: number; done: number; monitored: boolean; hasFiles: boolean;
   queue: { state: 'downloading' | 'failed'; detail: string | null; protocol?: string | null } | null;
 };
@@ -55,7 +55,7 @@ const releaseOf = (a: any): Release => ({
 });
 
 const stateOf = (a: any, queue: Map<number, QueueEntry>): AlbumState => ({
-  id: a.id, ...releaseOf(a),
+  id: a.id, ...releaseOf(a), artistId: a.artistId ?? a.artist?.id,
   total: a.statistics?.totalTrackCount ?? 0, done: a.statistics?.trackFileCount ?? 0,
   monitored: Boolean(a.monitored), hasFiles: (a.statistics?.trackFileCount ?? 0) > 0,
   queue: queue.get(a.id) ?? null,
@@ -311,6 +311,23 @@ export function lidarrClient(opts: LidarrOptions) {
       if (!a.artist?.monitored) await api(`/artist/${a.artist.id}`, { method: 'PUT', body: JSON.stringify({ ...a.artist, monitored: true, monitorNewItems: 'none' }) });
       await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) });
       cache.delete('activity');
+    },
+
+    // Stop wanting an album (the watcher gave up on it): off the wanted
+    // list, so the Soulseek watcher stops searching for it.
+    async unmonitor(albumId: number) {
+      await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: false }) });
+      cache.delete('activity');
+    },
+
+    // Files Lidarr imported for an artist since a moment, with the album
+    // each landed in. How the watcher spots a downloader that keeps
+    // fetching a different album than the one asked for.
+    async importsSince(artistId: number, since: number): Promise<{ albumId: number; album: string; at: number }[]> {
+      const h = (await api(`/history/artist?artistId=${artistId}&eventType=3&includeAlbum=true`, { timeoutMs: 30000 })) || [];
+      return (h as any[])
+        .filter((r) => r.eventType === 'trackFileImported' && Date.parse(r.date) >= since)
+        .map((r) => ({ albumId: r.albumId, album: r.album?.title || '', at: Date.parse(r.date) }));
     },
 
     // The release group a loose song belongs to: Deezer finds the album for

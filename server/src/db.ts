@@ -156,6 +156,16 @@ const MIGRATIONS: string[] = [
   ALTER TABLE artists ADD COLUMN banner_hash TEXT;
   ALTER TABLE artists ADD COLUMN banner_tries INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Every wanted album the download watcher has seen (downloads.ts): when it
+  -- showed up, when it last gained a file, and if the watcher gave up on it,
+  -- when and why. album_id is the release-group id the chores request by.
+  CREATE TABLE download_watch (
+    lidarr_id INTEGER PRIMARY KEY, album_id TEXT, first_seen INTEGER NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0, progress_at INTEGER NOT NULL, gave_up INTEGER, reason TEXT
+  );
+  CREATE INDEX download_watch_album ON download_watch(album_id);
+  `,
 ];
 
 export type DB = Database.Database;

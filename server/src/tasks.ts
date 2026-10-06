@@ -23,6 +23,7 @@ import { songPath } from './songcache.js';
 import { releaseInLibrary } from './discover.js';
 import { slskdFind, slskdDownload, slskdWait } from './explore.js';
 import type { Lidarr } from './lidarr.js';
+import { cleanStaging, givenUp, watchDownloads } from './downloads.js';
 
 export type Schedule =
   | { mode: 'off' }
@@ -188,16 +189,20 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   app.addHook('onClose', async () => { for (const w of watchers.values()) w.close(); });
 
   // Scheduled runs: one task at a time. First tick a minute after boot, not
-  // in it. The scan is round-robin from just past the last task started, so
+  // in it. Alongside tasks are not part of the line: a due one starts even
+  // while a long scan holds it (the download watcher must not wait hours). The scan is round-robin from just past the last task started, so
   // a chore that takes longer than its interval cannot starve the ones
   // listed after it.
   let rr = -1;
   const tick = () => {
     if (process.env.NODE_ENV !== 'test') syncWatchers(); // recreate any watcher dropped by an error
+    for (const def of defs) if (def.alongside && !running.has(def.id) && isDue(schedOf(def), last(def.id), now())) start(def);
     if (busy() || !defs.length) return;
+    // The round-robin below is for the line only.
     for (let i = 1; i <= defs.length; i++) {
       const idx = (rr + i) % defs.length;
       const def = defs[idx];
+      if (def.alongside) continue;
       if (!isDue(schedOf(def), last(def.id), now())) continue;
       rr = idx;
       start(def);
@@ -452,7 +457,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
             // without it ever having had its chance.
             seen.set(norm(cand.name), Date.now());
             const hit = found.find((r) => norm(r.artist) === norm(cand.name) && norm(r.title) === norm(best.title)) || found.find((r) => norm(r.artist) === norm(cand.name));
-            if (!hit || releaseInLibrary(db, hit.artist, hit.title)) continue;
+            if (!hit || releaseInLibrary(db, hit.artist, hit.title) || givenUp(db).has(hit.album_id)) continue;
             const req = await lidarr.request(hit.album_id);
             if (req.status === 'queued') {
               n++; ctx.log(`${hit.artist} - ${hit.title} (similar to ${top.name})`);
@@ -487,6 +492,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const done = JSON.parse(kvGet(db, 'task:backlog:done') || '{}') as Record<string, number>;
       const pending = await lidarr.statuses();
+      const quit = givenUp(db); // the download watcher already gave up on these
       let n = 0, artists = 0, full = false;
       for (const a of topPlayedArtists(10 * 365 * 86400000, 500)) {
         if (artists >= ctx.setting<number>('artistsPerRun') || n >= cap || full) break;
@@ -496,7 +502,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         try {
           const d = await lidarr.discography(a.name);
           for (const r of d.releases) {
-            if (!isStudio(r) || pending.has(r.album_id) || releaseInLibrary(db, r.artist || a.name, r.title)) continue;
+            if (!isStudio(r) || pending.has(r.album_id) || quit.has(r.album_id) || releaseInLibrary(db, r.artist || a.name, r.title)) continue;
             if (n >= cap || full) { complete = false; break; } // resume this artist next run
             const req = await lidarr.request(r.album_id);
             if (req.status === 'queued') {
@@ -658,5 +664,32 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     },
   };
 
-  return [scan, enrich, heads, discovery, backlog, flac];
+  // Keeps the wanted list honest (see watchDownloads) and slskd's staging
+  // folder from silting up. Alongside: a scan holding the line for hours
+  // must not leave a wrong-album loop running that long.
+  const downloads: TaskDef = {
+    id: 'downloads', name: 'Watch downloads', schedule: { mode: 'interval', hours: 0.25 }, alongside: true,
+    description: 'Give up on albums that never turn up or keep arriving as the wrong album, and clear spent files from the download folder',
+    settings: [
+      { key: 'giveUpH', label: 'Give up after', type: 'number', min: 1, max: 24 * 14, unit: 'hours', default: 12, help: 'With no new song in this long an album comes off the wanted list. Retry puts it back.' },
+      { key: 'clean', label: 'Clear spent downloads', type: 'toggle', default: true },
+    ],
+    run: async (ctx) => {
+      const out: string[] = [];
+      if (o.lidarr?.enabled) {
+        ctx.step('Checking the wanted list');
+        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log });
+        out.push(`${r.watching} wanted${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
+      } else out.push('Lidarr is not configured');
+      if (o.slskdDownloadsDir && ctx.setting('clean')) {
+        ctx.step('Clearing the download folder');
+        const c = await cleanStaging(o.slskdDownloadsDir);
+        if (c.removed) out.push(`cleared ${c.removed} spent folders (${(c.bytes / 1e9).toFixed(1)} GB)`);
+        if (c.failed.length) out.push(`failed imports waiting in ${path.join(o.slskdDownloadsDir, 'failed_imports')}: ${c.failed.map((x) => x.name).join('; ')} (${(c.failed.reduce((t, x) => t + x.bytes, 0) / 1e9).toFixed(1)} GB)`);
+      }
+      return out.join('; ');
+    },
+  };
+
+  return [scan, enrich, heads, discovery, backlog, flac, downloads];
 }

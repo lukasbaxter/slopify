@@ -358,7 +358,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         // reaches everyone on their next hello; the live update only goes
         // to this account's clients. Only ids shaped like our speaker ids
         // are persisted (the kv store is not a free-form dump).
-        if (typeof msg.id !== 'string' || !msg.id || msg.id.length > 128 || !/^(cast|bluos):/.test(msg.id)) break;
+        if (typeof msg.id !== 'string' || !msg.id || msg.id.length > 128 || !/^(cast|bluos|bridge):/.test(msg.id)) break;
         const offset = Number.isFinite(msg.offset) ? Math.max(-5, Math.min(5, msg.offset)) : null;
         if (offset == null) db.prepare('DELETE FROM kv WHERE k = ?').run(`offset:${msg.id}`); else db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(`offset:${msg.id}`, String(offset));
         for (const c of ofUser(me.uid)) send(c, { type: 'offset', id: msg.id, offset });

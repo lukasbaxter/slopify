@@ -263,7 +263,7 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
           <h2>Speakers</h2>
           {status.speakers.length ? (
             <ul className="admin-list">
-              {status.speakers.map((d) => <li key={d.id}><b>{d.name}</b><span>{d.kind === 'cast' ? 'Chromecast' : d.kind === 'bluos' ? 'BluOS' : d.kind} · {d.host}{d.playing ? ' · playing' : ''}</span></li>)}
+              {status.speakers.map((d) => <li key={d.id}><b>{d.name}</b><span>{d.kind === 'cast' ? 'Chromecast' : d.kind === 'bluos' ? 'BluOS' : d.model || d.kind} · {d.host}{d.playing ? ' · playing' : ''}</span></li>)}
             </ul>
           ) : <div className="settings-hint">No Chromecast or BluOS players found on the server's network yet. They are looked for continuously.</div>}
         </section>

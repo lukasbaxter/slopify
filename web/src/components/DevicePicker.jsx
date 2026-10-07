@@ -43,7 +43,7 @@ export function DeviceIcon({ kind, form = null, phone = false, size = 18 }) {
   const shape = form || (kind === 'local' ? LOCAL_FORM : null);
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
-      <path d={(shape && FORM_ICONS[shape]) || set[kind] || set.cast} />
+      <path d={(shape && FORM_ICONS[shape]) || set[kind] || (kind === 'bridge' ? set.bluos : set.cast)} />
     </svg>
   );
 }
@@ -172,13 +172,13 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
   const groups = [
     { label: 'This device', items: all.filter((d) => d.kind === 'local') },
     { label: 'Your devices', items: all.filter((d) => d.kind === 'relay') },
-    { label: 'Speakers & TVs', items: all.filter((d) => d.kind === 'cast') },
+    { label: 'Speakers & TVs', items: all.filter((d) => d.kind === 'cast' || d.kind === 'bridge') },
     { label: 'Bluesound', items: all.filter((d) => d.kind === 'bluos') },
   ].filter((g) => g.items.length);
 
   const remoteCount = visible.length;
   const isBrowser = typeof window !== 'undefined' && !window.conduit;
-  const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : 'Slopify');
+  const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? d.model || 'Speaker' : 'Slopify');
   const playing = new Set(active.playingOn || [active.id]);
   const isActive = (d) => playing.has(d.id);
   const others = all.filter((d) => !isActive(d));

@@ -1,10 +1,12 @@
-// LAN discovery for the two speaker families the server can drive:
-//   _googlecast._tcp  -> Chromecast / Google TV / Cast speakers (CASTV2 on :8009)
-//   _musc._tcp        -> Bluesound / BluOS players (plain HTTP on :11000)
+// LAN discovery for the speaker families the server can drive:
+//   _googlecast._tcp       -> Chromecast / Google TV / Cast speakers (CASTV2 on :8009)
+//   _musc._tcp             -> Bluesound / BluOS players (plain HTTP on :11000)
+//   _slopify-speaker._tcp  -> anything speaking the small "slopify-speaker/1" HTTP API on :7780
+//                             (see BridgeTransport; e.g. an ESP32 bridge to a Bluetooth soundbar)
 // mDNS is not enough on its own: Google TV devices in particular go missing
 // from the multicast browse (a wired Google TV Streamer never showed up
 // while it answered on :8009 the whole time), so every minute the local /24
-// is also swept for the two ports and anything that answers is asked for
+// is also swept for the three ports and anything that answers is asked for
 // its name over plain HTTP. The server runs on the house LAN, so what it
 // finds here is offered to every client of every account, wherever they are.
 import { Bonjour, type Browser } from 'bonjour-service';
@@ -12,10 +14,11 @@ import net from 'node:net';
 import os from 'node:os';
 import http from 'node:http';
 
-export type Speaker = { id: string; kind: 'cast' | 'bluos'; name: string; model: string; host: string; port: number; swept?: boolean };
+export type Speaker = { id: string; kind: 'cast' | 'bluos' | 'bridge'; name: string; model: string; host: string; port: number; swept?: boolean };
 
 const CAST_PORT = 8009;
 export const BLUOS_PORT = 11000;
+export const BRIDGE_PORT = 7780;
 const SWEEP_EVERY = 60 * 1000;
 
 // The LAN's own IPv4 (not a VPN's, not link-local); mDNS sockets are pinned
@@ -47,7 +50,8 @@ export class Discovery {
     catch (e: any) { this.log(`mdns: ${e.message}`); return; }
     const cast = this.bonjour.find({ type: 'googlecast' }, (s) => this.add(this.fromCast(s)));
     const blu = this.bonjour.find({ type: 'musc' }, (s) => this.add(this.fromBluOS(s)));
-    this.browsers = [cast, blu];
+    const bridge = this.bonjour.find({ type: 'slopify-speaker' }, (s) => { this.identifyBridge(this.address(s), s.port || BRIDGE_PORT).then((d) => d && this.add({ ...d, swept: false })).catch(() => {}); });
+    this.browsers = [cast, blu, bridge];
     for (const b of this.browsers) b.on('down', (s) => this.remove(s));
     this.sweepTimer = setInterval(() => this.sweep().catch(() => {}), SWEEP_EVERY);
     setTimeout(() => this.sweep().catch(() => {}), 1500);
@@ -127,6 +131,12 @@ export class Discovery {
     if (!name) return null;
     return { id: `bluos:${host}`, kind: 'bluos', name: name.replace(/&amp;/g, '&'), model: 'BluOS', host, port: BLUOS_PORT, swept: true };
   }
+  // A "slopify-speaker/1" device says who it is at /info.
+  async identifyBridge(host: string, port = BRIDGE_PORT): Promise<Speaker | null> {
+    const info = JSON.parse(await this.getText(`http://${host}:${port}/info`));
+    if (!/^slopify-speaker\//.test(String(info.api || '')) || !info.name) return null;
+    return { id: `bridge:${String(info.id || host).toLowerCase()}`, kind: 'bridge', name: String(info.name), model: String(info.model || 'Speaker'), host, port, swept: true };
+  }
   async sweep() {
     if (!this.bonjour || this.sweeping) return;
     this.sweeping = true;
@@ -136,7 +146,7 @@ export class Discovery {
       const known = new Map([...this.devices.values()].map((d) => [`${d.host}:${d.port}`, d]));
       const seen = new Set<string>();
       let changed = false;
-      const queue = hosts.flatMap((h) => [[h, CAST_PORT], [h, BLUOS_PORT]] as [string, number][]);
+      const queue = hosts.flatMap((h) => [[h, CAST_PORT], [h, BLUOS_PORT], [h, BRIDGE_PORT]] as [string, number][]);
       const worker = async () => {
         while (queue.length) {
           const [host, port] = queue.shift()!;
@@ -144,7 +154,7 @@ export class Discovery {
           seen.add(`${host}:${port}`);
           if (known.has(`${host}:${port}`)) continue;
           try {
-            const dev = port === CAST_PORT ? await this.identifyCast(host) : await this.identifyBluOS(host);
+            const dev = port === CAST_PORT ? await this.identifyCast(host) : port === BLUOS_PORT ? await this.identifyBluOS(host) : await this.identifyBridge(host, port);
             if (dev && !this.devices.has(dev.id)) { this.devices.set(dev.id, dev); changed = true; }
           } catch { /* answers on the port but is not one of ours */ }
         }

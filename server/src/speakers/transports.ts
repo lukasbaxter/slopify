@@ -1,9 +1,11 @@
-// The two speaker transports. Both pull the stream themselves, so the URLs
+// The speaker transports. All of them pull the stream themselves, so the URLs
 // handed to them must be reachable from the speaker (the server's public
 // address on the LAN), never localhost.
 //
 // Cast: the Default Media Receiver over CASTV2 (no registered app id).
 // BluOS: the plain HTTP API on :11000 (undocumented but stable, no auth).
+// Bridge: Slopify's own "slopify-speaker/1" HTTP API on :7780, small enough
+// for a microcontroller (see BridgeTransport).
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import type { Speaker } from './discovery.js';
@@ -323,4 +325,78 @@ export class BluOSTransport implements Transport {
 
 const BLUOS_DEFAULT_PORT = 11000;
 
-export function transportFor(device: Speaker): Transport { return device.kind === 'cast' ? new CastTransport(device) : new BluOSTransport(device); }
+// ---- slopify-speaker/1 ------------------------------------------------------
+// The whole protocol, plain GETs with JSON replies (no auth, LAN only):
+//   /info                  {api:"slopify-speaker/1", id, name, model, formats:["mp3"], maxKbps}
+//   /play?url=&startAt=s   fetch that http:// URL and play it, starting the stream at s seconds
+//                          (the device appends startAt to the URL; the server's mp3 route honours it)
+//   /pause  /resume  /stop
+//   /volume?level=0-100
+//   /status                {state: playing|buffering|paused|idle|stream, position, volume, ended,
+//                           source, url, error}
+// state "stream" means something else pushed audio to it (source names it,
+// e.g. Spotify): to the player that reads as the speaker taken by another app.
+// The device decodes nothing but MP3, at a bitrate it names, so every track is
+// handed over as the server's progressive mp3 transcode; a seek is a new /play.
+export class BridgeTransport implements Transport {
+  private info: { formats: string[]; maxKbps: number } | null = null;
+  private last: string | null = null;
+  private failures = 0;
+  constructor(private device: Speaker) {}
+  private async get(path: string, timeoutMs = 6000): Promise<any> {
+    const body = await request(this.device.host, this.device.port, path, timeoutMs);
+    return body ? JSON.parse(body) : {};
+  }
+  private async kbps() {
+    if (!this.info) { const i = await this.get('/info'); this.info = { formats: i.formats || ['mp3'], maxKbps: Number(i.maxKbps) || 160 }; }
+    return this.info.maxKbps;
+  }
+  // /api/stream/<id>?token=... -> /api/stream/<id>/mp3?token=...&bitrate=...
+  private mp3Url(url: string, kbps: number) {
+    const u = new URL(url);
+    if (!/\/mp3$/.test(u.pathname)) u.pathname = `${u.pathname.replace(/\/+$/, '')}/mp3`;
+    u.searchParams.set('bitrate', String(kbps * 1000));
+    u.searchParams.delete('startAt');
+    return u.toString();
+  }
+  async play(url: string, _meta: PlayMeta = {}, startAt = 0) {
+    if (!/^http:/i.test(url)) throw new Error(`${this.device.name} can only fetch http:// streams; set PUBLIC_URL to the server's plain LAN address`);
+    this.last = this.mp3Url(url, await this.kbps());
+    return this.get(`/play?${new URLSearchParams({ url: this.last, startAt: String(Math.max(0, startAt)) })}`, 15000);
+  }
+  resume() { return this.get('/resume', 15000); }
+  pause() { return this.get('/pause'); }
+  stop() { return this.get('/stop').catch(() => null); }
+  async seek(seconds: number) {
+    if (!this.last) return null;
+    return this.get(`/play?${new URLSearchParams({ url: this.last, startAt: String(Math.max(0, seconds)) })}`, 15000);
+  }
+  setVolume(level: number) { return this.get(`/volume?level=${Math.max(0, Math.min(100, Math.round(level)))}`); }
+  async status(): Promise<Status> {
+    let s: any;
+    try { s = await this.get('/status', 4000); this.failures = 0; }
+    catch (e) {
+      // One missed poll is WiFi; a few in a row is a device that went away.
+      if (++this.failures >= 3) return { playing: false, state: 'IDLE', position: 0, duration: 0, volume: null, gone: true };
+      throw e;
+    }
+    const state = String(s.state || 'idle');
+    const theirs = state === 'stream';
+    return {
+      playing: state === 'playing' || state === 'buffering' || theirs,
+      state: theirs ? 'stream' : state === 'paused' ? 'PAUSED' : state === 'idle' ? 'IDLE' : state === 'buffering' ? 'BUFFERING' : 'PLAYING',
+      position: Number(s.position) || 0, duration: 0,
+      volume: typeof s.volume === 'number' ? s.volume : null,
+      ended: !!s.ended,
+      service: theirs ? (s.source || 'stream') : 'url',
+      serviceName: theirs ? (s.source || 'another app') : null,
+      streamUrl: s.url || null,
+      canSeek: true,
+    };
+  }
+  close() {}
+}
+
+export function transportFor(device: Speaker): Transport {
+  return device.kind === 'cast' ? new CastTransport(device) : device.kind === 'bridge' ? new BridgeTransport(device) : new BluOSTransport(device);
+}

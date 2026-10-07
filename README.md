@@ -78,6 +78,9 @@ spelled out there.
   at the desk, control one from another.
 - Chromecast and BluOS speakers driven by the server, so any phone or browser
   can pick them, and speaker groups.
+- DIY speakers: anything answering the small `slopify-speaker/1` HTTP API on
+  port 7780 is found and played to like the others (the protocol is
+  documented at `BridgeTransport` in `server/src/speakers/transports.ts`).
 - Accounts with invites and admin roles; sign-ins revocable per device.
 - Optional: Lidarr and slskd for filling the library, ListenBrainz
   scrobbling and weekly playlists, generated playlists (Claude), synced

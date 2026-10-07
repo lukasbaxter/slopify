@@ -92,6 +92,15 @@ export const config = {
   // so imported albums are playable seconds later. Anything that actually
   // fetches music (an indexer in Lidarr, Soularr bridging slskd, ...) is
   // configured in Lidarr itself, not here.
+  // Soularr (Soulseek for Lidarr's wanted list), optional: lets the
+  // Downloads page say what it is doing about each waiting album. SOULARR_LOG
+  // = its log file (log_to_file = True; mount its data folder read only, the
+  // config.ini beside the log is read too); SOULARR_URL = its Web UI, so
+  // Retry can clear an album it skips after a failed import.
+  soularr: {
+    log: env('SOULARR_LOG', ''),
+    url: env('SOULARR_URL', '').replace(/\/+$/, ''),
+  },
   lidarr: {
     url: env('LIDARR_URL', '').replace(/\/+$/, ''),
     apiKey: env('LIDARR_API_KEY', ''),

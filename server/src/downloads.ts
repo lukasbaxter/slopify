@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { releaseInLibrary } from './discover.js';
 import type { Lidarr, AlbumState } from './lidarr.js';
+import { searchKey, type Soularr, type SoularrStatus } from './soularr.js';
 
 // Monitored with nothing moving for this long = stuck (a Soulseek watcher
 // polls Lidarr's wanted list every few minutes, so quiet half-hours mean
@@ -58,7 +59,27 @@ export function downloadOut(a: AlbumState, meta: Meta | undefined, inLibrary: { 
   };
 }
 
-export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?: Lidarr }) {
+// What the Soulseek downloader did about one album: its last search, and
+// whether it skips the album after a failed import (then it is failed, not
+// waiting: it would wait forever).
+export function withWatcher(item: ReturnType<typeof downloadOut>, st: SoularrStatus | null, failedImport: boolean) {
+  const out: typeof item & { search: { at: number; results: number | null; outcome: string } | null; failedImport: boolean } = { ...item, search: null, failedImport: false };
+  if (item.state === 'done' || item.state === 'adding') return out;
+  const s = st ? st.searches.get(searchKey(item.artist, item.title)) ?? st.searches.get(searchKey('', item.title)) ?? null : null;
+  out.search = s ? { at: s.at, results: s.results, outcome: s.outcome } : null;
+  if (failedImport) {
+    out.failedImport = true; out.state = 'failed';
+    out.reason = 'Downloaded, but Lidarr could not import the files, so the Soulseek downloader skips this album until you retry';
+  }
+  return out;
+}
+
+export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?: Lidarr; soularr?: Soularr }) {
+  const soularr = opts.soularr?.enabled || opts.soularr?.canClear ? opts.soularr : null;
+  const failedImports = async () => {
+    try { return soularr ? await soularr.failedImports() : new Set<number>(); }
+    catch (e: any) { app.log.warn(e.message); return new Set<number>(); }
+  };
   const auth = { preHandler: (app as any).requireUser };
   const lidarr = opts.lidarr;
   const ready = lidarr?.enabled;
@@ -107,12 +128,18 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?:
     } catch (e: any) { return reply.code(502).send({ error: e.message }); }
     const now = Date.now();
     const watch = watchOf(rows.map((a) => a.id));
-    const items = rows.map((a) => downloadOut(a, meta.get(a.id), releaseInLibrary(db, a.artist, a.title), now, watch.get(a.id)));
+    const st = soularr?.status(now) ?? null;
+    // Its failed-imports list when its Web UI is reachable; else what its log says it skips.
+    const failed = soularr?.canClear ? await failedImports() : new Set(st?.skipped.keys() ?? []);
+    const items = rows.map((a) => withWatcher(downloadOut(a, meta.get(a.id), releaseInLibrary(db, a.artist, a.title), now, watch.get(a.id)), st, failed.has(a.id)));
     const counts: Record<string, number> = {};
     for (const i of items) counts[i.state] = (counts[i.state] || 0) + 1;
     const order = ['downloading', 'adding', 'stuck', 'queued', 'failed', 'done'];
     items.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (b.requested ?? 0) - (a.requested ?? 0));
-    return { scope, items, counts, stuckAfterMs: STUCK_MS };
+    // The downloader's own rhythm, so a waiting album can say when it is next looked at.
+    const wanted = st ? await Promise.resolve().then(() => lidarr!.wantedCount()).catch(() => null) : null;
+    const watcher = st ? { name: 'Soularr', lastCheck: st.lastStart, lastCheckEnd: st.lastEnd, next: st.next, interval: st.interval, checking: st.checking, perCheck: st.perCheck, wanted } : null;
+    return { scope, items, counts, stuckAfterMs: STUCK_MS, watcher, now };
   });
 
   // Try a failed or stuck album again: monitor it and search Lidarr's
@@ -124,9 +151,15 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?:
     try { a = (await lidarr!.albums([id]))[0]; } catch (e: any) { return reply.code(502).send({ error: e.message }); }
     if (!a) return reply.code(404).send({ error: 'no such download' });
     const meta = metaFor(req.user.id).get(id);
-    const state = downloadOut(a, meta, releaseInLibrary(db, a.artist, a.title), Date.now(), watchOf([id]).get(id)).state;
+    const failedImport = soularr?.canClear ? (await failedImports()).has(id) : !!soularr?.status()?.skipped.has(id);
+    const state = withWatcher(downloadOut(a, meta, releaseInLibrary(db, a.artist, a.title), Date.now(), watchOf([id]).get(id)), null, failedImport).state;
     if (state !== 'failed' && state !== 'stuck') return reply.code(409).send({ error: `It is ${state}, not failed or stuck` });
-    try { await lidarr!.retry(id); } catch (e: any) { return reply.code(502).send({ error: e.message }); }
+    try {
+      // Soularr would keep skipping it: take it off its failed-imports list.
+      if (failedImport && !soularr!.canClear) return reply.code(409).send({ error: "Soularr skips it after a failed import: remove it from Soularr's failed imports (its Web UI), then retry" });
+      if (failedImport) await soularr!.clearFailedImport(id);
+      await lidarr!.retry(id);
+    } catch (e: any) { return reply.code(502).send({ error: e.message }); }
     const old = db.prepare('SELECT * FROM my_requests WHERE user_id = ? AND lidarr_id = ?').get(req.user.id, id) as any;
     recordRequest(db, req.user.id, { id, album_id: a.album_id, artist: a.artist, title: a.title }, old?.source ?? 'retry', old?.note ?? null);
     // The stuck clock runs from `created`: a retry restarts it (every row for

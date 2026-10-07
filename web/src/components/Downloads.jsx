@@ -22,8 +22,38 @@ const ago = (t) => {
   const d = Math.round(h / 24); return `${d} day${d === 1 ? '' : 's'} ago`;
 };
 const mins = (ms) => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? `${m} min` : `${Math.round(m / 60)} h`; };
+// "in 3 min" / "in 40 s" until a time.
+const inTime = (t) => { const s = Math.round((t - Date.now()) / 1000); if (s <= 5) return 'any moment now'; if (s < 90) return `in ${s} s`; return `in ${mins(s * 1000)}`; };
 
-function Row({ d, onRetry, retrying, onPlay, onOpen }) {
+// The Soulseek downloader's rhythm, for the header: never leave anyone
+// wondering whether anything is happening.
+function watcherLine(w) {
+  if (!w) return null;
+  const when = w.checking ? 'checking the wanted list now' : [w.lastCheck && `last checked ${ago(w.lastCheck)}`, w.next && `next check ${inTime(w.next)}`].filter(Boolean).join(' • ');
+  const load = w.wanted != null ? `${w.wanted} album${w.wanted === 1 ? '' : 's'} wanted${w.perCheck && w.wanted > w.perCheck ? `, ${w.perCheck} searched per check` : ''}` : '';
+  return `Soulseek downloader: ${[when, load].filter(Boolean).join(' • ')}`;
+}
+
+// What the downloader did about a waiting (or stuck) album and what happens next.
+function waitingText(d, w) {
+  const next = !w ? '' : w.checking ? 'checking now' : w.next ? `next try ${inTime(w.next)}` : '';
+  const s = d.search;
+  if (s && s.outcome === 'searching') return 'Searching Soulseek for it now…';
+  if (s) {
+    const what = {
+      noresults: `Searched Soulseek ${ago(s.at)}: nobody is sharing it`,
+      nomatch: `Searched Soulseek ${ago(s.at)}: ${s.results} result${s.results === 1 ? '' : 's'}, none a complete match for this release`,
+      refused: `Found on Soulseek ${ago(s.at)}, but nobody sharing it would send it (offline or their queue is full)`,
+      matched: `Found on Soulseek ${ago(s.at)}, the download is starting`,
+    }[s.outcome] || `Searched Soulseek ${ago(s.at)}`;
+    return s.outcome === 'matched' ? what : [what, next].filter(Boolean).join(' • ');
+  }
+  if (!w) return `Waiting for the downloader to pick it up${d.requested ? ` • requested ${ago(d.requested)}` : ''}`;
+  const many = w.perCheck && w.wanted > w.perCheck ? ` (${w.wanted} albums wait, ${w.perCheck} are searched per check, so it can take a few)` : '';
+  return `Not searched yet • first search at the next check, ${w.checking ? 'running now' : w.next ? inTime(w.next) : 'soon'}${many}`;
+}
+
+function Row({ d, w, onRetry, retrying, onPlay, onOpen }) {
   const pct = d.total ? Math.min(100, Math.round((d.done / d.total) * 100)) : 0;
   const songs = d.total === 1 ? 'song' : 'songs';
   return (
@@ -43,8 +73,8 @@ function Row({ d, onRetry, retrying, onPlay, onOpen }) {
         <div className="dl-line">
           {d.state === 'downloading' && d.via === 'torrent' && <span>Torrent • {d.detail}</span>}
           {d.state === 'downloading' && d.via !== 'torrent' && <span>{d.done} of {d.total} {songs}{d.started ? ` • started ${ago(d.started)}` : ''}</span>}
-          {d.state === 'stuck' && <span className="dl-warn">{d.reason || `No progress for ${mins(Date.now() - (d.progressAt || d.started || Date.now()))}`} • {d.done} of {d.total} {songs}</span>}
-          {d.state === 'queued' && <span>{d.queuePos ? `#${d.queuePos} in line` : 'In line'}{d.requested ? ` • requested ${ago(d.requested)}` : ''}</span>}
+          {d.state === 'stuck' && <span className="dl-warn">{d.search ? waitingText(d, w) : d.reason || `No progress for ${mins(Date.now() - (d.progressAt || d.started || Date.now()))}`} • {d.done} of {d.total} {songs}</span>}
+          {d.state === 'queued' && <span>{waitingText(d, w)}</span>}
           {d.state === 'failed' && <span className="dl-warn">{d.reason || 'Failed'}{d.finished ? ` • ${ago(d.finished)}` : ''}</span>}
           {d.state === 'adding' && <span>Downloaded • adding to your library…</span>}
           {d.state === 'done' && (d.libraryAlbumId
@@ -105,6 +135,7 @@ export default function Downloads({ jf, notify, onPlay, onOpen }) {
           </div>
           {summary.length > 0 && <div className="dl-summary">{summary.map(([k, label, n]) => <span key={k} className={k}>{n} {label.toLowerCase()}</span>)}</div>}
         </div>
+        {data?.watcher && <p className="dl-watcher">{watcherLine(data.watcher)}</p>}
         {error && <p className="banner">{error}</p>}
         {!data && !error && <p className="dl-empty">Loading…</p>}
         {data && !items.length && (
@@ -120,7 +151,7 @@ export default function Downloads({ jf, notify, onPlay, onOpen }) {
             <section key={k} className="dl-section">
               <h2>{label} <span>{list.length}</span></h2>
               {k === 'stuck' && <p className="dl-hint">No new song for {mins(data.stuckAfterMs)} or more. Soulseek keeps looking; if nothing turns up it moves to Failed with the reason. Retry also tries torrents.</p>}
-              {shown.map((d) => <Row key={d.id} d={d} onRetry={retry} retrying={retrying === d.id} onPlay={onPlay} onOpen={onOpen} />)}
+              {shown.map((d) => <Row key={d.id} d={d} w={data?.watcher} onRetry={retry} retrying={retrying === d.id} onPlay={onPlay} onOpen={onOpen} />)}
             </section>
           );
         })}

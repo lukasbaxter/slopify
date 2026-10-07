@@ -1684,6 +1684,7 @@ button:disabled { cursor: default; }
 .dl-summary { display: flex; gap: 14px; color: var(--fg-dim); font-size: 14px; flex-wrap: wrap; }
 .dl-summary .downloading { color: var(--accent); }
 .dl-summary .stuck, .dl-summary .failed { color: var(--danger); }
+.dl-watcher { color: var(--fg-dim); font-size: 13px; margin: -4px 0 14px; }
 .dl-section { margin: 24px 0 8px; }
 .dl-section h2 { font-size: 20px; font-weight: 700; margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; }
 .dl-section h2 span { font-size: 14px; font-weight: 400; color: var(--fg-dim); }

@@ -24,6 +24,7 @@ import { registerAi } from './ai.js';
 import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
+import { soularrClient } from './soularr.js';
 import { registerTasks, builtinTasks } from './tasks.js';
 import { lyricSyncTask, registerLyricSync } from './lyricsync.js';
 import { registerIngest } from './ingest.js';
@@ -102,7 +103,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerJobs(app);
   app.decorate('ai', registerAi(app, db, { ...config.ai, lidarr }));
   registerSpotifyImport(app, db, dataDir, { lidarr });
-  registerDownloads(app, db, { lidarr });
+  registerDownloads(app, db, { lidarr, soularr: soularrClient(config.soularr) });
   registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
   registerTasks(app, db, [...builtinTasks(app, {
     db, lidarr, cacheDir, musicDir,

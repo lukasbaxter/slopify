@@ -27,6 +27,23 @@ const remotePauseHold = (() => {
   return { start(fn) { cancel(); timer = setTimeout(() => { timer = null; fn(); }, 1000); }, cancel };
 })();
 
+// Hardware volume button steps (phone app), the same rule the server applies
+// to its speakers: one step per 300 ms, and a run of steps goes at most 20
+// above where it began until the buttons rest for 3 s. A phone once reported
+// presses nobody made, 4 at a time, and took a speaker group from 18 to 83.
+export function makeVolumeStepper() {
+  let last = 0, runFrom = null;
+  return (from, step) => {
+    const now = Date.now();
+    if (!step || now - last < 300) return null;
+    if (runFrom == null || now - last > 3000) runFrom = from;
+    last = now;
+    const want = Math.max(0, Math.min(100, from + Math.sign(step) * 5));
+    const next = Math.min(want, Math.max(from, runFrom + 20));
+    return next === from ? null : next;
+  };
+}
+
 // Breadcrumbs for what happened while nobody could look (the phone locked):
 // the element's own events, lock-screen actions, recoveries. Read by a
 // debugger as window.__slopifyMediaLog and sent with the phone's diag report
@@ -130,6 +147,8 @@ export function usePlayer(jf) {
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(80);
+  const volumeRef = useRef(80);
+  volumeRef.current = volume;
   // Spotify-style modes. repeat: 'off' | 'all' | 'one'. shuffle: 'off' | 'on' |
   // 'smart' (smart = keep going past the queue with similar songs).
   const [repeat, setRepeat] = useState('off');
@@ -271,6 +290,7 @@ export function usePlayer(jf) {
   const skipToRef = useRef(() => {});
   const yieldRef = useRef(() => {});
   const setVolumeRef = useRef(() => {});
+  const volumeStepRef = useRef(() => {});
   const previousRef = useRef(() => {});
   const setRepeatModeRef = useRef(() => {});
   const setShuffleModeRef = useRef(() => {});
@@ -929,6 +949,26 @@ export function usePlayer(jf) {
     },
     [remote]
   );
+
+  // Play or pause, as asked (not a flip): the lock screen's buttons. A toggle
+  // sent while the phone's idea of the state was stale did the opposite, and
+  // a pause restarted music someone had just paused elsewhere.
+  const setPlayingTo = useCallback((want) => {
+    const act = activePlayerRef.current;
+    if (act && relayRef.current) { relayRef.current.command(act, { action: 'setPlaying', playing: !!want }); return; }
+    if (playingRef.current !== !!want) toggleRef.current();
+  }, []);
+
+  // A hardware volume button press: the device playing works the level out
+  // from its own (a server speaker applies the same limits itself).
+  const stepperRef = useRef(null);
+  const volumeStep = useCallback((step) => {
+    const act = activePlayerRef.current;
+    if (act && relayRef.current) { relayRef.current.command(act, { action: 'volumeStep', step: Math.sign(step) }); return; }
+    stepperRef.current ||= makeVolumeStepper();
+    const next = stepperRef.current(Math.round(volumeRef.current ?? 0), step);
+    if (next != null) setVolumeRef.current(next);
+  }, []);
 
   // Re-order the queue for a shuffle change, keeping the current track playing.
   const applyShuffleOrder = useCallback((mode) => {
@@ -1843,6 +1883,8 @@ export function usePlayer(jf) {
     else if (cmd.action === 'queueClear') { clearQueuedRef.current(); }
     else if (cmd.action === 'skipTo') { skipToRef.current(cmd.index | 0); }
     else if (cmd.action === 'toggle') { toggleRef.current(); }
+    else if (cmd.action === 'setPlaying') { if (playingRef.current !== !!cmd.playing) toggleRef.current(); }
+    else if (cmd.action === 'volumeStep') { volumeStepRef.current(Number(cmd.step) || 0); }
     else if (cmd.action === 'seek') { seekRef.current(cmd.pos || 0); }
     else if (cmd.action === 'setVolume') { setVolumeRef.current(cmd.level ?? 100); }
     else if (cmd.action === 'next') { advanceRef.current(false); }
@@ -1886,6 +1928,7 @@ export function usePlayer(jf) {
   useEffect(() => { seekRef.current = seek; }, [seek]);
   useEffect(() => { skipToRef.current = skipTo; }, [skipTo]);
   useEffect(() => { setVolumeRef.current = setVolume; }, [setVolume]);
+  useEffect(() => { volumeStepRef.current = volumeStep; }, [volumeStep]);
   useEffect(() => { previousRef.current = previous; }, [previous]);
   useEffect(() => { setRepeatModeRef.current = setRepeatMode; }, [setRepeatMode]);
   useEffect(() => { setShuffleModeRef.current = setShuffleMode; }, [setShuffleMode]);
@@ -1984,8 +2027,8 @@ export function usePlayer(jf) {
   // The stand-in plays for a session playing elsewhere, and (phone app, within
   // the 2 hours) whenever this phone is not making the sound itself.
   const standIn = (msRemote && shownPlaying) || (staying && !(msLocal && shownPlaying));
-  // Held by the stand-in while paused: iOS may show the pause button then (it
-  // sees silent media playing), so a press of either button means play.
+  // Held by the stand-in while paused (silent media keeps the lock screen).
+  // Only its play button acts; a pause there just re-syncs the icon.
   const holding = standIn && !shownPlaying;
   // Lock-screen play and pause ask for a state; they used to both toggle, so
   // once the app and the sound disagreed each tap went the wrong way. A tap
@@ -2000,7 +2043,7 @@ export function usePlayer(jf) {
       else if (!shownPlaying && !el.paused) ownPause(el);
     }
   };
-  msRefs.current = { toggle, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding };
+  msRefs.current = { toggle, setPlaying: setPlayingTo, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
   const msNote = (m) => mediaLog(`${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
@@ -2019,19 +2062,16 @@ export function usePlayer(jf) {
     const playPause = (wantPlaying) => () => {
       const r = msRefs.current;
       msNote(`lock screen ${wantPlaying ? 'play' : 'pause'}`);
-      // Held by the stand-in (the 2-hour hold): either button means play. It
-      // waits a second and is dropped if the app is going away, like a remote
-      // play/pause: iOS sends the stand-in a 'pause' as the app is closed or
-      // switched from, and acting on it at once started the paused music.
-      if (r.holding && !r.playing) {
-        msNote('play (held by the stand-in, waiting a second)');
-        remotePauseHold.start(() => { msNote('sent'); if (msRefs.current.holding && !msRefs.current.playing) msRefs.current.toggle(); });
-        return;
-      }
+      // A pause never plays. iOS sends the silent stand-in 'pause' by itself
+      // (when the music is paused elsewhere, when the app is switched from),
+      // and reading that as play restarted music paused from another device,
+      // again and again.
       if (r.playing === wantPlaying) { r.resync(); return; }
-      if (!r.remote) { r.toggle(); return; }
+      if (!r.remote && !r.holding) { r.toggle(); return; }
+      // For another device (or the 2-hour hold): wait a second, dropped if
+      // the app is going away, then ask for the state, never a flip.
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);
-      remotePauseHold.start(() => { msNote('sent'); msRefs.current.toggle(); });
+      remotePauseHold.start(() => { msNote('sent'); msRefs.current.setPlaying(wantPlaying); });
     };
     on('play', playPause(true));
     on('pause', playPause(false));
@@ -2099,7 +2139,7 @@ export function usePlayer(jf) {
       queue: shownQueue, index: shownIndex, current, applyRemoteQueue, applySession, mirroring: !!relayTarget,
       playing: shownPlaying, position: shownPosition, duration: shownDuration, volume: shownVolume, error,
       repeat: shownRepeat, shuffle: shownShuffle, cycleRepeat, cycleShuffle, setShuffle: setShuffleRouted,
-      playQueue, toggle, next, previous, seek, setVolume, skipTo,
+      playQueue, toggle, next, previous, seek, setVolume, volumeStep, skipTo,
       clearError: () => setError(null),
     }),
     // eslint-disable-next-line
@@ -2107,6 +2147,6 @@ export function usePlayer(jf) {
      relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relayInstance, shownQueue, shownIndex, current, applyRemoteQueue, applySession, relayTarget,
      shownPlaying, shownPosition, shownDuration, shownVolume, error, shownRepeat, shownShuffle,
      cycleRepeat, cycleShuffle, setShuffleRouted, playQueue, toggle, next,
-     previous, seek, setVolume, skipTo]
+     previous, seek, setVolume, volumeStep, skipTo]
   );
 }

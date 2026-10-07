@@ -50,6 +50,8 @@ export default function App() {
   // Recognised by value, not by a quiet period after each press, so presses
   // in quick succession all count.
   const echo = useRef(null);
+  // Shown in the page's diag report: what the shell heard and dropped.
+  const note = (msg) => web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:shellnote', { detail: { msg: ${JSON.stringify(msg)} } })); true;`);
   const putBack = (level) => {
     echo.current = level;
     VolumeManager.setVolume(level, { showUI: false }).catch(() => {});
@@ -63,11 +65,20 @@ export default function App() {
       sub = VolumeManager.addVolumeListener((ev) => {
         const vol = typeof ev === 'number' ? ev : ev?.volume;
         if (typeof vol !== 'number') return;
-        if (echo.current != null && Math.abs(vol - echo.current) < 0.001) { echo.current = null; return; } // our own put-back
+        const reason = typeof ev === 'object' ? ev?.reason || '' : '';
+        // Our own put-back. iOS rounds the level to its own steps, so the
+        // echo can come back a little off the value we set: matched within
+        // a third of a press (one press is 1/16 = 0.0625).
+        if (echo.current != null && Math.abs(vol - echo.current) < 0.02) { echo.current = null; return; }
         if (!remote.current || base.current == null) { base.current = vol; return; }
-        const step = vol > base.current + 0.001 ? 1 : vol < base.current - 0.001 ? -1 : 0;
+        // Only a button press counts. iOS also reports volume changes when
+        // the audio route or category switches (the silent stand-in starting
+        // or stopping), with another reason: those were taken for presses,
+        // 4 at a time, and stepped a speaker group from 18 to 83 unasked.
+        if (reason && reason !== 'ExplicitVolumeChange') { note(`ignored ${reason} ${vol.toFixed(3)} (base ${base.current.toFixed(3)})`); return; }
+        const step = vol > base.current + 0.02 ? 1 : vol < base.current - 0.02 ? -1 : 0;
         if (!step) return;
-        web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('conduit:volumestep', { detail: { step: ${step} } })); true;`);
+        web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('conduit:volumestep', { detail: { step: ${step}, reason: ${JSON.stringify(reason || 'kvo')} } })); true;`);
         // Put the phone's own level back, quietly, so the next press measures from the same place.
         putBack(base.current);
       });
@@ -93,7 +104,10 @@ export default function App() {
         VolumeManager.getVolume().then((v) => {
           let b = typeof v === 'number' ? v : v?.volume;
           if (typeof b !== 'number') return;
-          if (b > 0.95 || b < 0.05) { b = b > 0.95 ? 0.8 : 0.2; putBack(b); }
+          // On one of iOS's own steps (sixteenths), so a put-back reads back exactly.
+          const q = Math.round(b * 16) / 16;
+          if (b > 0.95 || b < 0.05) b = b > 0.95 ? 0.8125 : 0.1875; else b = q;
+          if (Math.abs(b - (typeof v === 'number' ? v : v?.volume)) > 0.001) putBack(b);
           base.current = b;
         }).catch(() => {});
       }

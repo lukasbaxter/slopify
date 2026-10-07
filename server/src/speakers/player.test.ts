@@ -190,3 +190,39 @@ describe('BluOS end of track', () => {
     expect(p.playing).toBe(false);
   });
 });
+
+describe('phone volume buttons and lock-screen play/pause', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a burst of presses in the same instant is one step', async () => {
+    const p = player(); p.volume = 18;
+    await Promise.all([1, 1, 1, 1].map((step) => p.execute({ action: 'volumeStep', step })));
+    expect(p.volume).toBe(23);
+  });
+
+  it('a run of presses rises at most 20 until the buttons rest', async () => {
+    const p = player(); p.volume = 18;
+    for (let i = 0; i < 10; i++) { await p.execute({ action: 'volumeStep', step: 1 }); await vi.advanceTimersByTimeAsync(400); }
+    expect(p.volume).toBe(38);
+    await p.execute({ action: 'volumeStep', step: -1 });
+    expect(p.volume).toBe(33);
+    await vi.advanceTimersByTimeAsync(3500);
+    await p.execute({ action: 'volumeStep', step: 1 });
+    expect(p.volume).toBe(38);
+  });
+
+  it('a pause for a paused speaker leaves it paused; a play for a playing one leaves it playing', async () => {
+    const p = player();
+    let flips = 0; p.toggle = async () => { flips++; p.playing = !p.playing; };
+    p.playing = false;
+    await p.execute({ action: 'setPlaying', playing: false });
+    expect(p.playing).toBe(false);
+    p.playing = true;
+    await p.execute({ action: 'setPlaying', playing: true });
+    expect(flips).toBe(0);
+    await p.execute({ action: 'setPlaying', playing: false });
+    expect(p.playing).toBe(false);
+    expect(flips).toBe(1);
+  });
+});

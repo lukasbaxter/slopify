@@ -12,6 +12,11 @@ import { BluOSTransport, transportFor, type Transport } from './transports.js';
 type Row = { Id: string; Name: string; Artists: string[]; AlbumArtist: string; Album: string; AlbumId: string; RunTimeTicks: number; ArtistItems: { Id: string; Name: string }[]; AlbumArtists: { Id: string; Name: string }[]; UserData: { IsFavorite: boolean }; _queued: boolean; _codec?: string | null };
 const MIME: Record<string, string> = { flac: 'audio/flac', mp3: 'audio/mpeg', aac: 'audio/mp4', m4a: 'audio/mp4', alac: 'audio/mp4', ogg: 'audio/ogg', vorbis: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', aiff: 'audio/aiff' };
 
+
+const STEP_SIZE = 5;
+const STEP_GAP_MS = 300;
+const STEP_RUN_REST_MS = 3000;
+const STEP_RUN_MAX_RISE = 20;
 export type PlayerDeps = {
   db: DB; discovery: Discovery; publicUrl: string; token: string;
   report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void; scrobble?: (trackId: string, at: number) => void;
@@ -110,6 +115,10 @@ export class ServerPlayer {
       else if (a === 'queueClear') { const cur = this.current; this.queue = this.queue.filter((t, i) => i <= this.index || !t._queued); this.index = cur ? this.queue.indexOf(cur) : -1; this.d.reportQueue(this.queue); }
       else if (a === 'skipTo') await this.skipTo(cmd.index | 0);
       else if (a === 'toggle') await this.toggle();
+      // Asks for a state rather than flipping it: a pause sent while the
+      // speaker is already paused stays a pause (a toggle restarted it).
+      else if (a === 'setPlaying') { if (!!cmd.playing !== this.playing) await this.toggle(); }
+      else if (a === 'volumeStep') await this.volumeStep(Number(cmd.step) || 0);
       else if (a === 'seek') await this.seek(Number(cmd.pos) || 0);
       else if (a === 'setVolume') await this.setVolume(Number(cmd.level ?? 100));
       else if (a === 'next') await this.next(false);
@@ -368,6 +377,25 @@ export class ServerPlayer {
     this.d.log(`speaker ${this.device?.name || '?'}: group volume ${L} (${to.map((x) => `${x.sp.name} ${x.level ?? '?'}->${x.next}`).join(', ')})`);
     await Promise.all(to.map(({ sp, next }) => new BluOSTransport(sp).setOwnVolume(next).catch(() => {})));
   }
+  // A hardware volume button press from a phone: one step from the speaker's
+  // own level, worked out here rather than by the phone (whose idea of the
+  // level lags). A phone once reported presses nobody made, 4 at a time, and
+  // took a group from 18 to 83, so: one step per 300 ms, and a run of steps
+  // goes at most 20 above where it began until the buttons rest for 3 s.
+  async volumeStep(step: number) {
+    if (!step) return;
+    const now = Date.now();
+    if (now - this.lastStepAt < STEP_GAP_MS) { this.d.log(`speaker ${this.device?.name || '?'}: volume step dropped (too soon)`); return; }
+    const from = this.volume ?? 0;
+    if (!this.stepRun || now - this.lastStepAt > STEP_RUN_REST_MS) this.stepRun = { from };
+    this.lastStepAt = now;
+    const want = Math.max(0, Math.min(100, from + Math.sign(step) * STEP_SIZE));
+    const next = Math.min(want, Math.max(from, this.stepRun.from + STEP_RUN_MAX_RISE));
+    if (next === from) { this.d.log(`speaker ${this.device?.name || '?'}: volume step held at ${from} (run limit)`); return; }
+    await this.setVolume(next);
+  }
+  private lastStepAt = 0;
+  private stepRun: { from: number } | null = null;
   private balance: { at: number; top: number; levels: { sp: Speaker; level: number | null }[] } | null = null;
   private grouped() { return this.device?.kind === 'bluos' && this.members.length > 0; }
   // Each speaker's own level (leader first).

@@ -118,8 +118,9 @@ test('closing the phone app never pauses the laptop; a lock-screen pause still d
     ms.setActionHandler = (a: string, fn: any) => { handlers[a] = fn; try { orig(a, fn); } catch { /* unsupported */ } };
   });
   const phone = await pctx.newPage(); await login(phone); await waitForLibrary(phone);
-  let toggles = 0;
-  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && p.includes('"action":"toggle"')) toggles += 1; }));
+  // What the lock screen sends: a state asked for (never a toggle).
+  const sent: string[] = [];
+  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && /"action":"(toggle|setPlaying)"/.test(p)) sent.push(p.includes('"action":"toggle"') ? 'toggle' : p.includes('"playing":true') ? 'play' : 'pause'); }));
   await phone.reload(); await waitForLibrary(phone);
   // The laptop plays; the phone shows it.
   await openAlbum(desk, 'First Light');
@@ -130,14 +131,15 @@ test('closing the phone app never pauses the laptop; a lock-screen pause still d
   // iOS pauses the stand-in session as the app closes: dropped.
   await phone.evaluate(() => { (window as any).__ms.pause(); window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: 'background' } })); });
   await phone.waitForTimeout(1600);
-  expect(toggles).toBe(0);
-  // A real lock-screen pause: reaches the laptop a moment later.
+  expect(sent).toEqual([]);
+  // A real lock-screen pause: reaches the laptop a moment later, as a pause.
   await phone.evaluate(() => (window as any).__ms.pause());
   await phone.waitForTimeout(1500);
-  await expect.poll(() => toggles, { timeout: 4000 }).toBe(1);
+  await expect.poll(() => sent, { timeout: 4000 }).toEqual(['pause']);
+  await expect.poll(() => desk.locator('.player button[title="Play"]').count(), { timeout: 5000 }).toBeGreaterThan(0);
 });
 
-test('the 2-hour hold: closing the phone app never starts the paused music; a real lock-screen tap does', async ({ browser }, info) => {
+test('the 2-hour hold: a lock-screen pause never starts the paused music; its play does', async ({ browser }, info) => {
   test.skip(info.project.name !== 'chromium', 'two devices of its own');
   const desk = await device(browser, false);
   // The iPhone app: its user agent and the shell's flag, so the hold applies.
@@ -150,8 +152,9 @@ test('the 2-hour hold: closing the phone app never starts the paused music; a re
     ms.setActionHandler = (a: string, fn: any) => { handlers[a] = fn; try { orig(a, fn); } catch { /* unsupported */ } };
   });
   const phone = await pctx.newPage(); await login(phone); await waitForLibrary(phone);
-  let toggles = 0;
-  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && p.includes('"action":"toggle"')) toggles += 1; }));
+  // What the lock screen sends: a state asked for (never a toggle).
+  const sent: string[] = [];
+  phone.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && /"action":"(toggle|setPlaying)"/.test(p)) sent.push(p.includes('"action":"toggle"') ? 'toggle' : p.includes('"playing":true') ? 'play' : 'pause'); }));
   await phone.reload(); await waitForLibrary(phone);
   await openAlbum(desk, 'First Light');
   await desk.locator('.trackrow').nth(0).dblclick();
@@ -163,10 +166,17 @@ test('the 2-hour hold: closing the phone app never starts the paused music; a re
   // iOS pauses the stand-in as the app closes: must not start the laptop.
   await phone.evaluate(() => { (window as any).__ms.pause(); window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: 'background' } })); });
   await phone.waitForTimeout(1600);
-  expect(toggles).toBe(0);
-  // A real tap on the held lock screen: plays, a moment later.
+  expect(sent).toEqual([]);
+  // A pause while the music is paused elsewhere (iOS sends the stand-in one
+  // by itself, app in the background or not) stays a pause: nothing sent.
+  // It used to mean play, and restarted music paused from another device.
   await phone.evaluate(() => (window as any).__ms.pause());
-  await expect.poll(() => toggles, { timeout: 4000 }).toBe(1);
+  await phone.waitForTimeout(2000);
+  expect(sent).toEqual([]);
+  // Play on the held lock screen: plays, a moment later.
+  await phone.evaluate(() => (window as any).__ms.play());
+  await expect.poll(() => sent, { timeout: 4000 }).toEqual(['play']);
+  await expect.poll(() => desk.locator('.player button[title="Pause"]').count(), { timeout: 5000 }).toBeGreaterThan(0);
 });
 
 test('a quick drag on the device sheet volume slider never skips; a swipe on the mini player still does', async ({ browser }, info) => {

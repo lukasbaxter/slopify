@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-volume-manager/ios/VolumeManager.m b/node_modules/react-native-volume-manager/ios/VolumeManager.m
-index 5bcd2ce..641f930 100644
+index 5bcd2ce..ab3f9e6 100644
 --- a/node_modules/react-native-volume-manager/ios/VolumeManager.m
 +++ b/node_modules/react-native-volume-manager/ios/VolumeManager.m
 @@ -1,4 +1,5 @@
@@ -24,7 +24,7 @@ index 5bcd2ce..641f930 100644
    }
    [self initVolumeView];
    return self;
-@@ -179,6 +182,40 @@ RCT_EXPORT_MODULE(VolumeManager)
+@@ -179,6 +182,48 @@ RCT_EXPORT_MODULE(VolumeManager)
                      context:nil];
  }
  
@@ -57,15 +57,23 @@ index 5bcd2ce..641f930 100644
 +  id volume = info[@"Volume"] ?: info[@"AVSystemController_AudioVolumeNotificationParameter"];
 +  if (![volume isKindOfClass:[NSNumber class]]) return;
 +  sysVolSeen = YES;
++  // Slopify: why it changed. "ExplicitVolumeChange" is a button press (or a
++  // volume set by an app); route and category switches report other reasons
++  // and were being taken for presses.
++  id reason = info[@"Reason"] ?: info[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
 +  if (hasListeners) {
-+    [self sendEventWithName:@"RNVMEventVolume" body:@{@"volume" : volume}];
++    [self sendEventWithName:@"RNVMEventVolume" body:@{
++      @"volume" : volume,
++      @"reason" : [reason isKindOfClass:[NSString class]] ? reason : @"",
++      @"category" : [category isKindOfClass:[NSString class]] ? category : @"",
++    }];
 +  }
 +}
 +
  - (void)removeVolumeListener {
    [audioSession removeObserver:self forKeyPath:@"outputVolume"];
  }
-@@ -187,6 +224,7 @@ RCT_EXPORT_MODULE(VolumeManager)
+@@ -187,6 +232,7 @@ RCT_EXPORT_MODULE(VolumeManager)
                        ofObject:(id)object
                          change:(NSDictionary<NSString *, id> *)change
                         context:(void *)context {
@@ -73,7 +81,7 @@ index 5bcd2ce..641f930 100644
    if (object == [AVAudioSession sharedInstance] &&
        [keyPath isEqualToString:@"outputVolume"]) {
      float newValue = [change[@"new"] floatValue];
-@@ -338,10 +376,10 @@ RCT_EXPORT_METHOD(enableInSilenceMode:(BOOL)enabled) {
+@@ -338,10 +384,10 @@ RCT_EXPORT_METHOD(enableInSilenceMode:(BOOL)enabled) {
  }
  
  - (void)applicationWillEnterForeground:(NSNotification *)notification {

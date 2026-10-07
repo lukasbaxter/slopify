@@ -3,7 +3,7 @@ import { clientIdentity } from './api/deviceName.js';
 import { resumeLyricJobs, useLyricJobs } from './api/lyricsync.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Slopify, loadSession, persistSession, clearSession } from './api/slopify.js';
-import { usePlayer } from './player/usePlayer.js';
+import { usePlayer, mediaLog } from './player/usePlayer.js';
 import { SessionLink } from './api/session.js';
 import GeneratePlaylist from './components/GeneratePlaylist.jsx';
 import Sidebar from './components/Sidebar.jsx';
@@ -937,8 +937,7 @@ export default function App() {
   // the shell whether the sound is on THIS phone or elsewhere and the current
   // session volume; the shell turns hardware volume presses into steps here
   // while the sound is elsewhere (the phone's own buttons already control its
-  // own output natively). setVolume routes to the active device.
-  const volumeTargetRef = useRef(null);
+  // own output natively). volumeStep routes to the active device.
   const remoteSession = !!player.mirroring || (player.device?.kind && player.device.kind !== 'local');
   useEffect(() => {
     const rn = window.ReactNativeWebView;
@@ -950,19 +949,18 @@ export default function App() {
     if (!window.ReactNativeWebView) return undefined;
     const onStep = (e) => {
       const step = Number(e.detail?.step) || 0; if (!step) return;
-      (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} volume button ${step > 0 ? 'up' : 'down'} (session at ${Math.round(player.volume ?? 0)})`);
-      // Presses in quick succession build on the level the last one asked
-      // for: the device's reported volume lags them, and stepping from it
-      // kept every burst within one step of where it started.
-      const t = volumeTargetRef.current;
-      const from = t && Date.now() - t.at < 2500 ? t.level : Math.round(player.volume ?? 0);
-      const next = Math.max(0, Math.min(100, from + step * 5));
-      volumeTargetRef.current = { level: next, at: Date.now() };
-      player.setVolume(next);
+      const why = e.detail?.reason ? ` ${e.detail.reason}` : '';
+      mediaLog(`volume button ${step > 0 ? 'up' : 'down'}${why} (session at ${Math.round(player.volume ?? 0)})`);
+      // One step, worked out and limited by the device playing (a speaker
+      // on the server does it there, from its own level).
+      player.volumeStep(step);
     };
+    // What the shell heard and did not count as a press, for the diag report.
+    const onNote = (e) => { if (e.detail?.msg) mediaLog(`shell: ${e.detail.msg}`); };
     window.addEventListener('conduit:volumestep', onStep);
-    return () => window.removeEventListener('conduit:volumestep', onStep);
-  }, [player.volume, player.setVolume]); // eslint-disable-line react-hooks/exhaustive-deps
+    window.addEventListener('slopify:shellnote', onNote);
+    return () => { window.removeEventListener('conduit:volumestep', onStep); window.removeEventListener('slopify:shellnote', onNote); };
+  }, [player.volume, player.volumeStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Phone viewport diagnostics, logged by the relay (installed web app layout
   // issues cannot be reproduced in a simulator).

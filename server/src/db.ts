@@ -166,6 +166,13 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX download_watch_album ON download_watch(album_id);
   `,
+  `
+  -- The admin status counts (lyrics by kind, tracks by identity state) read
+  -- the whole lyrics table (300+ MB of lyric text) on every call: ~4 s when
+  -- it was not cached, the wait before Settings showed the admin section.
+  CREATE INDEX lyrics_kind ON lyrics(kind);
+  CREATE INDEX tracks_identity ON tracks(identity_state);
+  `,
 ];
 
 export type DB = Database.Database;

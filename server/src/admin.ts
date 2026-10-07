@@ -91,22 +91,25 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
     }
     return { started: true, scan: await runScan() };
   });
-  app.get('/api/admin/status', admin, async () => ({
-    scanning: current,
-    library: {
-      tracks: (db.prepare('SELECT COUNT(*) n FROM tracks').get() as any).n,
-      albums: (db.prepare('SELECT COUNT(*) n FROM albums').get() as any).n,
-      artists: (db.prepare('SELECT COUNT(*) n FROM artists').get() as any).n,
-      artistsWithImage: (db.prepare('SELECT COUNT(*) n FROM artists WHERE image_hash IS NOT NULL').get() as any).n,
-    },
-    speakers: (app as any).speakers?.list?.() ?? [],
-    scans: db.prepare('SELECT * FROM scans ORDER BY id DESC LIMIT 10').all(),
-    users: (db.prepare('SELECT COUNT(*) n FROM users').get() as any).n,
-    lyrics: db.prepare("SELECT kind, COUNT(*) n FROM lyrics GROUP BY kind").all(),
-    missingLyrics: (db.prepare('SELECT COUNT(*) n FROM tracks t WHERE NOT EXISTS (SELECT 1 FROM lyrics l WHERE l.track_id = t.id)').get() as any).n,
-    identity: db.prepare('SELECT identity_state AS state, COUNT(*) n FROM tracks GROUP BY identity_state').all(),
-    enrich: enrichStatus(db),
-    enriching,
-    explore: (app as any).exploreStatus?.() ?? null,
-  }));
+  app.get('/api/admin/status', admin, async () => {
+    const enrich = enrichStatus(db);
+    return {
+      scanning: current,
+      library: {
+        tracks: (db.prepare('SELECT COUNT(*) n FROM tracks').get() as any).n,
+        albums: (db.prepare('SELECT COUNT(*) n FROM albums').get() as any).n,
+        artists: (db.prepare('SELECT COUNT(*) n FROM artists').get() as any).n,
+        artistsWithImage: (db.prepare('SELECT COUNT(*) n FROM artists WHERE image_hash IS NOT NULL').get() as any).n,
+      },
+      speakers: (app as any).speakers?.list?.() ?? [],
+      scans: db.prepare('SELECT * FROM scans ORDER BY id DESC LIMIT 10').all(),
+      users: (db.prepare('SELECT COUNT(*) n FROM users').get() as any).n,
+      lyrics: Object.entries(enrich.kinds).map(([kind, n]) => ({ kind, n })),
+      missingLyrics: (db.prepare('SELECT COUNT(*) n FROM tracks t WHERE NOT EXISTS (SELECT 1 FROM lyrics l WHERE l.track_id = t.id)').get() as any).n,
+      identity: db.prepare('SELECT identity_state AS state, COUNT(*) n FROM tracks GROUP BY identity_state').all(),
+      enrich,
+      enriching,
+      explore: (app as any).exploreStatus?.() ?? null,
+    };
+  });
 }

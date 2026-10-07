@@ -4,7 +4,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
 import { buildPool, finalize, generatePlaylist, Progress, type Ask } from './ai.js';
-import { parseExport, importSpotify, type Parsed } from './spotifyImport.js';
+import { parseExport, importSpotify, requestPending, fillPending, type Parsed } from './spotifyImport.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-ai-'));
@@ -125,5 +125,68 @@ describe('Spotify import', () => {
     const again = await importSpotify(db, 'u1', parse());
     expect(again.plays.added).toBe(0); expect(again.likes.added).toBe(0);
     expect(again.playlists.created).toBe(0); expect(again.playlists.skipped).toEqual(['Car']);
+  });
+
+  it('puts missing liked songs, playlist songs and saved albums aside, once', async () => {
+    const c = tracks[2];
+    const p: Parsed = { plays: [], basicPlays: [], files: ['x'],
+      likes: [{ artist: 'Ghost', title: 'Gone Song', album: 'Gone Album' }],
+      albums: [{ artist: 'Ghost', album: 'Saved Away' }],
+      playlists: [{ name: 'Gaps', items: [{ artist: 'Ghost', title: 'First', added: 1 }, { artist: c.artist, title: c.title, added: 2 }] }] };
+    const r = await importSpotify(db, 'u1', p);
+    expect(r.queued).toEqual({ songs: 2, albums: 1 });
+    const pl = (db.prepare("SELECT id FROM playlists WHERE user_id = 'u1' AND name = 'Gaps'").get() as any).id;
+    // The song that is here keeps its Spotify place, after the one that is not.
+    expect(db.prepare('SELECT pos, track_id FROM playlist_tracks WHERE playlist_id = ?').all(pl)).toEqual([{ pos: 1, track_id: c.id }]);
+    expect(db.prepare("SELECT kind, playlist_id, pos, title FROM spotify_pending WHERE user_id = 'u1' AND artist = 'Ghost' ORDER BY id").all()).toEqual([
+      { kind: 'like', playlist_id: '', pos: null, title: 'Gone Song' },
+      { kind: 'album', playlist_id: '', pos: null, title: 'Saved Away' },
+      { kind: 'playlist', playlist_id: pl, pos: 0, title: 'First' },
+    ]);
+    expect((await importSpotify(db, 'u1', { ...p, playlists: [] })).queued).toEqual({ songs: 0, albums: 0 });
+  });
+
+  it('requests each missing release in Lidarr once; what cannot be found or keeps failing is set aside', async () => {
+    db.prepare('DELETE FROM spotify_pending').run();
+    const add = db.prepare("INSERT INTO spotify_pending (user_id, kind, playlist_id, at, artist, title, album, created) VALUES ('u1', ?, ?, 1, ?, ?, ?, ?)");
+    add.run('like', '', 'Band', 'One', 'Record', Date.now());
+    add.run('playlist', 'pl_1', 'Band', 'Two', 'Record', Date.now());
+    add.run('like', '', 'Band', 'Loose', null, Date.now());
+    add.run('like', '', 'Nobody', 'Nowhere', null, Date.now());
+    add.run('album', '', 'Broken', 'Lp', null, Date.now());
+    let requested: string[] = [];
+    const lidarr: any = {
+      enabled: true,
+      search: async (q: string) => q === 'Band Record' ? [{ album_id: 'rg-record', artist: 'Band', title: 'Record' }] : q === 'Broken Lp' ? [{ album_id: 'rg-broken', artist: 'Broken', title: 'Lp' }] : [],
+      releaseForTrack: async (artist: string) => artist === 'Band' ? { album_id: 'rg-single', artist: 'Band', title: 'Loose' } : null,
+      request: async (id: string) => { requested.push(id); if (id === 'rg-broken') throw new Error('Lidarr is still fetching the artist'); return { id: requested.length, album_id: id, artist: 'Band', title: id, status: 'queued' }; },
+    };
+    const r = await requestPending(db, lidarr);
+    expect(r).toEqual({ requested: 3, notfound: 1, failed: 1 });
+    expect(requested.sort()).toEqual(['rg-broken', 'rg-record', 'rg-single']);
+    expect(db.prepare('SELECT title, state FROM spotify_pending ORDER BY id').all()).toEqual([
+      { title: 'One', state: 'requested' }, { title: 'Two', state: 'requested' }, { title: 'Loose', state: 'requested' },
+      { title: 'Nowhere', state: 'notfound' }, { title: 'Lp', state: 'new' },
+    ]);
+    expect((db.prepare("SELECT COUNT(*) n FROM my_requests WHERE user_id = 'u1' AND source = 'spotify'").get() as any).n).toBe(2);
+    // Retried by later runs, given up after the third failure.
+    requested = []; await requestPending(db, lidarr); await requestPending(db, lidarr);
+    expect((db.prepare("SELECT state, tries FROM spotify_pending WHERE title = 'Lp'").get() as any)).toEqual({ state: 'failed', tries: 3 });
+  });
+
+  it('puts what arrived in its place', async () => {
+    db.prepare('DELETE FROM spotify_pending').run();
+    const [, , c, d] = tracks;
+    db.prepare("DELETE FROM likes WHERE user_id = 'u1' AND track_id = ?").run(d.id);
+    db.prepare("INSERT INTO playlists (id, user_id, name, created, updated) VALUES ('pl_arrive', 'u1', 'Arrive', 1, 1)").run();
+    db.prepare("INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES ('pl_arrive', 1, ?, 1)").run(c.id);
+    const add = db.prepare("INSERT INTO spotify_pending (user_id, kind, playlist_id, pos, at, artist, title, created, state) VALUES ('u1', ?, ?, ?, 7, ?, ?, ?, 'requested')");
+    add.run('playlist', 'pl_arrive', 0, d.artist, d.title, Date.now());
+    add.run('like', '', null, d.artist, d.title, Date.now());
+    add.run('like', '', null, 'Still', 'Coming', Date.now());
+    expect(fillPending(db)).toBe(2);
+    expect(db.prepare("SELECT pos, track_id FROM playlist_tracks WHERE playlist_id = 'pl_arrive' ORDER BY pos").all()).toEqual([{ pos: 0, track_id: d.id }, { pos: 1, track_id: c.id }]);
+    expect((db.prepare("SELECT at FROM likes WHERE user_id = 'u1' AND track_id = ?").get(d.id) as any).at).toBe(7);
+    expect(db.prepare('SELECT title FROM spotify_pending').all()).toEqual([{ title: 'Coming' }]);
   });
 });

@@ -21,6 +21,8 @@ import type { DB } from './db.js';
 import { playlistId } from './ids.js';
 import { matchTrack } from './explore.js';
 import { startJob, jobOut, type Job } from './jobs.js';
+import type { Lidarr } from './lidarr.js';
+import { recordRequest } from './downloads.js';
 
 type Song = { artist: string; title: string; album?: string };
 type Play = Song & { at: number };
@@ -111,6 +113,9 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
     playlists: { total: parsed.playlists.length, created: 0, skipped: [] as string[], songs: 0, songsMatched: 0 },
     songs: { total: songs.size, matched: [...found.values()].filter(Boolean).length },
     missing: [] as { artist: string; title: string; plays: number }[],
+    // Liked songs, playlist songs and saved albums the library lacks: put
+    // aside to be requested and filled in as they arrive.
+    queued: { songs: 0, albums: 0 },
   };
   db.transaction(() => {
     const insPlay = db.prepare("INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, 'spotify')");
@@ -126,14 +131,23 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
     const have = new Set((db.prepare('SELECT name FROM playlists WHERE user_id = ?').all(uid) as any[]).map((r) => String(r.name).toLowerCase()));
     const insPl = db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)');
     const insPt = db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)');
+    const insPending = db.prepare(`INSERT OR IGNORE INTO spotify_pending (user_id, kind, playlist_id, pos, at, artist, title, album, created)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const pend = (kind: string, plId: string, pos: number | null, at: number, artist: string, title: string, album?: string) =>
+      insPending.run(uid, kind, plId, pos, at, artist, title, album ?? null, t0).changes;
+    parsed.likes.forEach((s, n) => { if (!found.get(key(s))) out.queued.songs += pend('like', '', null, t0 - n * 1000, s.artist, s.title, s.album); });
+    parsed.albums.forEach((a, n) => { if (!albumBy.has(`${norm(a.artist)}|${norm(a.album)}`)) out.queued.albums += pend('album', '', null, t0 - n * 1000, a.artist, a.album); });
     for (const pl of parsed.playlists) {
       if (have.has(pl.name.toLowerCase())) { out.playlists.skipped.push(pl.name); continue; }
-      const ids = pl.items.map((s) => ({ id: found.get(key(s)), added: s.added })).filter((x) => x.id);
+      // Each song keeps its place in the Spotify playlist (pos), so a song
+      // that arrives later lands where it was, not at the end.
+      const ids = pl.items.map((s, pos) => ({ id: found.get(key(s)), added: s.added, pos })).filter((x) => x.id);
       out.playlists.songs += pl.items.length; out.playlists.songsMatched += ids.length;
       const id = playlistId(); const created = Math.min(...pl.items.map((s) => s.added || t0), t0);
       const updated = Math.max(0, ...pl.items.map((s) => s.added || 0)) || t0;
       insPl.run(id, uid, pl.name, created, updated);
-      ids.forEach((x, pos) => insPt.run(id, pos, x.id, x.added || t0));
+      ids.forEach((x) => insPt.run(id, x.pos, x.id, x.added || t0));
+      pl.items.forEach((s, pos) => { if (!found.get(key(s))) out.queued.songs += pend('playlist', id, pos, s.added || t0, s.artist, s.title, s.album); });
       have.add(pl.name.toLowerCase()); out.playlists.created++;
     }
   })();
@@ -142,7 +156,104 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
   return out;
 }
 
-export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: string) {
+// Asks Lidarr for the releases of what an import found missing: one release
+// per song (by its Spotify album when it has one, else the album Deezer
+// files it under), each release once. Runs in the background after an
+// import and on start, two at a time; a row that keeps failing (Lidarr
+// still adding the artist, a lookup timing out) is given up after 3 tries.
+export async function requestPending(db: DB, lidarr: Lidarr, log: (m: string) => void = () => {}) {
+  const rows = db.prepare("SELECT * FROM spotify_pending WHERE state = 'new' ORDER BY id").all() as any[];
+  if (!rows.length) return { requested: 0, notfound: 0, failed: 0 };
+  log(`spotify import: requesting ${rows.length} missing songs/albums in Lidarr`);
+  const releases = new Map<string, Promise<{ album_id: string; artist: string; title: string } | null>>();
+  const requests = new Map<string, Promise<{ id?: number; album_id: string; artist: string; title: string; status: string }>>();
+  const releaseFor = (r: any) => {
+    const k = `${norm(r.artist)}|${r.kind === 'album' ? '' : norm(r.title)}|${norm(r.album || (r.kind === 'album' ? r.title : ''))}`;
+    if (!releases.has(k)) releases.set(k, (async () => {
+      const albumName = r.kind === 'album' ? r.title : r.album;
+      if (albumName) {
+        const found = await lidarr.search(`${r.artist} ${albumName}`);
+        const hit = found.find((x) => norm(x.title) === norm(albumName) && norm(x.artist) === norm(r.artist)) || found.find((x) => norm(x.title) === norm(albumName));
+        if (hit) return { album_id: hit.album_id, artist: hit.artist, title: hit.title };
+      }
+      return r.kind === 'album' ? null : lidarr.releaseForTrack(r.artist, r.title);
+    })());
+    return releases.get(k)!;
+  };
+  const set = db.prepare('UPDATE spotify_pending SET state = ?, release = ?, tries = tries + ? WHERE id = ?');
+  const out = { requested: 0, notfound: 0, failed: 0 };
+  let next = 0;
+  const work = async () => {
+    while (next < rows.length) {
+      const r = rows[next++];
+      let rel: { album_id: string; artist: string; title: string } | null = null;
+      try {
+        rel = await releaseFor(r);
+        if (!rel) { set.run('notfound', null, 0, r.id); out.notfound++; continue; }
+        if (!requests.has(rel.album_id)) requests.set(rel.album_id, lidarr.request(rel.album_id));
+        const q = await requests.get(rel.album_id)!;
+        recordRequest(db, r.user_id, q, 'spotify', r.kind === 'album' ? 'saved album on Spotify' : r.kind === 'like' ? `"${r.title}" liked on Spotify` : `"${r.title}" from a Spotify playlist`);
+        set.run('requested', `${rel.artist} - ${rel.title}`, 0, r.id); out.requested++;
+      } catch (e: any) {
+        // A failed request is retried by the next run, not by the next song of the same release.
+        if (rel) requests.delete(rel.album_id);
+        set.run(r.tries >= 2 ? 'failed' : 'new', null, 1, r.id); out.failed++;
+        log(`spotify import: ${r.artist} - ${r.title}: ${e.message}`);
+      }
+    }
+  };
+  await Promise.all([work(), work()]);
+  log(`spotify import: requests done ${JSON.stringify(out)}`);
+  return out;
+}
+
+// Puts what arrived in its place: a liked song in Liked Songs (at its
+// Spotify order), a playlist song back at its position (or the end, if the
+// playlist was edited since), a saved album in saved albums. Rows older than
+// 60 days are dropped: whatever has not come by then is not coming.
+export function fillPending(db: DB, log: (m: string) => void = () => {}) {
+  db.prepare('DELETE FROM spotify_pending WHERE created < ?').run(Date.now() - 60 * 86400000);
+  const rows = db.prepare('SELECT * FROM spotify_pending').all() as any[];
+  if (!rows.length) return 0;
+  const albumRows = db.prepare('SELECT id, name, artist FROM albums').all() as { id: string; name: string; artist: string }[];
+  const albumBy = new Map(albumRows.map((a) => [`${norm(a.artist)}|${norm(a.name)}`, a.id]));
+  let n = 0;
+  for (const r of rows) {
+    let id: string | null | undefined;
+    if (r.kind === 'album') id = albumBy.get(`${norm(r.artist)}|${norm(r.title)}`);
+    else { id = matchTrack(db, r); if (!id) { const t2 = stripped(r.title); if (t2 && t2 !== r.title) id = matchTrack(db, { ...r, title: t2 }); } }
+    if (!id) continue;
+    db.transaction(() => {
+      if (r.kind === 'like') db.prepare('INSERT INTO likes (user_id, track_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(r.user_id, id, r.at);
+      else if (r.kind === 'album') db.prepare('INSERT INTO album_likes (user_id, album_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(r.user_id, id, r.at);
+      else if (db.prepare('SELECT 1 FROM playlists WHERE id = ?').get(r.playlist_id) && !db.prepare('SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?').get(r.playlist_id, id)) {
+        const free = r.pos != null && !db.prepare('SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND pos = ?').get(r.playlist_id, r.pos);
+        const pos = free ? r.pos : ((db.prepare('SELECT COALESCE(MAX(pos), -1) m FROM playlist_tracks WHERE playlist_id = ?').get(r.playlist_id) as any).m as number) + 1;
+        db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(r.playlist_id, pos, id, r.at);
+        db.prepare('UPDATE playlists SET updated = ? WHERE id = ?').run(Date.now(), r.playlist_id);
+      }
+      db.prepare('DELETE FROM spotify_pending WHERE id = ?').run(r.id);
+    })();
+    n++;
+  }
+  if (n) log(`spotify import: ${n} missing songs/albums arrived and were put in place`);
+  return n;
+}
+
+export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: string, opts: { lidarr?: Lidarr } = {}) {
+  const lidarr = opts.lidarr?.enabled ? opts.lidarr : null;
+  const log = (m: string) => app.log.info(m);
+  let draining: Promise<unknown> | null = null;
+  const drain = () => {
+    if (!lidarr || draining) return;
+    draining = requestPending(db, lidarr, log).catch((e: any) => app.log.warn(`spotify import requests: ${e.message}`)).finally(() => { draining = null; });
+  };
+  (app as any).afterScan?.(() => fillPending(db, log));
+  // Pick up where a restart left off, and retry what failed, now and then.
+  if (process.env.NODE_ENV !== 'test' && lidarr) {
+    const t = setTimeout(drain, 60000); const iv = setInterval(drain, 6 * 3600000);
+    app.addHook('onClose', async () => { clearTimeout(t); clearInterval(iv); });
+  }
   const auth = { preHandler: (app as any).requireUser };
   const dir = path.join(dataDir, 'imports');
   const MAX = 2 * 1024 * 1024 * 1024;
@@ -187,8 +298,10 @@ export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: str
       } finally { for (const f of b.data.fileIds) for (const x of ['bin', 'name']) fs.rmSync(path.join(dir, `${f}.${x}`), { force: true }); }
       if (!parsed.files.length) throw new Error('No Spotify data found in that file. Upload the my_spotify_data.zip Spotify emailed you, or the JSON files inside it.');
       const r = await importSpotify(db, uid, parsed, j);
-      app.log.info({ uid, plays: r.plays, likes: r.likes, playlists: r.playlists.created }, 'spotify import');
-      return r;
+      app.log.info({ uid, plays: r.plays, likes: r.likes, playlists: r.playlists.created, queued: r.queued }, 'spotify import');
+      fillPending(db, log); // anything put aside by an earlier import that is here now
+      drain();
+      return { ...r, downloads: !!lidarr };
     });
     return jobOut(job);
   });

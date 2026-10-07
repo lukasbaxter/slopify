@@ -23,7 +23,7 @@ export const STUCK_MS = 30 * 60 * 1000;
 // keeps no import timestamp we can read, so the request time stands in.
 export const ADDING_GRACE_MS = 24 * 60 * 60 * 1000;
 
-export function recordRequest(db: DB, uid: string, r: { id?: number; album_id?: string; artist?: string; title?: string }, source: 'request' | 'ai' | 'retry', note: string | null = null) {
+export function recordRequest(db: DB, uid: string, r: { id?: number; album_id?: string; artist?: string; title?: string }, source: 'request' | 'ai' | 'retry' | 'spotify', note: string | null = null) {
   if (!r?.id) return;
   // Asked for again: whatever the watcher concluded before starts over.
   db.prepare('DELETE FROM download_watch WHERE lidarr_id = ?').run(r.id);

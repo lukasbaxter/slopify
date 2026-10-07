@@ -38,7 +38,7 @@ export default function SpotifyImport({ jf }) {
         Request the data at <a href="https://www.spotify.com/account/privacy/" target="_blank" rel="noreferrer">spotify.com › Account › Privacy</a>:
         tick <b>Account data</b> (liked songs, playlists, the last year of plays) and, for every play since you joined, <b>Extended streaming history</b>.
         Spotify emails a <code>my_spotify_data.zip</code> for each. Upload one or both, as zips or the JSON files inside.
-        Running it again with a newer export only adds what is new.
+        Running it again with a newer export only adds what is new. Liked and playlist songs the library does not have are requested for download and filled in as they arrive.
       </div>
       <input ref={input} type="file" accept=".zip,.json,application/zip,application/json" multiple hidden onChange={(e) => run([...e.target.files])} />
       <div className="settings-actions">
@@ -54,6 +54,9 @@ export default function SpotifyImport({ jf }) {
             {result.albums.total > 0 && <li><b>{n(result.albums.added)}</b> saved albums added ({n(result.albums.matched)} of {n(result.albums.total)} matched)</li>}
             <li><b>{n(result.playlists.created)}</b> playlists created ({n(result.playlists.songsMatched)} of {n(result.playlists.songs)} songs matched){result.playlists.skipped.length ? `, ${result.playlists.skipped.length} skipped because a playlist with that name exists` : ''}</li>
             <li>{n(result.songs.matched)} of {n(result.songs.total)} different songs are in this library</li>
+            {(result.queued?.songs > 0 || result.queued?.albums > 0) && (result.downloads
+              ? <li><b>{n(result.queued.songs)}</b> missing liked and playlist songs{result.queued.albums > 0 ? <> and <b>{n(result.queued.albums)}</b> saved albums</> : null} are being requested. Each one goes into Liked Songs, its playlist or saved albums as it downloads (see Downloads).</li>
+              : <li>{n(result.queued.songs)} liked and playlist songs{result.queued.albums > 0 ? ` and ${n(result.queued.albums)} saved albums` : ''} are not in the library. They are filled in if they are added later.</li>)}
           </ul>
           {result.missing.length > 0 && (
             <details>

@@ -173,6 +173,20 @@ const MIGRATIONS: string[] = [
   CREATE INDEX lyrics_kind ON lyrics(kind);
   CREATE INDEX tracks_identity ON tracks(identity_state);
   `,
+  `
+  -- Spotify import: liked songs, playlist songs and saved albums the library
+  -- did not have. Each is requested in Lidarr (state new -> requested, or
+  -- notfound/failed) and put in its place by the scan that brings it in.
+  -- kind like/playlist/album; for an album, title is the album's name.
+  -- playlist_id '' unless kind = playlist; pos = its place in the playlist.
+  CREATE TABLE spotify_pending (
+    id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, playlist_id TEXT NOT NULL DEFAULT '', pos INTEGER,
+    at INTEGER NOT NULL, artist TEXT NOT NULL, title TEXT NOT NULL, album TEXT,
+    state TEXT NOT NULL DEFAULT 'new', tries INTEGER NOT NULL DEFAULT 0, release TEXT, created INTEGER NOT NULL,
+    UNIQUE (user_id, kind, playlist_id, artist, title)
+  );
+  CREATE INDEX spotify_pending_state ON spotify_pending(state);
+  `,
 ];
 
 export type DB = Database.Database;

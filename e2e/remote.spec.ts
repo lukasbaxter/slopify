@@ -139,6 +139,27 @@ test('closing the phone app never pauses the laptop; a lock-screen pause still d
   await expect.poll(() => desk.locator('.player button[title="Play"]').count(), { timeout: 5000 }).toBeGreaterThan(0);
 });
 
+test('two quick taps on Pause from another device leave the music paused', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  // 2026-10-08: a play on the Node took a few seconds to land, got a second
+  // tap, and the two flips arrived together: played, then paused again.
+  const desk = await device(browser, false);
+  const other = await device(browser, false);
+  const sent: string[] = [];
+  other.on('websocket', (ws) => ws.on('framesent', (f) => { const p = String(f.payload); if (p.includes('"type":"command"') && /"action":"(toggle|setPlaying)"/.test(p)) sent.push(p.includes('"action":"toggle"') ? 'toggle' : p.includes('"playing":true') ? 'play' : 'pause'); }));
+  await other.reload(); await waitForLibrary(other);
+  await openAlbum(desk, 'First Light');
+  await desk.locator('.trackrow').nth(0).dblclick();
+  await expect.poll(() => nowTitle(other), { timeout: 20000 }).toContain('River Harbour');
+  await expect.poll(() => other.locator('.player button[title="Pause"]').count(), { timeout: 10000 }).toBeGreaterThan(0);
+  const pause = other.locator('.player button[title="Pause"]').first();
+  await pause.evaluate((b: HTMLElement) => { b.click(); b.click(); });
+  await expect.poll(() => sent, { timeout: 4000 }).toEqual(['pause', 'pause']);
+  await desk.waitForTimeout(1500);
+  expect(await desk.evaluate(() => [...document.querySelectorAll('audio')].every((a) => a.paused))).toBe(true);
+  await expect.poll(() => other.locator('.player button[title="Play"]').count(), { timeout: 5000 }).toBeGreaterThan(0);
+});
+
 test('the 2-hour hold: a lock-screen pause never starts the paused music; its play does', async ({ browser }, info) => {
   test.skip(info.project.name !== 'chromium', 'two devices of its own');
   const desk = await device(browser, false);

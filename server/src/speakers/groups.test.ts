@@ -278,4 +278,69 @@ describe('playing on speaker groups', () => {
     } finally { await p.stopAll(); for (const id of [sp(pulse).id, sp(towers).id, sp(node).id]) groups.unjoin(id); for (const g of saved) groups.join(g[0], g.slice(1)); }
   });
 
+  // 2026-10-08: the Pulse dropped off the network while it was in the Node's
+  // group. Every command then waited ~3 s on it (two play taps ran late, back
+  // to back, and cancelled out), and the Node, resumed with a missing member,
+  // played 5 s and stopped.
+  it('a member that stops answering leaves the group; the rest plays on and never waits on it', async () => {
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    const kitchen = await unit('Kitchen');
+    speakers.set(`bluos:${kitchen.port}`, { id: `bluos:${kitchen.port}`, kind: 'bluos', name: 'Kitchen', model: 'BluOS', host: '127.0.0.1', port: kitchen.port });
+    groups.join(sp(node).id, [sp(towers).id, sp(kitchen).id]);
+    const p = player('lukas-dead');
+    try {
+      await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      expect([...node.slaves].sort()).toEqual([towers.port, kitchen.port].sort());
+      // The Kitchen goes away (unplugged, off the WiFi).
+      const gone = servers[servers.length - 1];
+      const closed = new Promise<void>((r) => gone.close(() => r()));
+      gone.closeAllConnections();
+      await closed;
+      (p as any).groupReadAt = 0; await (p as any).tick();
+      (p as any).groupReadAt = 0; await (p as any).tick();
+      await p.execute({ action: 'noop' });
+      expect(p.members.map((m: Speaker) => m.id)).toEqual([sp(towers).id]);
+      await vi.waitFor(() => expect(node.calls).toContain(`/RemoveSlave?slave=127.0.0.1&port=${kitchen.port}`));
+      expect(reports['lukas-dead'].device).toMatchObject({ name: 'Node + Towers', members: [sp(towers).id] });
+      expect(linkedGroups.get(sp(node).id)).toEqual([sp(towers).id]);
+      // Volume and play/pause only talk to the speakers that are there.
+      node.calls.length = 0;
+      await p.execute({ action: 'setVolume', level: 20 });
+      await p.execute({ action: 'setPlaying', playing: false });
+      expect(node.calls.some((c) => c.startsWith('/Pause'))).toBe(true);
+      expect(p.members.map((m: Speaker) => m.id)).toEqual([sp(towers).id]);
+      // It stays in the household's group, and a regroup does not try it again right away.
+      expect(groups.groupOf(sp(node).id)).toContain(sp(kitchen).id);
+      await p.regroup();
+      expect(p.members.map((m: Speaker) => m.id)).toEqual([sp(towers).id]);
+    } finally {
+      await p.stopAll();
+      for (const id of [sp(node).id, sp(towers).id, sp(kitchen).id]) groups.unjoin(id);
+      speakers.delete(`bluos:${kitchen.port}`); units.splice(units.indexOf(kitchen), 1); servers.pop();
+      for (const g of saved) groups.join(g[0], g.slice(1));
+    }
+  });
+
+  it('a busy-member check or a regroup never leaves a member that is still there', async () => {
+    // A regroup while a member is missing from discovery (a sweep that missed
+    // it) keeps it linked: only a member that stops answering is dropped.
+    const saved = groups.list();
+    for (const g of saved) for (const id of g) groups.unjoin(id);
+    groups.join(sp(node).id, [sp(towers).id]);
+    const p = player('lukas-flap');
+    const towersSp = sp(towers);
+    try {
+      await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      speakers.delete(towersSp.id);
+      await p.regroup();
+      expect(p.members.map((m: Speaker) => m.id)).toEqual([towersSp.id]);
+      expect(towers.master).toBe(node.port);
+    } finally {
+      speakers.set(towersSp.id, towersSp);
+      await p.stopAll(); groups.unjoin(sp(node).id); groups.unjoin(sp(towers).id);
+      for (const g of saved) groups.join(g[0], g.slice(1));
+    }
+  });
+
 });

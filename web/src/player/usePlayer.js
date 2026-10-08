@@ -831,7 +831,14 @@ export function usePlayer(jf) {
     if (waited) await relayRef.current.whenRoster(3000);
     const dev = deviceRef.current;
     const act = activePlayerRef.current || (waited ? activeFromRoster() : null);
-    if (act && relayRef.current) { relayRef.current.command(act, { action: 'toggle' }); return; }
+    // For another device: ask for the opposite of what is shown, never a
+    // flip. A play that took a few seconds to land got a second tap, and two
+    // flips arriving together played and paused again (2026-10-08, Node).
+    if (act && relayRef.current) {
+      const shown = (rosterRef.current?.players || []).find((p) => p.id === act)?.nowPlaying;
+      relayRef.current.command(act, shown ? { action: 'setPlaying', playing: !shown.playing } : { action: 'toggle' });
+      return;
+    }
     if (!current && !external) return;
     try {
       // Nothing loaded on this device for the shown track (a queue restored

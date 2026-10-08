@@ -14,6 +14,10 @@ const MIME: Record<string, string> = { flac: 'audio/flac', mp3: 'audio/mpeg', aa
 
 
 const STEP_SIZE = 5;
+// A member dropped for not answering is not tried again for this long, unless
+// discovery finds it again first (then a regroup brings it back in).
+const DOWN_RETRY_MS = 90_000;
+const UNREACHABLE = /EHOSTUNREACH|EHOSTDOWN|ENETUNREACH|ECONNREFUSED|ETIMEDOUT|timed out/i;
 const STEP_GAP_MS = 300;
 const STEP_RUN_REST_MS = 3000;
 const STEP_RUN_MAX_RISE = 20;
@@ -205,9 +209,13 @@ export class ServerPlayer {
   private async formGroup({ take = new Set<string>() }: { take?: Set<string> } = {}) {
     const leader = this.device;
     if (!leader) return;
-    const want = (this.d.groupOf?.(leader.id) ?? [leader.id]).slice(1).filter((id) => !this.excluded.has(id))
-      .map((id) => this.d.discovery.get(id)).filter((d): d is Speaker => !!d && d.kind === 'bluos' && leader.kind === 'bluos');
-    const keep = new Set(want.map((d) => d.id));
+    const ids = leader.kind === 'bluos' ? (this.d.groupOf?.(leader.id) ?? [leader.id]).slice(1).filter((id) => !this.excluded.has(id)) : [];
+    // Who stays is the household's group: a member a discovery sweep missed
+    // is still linked and playing (one that stops answering is the poll's to
+    // drop). Who joins has to be found on the network, and not have just
+    // stopped answering (trying it again costs every command ~3 s).
+    const keep = new Set(ids);
+    const want = ids.filter((id) => !this.isDown(id)).map((id) => this.d.discovery.get(id)).filter((d): d is Speaker => !!d && d.kind === 'bluos');
     for (const m of this.members.filter((m) => !keep.has(m.id))) await this.unlink(m);
     const lt = this.transport as unknown as Partial<BluOSTransport> | null;
     // The leader leaves any other group and drops slaves it should not have,
@@ -218,6 +226,7 @@ export class ServerPlayer {
     if (leader.kind === 'bluos' && lt?.standAlone) await lt.standAlone(stay).catch((e: any) => this.d.log(`group: ${leader.name} stand alone: ${e.message}`));
     const have = new Set(this.members.map((m) => m.id));
     for (const m of want.filter((m) => !have.has(m.id))) {
+      this.down.delete(m.id);
       if (!take.has(m.id) && (await this.busy(m))) { this.d.log(`group: ${m.name} is playing something else; ${leader.name} plays without it`); continue; }
       await this.claimDevice(m);
       try {
@@ -375,7 +384,8 @@ export class ServerPlayer {
     const L = this.volume;
     const to = levels.map(({ sp, level }) => ({ sp, level, next: level == null || top <= 0 ? L : Math.round((level * L) / top) }));
     this.d.log(`speaker ${this.device?.name || '?'}: group volume ${L} (${to.map((x) => `${x.sp.name} ${x.level ?? '?'}->${x.next}`).join(', ')})`);
-    await Promise.all(to.map(({ sp, next }) => new BluOSTransport(sp).setOwnVolume(next).catch(() => {})));
+    await Promise.all(to.filter(({ sp }) => sp.id === this.device?.id || this.members.some((m) => m.id === sp.id))
+      .map(({ sp, next }) => this.member(sp, new BluOSTransport(sp).setOwnVolume(next)).catch(() => {})));
   }
   // A hardware volume button press from a phone: one step from the speaker's
   // own level, worked out here rather than by the phone (whose idea of the
@@ -400,7 +410,52 @@ export class ServerPlayer {
   private grouped() { return this.device?.kind === 'bluos' && this.members.length > 0; }
   // Each speaker's own level (leader first).
   private groupLevels() {
-    return Promise.all([this.device as Speaker, ...this.members].map(async (sp) => ({ sp, level: await new BluOSTransport(sp).ownVolume().catch(() => null) })));
+    return Promise.all([this.device as Speaker, ...this.members].map(async (sp) => ({ sp, level: await this.member(sp, new BluOSTransport(sp).ownVolume()).catch(() => null) })));
+  }
+  // A member that stopped answering (switched off, off the WiFi) leaves the
+  // music. Kept, every call to it took ~3 s to fail (EHOSTUNREACH), so each
+  // command and poll waited on it, and the leader, resumed with a member
+  // missing, played 5 s and stopped (Pulse, 2026-10-08). Two misses in a row,
+  // and only for "not there" errors: a busy BluOS hanging up is not one.
+  private misses = new Map<string, number>();
+  private down = new Map<string, { at: number; lost: boolean }>(); // dropped for not answering; lost = discovery lost it since
+  private isDown(id: string) { const d = this.down.get(id); return !!d && Date.now() - d.at < DOWN_RETRY_MS; }
+  // The speaker list changed. A dropped member that discovery lost and has
+  // now found again is back: the group takes it in again.
+  speakersChanged(ids: Set<string>) {
+    let back = false;
+    for (const [id, d] of this.down) {
+      if (!ids.has(id)) d.lost = true;
+      else if (d.lost) { this.down.delete(id); back = true; }
+    }
+    if (back) void this.regroup();
+  }
+  private async member<T>(sp: Speaker, call: Promise<T>): Promise<T> {
+    if (sp.id === this.device?.id) return call;
+    try { const v = await call; this.misses.delete(sp.id); return v; }
+    catch (e: any) {
+      if (UNREACHABLE.test(`${e?.code || ''} ${e?.message || ''}`)) {
+        const n = (this.misses.get(sp.id) || 0) + 1;
+        this.misses.set(sp.id, n);
+        if (n >= 2) this.dropUnreachable(sp, e?.code || e?.message);
+      }
+      throw e;
+    }
+  }
+  private dropUnreachable(m: Speaker, why: string) {
+    if (!this.members.some((x) => x.id === m.id)) return;
+    this.misses.delete(m.id);
+    this.down.set(m.id, { at: Date.now(), lost: false });
+    // Out of the list now, so nothing queued after this waits on it; the
+    // leader is told in the background.
+    this.members = this.members.filter((x) => x.id !== m.id);
+    if (owners.get(m.id) === this) owners.delete(m.id);
+    if (this.device) { if (this.members.length) linkedGroups.set(this.device.id, this.members.map((x) => x.id)); else linkedGroups.delete(this.device.id); }
+    this.d.log(`group: ${m.name} stopped answering (${why}); ${this.device?.name || '?'} plays on without it`);
+    const lt = this.transport as unknown as Partial<BluOSTransport> | null;
+    if (this.device?.kind === 'bluos' && lt?.removeSlave) void lt.removeSlave(m.host, m.port).catch(() => {});
+    this.balance = null;
+    this.report();
   }
   async next(auto: boolean) {
     if (!this.queue.length) return;

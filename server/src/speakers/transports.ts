@@ -359,6 +359,8 @@ export class BridgeTransport implements Transport {
     u.searchParams.delete('startAt');
     return u.toString();
   }
+  // No metadata: the device has no screen.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async play(url: string, _meta: PlayMeta = {}, startAt = 0) {
     if (!/^http:/i.test(url)) throw new Error(`${this.device.name} can only fetch http:// streams; set PUBLIC_URL to the server's plain LAN address`);
     this.last = this.mp3Url(url, await this.kbps());

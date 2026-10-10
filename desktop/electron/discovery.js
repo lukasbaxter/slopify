@@ -47,7 +47,16 @@ class Discovery {
   start() {
     if (this.bonjour) return;
     const iface = this._lanAddress();
-    this.bonjour = new Bonjour(iface ? { interface: iface } : undefined);
+    // Bound to the wildcard address, the multicast group joined on the LAN
+    // interface only. Binding the LAN address itself (multicast-dns binds
+    // `interface` unless told otherwise) is refused on macOS while its own
+    // mDNSResponder holds *:5353: EADDRINUSE, no speakers found, and the
+    // library's default error handler threw it as an uncaught exception
+    // (the "JavaScript error in the main process" box at startup).
+    // A discovery error is logged, never thrown: the app works without it.
+    this.bonjour = new Bonjour(iface ? { interface: iface, bind: '0.0.0.0' } : undefined, (e) => {
+      console.warn(`discovery: ${e?.message || e}`);
+    });
     const cast = this.bonjour.find({ type: CAST_TYPE }, (s) => this._add(this._fromCast(s)));
     const blu = this.bonjour.find({ type: BLUOS_TYPE }, (s) => this._add(this._fromBluOS(s)));
     this.browsers = [cast, blu];

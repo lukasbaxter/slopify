@@ -32,6 +32,7 @@ const PlusCircle = ({ on }) => (on
   ? <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="var(--accent, #1ed760)" /><path d="M6.5 12.3l3.4 3.4 7.6-7.6" fill="none" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
   : <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10.1" /><path d="M12 7.5v9M7.5 12h9" /></svg>);
 const G16 = {
+  moon: <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"><path d="M14 9.8A6 6 0 0 1 6.2 2 6 6 0 1 0 14 9.8z" /></svg>,
   queue: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M15 15H1v-1.5h14V15zm0-4.5H1V9h14v1.5zm-14-7A2.5 2.5 0 0 1 3.5 1h9a2.5 2.5 0 0 1 0 5h-9A2.5 2.5 0 0 1 1 3.5zm2.5-1a1 1 0 0 0 0 2h9a1 1 0 1 0 0-2h-9z" /></svg>,
   radio: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z" /><path d="M3.05 3.05a7 7 0 0 0 0 9.9l1.06-1.06a5.5 5.5 0 0 1 0-7.78L3.05 3.05zm9.9 0-1.06 1.06a5.5 5.5 0 0 1 0 7.78l1.06 1.06a7 7 0 0 0 0-9.9z" /></svg>,
   share: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5 5 4.5l1.06 1.06L7.25 4.37V10h1.5V4.37l1.19 1.19L11 4.5 8 1.5z" /><path d="M3 7h3v1.5H4.5v5h7v-5H10V7h3v8H3V7z" /></svg>,
@@ -39,6 +40,24 @@ const G16 = {
 const HeartPath = ({ on }) => (on
   ? <path d="M15.724 4.22A4.313 4.313 0 0 0 12.192.814a4.269 4.269 0 0 0-3.622 1.13.837.837 0 0 1-1.14 0 4.272 4.272 0 0 0-6.21 5.855l5.916 7.05a1.128 1.128 0 0 0 1.727 0l5.916-7.05a4.228 4.228 0 0 0 .945-3.577z" />
   : <path d="M1.69 2A4.582 4.582 0 0 1 8 2.023 4.583 4.583 0 0 1 11.88.817h.002a4.618 4.618 0 0 1 3.782 3.65v.003a4.543 4.543 0 0 1-1.011 3.84L9.35 14.629a1.765 1.765 0 0 1-2.093.464 1.762 1.762 0 0 1-.605-.463L1.348 8.309A4.582 4.582 0 0 1 1.689 2zm3.158.252A3.082 3.082 0 0 0 2.49 7.337l.005.005L7.8 13.664a.264.264 0 0 0 .311.069.262.262 0 0 0 .09-.069l5.312-6.33a3.043 3.043 0 0 0 .68-2.573 3.118 3.118 0 0 0-2.551-2.463 3.079 3.079 0 0 0-2.612.816l-.007.007a1.501 1.501 0 0 1-2.045 0l-.009-.008a3.082 3.082 0 0 0-2.121-.861z" />);
+
+// Spotify's sleep timer: stop the music after a while, or when this song
+// ends. The server keeps it, so it is the same on every device and runs out
+// even with this phone locked or closed.
+const SLEEP_MINUTES = [5, 10, 15, 30, 45, 60];
+function sleepItem(player) {
+  const z = player.sleep;
+  const left = z?.at ? Math.max(1, Math.ceil((z.at - Date.now()) / 60000)) : 0;
+  const label = z?.endOfTrack ? 'Sleep timer: end of track' : z?.at ? `Sleep timer: ${left >= 60 ? `${Math.floor(left / 60)} h ${left % 60 ? `${left % 60} min ` : ''}` : `${left} min `}left` : 'Sleep timer';
+  return {
+    label, icon: G16.moon, sub: [
+      ...SLEEP_MINUTES.map((m) => ({ key: `m${m}`, label: m === 60 ? '1 hour' : `${m} minutes`, onClick: () => player.setSleepTimer({ minutes: m }) })),
+      { key: 'eot', label: 'End of track', onClick: () => player.setSleepTimer({ endOfTrack: true }) },
+      z ? { sep: true } : null,
+      z ? { key: 'off', label: 'Turn off timer', onClick: () => player.setSleepTimer({ off: true }) } : null,
+    ].filter(Boolean),
+  };
+}
 
 /**
  * Spotify's full-screen player: blurred cover behind, tabs up top (Album /
@@ -178,6 +197,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
     { sep: true },
     nowPlaying?.itemId ? { label: npLyricJob ? 'Syncing Lyrics…' : 'Sync Lyrics', icon: I.lyrics, disabled: Boolean(npLyricJob), onClick: () => syncLyrics(jf, { Id: nowPlaying.itemId, Name: nowPlaying.title }) } : null,
     { label: 'Share', icon: G16.share, onClick: share },
+    player.setSleepTimer ? sleepItem(player) : null,
   ] : [];
   const moreHeader = nowPlaying ? { image: nowPlaying.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: 120 }) : nowPlaying.artUrl || null, title: nowPlaying.title, sub: nowPlaying.artist || '' } : null;
   useEffect(() => { try { localStorage.setItem('conduit.fsTab', tab); } catch {} }, [tab]);

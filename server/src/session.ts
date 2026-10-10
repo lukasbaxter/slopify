@@ -39,6 +39,12 @@ export const Event = z.object({
 export type SessionEvent = z.infer<typeof Event>;
 
 const clients = new Map<string, Client>();          // clientId -> client
+// Sleep timers, one per account: pause at a time (the server fires it, so it
+// works whatever is playing and wherever, a locked phone included), or at the
+// end of the current track (the player that is playing honours that itself,
+// when the track ends).
+export type Sleep = { at: number | null; endOfTrack: boolean };
+const sleeps = new Map<string, Sleep & { timer?: NodeJS.Timeout }>();
 const sessions = new Map<string, Session>();        // uid -> session
 const saveTimers = new Map<string, NodeJS.Timeout>();
 
@@ -187,6 +193,8 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       scrobble: (trackId, at) => (app as any).scrobbleStart?.(uid, trackId, at),
       reportQueue: (rows) => handle(c, { type: 'queue', queue: rows }),
       claim: () => handle(c, { type: 'claim' }),
+      sleepAtTrackEnd: () => !!sleeps.get(uid)?.endOfTrack,
+      sleepDone: () => setSleep(uid, null, 'end of track'),
     });
     clients.set(id, c);
     return c;
@@ -276,6 +284,32 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     if (index < 0 || !(app as any).warmTracks) return;
     (app as any).warmTracks(uid, ids.slice(index + 1, index + 4));
   };
+
+  // --- sleep timer --------------------------------------------------------------------
+  const sleepOut = (uid: string): Sleep | null => { const z = sleeps.get(uid); return z ? { at: z.at, endOfTrack: z.endOfTrack } : null; };
+  function setSleep(uid: string, next: Sleep | null, why: string) {
+    const old = sleeps.get(uid);
+    if (old?.timer) clearTimeout(old.timer);
+    sleeps.delete(uid);
+    if (next) {
+      const z: Sleep & { timer?: NodeJS.Timeout } = { ...next };
+      if (next.at) {
+        z.timer = setTimeout(() => {
+          if (sleeps.get(uid) !== z) return;
+          const s = loadSession(db, uid);
+          const target = s.active ? clients.get(String(s.active)) : null;
+          app.log.info(`session: sleep timer: ${target ? `pausing ${target.name}` : 'nothing playing'}`);
+          if (target && s.playing) send(target, { type: 'command', from: 'server', command: { action: 'setPlaying', playing: false } });
+          setSleep(uid, null, 'timer');
+        }, Math.max(0, next.at - Date.now()));
+        z.timer.unref?.();
+      }
+      sleeps.set(uid, z);
+    }
+    if (next || old) app.log.info(`session: sleep timer ${next ? (next.endOfTrack ? 'at the end of this track' : `at ${new Date(next.at!).toISOString()}`) : `cleared (${why})`}`);
+    for (const c of ofUser(uid)) send(c, { type: 'sleep', sleep: sleepOut(uid) });
+  }
+  app.decorate('sleepOf', sleepOut);
 
   // --- one message from a client (or from the server player) ---------------------
   const handle = (me: Client, msg: any) => {
@@ -370,12 +404,21 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         break;
       }
       case 'prefs': for (const c of ofUser(me.uid)) if (c.id !== me.id) send(c, { type: 'prefs', prefs: msg.prefs || {} }); break;
+      case 'sleep': {
+        // { minutes } from now, { endOfTrack: true }, or { off: true }. The
+        // player that finished the track with endOfTrack set reports done.
+        const min = Number(msg.minutes);
+        if (msg.endOfTrack === true) setSleep(me.uid, { at: null, endOfTrack: true }, 'set');
+        else if (Number.isFinite(min) && min > 0 && min <= 24 * 60) setSleep(me.uid, { at: now + Math.round(min * 60000), endOfTrack: false }, 'set');
+        else setSleep(me.uid, null, msg.done ? 'end of track' : `turned off on ${me.name}`);
+        break;
+      }
       case 'diag': app.log.info({ client: me.name, diag: msg.data || {} }, 'diag'); break;
     }
   };
 
   // Message types a client may send; anything else is dropped unparsed into handle().
-  const KNOWN = new Set(['ping', 'devices', 'queue', 'nowplaying', 'claim', 'command', 'like', 'offset', 'prefs', 'diag']);
+  const KNOWN = new Set(['ping', 'devices', 'queue', 'nowplaying', 'claim', 'command', 'like', 'offset', 'prefs', 'diag', 'sleep']);
   app.get('/api/ws', { websocket: true }, (ws, req) => {
     const net = networkOf(req);
     let self: Client | null = null;
@@ -432,7 +475,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         clients.set(id, self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);
-        send(self, { type: 'hello-ok', clientId: id, userId: who.id, offsets: offsetsAll(), now: Date.now() });
+        send(self, { type: 'hello-ok', clientId: id, userId: who.id, offsets: offsetsAll(), now: Date.now(), sleep: sleepOut(who.id) });
         broadcastRoster(who.id);
         for (const c of ofUser(who.id)) if (c.id !== id && c.queue) send(self, { type: 'queue', from: c.id, queue: c.queue });
         if (!s.active) { const sm = sessionMsg(s); if (sm) send(self, sm); }

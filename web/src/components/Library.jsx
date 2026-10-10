@@ -3,7 +3,7 @@ import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePh
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { vibrantColor } from '../api/colors.js';
-import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals } from '../api/prefs.js';
+import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
 import Home, { topSongsSub } from './Home.jsx';
 import History from './History.jsx';
@@ -768,6 +768,16 @@ export default function Library({
               <span className="setrow-text"><b>Streaming quality elsewhere</b><small>{quality.label}</small></span>
               <Chev />
             </button>
+            <button className="setrow" onClick={() => onUpdatePrefs({ normalize: prefs?.normalize === false })}>
+              <span className="setrow-text"><b>Normalize volume</b><small>{prefs?.normalize === false ? 'Off' : 'On: every song at the same loudness'}</small></span>
+            </button>
+            <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'crossfade' }); }}>
+              <span className="setrow-text"><b>Crossfade</b><small>{crossfadeLabel(prefs?.crossfade)}. Not on iPhone yet</small></span>
+              <Chev />
+            </button>
+            <button className="setrow" onClick={() => onUpdatePrefs({ gapless: prefs?.gapless === false })}>
+              <span className="setrow-text"><b>Gapless playback</b><small>{prefs?.gapless === false ? 'Off' : 'On'}. Not on iPhone yet</small></span>
+            </button>
 
             <h2>Scrobbling</h2>
             <button className="setrow" onClick={() => setSettingsSub('scrobbling')}>
@@ -799,8 +809,10 @@ export default function Library({
 
             {settingsMenu && (
               <ContextMenu x={settingsMenu.x} y={settingsMenu.y} onClose={() => setSettingsMenu(null)}
-                header={settingsMenu.kind === 'phoneQuality' ? { icon: MI.play, title: 'Streaming quality on phones', sub: 'Applies from the next track on every phone signed in as you.' } : settingsMenu.kind === 'quality' ? { icon: MI.play, title: 'Streaming quality elsewhere', sub: 'Desktop and tablet. Applies from the next track. Speakers always get the original file.' } : { icon: MI.photo, title: 'Theme', sub: 'Applied to every Slopify you have open, instantly.' }}
-                items={settingsMenu.kind === 'phoneQuality'
+                header={settingsMenu.kind === 'crossfade' ? { icon: MI.play, title: 'Crossfade', sub: 'Songs that end by themselves fade into the next. Albums played in order stay gapless.' } : settingsMenu.kind === 'phoneQuality' ? { icon: MI.play, title: 'Streaming quality on phones', sub: 'Applies from the next track on every phone signed in as you.' } : settingsMenu.kind === 'quality' ? { icon: MI.play, title: 'Streaming quality elsewhere', sub: 'Desktop and tablet. Applies from the next track. Speakers always get the original file.' } : { icon: MI.photo, title: 'Theme', sub: 'Applied to every Slopify you have open, instantly.' }}
+                items={settingsMenu.kind === 'crossfade'
+                  ? CROSSFADES.map((sec) => ({ key: `x${sec}`, label: crossfadeLabel(sec), icon: (Number(prefs?.crossfade) || 0) === sec ? MI.check : null, onClick: () => onUpdatePrefs({ crossfade: sec }) }))
+                  : settingsMenu.kind === 'phoneQuality'
                   ? QUALITIES.map((q) => ({ key: q.id, label: q.label, icon: q.id === phoneQuality.id ? MI.check : null, onClick: () => onUpdatePrefs({ phoneQuality: q.id }) }))
                   : settingsMenu.kind === 'quality'
                   ? QUALITIES.map((q) => ({ key: q.id, label: q.label, icon: q.id === quality.id ? MI.check : null, onClick: () => onUpdatePrefs({ quality: q.id }) }))
@@ -842,6 +854,29 @@ export default function Library({
                   {QUALITIES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
                 </select>
                 <div className="settings-hint">{QUALITIES.find((q) => q.id === (prefs?.quality || 'original'))?.hint || 'Applies from the next track. Speakers always get the original file.'}</div>
+              </div>
+              <div className="settings-field">
+                <label>Normalize volume</label>
+                <select value={prefs?.normalize === false ? 'off' : 'on'} onChange={(e) => onUpdatePrefs({ normalize: e.target.value === 'on' })}>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+                <div className="settings-hint">Every song at the same loudness, like Spotify&apos;s Normal (-14 LUFS). An album played in order keeps its own balance. Not applied on speakers or to lossless on iPhone.</div>
+              </div>
+              <div className="settings-field">
+                <label>Crossfade</label>
+                <select value={String(Number(prefs?.crossfade) || 0)} onChange={(e) => onUpdatePrefs({ crossfade: Number(e.target.value) })}>
+                  {CROSSFADES.map((sec) => <option key={sec} value={sec}>{crossfadeLabel(sec)}</option>)}
+                </select>
+                <div className="settings-hint">Songs that end by themselves fade into the next. Albums played in order stay gapless. On computers and Android, not on iPhone or speakers yet.</div>
+              </div>
+              <div className="settings-field">
+                <label>Gapless playback</label>
+                <select value={prefs?.gapless === false ? 'off' : 'on'} onChange={(e) => onUpdatePrefs({ gapless: e.target.value === 'on' })}>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+                <div className="settings-hint">The next song starts the moment one ends, so live albums and mixes play through. On computers and Android.</div>
               </div>
             </section>
 

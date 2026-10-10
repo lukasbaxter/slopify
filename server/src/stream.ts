@@ -27,8 +27,19 @@ import type { Readable } from 'node:stream';
 import { headOf, openBytes } from './heads.js';
 import type { SongCache } from './songcache.js';
 import { config } from './config.js';
+import { gainFor, measure, refreshAlbumLoudness, saveTrackLoudness, type GainMode } from './loudness.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
+// A transcode variant: a profile, optionally with a volume-normalization gain
+// baked in (loudness.ts), e.g. 'aac-320g-5.2'. Each is its own cache dir.
+export function parseVariant(v: string): { profile: string; gain: number } | null {
+  const m = /^(aac-\d+)(?:g(-?\d{1,2}(?:\.\d)?))?$/.exec(String(v || ''));
+  if (!m || !PROFILES[m[1]]) return null;
+  const gain = m[2] == null ? 0 : Number(m[2]);
+  if (!Number.isFinite(gain) || gain < -20 || gain > 12) return null;
+  return { profile: m[1], gain };
+}
+export const variantName = (profile: string, gain: number | null | undefined) => (gain ? `${profile}g${gain.toFixed(1).replace(/\.0$/, '')}` : profile);
 const MIME: Record<string, string> = { '.flac': 'audio/flac', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.aiff': 'audio/aiff', '.aif': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.ape': 'audio/x-ape', '.wv': 'audio/x-wavpack' };
 
 const running = new Map<string, Promise<void>>(); // key -> startable (RUNWAY segments or done)
@@ -87,7 +98,7 @@ function ffIn(src: Src): { args: string[]; feed: (() => Readable) | null } {
   }
   return { args: ['-i', src.file], feed: null };
 }
-function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | 'ignore', nice = false) {
+export function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | 'ignore', nice = false) {
   const inp = ffIn(src);
   const args = ['-v', 'error', '-nostdin', ...pre, ...inp.args, ...post].filter((a) => !(inp.feed && a === '-nostdin'));
   const stdio: any = [inp.feed ? 'pipe' : 'ignore', out, 'pipe'];
@@ -132,7 +143,8 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
       try {
         await fsp.rm(dir, { recursive: true, force: true });
         await fsp.mkdir(dir, { recursive: true });
-        ff = spawnFf([], src, ['-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', PROFILES[profile].bitrate, '-ac', '2',
+        const v = parseVariant(profile)!;
+        ff = spawnFf([], src, ['-map', '0:a:0', '-vn', ...(v.gain ? ['-af', `volume=${v.gain}dB`] : []), '-c:a', 'aac', '-b:a', PROFILES[v.profile].bitrate, '-ac', '2',
           '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
       } catch (e) { release?.(); throw e; }
       let err = '';
@@ -238,12 +250,14 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // Every caller is about to play the song (or warm it as next in a queue):
   // the whole file comes from the song cache when it is there, and is fetched
   // into it in the background when it is not.
-  const srcOf = (id: string): Src | undefined => {
+  // want: fetch it into the song cache too (anything about to play; not the
+  // library-wide loudness pass, which would churn the cache through every song).
+  const srcOf = (id: string, want = true): Src | undefined => {
     const t = db.prepare('SELECT path, size FROM tracks WHERE id = ?').get(id) as { path: string; size: number } | undefined;
     if (!t) return undefined;
     const local = songs?.get(id, t.size);
     if (local) return { file: local, name: t.path, size: t.size, head: null };
-    songs?.want(id, t.path, t.size);
+    if (want) songs?.want(id, t.path, t.size);
     return { file: t.path, name: t.path, size: t.size, head: headsEnabled ? headOf(db, cacheDir, id, t.size) : null, alt: altOf?.(t.path) ?? null };
   };
   app.get('/api/admin/cache', { preHandler: (app as any).requireAdmin }, async () => ({
@@ -251,18 +265,74 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     heads: db.prepare('SELECT COUNT(*) songs, COALESCE(SUM(bytes), 0) bytes FROM heads').get(),
   }));
   const log = (m: string) => app.log.warn(m);
-  // The profile each account last streamed at: what its upcoming tracks are warmed in.
-  const lastProfile = new Map<string, string>();
-  const warm = (uid: string | null, ids: string[], profile?: string) => {
-    const prof = profile && PROFILES[profile] ? profile : (uid && lastProfile.get(uid)) || 'aac-320';
+
+  // --- loudness (volume normalization) ---------------------------------------------
+  // Songs about to play are measured first, one at a time at low priority, so
+  // by the time one comes up its gain is known. The library-wide pass is the
+  // 'loudness' task, through the same measureTrack.
+  const measureTrack = async (id: string, nice = true): Promise<boolean> => {
+    const src = srcOf(id, false);
+    if (!src) return false;
+    let l = null;
+    try { l = await measure((pre, post) => spawnFf(pre, src, post, 'ignore', nice) as any); }
+    catch (e: any) { log(`loudness ${id}: ${e.message}`); }
+    saveTrackLoudness(db, id, l);
+    const album = (db.prepare('SELECT album_id FROM tracks WHERE id = ?').get(id) as any)?.album_id;
+    if (album) refreshAlbumLoudness(db, [album]);
+    return !!l;
+  };
+  const unmeasured = (id: string) => !!db.prepare('SELECT 1 FROM tracks WHERE id = ? AND loudness_at IS NULL').get(id);
+  const measureQueue: { id: string; then?: () => void }[] = [];
+  let measuring = false;
+  const pumpMeasure = async () => {
+    if (measuring) return;
+    measuring = true;
+    try {
+      while (measureQueue.length) {
+        const job = measureQueue.shift()!;
+        if (unmeasured(job.id)) await measureTrack(job.id);
+        try { job.then?.(); } catch { /* follow-up */ }
+      }
+    } finally { measuring = false; }
+  };
+  const measureSoon = (id: string, then?: () => void) => {
+    const have = measureQueue.find((j) => j.id === id);
+    if (have) { if (then) { const prev = have.then; have.then = () => { prev?.(); then(); }; } return; }
+    measureQueue.push({ id, then });
+    void pumpMeasure();
+  };
+  app.decorate('measureTrack', measureTrack);
+
+  // What each account last streamed at (profile, and the normalization mode
+  // when it asked for one): what its upcoming tracks are warmed in.
+  const lastProfile = new Map<string, { profile: string; norm: GainMode | null }>();
+  const variantFor = (id: string, profile: string, norm: GainMode | null) => variantName(profile, norm ? gainFor(db, id, norm) : 0);
+  const warm = (uid: string | null, ids: string[], profile?: string, normArg?: GainMode | null) => {
+    const last = uid ? lastProfile.get(uid) : undefined;
+    const prof = profile && PROFILES[profile] ? profile : last?.profile || 'aac-320';
+    const norm = normArg !== undefined ? normArg : last?.norm ?? null;
     for (const id of ids.slice(0, 10)) {
-      if (typeof id !== 'string' || warmQueue.some((w) => w.id === id && w.profile === prof)) continue;
-      if (running.has(`${id}:${prof}`) || fs.existsSync(path.join(transcodeDir(dataDir, id, prof), 'done'))) continue;
-      warmQueue.push({ id, profile: prof });
+      if (typeof id !== 'string') continue;
+      // Not measured yet: measure, then warm at the gain it turns out to need.
+      if (norm && unmeasured(id)) { measureSoon(id, () => warm(uid, [id], prof, norm)); continue; }
+      const v = variantFor(id, prof, norm);
+      if (warmQueue.some((w) => w.id === id && w.profile === v)) continue;
+      if (running.has(`${id}:${v}`) || fs.existsSync(path.join(transcodeDir(dataDir, id, v), 'done'))) continue;
+      warmQueue.push({ id, profile: v });
     }
     pumpWarm(dataDir, srcOf, log);
   };
   app.decorate('warmTracks', warm);
+  // A variant in a URL must be one the server itself would choose for that
+  // song (its track or album gain, or none): a client cannot fill the cache
+  // with arbitrary gains.
+  const variantOk = (id: string, v: string) => {
+    const p = parseVariant(v);
+    if (!p) return false;
+    if (!p.gain) return true;
+    return p.gain === gainFor(db, id, 'track') || p.gain === gainFor(db, id, 'album');
+  };
+  const normOf = (q: any): GainMode | null => (q?.norm === 'track' || q?.norm === 'album' ? q.norm : null);
 
   // Original file, byte ranges honoured by @fastify/static-free code (ranges by hand: it is 20 lines).
   app.get('/api/stream/:id', auth, async (req, reply) => {
@@ -335,18 +405,29 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const max = PROFILES[q.max] ? q.max : 'aac-320';
-    lastProfile.set(req.user!.id, max);
+    // norm=track|album: the gain is baked into the transcode (a phone cannot
+    // scale the audio itself). Not measured yet: plain this time, measured
+    // for the next.
+    const norm = normOf(q);
+    lastProfile.set(req.user!.id, { profile: max, norm });
+    const gain = norm ? gainFor(db, id, norm) : 0;
+    if (norm && gain == null) measureSoon(id);
     const tok = q.token ? `token=${encodeURIComponent(q.token)}&` : '';
     const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
-    for (const [profile, bw] of LADDER.slice(LADDER.findIndex(([p]) => p === max))) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${profile}/index.m3u8?${tok}abr=1`);
+    for (const [profile, bw] of LADDER.slice(LADDER.findIndex(([p]) => p === max))) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${variantName(profile, gain)}/index.m3u8?${tok}abr=1`);
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return lines.join('\n') + '\n';
   });
   // The whole song as one AAC file (see joinSegments). Waits for the
   // transcode to finish; a phone asks for it while the song before plays.
   app.get('/api/stream/:id/whole/:profile', hls, async (req, reply) => {
-    const { id, profile } = req.params as any;
-    if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });
+    const { id } = req.params as any;
+    // A plain profile plus ?norm= picks the gain here (what a phone asks for
+    // ahead of time); a variant name in the path is taken as it is.
+    let profile = (req.params as any).profile as string;
+    const norm = normOf(req.query);
+    if (norm && PROFILES[profile]) profile = variantFor(id, profile, norm);
+    if (!variantOk(id, profile)) return reply.code(404).send({ error: 'no such profile' });
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const dir = transcodeDir(dataDir, id, profile);
@@ -364,11 +445,11 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
 
   app.get('/api/stream/:id/hls/:profile/index.m3u8', hls, async (req, reply) => {
     const { id, profile } = req.params as any;
-    if (!PROFILES[profile]) return reply.code(404).send({ error: 'no such profile' });
+    if (!variantOk(id, profile)) return reply.code(404).send({ error: 'no such profile' });
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     // A step down inside an adaptive stream is not the quality they chose.
-    if (!(req.query as any).abr) lastProfile.set(req.user!.id, profile);
+    if (!(req.query as any).abr && PROFILES[profile]) lastProfile.set(req.user!.id, { profile, norm: null });
     let index: string;
     try { index = await ensureHls(dataDir, id, src, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
@@ -389,7 +470,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   const segTouched = new Map<string, number>(); // dir -> last done-mtime refresh
   app.get('/api/stream/:id/hls/:profile/:seg', hls, async (req, reply) => {
     const { id, profile, seg } = req.params as any;
-    if (!/^[0-9a-f]{32}$/.test(id) || !PROFILES[profile] || !/^s\d{4}\.ts$/.test(seg)) return reply.code(404).send();
+    if (!/^[0-9a-f]{32}$/.test(id) || !parseVariant(profile) || !/^s\d{4}\.ts$/.test(seg)) return reply.code(404).send();
     const p = path.join(transcodeDir(dataDir, id, profile), seg);
     // A segment ffmpeg has not written yet: wait for it rather than 404 (the
     // synthetic playlist lists every segment from the start). No transcode
@@ -411,11 +492,11 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     return reply.send(fs.createReadStream(p));
   });
   // The client's own warm: the next few queue items at the profile it plays.
-  const Warm = z.object({ ids: z.array(z.string()).max(10), profile: z.string().optional() });
+  const Warm = z.object({ ids: z.array(z.string()).max(10), profile: z.string().optional(), norm: z.enum(['track', 'album']).nullable().optional() });
   app.post('/api/stream/warm', hls, async (req, reply) => {
     const b = Warm.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'ids required' });
-    warm(req.user!.id, b.data.ids, b.data.profile);
+    warm(req.user!.id, b.data.ids, b.data.profile, b.data.norm);
     return { ok: true, queued: warmQueue.length, active: warmActive };
   });
 
@@ -461,9 +542,13 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     return { total, removed };
   };
   const nightly = async () => {
-    const ids = hotSet().filter((id) => !fs.existsSync(path.join(transcodeDir(dataDir, id, 'aac-320'), 'done')));
+    // Normalization is on unless an account turned it off (web prefs.normalize):
+    // warm at the per-track gain then, as phones will ask for it.
+    const prefs = (db.prepare('SELECT json FROM prefs').all() as any[]).map((r) => { try { return JSON.parse(r.json) || {}; } catch { return {}; } });
+    const norm: GainMode | null = !prefs.length || prefs.some((p) => p.normalize !== false) ? 'track' : null;
+    const ids = hotSet().filter((id) => !fs.existsSync(path.join(transcodeDir(dataDir, id, variantFor(id, 'aac-320', norm)), 'done')));
     app.log.info(`transcodes: warming ${ids.length} hot tracks`);
-    for (let i = 0; i < ids.length; i += 10) { warm(null, ids.slice(i, i + 10), 'aac-320'); while (warmQueue.length > 4) await new Promise((r) => setTimeout(r, 2000)); }
+    for (let i = 0; i < ids.length; i += 10) { warm(null, ids.slice(i, i + 10), 'aac-320', norm); while (warmQueue.length > 4 || measureQueue.length > 20) await new Promise((r) => setTimeout(r, 2000)); }
     const t = await trimCache();
     app.log.info(`transcodes: ${(t.total / 1024 ** 3).toFixed(1)} GB after trim, ${t.removed} removed`);
   };

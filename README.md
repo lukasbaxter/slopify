@@ -72,6 +72,9 @@ spelled out there.
 - Browse and search your library; play the original files or a quality you
   pick per device (adaptive on a weak signal); lyrics (your `.lrc` files, else LrcLib), artist pictures and
   banners, album art.
+- Spotify's playback basics: volume normalization (every song measured once,
+  played at -14 LUFS; albums keep their own balance), crossfade and gapless
+  playback on computers and Android, and a sleep timer that works on any device.
 - Likes, playlists, history and a Home page built from your own listening;
   Popular per artist from ListenBrainz.
 - One session per person across every device: start on the phone, carry on

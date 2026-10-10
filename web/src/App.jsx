@@ -199,6 +199,13 @@ export default function App() {
   // kbps MP3: a third of the data of the FLACs, starts faster on cellular),
   // everything else uses the account's quality.
   const deviceQuality = (p) => (isMobileRef.current ? (p.phoneQuality || 'high') : (p.quality || 'original'));
+  // Quality plus the account's other playback settings, onto the client the player streams through.
+  const applyPlayback = (p) => {
+    jf.quality = deviceQuality(p);
+    jf.normalize = p.normalize !== false;
+    jf.crossfade = Math.max(0, Math.min(12, Number(p.crossfade) || 0));
+    jf.gapless = p.gapless !== false;
+  };
   const [avatarV, setAvatarV] = useState(0);
   const [nameDraft, setNameDraft] = useState('');
 
@@ -394,10 +401,10 @@ export default function App() {
     setAvatarOk(true);
     // Paint the last known theme instantly, then the account's saved one.
     const cached = jf.persisted('prefs');
-    if (cached) { setPrefs((p) => ({ ...p, ...cached })); applyTheme(cached.theme); jf.quality = deviceQuality(cached); }
+    if (cached) { setPrefs((p) => ({ ...p, ...cached })); applyTheme(cached.theme); applyPlayback(cached); }
     jf.getPrefs().then((p) => {
       const next = { ...p, theme: { ...DEFAULT_THEME, ...(p.theme || {}) }, quality: p.quality || 'original' };
-      setPrefs(next); applyTheme(next.theme); jf.quality = deviceQuality(next); jf._persist('prefs', next);
+      setPrefs(next); applyTheme(next.theme); applyPlayback(next); jf._persist('prefs', next);
     }).catch(() => {});
   }, [jf]);
 
@@ -417,7 +424,7 @@ export default function App() {
     // Only the PATCH travels (to Jellyfin and over the relay); every client
     // merges it. Broadcasting whole prefs objects let a stale client overwrite
     // what another had just saved.
-    setPrefs((cur) => { const next = { ...cur, ...patch }; applyTheme(next.theme); jf.quality = deviceQuality(next); jf._persist('prefs', next); return next; });
+    setPrefs((cur) => { const next = { ...cur, ...patch }; applyTheme(next.theme); applyPlayback(next); jf._persist('prefs', next); return next; });
     player.relay?.sendPrefs?.(patch);
     try { await jf.setPrefs(patch); } catch (e) { notify(`Could not save settings: ${e.message}`); }
   };
@@ -506,7 +513,7 @@ export default function App() {
         setPrefs((cur) => {
           const next = { ...cur, ...patch };
           if (patch.theme) next.theme = { ...DEFAULT_THEME, ...patch.theme };
-          applyTheme(next.theme); jf.quality = deviceQuality(next); jf._persist('prefs', next);
+          applyTheme(next.theme); applyPlayback(next); jf._persist('prefs', next);
           return next;
         });
         if (p._libraryChanged && p._libraryChanged !== relayLibraryPing.current) { relayLibraryPing.current = p._libraryChanged; refreshPlaylists(); jf._persist('albumsAt', 0); jf._persist('artistsAt', 0); }
@@ -515,6 +522,7 @@ export default function App() {
       onLike: ({ itemId, liked, at }) => { likesSet(itemId, liked, at); },
       // Speaker timing offsets measured by anyone on this relay.
       onOffsets: offsetsMerge,
+      onSleep: (z) => playerRef.current.applySleep(z),
     });
     player.attachRelay(relay);
     return () => { relay.close(); player.attachRelay(null); };

@@ -179,6 +179,26 @@ describe('BluOS end of track', () => {
     await p.stopAll();
   });
 
+  it('sleep timer at the end of the track: stops there, on the next track paused at 0, and play starts it', async () => {
+    let done = 0;
+    const p = new ServerPlayer('u', { db: noopDb, discovery: {} as any, publicUrl: 'http://x', token: 't', report: () => {}, reportQueue: () => {}, claim: () => {}, log: () => {}, sleepAtTrackEnd: () => done === 0, sleepDone: () => { done++; } }) as any;
+    p.device = { id: 'cast:x', kind: 'cast', name: 'TV' };
+    p.queue = [row, row2]; p.index = 0; p.duration = 300;
+    p.playing = true; p.anchor = { pos: 298, at: Date.now() };
+    const calls: string[] = [];
+    p.transport = castFake({ ended: true }, calls);
+    await p.tick();
+    expect(done).toBe(1);
+    expect(p.index).toBe(1);
+    expect(p.playing).toBe(false); expect(p.position).toBe(0);
+    expect(calls).not.toContain('play');
+    // Play: the parked track is started on the speaker, from where it was left.
+    await p.toggle();
+    expect(calls).toContain('play');
+    expect(p.playing).toBe(true);
+    await p.stopAll();
+  });
+
   it('a stop in the middle is still a stop from the speaker: paused, not skipped', async () => {
     const p = custom();
     p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };

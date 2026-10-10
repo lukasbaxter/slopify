@@ -35,6 +35,8 @@ export const rowTrack = (t) => ({
   ProductionYear: t.year, IndexNumber: t.trackNo, ParentIndexNumber: t.discNo, RunTimeTicks: ticks(t.durationMs),
   Genres: t.genres || [], Container: t.codec || null, DateCreated: t.addedAt ? new Date(t.addedAt).toISOString() : undefined,
   ImageTags: t.cover ? { Primary: t.cover } : {}, UserData: { IsFavorite: false }, _identity: t.identity || null,
+  // Volume normalization: dB to play it at as a track / within its album (null = not measured yet).
+  _gain: t.gain || null,
 });
 export const rowAlbum = (a) => ({
   Id: a.id, Name: a.name, Type: 'MusicAlbum', AlbumArtist: a.artist, AlbumArtists: a.artistId ? [{ Name: a.artist, Id: a.artistId }] : [], ArtistItems: a.artistId ? [{ Name: a.artist, Id: a.artistId }] : [],
@@ -144,6 +146,11 @@ export class Slopify {
   // --- what the local player streams ---------------------------------------
   // 'original' or a transcode. Speakers always get the original file.
   quality = 'original';
+  // Playback settings from the account prefs (App sets them, like quality):
+  // volume normalization on/off, crossfade seconds (0 = off), gapless on/off.
+  normalize = true;
+  crossfade = 0;
+  gapless = true;
   // How the local element gets a transcode:
   //  'file'    original file, byte ranges, seeks natively;
   //  'hls'     Safari/iOS: AAC segments fetched as needed, seeks natively;
@@ -161,11 +168,14 @@ export class Slopify {
   // fetched so they sit in the browser's disk cache. iOS's native HLS loader
   // reads that cache (it never writes it), so a warmed track starts without
   // a round trip per segment. ~300 KB per warmed track at 320k.
-  prewarm(itemId, { segments = 2 } = {}) {
+  // gain: the normalization gain baked into the transcode (dB), when the
+  // player has it applied by the server (iPhone); it names the cache variant.
+  prewarm(itemId, { segments = 2, gain = 0 } = {}) {
     if (!itemId || this.streamMode() !== 'hls') return;
     const at = this._warm.get(itemId); if (at && Date.now() - at < 60000) return;
     this._warm.set(itemId, Date.now());
-    const url = this._url(`/api/stream/${itemId}/hls/${this._profile()}/index.m3u8`);
+    const variant = gain ? `${this._profile()}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : this._profile();
+    const url = this._url(`/api/stream/${itemId}/hls/${variant}/index.m3u8`);
     const base = url.slice(0, url.lastIndexOf('/') + 1);
     const tok = url.includes('?') ? url.slice(url.indexOf('?')) : '';
     const pull = (tries) => fetch(url).then((r) => r.text()).then((txt) => {
@@ -176,25 +186,28 @@ export class Slopify {
     pull(3);
   }
   // Ask the server to transcode these (low priority, in the background).
-  warm(itemIds) {
+  // norm: 'track' | 'album' when the server bakes the normalization gain in.
+  warm(itemIds, norm = null) {
     const ids = (itemIds || []).filter(Boolean).slice(0, 10);
     if (!ids.length || this.streamMode() !== 'hls') return Promise.resolve(null);
-    return this._fetch('/api/stream/warm', { method: 'POST', body: JSON.stringify({ ids, profile: this._profile() }), timeoutMs: 8000 }).catch(() => null);
+    return this._fetch('/api/stream/warm', { method: 'POST', body: JSON.stringify({ ids, profile: this._profile(), norm }), timeoutMs: 8000 }).catch(() => null);
   }
   _profile() { return { high: 'aac-320', normal: 'aac-160', low: 'aac-96' }[this.quality] || 'aac-320'; }
-  playbackUrl(itemId, { startAt = 0 } = {}) {
+  // norm ('track' | 'album'): have the server bake the normalization gain into
+  // the transcode (HLS only: a player that cannot scale the audio itself).
+  playbackUrl(itemId, { startAt = 0, norm = null } = {}) {
     const mode = this.streamMode();
     if (mode === 'file') return this.streamUrl(itemId);
     // Adaptive up to the chosen quality: on a weak signal iOS drops to a
     // lower one instead of stopping to buffer. (The first segments of the
     // top quality are what prewarm() puts in the cache, so starts stay fast.)
-    if (mode === 'hls') return this._url(`/api/stream/${itemId}/hls/master.m3u8`, { max: this._profile() });
+    if (mode === 'hls') return this._url(`/api/stream/${itemId}/hls/master.m3u8`, norm ? { max: this._profile(), norm } : { max: this._profile() });
     return this.transcodeUrl(itemId, { codec: 'mp3', bitrate: { high: 320000, normal: 160000, low: 96000 }[this.quality], startAt });
   }
   streamUrl(itemId) { return this._url(`/api/stream/${itemId}`); }
   // The whole song as one AAC file at the phone's quality (HLS mode only):
   // what the player keeps in memory to ride out dead zones.
-  wholeUrl(itemId) { return this._url(`/api/stream/${itemId}/whole/${this._profile()}`); }
+  wholeUrl(itemId, norm = null) { return this._url(`/api/stream/${itemId}/whole/${this._profile()}`, norm ? { norm } : undefined); }
   transcodeUrl(itemId, { bitrate = 320000, startAt = 0 } = {}) {
     const q = { bitrate: String(bitrate) };
     if (startAt > 0) q.startAt = String(Math.round(startAt * 1000) / 1000);

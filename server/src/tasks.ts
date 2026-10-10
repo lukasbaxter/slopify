@@ -691,5 +691,38 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     },
   };
 
-  return [scan, enrich, heads, discovery, backlog, flac, downloads];
+  // Volume normalization needs every song's loudness (loudness.ts). Songs
+  // about to play are measured on the spot by the stream code; this walks the
+  // rest of the library, what gets played first, beside the other chores
+  // (it is a long first pass, ~1 s of ffmpeg per song). Hourly after that:
+  // only new songs, and failures retried after a week.
+  const loudness: TaskDef = {
+    id: 'loudness', name: 'Measure loudness', schedule: { mode: 'interval', hours: 1 }, alongside: true,
+    description: 'Measure every song once so playback can even out the volume between songs',
+    settings: [PACE('normal'), { key: 'workers', label: 'Songs at once', type: 'number', min: 1, max: 4, default: 2 }],
+    run: async (ctx) => {
+      const measureTrack = (app as any).measureTrack as ((id: string, nice?: boolean) => Promise<boolean>) | undefined;
+      if (!measureTrack) return 'streaming is not set up';
+      const rows = db.prepare(`
+        SELECT t.id FROM tracks t
+        WHERE t.loudness_at IS NULL OR (t.loudness IS NULL AND t.loudness_at < ?)
+        ORDER BY (t.id IN (SELECT track_id FROM plays) OR t.id IN (SELECT track_id FROM likes) OR t.id IN (SELECT track_id FROM playlist_tracks)) DESC, t.album_id
+      `).all(Date.now() - 7 * 86400000) as { id: string }[];
+      if (!rows.length) return 'every song is measured';
+      let done = 0, failed = 0, next = 0;
+      const worker = async () => {
+        while (next < rows.length) {
+          const r = rows[next++];
+          if (await measureTrack(r.id).catch(() => false)) done++; else failed++;
+          if ((done + failed) % 25 === 0) ctx.step(`${(done + failed).toLocaleString()} of ${rows.length.toLocaleString()}`, (done + failed) / rows.length);
+          const pause = paceMs(ctx.setting('pace'), o.pauseMs);
+          if (pause) await sleep(pause);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(4, ctx.setting<number>('workers') || 1)) }, worker));
+      return `${done.toLocaleString()} measured${failed ? `, ${failed} could not be read` : ''}`;
+    },
+  };
+
+  return [scan, enrich, heads, discovery, backlog, flac, downloads, loudness];
 }

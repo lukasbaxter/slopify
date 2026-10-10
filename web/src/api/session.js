@@ -23,7 +23,7 @@ function clientId() {
 }
 
 export class SessionLink {
-  constructor({ baseUrl, token, name, kind, form = null, canPlay = true, onRoster, onCommand, onQueue, onSession, onPrefs, onLike, onOffsets }) {
+  constructor({ baseUrl, token, name, kind, form = null, canPlay = true, onRoster, onCommand, onQueue, onSession, onPrefs, onLike, onOffsets, onSleep }) {
     this.baseUrl = baseUrl;
     this.token = token;
     this.name = name;
@@ -37,6 +37,7 @@ export class SessionLink {
     this.onPrefs = onPrefs || (() => {});
     this.onLike = onLike || (() => {});
     this.onOffsets = onOffsets || (() => {});
+    this.onSleep = onSleep || (() => {});
     // Whether this connection has heard who is playing yet. Until it has, a
     // play pressed here cannot know the music is already on another device
     // (a phone app just opened): whenRoster() lets the player wait for it.
@@ -75,6 +76,7 @@ export class SessionLink {
         this.connected = true;
         if (typeof m.clientId === 'string' && m.clientId) this.id = m.clientId;
         if (m.offsets) this.onOffsets(m.offsets);
+        this.onSleep(m.sleep || null);
         // Only now is the server listening to us. Anything sent while it was
         // still verifying the token was dropped -- which is how the desktop's
         // speaker list went missing from the web player after a restart.
@@ -91,6 +93,7 @@ export class SessionLink {
       else if (m.type === 'prefs') this.onPrefs(m.prefs || {});
       else if (m.type === 'like') this.onLike(m);
       else if (m.type === 'offset') this.onOffsets({ [m.id]: m.offset });
+      else if (m.type === 'sleep') this.onSleep(m.sleep || null);
       else if (m.type === 'session') this.onSession({ nowPlaying: m.nowPlaying, queue: m.queue || [], at: m.at || 0 });
       else if (m.type === 'roster') {
         // The sender stamps nowPlaying.at with ITS wall clock; a mirror must
@@ -153,6 +156,8 @@ export class SessionLink {
   sendPrefs(prefs) { this._send({ type: 'prefs', prefs }); }
   // A like / unlike; the server stores the timestamp and tells the other clients.
   sendLike(itemId, liked) { this._send({ type: 'like', itemId, liked }); }
+  // The account's sleep timer: { minutes }, { endOfTrack: true } or { off: true }.
+  sendSleep(opt) { this._send({ type: 'sleep', ...opt }); }
   // A speaker's measured visualizer offset in seconds (null = forget it).
   sendOffset(id, offset) { this._send({ type: 'offset', id, offset }); }
 

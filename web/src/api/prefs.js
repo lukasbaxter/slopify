@@ -10,6 +10,10 @@ export const QUALITIES = [
   { id: 'low', label: 'Low (96 kbps)', bitrate: 96000 },
 ];
 
+// Crossfade lengths offered (seconds; 0 = off), as Spotify's slider runs 0-12.
+export const CROSSFADES = [0, 1, 2, 3, 5, 8, 12];
+export const crossfadeLabel = (sec) => { const n = Number(sec) || 0; return n ? `${n} second${n === 1 ? '' : 's'}` : 'Off'; };
+
 // The four colours that define the look; everything else is derived.
 export const DEFAULT_THEME = { accent: '#1ed760', bg: '#121212', surface: '#1f1f1f', fg: '#ffffff' };
 

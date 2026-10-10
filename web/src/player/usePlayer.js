@@ -13,6 +13,7 @@ const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
 // doing nothing. The visualizer analyses its silent shadow copy there instead.
 const IS_IOS = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 export const ROUTES_WEB_AUDIO = !IS_IOS;
+const IS_ANDROID = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
 const STAY_ON_LOCK_SCREEN_MS = 2 * 60 * 60 * 1000;
 // A lock-screen play/pause meant for another device, held for a moment and
 // dropped if the app is closing (see the Media Session handlers).
@@ -108,6 +109,7 @@ function slimTrack(t) {
     AlbumArtists: (t.AlbumArtists || []).map((a) => ({ Id: a.Id, Name: a.Name })),
     UserData: { IsFavorite: Boolean(t.UserData?.IsFavorite) },
     _queued: Boolean(t._queued),
+    _gain: t._gain || null,
   };
 }
 
@@ -162,6 +164,20 @@ export function usePlayer(jf) {
     if (text && (/interrupted by a new load|AbortError|The operation was aborted|goo\.gl\/LdLk22/i.test(text))) return;
     setErrorRaw(text);
   }, []);
+  // The account's sleep timer, from the server: { at, endOfTrack } or null.
+  // A time is the server's to fire (it pauses whatever is playing); the end
+  // of the track is for the player that is playing it (advance, below).
+  const [sleep, setSleepState] = useState(null);
+  const sleepRef = useRef(null);
+  const applySleep = useCallback((z) => { sleepRef.current = z || null; setSleepState(z || null); }, []);
+  const setSleepTimer = useCallback((opt) => {
+    const r = relayRef.current; if (!r) return;
+    // Shown at once; the server's answer (to every device) confirms it.
+    if (opt?.endOfTrack) applySleep({ at: null, endOfTrack: true });
+    else if (opt?.minutes > 0) applySleep({ at: Date.now() + opt.minutes * 60000, endOfTrack: false });
+    else applySleep(null);
+    r.sendSleep(opt?.endOfTrack ? { endOfTrack: true } : opt?.minutes > 0 ? { minutes: opt.minutes } : { off: true });
+  }, [applySleep]);
   // What a speaker reports playing when we did not start it ourselves (another
   // client, or this app on another machine). Lets a freshly opened window show
   // the house's current playback instead of claiming nothing is on.
@@ -201,7 +217,7 @@ export function usePlayer(jf) {
   // track and the next, so a dead zone on the road does not stop the music.
   // A track that starts, or restarts after a stall, plays from here when it
   // is in. The spare is re-pointed at the in-memory copy when it arrives.
-  const trackCache = useMemo(() => (jf ? createTrackCache((id) => jf.wholeUrl(id), {
+  const trackCache = useMemo(() => (jf ? createTrackCache((id) => jf.wholeUrl(id, bakeNormRef.current(id)), {
     onReady: (id, url) => {
       const spare = spareRef.current;
       if (spare && spare.dataset.track === id && spare.paused && !document.hidden && spare.src !== url) {
@@ -212,6 +228,33 @@ export function usePlayer(jf) {
   }) : null), [jf]);
   useEffect(() => () => trackCache?.clear(), [trackCache]);
   const wholeFor = (id) => (jf?.streamMode?.() === 'hls' ? trackCache?.get(id) || null : null);
+
+  // --- volume normalization -------------------------------------------------
+  // Spotify's: every song at -14 LUFS (the server measured it; track._gain
+  // carries the dB). An album played as the album keeps its own balance
+  // (album gain); anything else levels song by song. With Web Audio the gain
+  // node does it, on any stream; an iPhone has no Web Audio here, so its
+  // transcodes come from the server with the gain baked in (`norm` on the URL).
+  const normModeFor = (track) => {
+    if (!jf || jf.normalize === false || !track) return null;
+    return contextRef.current && track.AlbumId && contextRef.current === track.AlbumId ? 'album' : 'track';
+  };
+  const gainDbFor = (track) => {
+    const mode = normModeFor(track); const g = track?._gain;
+    if (!mode || !g) return 0;
+    return (mode === 'album' ? (g.album ?? g.track) : g.track) ?? 0;
+  };
+  const applyNorm = (el, track) => {
+    const n = webAudioRef.current?.gains?.get(el)?.norm;
+    if (!n) return;
+    const db = gainDbFor(track);
+    n.gain.cancelScheduledValues(0);
+    n.gain.value = 10 ** (db / 20);
+  };
+  // What the server should bake in for this track (iPhone only), by track or id.
+  const bakeNorm = (track) => (ROUTES_WEB_AUDIO ? null : normModeFor(track));
+  const bakeNormRef = useRef(() => null);
+  bakeNormRef.current = (id) => bakeNorm(queueRef.current.find((t) => t?.Id === id) || null);
 
   // iOS unlocks preload/play per element on a user gesture: the spare gets its
   // load() inside the first tap so it can buffer the next track unprompted.
@@ -238,11 +281,21 @@ export function usePlayer(jf) {
     const ctx = new Ctx({ latencyHint: 'playback' });
     // One source per element (a MediaElementSource can only be made once);
     // `source` is the active element's, and swaps tell the visualizer.
+    // Each element then goes through two gains: `norm`, the song's volume
+    // normalization, and `fade`, the crossfade ramp. The visualizer taps the
+    // source, before either.
     const sources = new Map();
-    for (const e of [el, spareRef.current]) if (e) { const src = ctx.createMediaElementSource(e); src.connect(ctx.destination); sources.set(e, src); }
+    const gains = new Map();
+    for (const e of [el, spareRef.current]) {
+      if (!e) continue;
+      const src = ctx.createMediaElementSource(e);
+      const norm = ctx.createGain(), fade = ctx.createGain();
+      src.connect(norm); norm.connect(fade); fade.connect(ctx.destination);
+      sources.set(e, src); gains.set(e, { norm, fade });
+    }
     const listeners = new Set();
     const wa = {
-      ctx, source: sources.get(el), sources,
+      ctx, source: sources.get(el), sources, gains,
       onSource: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
       setActive: (e) => { const prev = wa.source, next = sources.get(e); if (!next || next === prev) return; wa.source = next; for (const fn of listeners) { try { fn(next, prev); } catch { /* listener */ } } },
     };
@@ -251,6 +304,14 @@ export function usePlayer(jf) {
   }, []);
   // Build it before anything plays.
   useEffect(() => { webAudio(); }, [webAudio]);
+  // The song going out during a crossfade (or playing out its last moment
+  // under a gapless start): { el, timer }. endFade() silences and empties it.
+  const fadeRef = useRef(null);
+  const endFadeRef = useRef(() => {});
+  const fadeReset = (el) => {
+    const f = webAudioRef.current?.gains?.get(el)?.fade;
+    if (f) { f.gain.cancelScheduledValues(0); f.gain.value = 1; }
+  };
 
   // Mirrors of state that async callbacks and intervals need to read without
   // being re-created on every tick.
@@ -434,6 +495,9 @@ export function usePlayer(jf) {
       if (dev.kind === 'local') {
         ownUntilRef.current = Date.now() + 3000;
         webAudioRef.current?.ctx.resume?.().catch(() => {});
+        // A song still fading out (or playing out its last moment) under the
+        // current one stops: a skip or a seek is a hard cut.
+        endFadeRef.current();
         const transcoded = jf.transcoded?.();
         const spare = spareRef.current;
         // Only while the page is visible: with the screen locked iOS may hold
@@ -453,6 +517,7 @@ export function usePlayer(jf) {
           webAudioRef.current?.setActive?.(spare);
           localBaseRef.current = 0;
           spare.volume = volume / 100;
+          applyNorm(spare, track); fadeReset(spare);
           const outcome = await Promise.race([
             spare.play().then(() => 'ok', (e) => (e?.name === 'AbortError' ? 'abort' : 'fail')),
             new Promise((r) => setTimeout(() => r('timeout'), 4000)),
@@ -483,7 +548,8 @@ export function usePlayer(jf) {
         // clock then runs from 0 and localBaseRef holds the offset.
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
         el.dataset.track = track.Id;
-        el.src = (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0 });
+        el.src = (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0, norm: bakeNorm(track) });
+        applyNorm(el, track); fadeReset(el);
         mediaLog(`load ${track.Id.slice(0, 6)} at ${Math.round(seekSeconds)} from ${el.src.startsWith('blob:') ? 'memory' : 'network'}`);
         el.volume = volume / 100;
         if (seekSeconds > 0 && !transcoded) {
@@ -538,6 +604,7 @@ export function usePlayer(jf) {
       loadedRef.current = null;
       if (dev.kind === 'local') {
         ownUntilRef.current = Date.now() + 3000;
+        endFadeRef.current();
         for (const el of [audioRef.current, spareRef.current]) {
           if (!el) continue;
           el.pause();
@@ -794,6 +861,20 @@ export function usePlayer(jf) {
   const advance = useCallback(async (auto = false) => {
     const q = queueRef.current;
     const i = indexRef.current;
+    // Sleep timer set to the end of the track: stop here, on the next song,
+    // paused at its start (Spotify's way). Play starts it from there.
+    if (auto && sleepRef.current?.endOfTrack) {
+      mediaLog('sleep timer: end of track, stopping');
+      await stopOn(deviceRef.current).catch(() => {});
+      const n = i + 1 < q.length ? i + 1 : repeatRef.current === 'all' ? 0 : i;
+      setIndex(n); indexRef.current = n;
+      setDuration(ticksToSeconds(q[n]?.RunTimeTicks));
+      anchorAt(0, false);
+      setPlaying(false);
+      applySleep(null);
+      relayRef.current?.sendSleep({ off: true, done: true });
+      return undefined;
+    }
     if (auto && repeatRef.current === 'one') return skipTo(i); // replay the track
     if (i + 1 < q.length) return skipTo(i + 1);
     // Nothing left.
@@ -802,7 +883,7 @@ export function usePlayer(jf) {
     const ctx = contextRef.current;
     if (ctx && String(ctx).startsWith('artist:')) return moreOfArtist(String(ctx).slice(7));
     return smartNext(!!ctx);
-  }, [skipTo, smartNext, restart, moreOfArtist]);
+  }, [skipTo, smartNext, restart, moreOfArtist, stopOn, anchorAt, applySleep]);
   useEffect(() => { advanceRef.current = advance; }, [advance]);
 
   // Both route to the active player while mirroring: the queue lives there.
@@ -857,7 +938,7 @@ export function usePlayer(jf) {
       if (!playing) relayRef.current?.claim();
       if (dev.kind === 'local') {
         const el = audioRef.current;
-        if (playing) { mediaLog('toggle pause'); ownPause(el); }
+        if (playing) { mediaLog('toggle pause'); endFadeRef.current(); ownPause(el); }
         else {
           webAudioRef.current?.ctx.resume?.().catch(() => {});
           // Back from the lock screen the element can be dead: its stream cut
@@ -910,6 +991,7 @@ export function usePlayer(jf) {
           try { await startOn(dev, track, seconds); if (!wasPlaying) el.pause(); } catch (e) { setError(e.message); }
           return;
         }
+        endFadeRef.current();
         audioRef.current.currentTime = seconds;
         return;
       }
@@ -948,7 +1030,7 @@ export function usePlayer(jf) {
       if (act && relayRef.current) { relayRef.current.command(act, { action: 'setVolume', level }); return; }
       const dev = deviceRef.current;
       try {
-        if (dev.kind === 'local') audioRef.current.volume = level / 100;
+        if (dev.kind === 'local') { audioRef.current.volume = level / 100; if (fadeRef.current) fadeRef.current.el.volume = level / 100; }
         else await remote.setVolume(dev, level);
       } catch {
         // Some receivers reject volume while idle; not worth surfacing.
@@ -1142,7 +1224,7 @@ export function usePlayer(jf) {
         // bar.
         if (!act) {
           const dev = deviceRef.current;
-          if (dev.kind === 'local') { const el = audioRef.current; if (el) ownPause(el); }
+          if (dev.kind === 'local') { endFadeRef.current(); const el = audioRef.current; if (el) ownPause(el); }
           else if (dev.kind !== 'relay' && remote) remote.stop(dev).catch(() => {});
           setPlaying(false);
           anchorRef.current = { pos: positionRef.current, at: Date.now(), playing: false };
@@ -1338,7 +1420,7 @@ export function usePlayer(jf) {
       if (Date.now() - stuckSince < (wholeFor(id) ? 3000 : 6000)) return; // from memory it cannot fail, so sooner
       stuckSince = 0; recovering = true;
       mediaLog(`watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
-      const url = wholeFor(id) || jf.playbackUrl(id);
+      const url = wholeFor(id) || jf.playbackUrl(id, { norm: bakeNormRef.current(id) });
       ownUntilRef.current = Date.now() + 10000;
       el.src = url;
       // The wait below can outlive the song: a skip, a pause, an element swap
@@ -1558,37 +1640,197 @@ export function usePlayer(jf) {
   // (one request) and the next one's playlist and first segments are pulled
   // into the browser cache, so a skip lands on a finished, half-loaded track.
   // Delayed a little so it never competes with this track's own first segments.
+  const preloadRef = useRef(() => {});
+  preloadRef.current = () => {
+    if (deviceRef.current.kind !== 'local' || !playingRef.current || !jf) return;
+    const q = queueRef.current, i = indexRef.current;
+    const cur = q[i]; if (!cur) return;
+    const ahead = [q[i + 1], q[i + 2]].filter(Boolean).map((x) => x.Id);
+    if (!ahead.length && repeatRef.current === 'all' && q[0]) ahead.push(q[0].Id);
+    const nextItem = q[i + 1] || (repeatRef.current === 'all' ? q[0] : null);
+    if (jf.streamMode?.() === 'hls') {
+      const ms = (t) => (t?.RunTimeTicks ? t.RunTimeTicks / 10000 : 0);
+      trackCache?.keep([{ id: cur.Id, durationMs: ms(cur) }, nextItem && { id: nextItem.Id, durationMs: ms(nextItem) }]);
+    }
+    if (!ahead.length) return;
+    const bake = bakeNorm(nextItem || cur);
+    jf.warm?.(ahead, bake);
+    jf.prewarm?.(ahead[0], { gain: bake && nextItem ? gainDbFor(nextItem) : 0 });
+    // The next song's loudness, when the row was fetched before the server
+    // measured it (the server measures what is coming up as it is queued).
+    if (nextItem && jf.normalize !== false && nextItem._gain?.track == null) {
+      setTimeout(() => {
+        jf.itemsByIds?.([nextItem.Id]).then(([fresh]) => {
+          if (!fresh?._gain || fresh._gain.track == null) return;
+          setQueue((qq) => { const n = qq.map((t) => (t.Id === fresh.Id ? { ...t, _gain: fresh._gain } : t)); queueRef.current = n; return n; });
+        }).catch(() => {});
+      }, 3000);
+    }
+    // The spare element opens the next track now (paused): iOS fetches the
+    // playlist and buffers ahead, so the skip is a swap, not a load.
+    // Not while hidden on a phone or tablet: the swap only happens in the
+    // foreground there, so a locked phone would download every next track for
+    // nothing. (A computer plays on in the background, crossfades included.)
+    // Not on iPhone/iPad either: a paused element holding a song is one
+    // WebKit may pick as the page's Now Playing, and it then tells iOS
+    // "paused" while the song plays (phone syslog: the spare got the next
+    // song as the app went to the background, and mediaremoted flipped to
+    // Paused 150 ms later). The next song is in memory there anyway.
+    // Not while the spare is the song still fading out.
+    const spare = spareRef.current;
+    const hiddenOk = !document.hidden || (!IS_IOS && !IS_ANDROID);
+    if (spare && !IS_IOS && hiddenOk && !jf.transcoded?.() && spare.dataset.track !== ahead[0] && fadeRef.current?.el !== spare) {
+      spare.dataset.track = ahead[0];
+      spare.src = wholeFor(ahead[0]) || jf.playbackUrl(ahead[0]);
+      try { spare.load(); } catch { /* not unlocked yet */ }
+    }
+  };
   useEffect(() => {
     if (device.kind !== 'local' || !playing || !jf || !current) return undefined;
-    const t = setTimeout(() => {
-      const q = queueRef.current, i = indexRef.current;
-      const ahead = [q[i + 1], q[i + 2]].filter(Boolean).map((x) => x.Id);
-      if (!ahead.length && repeatRef.current === 'all' && q[0]) ahead.push(q[0].Id);
-      if (jf.streamMode?.() === 'hls') {
-        const ms = (t) => (t?.RunTimeTicks ? t.RunTimeTicks / 10000 : 0);
-        const nextItem = q[i + 1] || (repeatRef.current === 'all' ? q[0] : null);
-        trackCache?.keep([{ id: current.Id, durationMs: ms(current) }, nextItem && { id: nextItem.Id, durationMs: ms(nextItem) }]);
-      }
-      if (!ahead.length) return;
-      jf.warm?.(ahead);
-      jf.prewarm?.(ahead[0]);
-      // The spare element opens the next track now (paused): iOS fetches the
-      // playlist and buffers ahead, so the skip is a swap, not a load.
-      // Not while hidden: the swap only happens in the foreground, so a
-      // locked phone would download every next track for nothing.
-      // Not on iPhone/iPad either: a paused element holding a song is one
-      // WebKit may pick as the page's Now Playing, and it then tells iOS
-      // "paused" while the song plays (phone syslog: the spare got the next
-      // song as the app went to the background, and mediaremoted flipped to
-      // Paused 150 ms later). The next song is in memory there anyway.
-      const spare = spareRef.current;
-      if (spare && !IS_IOS && !document.hidden && !jf.transcoded?.() && spare.dataset.track !== ahead[0]) {
-        spare.dataset.track = ahead[0];
-        spare.src = wholeFor(ahead[0]) || jf.playbackUrl(ahead[0]);
-        try { spare.load(); } catch { /* not unlocked yet */ }
-      }
-    }, 1500);
+    const t = setTimeout(() => preloadRef.current(), 1500);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.kind, playing, current?.Id, jf]);
+
+  // --- crossfade and gapless ---------------------------------------------------
+  // Where Web Audio carries the sound (computers, Android; not iPhone), the
+  // next song is started on the spare element just before this one ends:
+  //  - crossfade (Settings, 1-12 s): the two overlap for that long, an
+  //    equal-power ramp down on one and up on the other;
+  //  - gapless (on by default): no overlap, the next one starts the moment
+  //    this one ends, so a live album or a DJ mix plays through.
+  // An album played in order is always gapless, never crossfaded: its tracks
+  // run into each other on purpose. Only for songs that end by themselves; a
+  // skip is a straight cut. Elsewhere (iPhone, speakers) the next song starts
+  // when the last one has ended, as before.
+  const leadRef = useRef(0.015); // seconds between play() and sound, learnt per start
+  const transitionPlan = () => {
+    if (!jf || !webAudioRef.current?.gains) return null;
+    const setting = Math.max(0, Math.min(12, Number(jf.crossfade) || 0));
+    const gapless = jf.gapless !== false;
+    if (!setting && !gapless) return null;
+    if (repeatRef.current === 'one' || sleepRef.current?.endOfTrack) return null;
+    const q = queueRef.current, i = indexRef.current;
+    const cur = q[i], next = q[i + 1];
+    if (!cur || !next) return null; // the end of the queue: Autoplay picks up after it, as before
+    const inAlbum = !!contextRef.current && cur.AlbumId === contextRef.current && next.AlbumId === cur.AlbumId;
+    let fade = inAlbum ? 0 : setting;
+    if (!fade && !gapless) return null;
+    // Short songs get short fades: never more than a third of either.
+    if (fade) fade = Math.min(fade, ticksToSeconds(cur.RunTimeTicks) / 3, ticksToSeconds(next.RunTimeTicks) / 3);
+    return { cur, next, nextIndex: i + 1, fade };
+  };
+  // The next song into the spare, if the early preload did not (a transcode,
+  // a window that was hidden): called in the last seconds of a song.
+  const ensureSpare = (next) => {
+    const spare = spareRef.current;
+    if (!spare || spare.dataset.track === next.Id || fadeRef.current?.el === spare) return;
+    spare.dataset.track = next.Id;
+    spare.src = wholeFor(next.Id) || jf.playbackUrl(next.Id);
+    try { spare.load(); } catch { /* not unlocked yet */ }
+    mediaLog(`spare: ${next.Id.slice(0, 6)} loaded for the transition`);
+  };
+  endFadeRef.current = () => {
+    const f = fadeRef.current; if (!f) return;
+    fadeRef.current = null;
+    clearTimeout(f.timer);
+    const el = f.el;
+    try { el.pause(); el.removeAttribute('src'); el.load(); } catch { /* gone */ }
+    delete el.dataset.track;
+    fadeReset(el);
+    // The spare is free again: the song after the next one can go in.
+    setTimeout(() => preloadRef.current(), 200);
+  };
+  const beginTransition = (plan) => {
+    const old = audioRef.current, spare = spareRef.current, wa = webAudioRef.current;
+    if (!wa?.gains || !spare || spare.dataset.track !== plan.next.Id || deviceRef.current.kind !== 'local' || !playingRef.current) return false;
+    if (queueRef.current[indexRef.current]?.Id !== plan.cur.Id || old.dataset.track !== plan.cur.Id) return false;
+    const og = wa.gains.get(old), ng = wa.gains.get(spare);
+    if (!og || !ng) return false;
+    const t0 = wa.ctx.currentTime;
+    const left = Math.max(0, (Number.isFinite(old.duration) ? old.duration : ticksToSeconds(plan.cur.RunTimeTicks) - localBaseRef.current) - old.currentTime);
+    applyNorm(spare, plan.next);
+    spare.volume = volumeRef.current / 100;
+    // Equal power: the sum stays level through the middle of the fade. A
+    // gapless start is the same thing over ~25 ms, a splice: the next song
+    // starts a hair early (its start lead), and the few ms where both play
+    // blend instead of doubling up or clicking.
+    const span = plan.fade > 0 ? plan.fade : Math.min(0.05, leadRef.current + 0.01);
+    const N = 64, up = new Float32Array(N), down = new Float32Array(N);
+    for (let k = 0; k < N; k++) { const x = k / (N - 1); up[k] = Math.sin((x * Math.PI) / 2); down[k] = Math.cos((x * Math.PI) / 2); }
+    ng.fade.gain.cancelScheduledValues(t0);
+    ng.fade.gain.setValueCurveAtTime(up, t0, span);
+    og.fade.gain.cancelScheduledValues(t0);
+    og.fade.gain.setValueCurveAtTime(down, t0, span);
+    ownUntilRef.current = Date.now() + 3000;
+    try { if (spare.currentTime) spare.currentTime = 0; } catch { /* not seekable yet */ }
+    const calledAt = performance.now();
+    spare.play().then(() => {
+      // Learn how long a start takes on this machine, for the next gapless one.
+      const took = (performance.now() - calledAt) / 1000;
+      leadRef.current = Math.max(0.005, Math.min(0.25, leadRef.current * 0.7 + took * 0.3));
+    }, (e) => {
+      if (e?.name === 'AbortError') return;
+      // It would not start: give the music back to the song that was ending,
+      // which then ends and advances the ordinary way.
+      mediaLog(`transition: next would not play (${e?.name}); falling back`);
+      if (fadeRef.current?.el === old) { clearTimeout(fadeRef.current.timer); fadeRef.current = null; }
+      fadeReset(old);
+      audioRef.current = old; spareRef.current = spare; setActiveEl(old); wa.setActive?.(old);
+      ownUntilRef.current = Date.now() + 1500;
+    });
+    // The new song is the playing one from here: the element, the queue
+    // position, the clock and the reports all move to it now.
+    audioRef.current = spare; spareRef.current = old; setActiveEl(spare); wa.setActive?.(spare);
+    localBaseRef.current = 0;
+    const out = plan.fade > 0 ? plan.fade : left;
+    fadeRef.current = { el: old, timer: setTimeout(() => endFadeRef.current(), out * 1000 + 400) };
+    if (!plan.fade) old.addEventListener('ended', () => { if (fadeRef.current?.el === old) endFadeRef.current(); }, { once: true });
+    startGenRef.current += 1;
+    setIndex(plan.nextIndex); indexRef.current = plan.nextIndex;
+    setDuration(ticksToSeconds(plan.next.RunTimeTicks));
+    anchorAt(0, true);
+    loadedRef.current = plan.next.Id;
+    const id = plan.next.Id;
+    setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
+    mediaLog(`${plan.fade ? `crossfade ${plan.fade.toFixed(1)} s` : `gapless (lead ${(leadRef.current * 1000).toFixed(0)} ms)`} into ${id.slice(0, 6)}`);
+    return true;
+  };
+  useEffect(() => {
+    if (device.kind !== 'local' || !playing || !current || !ROUTES_WEB_AUDIO) return undefined;
+    let timer = null, cancelled = false;
+    const remainingOf = (el) => {
+      const len = Number.isFinite(el.duration) && el.duration > 0 && !localBaseRef.current ? el.duration : ticksToSeconds(current.RunTimeTicks) - localBaseRef.current;
+      return len - el.currentTime;
+    };
+    // Close to the moment, wait on a timer (re-aimed until within ~15 ms);
+    // a 250 ms check finds the last seconds of the song.
+    const aim = (plan) => {
+      timer = null;
+      if (cancelled) return;
+      const el = audioRef.current;
+      if (!el || el.paused || el.dataset.track !== current.Id) return;
+      const lead = plan.fade > 0 ? plan.fade : leadRef.current;
+      const wait = remainingOf(el) - lead;
+      if (wait > 0.015) { timer = setTimeout(() => aim(plan), Math.min(wait * 1000, 1000)); return; }
+      beginTransition(plan);
+    };
+    const check = () => {
+      if (cancelled || timer || fadeRef.current) return;
+      const el = audioRef.current;
+      if (!el || el.paused || el.dataset.track !== current.Id) return;
+      const plan = transitionPlan(); if (!plan) return;
+      const left = remainingOf(el);
+      if (!(left > 0)) return;
+      const lead = plan.fade > 0 ? plan.fade : leadRef.current;
+      if (left < lead + 12) ensureSpare(plan.next);
+      if (left > lead + 1.2) return;
+      const spare = spareRef.current;
+      if (!spare || spare.dataset.track !== plan.next.Id || spare.readyState < 3) return;
+      aim(plan);
+    };
+    const iv = setInterval(check, 250);
+    return () => { cancelled = true; clearInterval(iv); if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device.kind, playing, current?.Id, jf]);
 
@@ -1925,7 +2167,7 @@ export function usePlayer(jf) {
   yieldRef.current = () => {
     mediaLog('yield: another device took over');
     const dev = deviceRef.current;
-    if (dev.kind === 'local') { const el = audioRef.current; if (el) ownPause(el); }
+    if (dev.kind === 'local') { endFadeRef.current(); const el = audioRef.current; if (el) ownPause(el); }
     else if (dev.kind !== 'relay' && remote) remote.pause(dev).catch(() => {});
     setPlaying(false);
     anchorRef.current = { pos: positionRef.current, at: Date.now(), playing: false };
@@ -2147,6 +2389,7 @@ export function usePlayer(jf) {
       playing: shownPlaying, position: shownPosition, duration: shownDuration, volume: shownVolume, error,
       repeat: shownRepeat, shuffle: shownShuffle, cycleRepeat, cycleShuffle, setShuffle: setShuffleRouted,
       playQueue, toggle, next, previous, seek, setVolume, volumeStep, skipTo,
+      sleep, setSleepTimer, applySleep,
       clearError: () => setError(null),
     }),
     // eslint-disable-next-line
@@ -2154,6 +2397,6 @@ export function usePlayer(jf) {
      relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relayInstance, shownQueue, shownIndex, current, applyRemoteQueue, applySession, relayTarget,
      shownPlaying, shownPosition, shownDuration, shownVolume, error, shownRepeat, shownShuffle,
      cycleRepeat, cycleShuffle, setShuffleRouted, playQueue, toggle, next,
-     previous, seek, setVolume, volumeStep, skipTo]
+     previous, seek, setVolume, volumeStep, skipTo, sleep, setSleepTimer, applySleep]
   );
 }

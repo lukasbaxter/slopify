@@ -9,12 +9,14 @@ import { artPath, nearestSize, SIZES } from './artwork.js';
 import { similarInLibrary } from './discover.js';
 import { albumGenreMap } from './genres.js';
 import { splitArtists } from './scanner.js';
+import { gainDb } from './loudness.js';
 
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
   track_no: number | null; disc_no: number | null; year: number | null; genres: string; duration_ms: number; codec: string | null; bitrate: number | null;
   sample_rate?: number | null; bit_depth?: number | null; path?: string;
   identity_state: string; identity_score: number; added_at: number; cover_hash?: string | null;
+  loudness?: number | null; true_peak?: number | null; album_loudness?: number | null; album_peak?: number | null;
 };
 // The file's own format, named the way people know it: the parser says
 // "MPEG 1 Layer 3" and "PCM"; a listener says MP3 and WAV.
@@ -30,12 +32,15 @@ export const trackOut = (t: TrackRow) => ({
   albumId: t.album_id, album: t.album, albumArtist: t.album_artist, trackNo: t.track_no, discNo: t.disc_no, year: t.year,
   genres: JSON.parse(t.genres) as string[], durationMs: t.duration_ms, codec: t.codec, bitrate: t.bitrate, cover: t.cover_hash ?? null,
   format: formatOf(t),
+  // Volume normalization (loudness.ts): dB to play it at, as a track and
+  // within its album; null until the song has been measured.
+  gain: { track: gainDb({ loudness: t.loudness ?? null, peak: t.true_peak ?? null }), album: gainDb({ loudness: t.album_loudness ?? null, peak: t.album_peak ?? null }) },
   identity: { state: t.identity_state, score: t.identity_score }, addedAt: t.added_at,
 });
 const albumOut = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artistId: a.artist_id, year: a.year, trackCount: a.track_count, durationMs: a.duration_ms, cover: a.cover_hash, addedAt: a.added_at });
 const artistOut = (a: any) => ({ id: a.id, name: a.name, trackCount: a.track_count, albumCount: a.album_count, image: a.image_hash, banner: a.banner_hash ?? null });
 
-export const TRACK_SELECT = 'SELECT t.*, a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id';
+export const TRACK_SELECT = 'SELECT t.*, a.cover_hash, a.loudness AS album_loudness, a.true_peak AS album_peak FROM tracks t JOIN albums a ON a.id = t.album_id';
 const page = (q: any) => ({ offset: Math.max(0, Number(q.offset) || 0), limit: Math.min(20000, Math.max(1, Number(q.limit) || 200)) });
 
 export function tracksByIds(db: DB, ids: string[]) {

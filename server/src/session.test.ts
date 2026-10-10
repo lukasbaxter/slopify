@@ -82,6 +82,43 @@ describe('ws client ids across accounts', () => {
       raw.terminate(); ok.ws.terminate();
     } finally { process.off('uncaughtException', onErr); }
   });
+  it('sleep timer: every device hears it, it pauses the one playing when it runs out, and it can be turned off', async () => {
+    const laptop = await hello('tokA', 'c_sleep_laptop');
+    const atLaptop: any[] = []; laptop.ws.on('message', (d: any) => atLaptop.push(JSON.parse(String(d))));
+    const phone = await hello('tokA', 'c_sleep_phone');
+    const atPhone: any[] = []; phone.ws.on('message', (d: any) => atPhone.push(JSON.parse(String(d))));
+    laptop.ws.send(JSON.stringify({ type: 'nowplaying', nowPlaying: { itemId: 't1', title: 'T', playing: true, position: 10 } }));
+    await new Promise((r) => setTimeout(r, 50));
+    // Set from the phone (a remote), 0.005 min = 300 ms.
+    phone.ws.send(JSON.stringify({ type: 'sleep', minutes: 0.005 }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(atLaptop.filter((m) => m.type === 'sleep').at(-1)?.sleep?.at).toBeGreaterThan(Date.now());
+    expect(atPhone.filter((m) => m.type === 'sleep').at(-1)?.sleep?.endOfTrack).toBe(false);
+    // A device joining now learns it too.
+    const late = await hello('tokA', 'c_sleep_late');
+    expect(late.ok.sleep?.at).toBeGreaterThan(Date.now());
+    await new Promise((r) => setTimeout(r, 400));
+    // The laptop (playing) is told to pause; nobody else is; everyone hears it is off.
+    expect(atLaptop.filter((m) => m.type === 'command' && m.command?.action === 'setPlaying' && m.command.playing === false).length).toBe(1);
+    expect(atPhone.filter((m) => m.type === 'command')).toEqual([]);
+    expect(atPhone.filter((m) => m.type === 'sleep').at(-1)?.sleep).toBeNull();
+    // Turned off before it fires: no pause.
+    atLaptop.length = 0;
+    laptop.ws.send(JSON.stringify({ type: 'nowplaying', nowPlaying: { itemId: 't1', title: 'T', playing: true, position: 11 } }));
+    phone.ws.send(JSON.stringify({ type: 'sleep', minutes: 0.005 }));
+    await new Promise((r) => setTimeout(r, 50));
+    phone.ws.send(JSON.stringify({ type: 'sleep', off: true }));
+    await new Promise((r) => setTimeout(r, 400));
+    expect(atLaptop.filter((m) => m.type === 'command')).toEqual([]);
+    // End of track: stored and announced; the player itself honours it.
+    phone.ws.send(JSON.stringify({ type: 'sleep', endOfTrack: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(atLaptop.filter((m) => m.type === 'sleep').at(-1)?.sleep).toEqual({ at: null, endOfTrack: true });
+    laptop.ws.send(JSON.stringify({ type: 'sleep', off: true, done: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(atPhone.filter((m) => m.type === 'sleep').at(-1)?.sleep).toBeNull();
+    laptop.ws.terminate(); phone.ws.terminate(); late.ws.terminate();
+  });
   it('another account cannot take over a connected client id', async () => {
     const a = await hello('tokA', 'c_crossacct1');
     const b = await hello('tokB', 'c_crossacct1');

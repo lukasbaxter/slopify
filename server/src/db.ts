@@ -187,6 +187,18 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX spotify_pending_state ON spotify_pending(state);
   `,
+  `
+  -- Volume normalization (loudness.ts): each song's EBU R128 integrated
+  -- loudness (LUFS) and true peak (dBTP), measured once. loudness_at is when
+  -- it was tried; set with loudness NULL = ffmpeg could not measure it.
+  -- Albums carry the figures for the album as a whole (album gain).
+  ALTER TABLE tracks ADD COLUMN loudness REAL;
+  ALTER TABLE tracks ADD COLUMN true_peak REAL;
+  ALTER TABLE tracks ADD COLUMN loudness_at INTEGER;
+  ALTER TABLE albums ADD COLUMN loudness REAL;
+  ALTER TABLE albums ADD COLUMN true_peak REAL;
+  CREATE INDEX tracks_loudness_at ON tracks(loudness_at);
+  `,
 ];
 
 export type DB = Database.Database;

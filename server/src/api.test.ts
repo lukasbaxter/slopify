@@ -98,6 +98,40 @@ describe('streaming', () => {
     expect((await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160`)).body.match(/^aac-\d+/gm)).toEqual(['aac-160', 'aac-96']);
     expect((await get('/api/stream/nope/hls/master.m3u8')).statusCode).toBe(404);
   });
+  it('normalization: measures a song, reports its gains, and bakes the gain into a phone transcode', async () => {
+    const al = (await get('/api/albums?limit=1')).json().items[0];
+    const tid = (await get(`/api/albums/${al.id}`)).json().tracks[2].id;
+    expect((await get(`/api/albums/${al.id}`)).json().tracks[2].gain).toEqual({ track: null, album: null });
+    // Not measured yet: the plain stream, and the song is queued for measuring.
+    const before = (await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160&norm=track`)).body;
+    expect(before.match(/^aac-\d+[^/]*/gm)).toEqual(['aac-160', 'aac-96']);
+    expect(await (app as any).measureTrack(tid)).toBe(true);
+    const row = (await get(`/api/albums/${al.id}`)).json().tracks[2];
+    // The fixtures are quiet sine tones (about -21 LUFS): turned up.
+    expect(row.gain.track).toBeGreaterThan(3);
+    expect(row.gain.album).toBeGreaterThan(3);
+    const g = row.gain.track;
+    const variant = `aac-160g${g.toFixed(1).replace(/\.0$/, '')}`;
+    const master = (await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160&norm=track`)).body;
+    expect(master).toContain(`${variant}/index.m3u8`);
+    // Without norm: no gain.
+    expect((await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160`)).body).not.toContain('g');
+    // The variant really is louder than the plain transcode, by the gain.
+    const whole = async (p: string) => {
+      const r = await get(`/api/stream/${tid}/whole/${p}`); expect(r.statusCode).toBe(200);
+      const f = path.join(DATA, `w-${p}.m4a`); fs.writeFileSync(f, r.rawPayload);
+      const { measure } = await import('./loudness.js');
+      const { spawn } = await import('node:child_process');
+      return measure((pre, post) => spawn('ffmpeg', ['-nostdin', ...pre, '-i', f, ...post], { stdio: ['ignore', 'ignore', 'pipe'] }) as any);
+    };
+    const plain = await whole('aac-160');
+    const louder = await whole(`aac-160?norm=track`);
+    expect(louder.loudness! - plain.loudness!).toBeCloseTo(g, 0);
+    expect(fs.existsSync(path.join(DATA, 'transcodes', tid, variant, 'done'))).toBe(true);
+    // A gain the server would not choose is refused: no filling the cache with variants.
+    expect((await get(`/api/stream/${tid}/hls/aac-160g-3/index.m3u8`)).statusCode).toBe(404);
+    expect((await get(`/api/stream/${tid}/whole/aac-160g11`)).statusCode).toBe(404);
+  }, 60000);
 });
 
 describe('likes, playlists, plays, home, prefs', () => {

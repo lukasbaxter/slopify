@@ -26,6 +26,9 @@ export type PlayerDeps = {
   report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void; scrobble?: (trackId: string, at: number) => void;
   // The speaker's group (itself first); alone, just itself.
   groupOf?: (id: string) => string[];
+  // The account's sleep timer is set to the end of the current track; and
+  // the call that says it went off.
+  sleepAtTrackEnd?: () => boolean; sleepDone?: () => void;
 };
 
 // Groups Slopify has linked with BluOS sync right now: leader id -> member ids.
@@ -308,6 +311,7 @@ export class ServerPlayer {
   }
   private async start(t: Row, startAt: number, play: boolean) {
     if (!this.transport || !t) return;
+    this.parked = false;
     this.starting = true;
     try {
       this.duration = t.RunTimeTicks / 10000000;
@@ -340,8 +344,24 @@ export class ServerPlayer {
     this.index = i;
     await this.start(this.queue[i], 0, true);
   }
+  // Stopped by the sleep timer at the end of a track: the next one is shown,
+  // paused at its start, but nothing is loaded on the speaker until play.
+  private parked = false;
+  private async parkOnNext() {
+    this.cancelLogPlay();
+    let n = this.index + 1;
+    if (n >= this.queue.length) n = this.repeat === 'all' ? 0 : this.extend() ? n : this.index;
+    this.index = n;
+    const t = this.current;
+    if (t) this.duration = t.RunTimeTicks / 10000000;
+    this.moveTo(0, false);
+    this.parked = true;
+    this.d.log(`speaker ${this.device?.name || '?'}: sleep timer, stopped after the track`);
+    this.report();
+  }
   async toggle() {
     if (!this.transport || !this.current) return;
+    if (this.parked) { if (!this.playing) await this.start(this.current, this.position, true); return; }
     // The poll must not re-anchor off a reading taken while the device is
     // still flipping state.
     this.busyUntil = Date.now() + 2000;
@@ -351,6 +371,7 @@ export class ServerPlayer {
   }
   async seek(pos: number) {
     if (!this.transport || !this.current) return;
+    if (this.parked) { this.moveTo(pos, false); this.report(); return; }
     // Readings taken mid-seek are the old position: hold the poll off until
     // the transport settles (BluOS verifies the landing itself) or 8 s.
     this.busyUntil = Date.now() + 8000;
@@ -459,6 +480,9 @@ export class ServerPlayer {
   }
   async next(auto: boolean) {
     if (!this.queue.length) return;
+    // Sleep timer set to the end of this track: stop here, on the next track,
+    // paused at its start (Spotify's way), and say the timer is done.
+    if (auto && this.d.sleepAtTrackEnd?.()) { await this.parkOnNext(); this.d.sleepDone?.(); return; }
     if (auto && this.repeat === 'one') return this.skipTo(this.index);
     const n = this.index + 1;
     if (n < this.queue.length) return this.skipTo(n);

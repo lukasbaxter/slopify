@@ -414,6 +414,9 @@ export class Slopify {
     const r = await this._fetch(`/api/likes/${itemId}`, { method: liked ? 'PUT' : 'DELETE', retries: 2 });
     if (r?.album) { if (liked) savedAlbums.add(itemId); else savedAlbums.delete(itemId); }
     if (r?.artist) { if (liked) followedArtists.add(itemId); else followedArtists.delete(itemId); this._evict(`artist:${itemId}`); }
+    // The cached album/artist row carries the heart as it was when first
+    // opened: drop it so the page opens with the new state.
+    if (r?.album || r?.artist) this._evict(`item:${itemId}`);
     return r;
   }
   async followedArtists() {

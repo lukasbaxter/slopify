@@ -127,6 +127,35 @@ describe('Spotify import', () => {
     expect(again.playlists.created).toBe(0); expect(again.playlists.skipped).toEqual(['Car']);
   });
 
+  it('never counts a play twice across the two histories, whichever comes first', async () => {
+    const [a, b] = tracks;
+    db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run('u2', 'hist', 'x', 'user', Date.now());
+    db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run('u3', 'hist2', 'x', 'user', Date.now());
+    const empty = (): Parsed => ({ plays: [], basicPlays: [], likes: [], albums: [], playlists: [], files: [] });
+    // The same two plays, as each export records them (basic: ending minute only).
+    const ext = () => { const p = empty(); p.plays = [
+      { artist: a.artist, title: a.title, at: Date.parse('2025-03-01T10:00:12Z') },
+      { artist: b.artist, title: b.title, at: Date.parse('2025-03-01T10:03:40Z') },
+    ]; return p; };
+    const basic = (more = false) => { const p = empty(); p.basicPlays = [
+      { artist: a.artist, title: a.title, at: Date.parse('2025-03-01T10:03:00Z') - 180000 },
+      { artist: b.artist, title: b.title, at: Date.parse('2025-03-01T10:06:00Z') - 140000 },
+      ...(more ? [{ artist: a.artist, title: a.title, at: Date.parse('2025-03-02T09:00:00Z') }] : []),
+    ]; return p; };
+    const n = (u: string) => (db.prepare("SELECT COUNT(*) n FROM plays WHERE user_id = ? AND client = 'spotify'").get(u) as any).n;
+    // Extended first, then the account data (with one newer play).
+    expect((await importSpotify(db, 'u2', ext())).plays.added).toBe(2);
+    expect((await importSpotify(db, 'u2', basic(true))).plays.added).toBe(1);
+    expect((await importSpotify(db, 'u2', basic(true))).plays.added).toBe(0);
+    expect(n('u2')).toBe(3);
+    // Account data first, then the extended history: its exact times replace the rounded ones.
+    expect((await importSpotify(db, 'u3', basic())).plays.added).toBe(2);
+    expect((await importSpotify(db, 'u3', ext())).plays.added).toBe(0);
+    expect((await importSpotify(db, 'u3', ext())).plays.added).toBe(0);
+    expect(n('u3')).toBe(2);
+    expect(db.prepare("SELECT at FROM plays WHERE user_id = 'u3' ORDER BY at").all().map((r: any) => r.at)).toEqual(ext().plays.map((p) => p.at));
+  });
+
   it('puts missing liked songs, playlist songs and saved albums aside, once', async () => {
     const c = tracks[2];
     const p: Parsed = { plays: [], basicPlays: [], files: ['x'],

@@ -9,7 +9,9 @@
 //     play since the account started: ts, ms_played, spotify_track_uri).
 // Either zip, the JSON files inside them, or both at once. A play counts
 // from 30 seconds, as Spotify counts it. Plays are keyed by their start
-// time, so importing the same export twice adds nothing. Playlists that
+// time, so importing the same export twice adds nothing, and the two
+// histories can be imported in either order, together or apart, without
+// counting a play twice. Playlists that
 // already exist here under the same name are left alone.
 import type { FastifyInstance } from 'fastify';
 import crypto from 'node:crypto';
@@ -87,7 +89,14 @@ const stripped = (t: string) => t.replace(/\s+-\s+.*(remaster|version|edit|mono|
 
 export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: Job) {
   const step = (s: string, p?: number) => { if (job) { job.step = s; job.progress = p ?? null; } };
-  const plays = parsed.plays.length ? parsed.plays : parsed.basicPlays; // the extended history covers the basic one
+  // The extended history covers the basic one, so the basic one is used only
+  // when no extended history came with it. Basic times are to the minute, so
+  // they never line up with plays already imported from an extended history
+  // (or an earlier basic export): only plays after the latest one already
+  // here are new. A minute of slack covers the rounding.
+  const extended = parsed.plays.length > 0;
+  const latest = extended ? 0 : ((db.prepare("SELECT MAX(at) AS at FROM plays WHERE user_id = ? AND client = 'spotify'").get(uid) as any)?.at ?? 0);
+  const plays = extended ? parsed.plays : parsed.basicPlays.filter((p) => p.at > latest + 60000);
   // Every distinct song once.
   const songs = new Map<string, Song & { count: number }>();
   const key = (s: Song) => `${norm(s.artist)}|${norm(s.title)}`;
@@ -118,8 +127,18 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
     queued: { songs: 0, albums: 0 },
   };
   db.transaction(() => {
+    // An extended history is the whole record for the time it spans: Spotify
+    // plays already here in that span (from a basic export, whose rounded
+    // times can fall a minute either side) give way to it.
+    let replaced = 0;
+    if (extended) {
+      let lo = Infinity, hi = -Infinity;
+      for (const p of plays) { if (p.at < lo) lo = p.at; if (p.at > hi) hi = p.at; }
+      replaced = db.prepare("DELETE FROM plays WHERE user_id = ? AND client = 'spotify' AND at BETWEEN ? AND ?").run(uid, lo - 60000, hi + 60000).changes;
+    }
     const insPlay = db.prepare("INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, 'spotify')");
     for (const p of plays) { const id = found.get(key(p)); if (!id) continue; out.plays.matched++; out.plays.added += insPlay.run(uid, id, p.at).changes; }
+    out.plays.added = Math.max(0, out.plays.added - replaced);
     // Liked Songs has no dates in the export; keep its order (newest first) a second apart.
     const insLike = db.prepare('INSERT INTO likes (user_id, track_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING');
     const t0 = Date.now();

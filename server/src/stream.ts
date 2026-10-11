@@ -27,6 +27,7 @@ import type { Readable } from 'node:stream';
 import { headOf, openBytes } from './heads.js';
 import type { SongCache } from './songcache.js';
 import { config } from './config.js';
+import { registerOffline } from './offline.js';
 import { gainFor, measure, refreshAlbumLoudness, saveTrackLoudness, type GainMode } from './loudness.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
@@ -391,6 +392,8 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     reply.header('Content-Disposition', disposition(`${base}.${d.ext}`)).type(d.mime);
     return reply.send(ff.stdout);
   });
+
+  registerOffline(app, db, cacheDir, srcOf);
 
   // A phone pulls 40-60 segments per track in a burst: keep the HLS routes out
   // of the per-IP rate limit (which, behind nginx, is one bucket for everyone).

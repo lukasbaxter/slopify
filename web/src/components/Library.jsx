@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePhone, I as MI, shareItem } from './TrackRow.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
+import { downloadPlaylistZip } from '../api/download.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
@@ -1177,6 +1178,7 @@ export default function Library({
               lead ? { label: 'Go to artist', icon: MI.artist, onClick: () => onOpenArtistById(lead.Id) } : null,
               kind === 'Album' ? { label: item.UserData?.IsFavorite ? 'Remove from Your Library' : 'Save to Your Library', icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
               kind === 'Album' || isArtist ? { label: 'Share', icon: MI.share, onClick: () => shareItem({ kind: isArtist ? 'artist' : 'album', id: item.Id, title: item.Name, by: isArtist ? null : lead?.Name }) } : null,
+              isPlaylist && !isLiked && !item._mix && tracks.length ? { label: 'Download for offline (zip)', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Edit details', icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Delete', icon: MI.trash, danger: true, onClick: () => { if (window.confirm(`Delete "${item.Name}"?`)) onDeletePlaylist(item); } } : null,

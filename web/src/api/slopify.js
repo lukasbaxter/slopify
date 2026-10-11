@@ -214,6 +214,7 @@ export class Slopify {
     return this._url(`/api/stream/${itemId}/mp3`, q);
   }
   downloadUrl(itemId, fmt = 'original') { return this._url(`/api/download/${itemId}`, { fmt }); }
+  playlistZipUrl(playlistId) { return this._url(`/api/playlists/${playlistId}/zip`); }
 
   // --- library ----------------------------------------------------------------
   // Whole lists, held for 10 minutes (3,000 albums is one 400 KB response).

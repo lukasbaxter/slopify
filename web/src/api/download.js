@@ -78,3 +78,20 @@ export async function downloadTrack(jf, track, fmt = 'original') {
   a.href = url; a.download = filename; a.style.display = 'none';
   document.body.appendChild(a); a.click(); a.remove();
 }
+
+// A whole playlist as a zip of tagged AAC files (server/src/offline.ts), for
+// listening with no connection. The phone shell cannot save files, so there
+// the link goes to the clipboard to open in Safari.
+export async function downloadPlaylistZip(jf, playlist, notify) {
+  const url = jf.playlistZipUrl(playlist.Id);
+  if (window.ReactNativeWebView) {
+    try { await navigator.clipboard.writeText(url); notify?.('Link copied: paste it into Safari to download'); }
+    catch { window.prompt('Open this in Safari to download:', url); }
+    return;
+  }
+  if (window.conduit?.download) { await window.conduit.download(url); return; }
+  const a = document.createElement('a');
+  a.href = url; a.download = `${playlist.Name}.zip`; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+  notify?.('Preparing the zip: it downloads as the songs are converted');
+}

@@ -3,6 +3,8 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { buildServer } from './app.js';
 import WebSocket from 'ws';
 import { scanLibrary } from './scanner.js';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-api-'));
@@ -153,6 +155,28 @@ describe('likes, playlists, plays, home, prefs', () => {
     expect((await get('/api/playlists')).json().items[0].name).toBe('Road trip');
     await send('DELETE', `/api/playlists/${p.id}`); expect((await get(`/api/playlists/${p.id}`)).statusCode).toBe(404);
   });
+  it('zips a playlist for offline: tagged m4a with cover, in order, plus an m3u8', async () => {
+    const p = (await send('POST', '/api/playlists', { name: 'Plane / Trip', trackIds: [ids[1], ids[0]] })).json();
+    const r = await get(`/api/playlists/${p.id}/zip`);
+    expect(r.statusCode).toBe(200); expect(r.headers['content-type']).toBe('application/zip');
+    const { unzipSync, strFromU8 } = await import('fflate');
+    const files = unzipSync(r.rawPayload);
+    const names = Object.keys(files).sort();
+    expect(names.length).toBe(3); expect(names.every((n) => n.startsWith('Plane - Trip/'))).toBe(true);
+    const songs = names.filter((n) => n.endsWith('.m4a'));
+    expect(songs[0]).toMatch(/\/01 - /); expect(songs[1]).toMatch(/\/02 - /);
+    const t1 = (await get(`/api/playlists/${p.id}`)).json().tracks[0];
+    expect(songs[0]).toContain(t1.title);
+    const m3u = strFromU8(files['Plane - Trip/Plane - Trip.m3u8']); expect(m3u.split('\n').filter((l) => l.endsWith('.m4a')).length).toBe(2);
+    const out = path.join(DATA, 'zip-check.m4a'); fs.writeFileSync(out, files[songs[0]]);
+    const probe = JSON.parse(require('node:child_process').execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', out]).toString());
+    expect(probe.streams.find((s: any) => s.codec_type === 'audio').codec_name).toBe('aac');
+    expect(probe.streams.some((s: any) => s.disposition?.attached_pic === 1)).toBe(true);
+    expect(probe.format.tags.title).toBe(t1.title);
+    expect(fs.readdirSync(path.join(DATA, 'tmp'))).toEqual([]); // temp files cleaned up
+    expect((await get('/api/playlists/nope/zip')).statusCode).toBe(404);
+    await send('DELETE', `/api/playlists/${p.id}`);
+  }, 60000);
   it('records plays (deduped) and builds Home from them', async () => {
     expect((await send('POST', '/api/plays', { trackId: ids[0], at: 5000 })).json().dup).toBeUndefined();
     expect((await send('POST', '/api/plays', { trackId: ids[0], at: 5500 })).json().dup).toBe(true);

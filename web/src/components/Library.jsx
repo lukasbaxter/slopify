@@ -1188,18 +1188,18 @@ export default function Library({
                 const okind = isLiked ? 'liked' : kind === 'Album' ? 'album' : 'playlist';
                 return [
                   held
-                    ? { label: `Remove from this phone${busy}`, icon: MI.trash, onClick: () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this phone?`)) { removeOffline(item.Id); notify?.('Removed from this phone'); } } }
-                    : { label: 'Download to this phone', icon: MI.down, onClick: () => {
+                    ? { label: `Remove download${busy}`, icon: MI.trash, onClick: async () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this device?`)) { await removeOffline(item.Id); notify?.('Download removed'); } } }
+                    : { label: 'Download for offline', icon: MI.down, onClick: async () => {
                       const gb = estimateBytes(tracks) / 1e9;
-                      if (gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download to this phone?`)) return;
-                      saveOffline(jf, item, okind, tracks);
-                      notify?.(`Downloading ${tracks.length} songs. Keep the app open until it finishes.`, 4000);
+                      if (gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download for offline?`)) return;
+                      try { await saveOffline(jf, item, okind, tracks); notify?.(`Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000); }
+                      catch (e) { notify?.(e.message, 5000); }
                     } },
-                  held && held.have < tracks.length && !busy ? { label: `Update download (${held.have}/${tracks.length})`, icon: MI.down, onClick: () => { saveOffline(jf, item, okind, tracks); notify?.('Downloading the rest'); } } : null,
+                  held && held.have < tracks.length && !busy ? { label: `Update download (${held.have}/${tracks.length})`, icon: MI.down, onClick: async () => { try { await saveOffline(jf, item, okind, tracks); notify?.('Downloading the rest'); } catch (e) { notify?.(e.message, 5000); } } } : null,
                   { label: 'Open downloads (offline)', icon: MI.down, onClick: openOffline },
                 ];
               })(),
-              isPlaylist && !isLiked && !item._mix && tracks.length && !canSaveOffline() ? { label: 'Download for offline (zip)', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
+              isPlaylist && !isLiked && !item._mix && tracks.length ? { label: 'Download as zip', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Edit details', icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Delete', icon: MI.trash, danger: true, onClick: () => { if (window.confirm(`Delete "${item.Name}"?`)) onDeletePlaylist(item); } } : null,

@@ -977,7 +977,7 @@ export default function App() {
     if (!jf || !canSaveOffline()) return undefined;
     return subscribeOffline((s, d) => {
       const f = d?.finished;
-      if (f) notify(f.failed ? `${f.name}: ${f.done} of ${f.total} songs on this phone, ${f.failed} failed (Update download to retry)` : `${f.name} is on this phone (${f.done} songs)`, 5000);
+      if (f) notify(f.failed ? `${f.name}: ${f.done} of ${f.total} songs downloaded, ${f.failed} failed (Update download to retry)` : `${f.name} is ready offline (${f.done} songs)`, 5000);
       if (s.plays?.length) flushOfflinePlays(jf, s.plays);
     });
   }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -16,6 +16,7 @@ import { applyTheme, DEFAULT_THEME } from './api/prefs.js';
 import { search as relaySearch, popular as relayPopular, likes as relayLikes, playlistTracks as relayPlaylist, likedFast } from './api/search.js';
 import { likesLoad, likesSet, likesSnapshot, likedIds, likesReady, isLiked, useLikesVersion } from './api/likes.js';
 import { offsetsMerge } from './api/offsets.js';
+import { canSaveOffline, subscribeOffline, flushOfflinePlays } from './api/offline.js';
 
 // Everything goes through music.baxtergroup.io (Let's Encrypt on the origin,
 // Cloudflare proxy deliberately off -- it throttles the audio). The browser
@@ -969,6 +970,17 @@ export default function App() {
     window.addEventListener('slopify:shellnote', onNote);
     return () => { window.removeEventListener('conduit:volumestep', onStep); window.removeEventListener('slopify:shellnote', onNote); };
   }, [player.volume, player.volumeStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Songs saved on the phone (api/offline.js): say when a download is done,
+  // and report plays made in the offline player once back online.
+  useEffect(() => {
+    if (!jf || !canSaveOffline()) return undefined;
+    return subscribeOffline((s, d) => {
+      const f = d?.finished;
+      if (f) notify(f.failed ? `${f.name}: ${f.done} of ${f.total} songs on this phone, ${f.failed} failed (Update download to retry)` : `${f.name} is on this phone (${f.done} songs)`, 5000);
+      if (s.plays?.length) flushOfflinePlays(jf, s.plays);
+    });
+  }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Phone viewport diagnostics, logged by the relay (installed web app layout
   // issues cannot be reproduced in a simulator).

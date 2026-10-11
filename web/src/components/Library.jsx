@@ -3,6 +3,7 @@ import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePh
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { downloadPlaylistZip } from '../api/download.js';
+import { canSaveOffline, useOffline, saveOffline, removeOffline, openOffline, estimateBytes } from '../api/offline.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
@@ -187,6 +188,7 @@ export default function Library({
 }) {
   const [results, setResults] = useState(null);
   const phone = usePhone();
+  const offline = useOffline();
   // Phone search: tapping the field enters Spotify's focus mode (Cancel at the
   // right, browse tiles hidden, recent searches shown) until Cancel or leaving
   // the tab. Blur alone does not end it: taps on the recents would be lost.
@@ -1178,7 +1180,26 @@ export default function Library({
               lead ? { label: 'Go to artist', icon: MI.artist, onClick: () => onOpenArtistById(lead.Id) } : null,
               kind === 'Album' ? { label: item.UserData?.IsFavorite ? 'Remove from Your Library' : 'Save to Your Library', icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
               kind === 'Album' || isArtist ? { label: 'Share', icon: MI.share, onClick: () => shareItem({ kind: isArtist ? 'artist' : 'album', id: item.Id, title: item.Name, by: isArtist ? null : lead?.Name }) } : null,
-              isPlaylist && !isLiked && !item._mix && tracks.length ? { label: 'Download for offline (zip)', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
+              // On the phone app: keep it on this phone (the offline player).
+              ...(() => {
+                if (!canSaveOffline() || item._mix || isArtist || !tracks.length) return [];
+                const held = offline.collections?.find((c) => c.id === item.Id);
+                const busy = offline.active?.id === item.Id ? ` (${offline.active.done}/${offline.active.total})` : '';
+                const okind = isLiked ? 'liked' : kind === 'Album' ? 'album' : 'playlist';
+                return [
+                  held
+                    ? { label: `Remove from this phone${busy}`, icon: MI.trash, onClick: () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this phone?`)) { removeOffline(item.Id); notify?.('Removed from this phone'); } } }
+                    : { label: 'Download to this phone', icon: MI.down, onClick: () => {
+                      const gb = estimateBytes(tracks) / 1e9;
+                      if (gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download to this phone?`)) return;
+                      saveOffline(jf, item, okind, tracks);
+                      notify?.(`Downloading ${tracks.length} songs. Keep the app open until it finishes.`, 4000);
+                    } },
+                  held && held.have < tracks.length && !busy ? { label: `Update download (${held.have}/${tracks.length})`, icon: MI.down, onClick: () => { saveOffline(jf, item, okind, tracks); notify?.('Downloading the rest'); } } : null,
+                  { label: 'Open downloads (offline)', icon: MI.down, onClick: openOffline },
+                ];
+              })(),
+              isPlaylist && !isLiked && !item._mix && tracks.length && !canSaveOffline() ? { label: 'Download for offline (zip)', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Edit details', icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Delete', icon: MI.trash, danger: true, onClick: () => { if (window.confirm(`Delete "${item.Name}"?`)) onDeletePlaylist(item); } } : null,

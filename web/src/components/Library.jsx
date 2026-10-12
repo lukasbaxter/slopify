@@ -3,7 +3,7 @@ import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePh
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { downloadPlaylistZip } from '../api/download.js';
-import { canSaveOffline, useOffline, saveOffline, removeOffline, openOffline, estimateBytes } from '../api/offline.js';
+import { canSaveOffline, useOffline, saveOffline, removeOffline, openOffline, estimateBytes, savesLossless } from '../api/offline.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
@@ -1164,6 +1164,20 @@ export default function Library({
             const shuffled = player.shuffle !== 'off';
             const all = (fn) => tracks.length && fn(tracks);
             const isFollowed = isArtist ? (followed[item.Id] ?? Boolean(item.UserData?.IsFavorite)) : false;
+            // Download for offline: what is kept of this list, and the actions.
+            const dl = canSaveOffline() && !item._mix && !isArtist && tracks.length ? (() => {
+              const held = offline.collections?.find((c) => c.id === item.Id) || null;
+              const busy = offline.active?.id === item.Id ? offline.active : null;
+              const okind = isLiked ? 'liked' : kind === 'Album' ? 'album' : 'playlist';
+              const download = async () => {
+                const gb = estimateBytes(tracks, savesLossless(jf)) / 1e9;
+                if (!held && gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download for offline?`)) return;
+                try { await saveOffline(jf, item, okind, tracks); notify?.(held ? 'Downloading the rest' : `Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000); }
+                catch (e) { notify?.(e.message, 5000); }
+              };
+              const remove = async () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this device?`)) { await removeOffline(item.Id); notify?.('Download removed'); } };
+              return { held, busy, download, remove };
+            })() : null;
             const heroItems = [
               { label: 'Add to queue', icon: MI.queue, onClick: () => all((t) => player.addToQueue(t)) },
               isArtist ? { label: isFollowed ? 'Unfollow' : 'Follow', icon: MI.follow, onClick: () => toggleFollow(item) } : null,
@@ -1180,25 +1194,14 @@ export default function Library({
               lead ? { label: 'Go to artist', icon: MI.artist, onClick: () => onOpenArtistById(lead.Id) } : null,
               kind === 'Album' ? { label: item.UserData?.IsFavorite ? 'Remove from Your Library' : 'Save to Your Library', icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
               kind === 'Album' || isArtist ? { label: 'Share', icon: MI.share, onClick: () => shareItem({ kind: isArtist ? 'artist' : 'album', id: item.Id, title: item.Name, by: isArtist ? null : lead?.Name }) } : null,
-              // On the phone app: keep it on this phone (the offline player).
-              ...(() => {
-                if (!canSaveOffline() || item._mix || isArtist || !tracks.length) return [];
-                const held = offline.collections?.find((c) => c.id === item.Id);
-                const busy = offline.active?.id === item.Id ? ` (${offline.active.done}/${offline.active.total})` : '';
-                const okind = isLiked ? 'liked' : kind === 'Album' ? 'album' : 'playlist';
-                return [
-                  held
-                    ? { label: `Remove download${busy}`, icon: MI.trash, onClick: async () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this device?`)) { await removeOffline(item.Id); notify?.('Download removed'); } } }
-                    : { label: 'Download for offline', icon: MI.down, onClick: async () => {
-                      const gb = estimateBytes(tracks) / 1e9;
-                      if (gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download for offline?`)) return;
-                      try { await saveOffline(jf, item, okind, tracks); notify?.(`Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000); }
-                      catch (e) { notify?.(e.message, 5000); }
-                    } },
-                  held && held.have < tracks.length && !busy ? { label: `Update download (${held.have}/${tracks.length})`, icon: MI.down, onClick: async () => { try { await saveOffline(jf, item, okind, tracks); notify?.('Downloading the rest'); } catch (e) { notify?.(e.message, 5000); } } } : null,
-                  { label: 'Open downloads (offline)', icon: MI.down, onClick: openOffline },
-                ];
-              })(),
+              // Kept for offline (api/offline.js): the same actions as the header's download button.
+              ...(dl ? [
+                dl.held
+                  ? { label: `Remove download${dl.busy ? ` (${dl.busy.done}/${dl.busy.total})` : ''}`, icon: MI.trash, onClick: dl.remove }
+                  : { label: 'Download for offline', icon: MI.down, onClick: dl.download },
+                dl.held && dl.held.have < tracks.length && !dl.busy ? { label: `Update download (${dl.held.have}/${tracks.length})`, icon: MI.down, onClick: dl.download } : null,
+                { label: 'Open downloads (offline)', icon: MI.down, onClick: openOffline },
+              ] : []),
               isPlaylist && !isLiked && !item._mix && tracks.length ? { label: 'Download as zip', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
               isPlaylist && !isLiked && !item._mix ? { label: 'Edit details', icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
@@ -1229,6 +1232,23 @@ export default function Library({
                     {isFollowed ? 'Following' : 'Follow'}
                   </button>
                 )}
+                {dl && (() => {
+                  // Spotify's download button: an outline arrow, a ring filling
+                  // while it downloads, green once every song is here.
+                  const { held, busy } = dl;
+                  const total = busy ? busy.total : tracks.length;
+                  const have = busy ? busy.done : held?.have || 0;
+                  const full = held && !busy && have >= tracks.length;
+                  const label = busy ? `Downloading ${have} of ${total}` : full ? 'Downloaded' : held ? `Downloaded ${have} of ${tracks.length}` : 'Download for offline';
+                  return (
+                    <>
+                      <button className={`iconbtn dlbtn ${held ? 'on' : ''}`} onClick={busy ? undefined : full ? dl.remove : dl.download} title={full ? 'Remove download' : label} aria-label={label}>
+                        <DownloadGlyph state={busy ? 'busy' : full ? 'done' : held ? 'part' : 'none'} progress={total ? have / total : 0} />
+                      </button>
+                      {(busy || (held && !full)) && <span className="dl-status">{busy ? `${have}/${total}` : `${have}/${tracks.length}`}</span>}
+                    </>
+                  );
+                })()}
                 <button className="iconbtn more" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHeroMenu({ x: r.left, y: r.bottom + 4 }); }} title={`More options for ${item.Name}`}>
                   <Dots />
                 </button>
@@ -1871,5 +1891,26 @@ export default function Library({
       onOpenMix={openMix}
       onOpenTopSongs={openTopSongs}
     />
+  );
+}
+
+// The header's download button: an outline circle with an arrow; a ring
+// that fills as songs arrive; a filled green circle once all are here.
+function DownloadGlyph({ state, progress = 0 }) {
+  const r = 10.5, c = 2 * Math.PI * r;
+  if (state === 'done' || state === 'part') {
+    return (
+      <svg viewBox="0 0 24 24" width="28" height="28" className={`dlglyph ${state}`}>
+        <circle cx="12" cy="12" r="12" fill="currentColor" />
+        <path d="M12 6v9m0 0-3.5-3.5M12 15l3.5-3.5M7.5 18h9" stroke="#000" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" width="28" height="28" className={`dlglyph ${state}`}>
+      <circle cx="12" cy="12" r={r} fill="none" stroke="currentColor" strokeWidth="1.5" opacity={state === 'busy' ? 0.3 : 1} />
+      {state === 'busy' && <circle cx="12" cy="12" r={r} fill="none" stroke="var(--green, #1ed760)" strokeWidth="1.5" strokeDasharray={`${c * Math.max(0.03, progress)} ${c}`} transform="rotate(-90 12 12)" />}
+      <path d="M12 7v8m0 0-3-3m3 3 3-3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

@@ -28,6 +28,14 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
     const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
     try {
       await login(page); await waitForLibrary(page);
+      // WebKit run: phone quality Lossless, so the original files are kept;
+      // Chromium keeps the default (AAC at 320).
+      const lossless = name === 'webkit';
+      if (lossless) {
+        const tok = await page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token || '');
+        await page.request.patch('/api/prefs', { headers: { authorization: `Bearer ${tok}` }, data: { phoneQuality: 'original' } });
+        await page.reload(); await waitForLibrary(page);
+      }
       await page.waitForFunction(() => navigator.serviceWorker?.controller != null || navigator.serviceWorker?.ready, null, { timeout: 15000 });
       await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
       await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
@@ -35,6 +43,10 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await page.locator('button.more').first().click();
       await page.getByText('Download for offline').click();
       await expect(page.getByText(/First Light is ready offline/)).toBeVisible({ timeout: 60000 });
+      // Every song shows the green downloaded mark, and the saved files are the chosen quality.
+      await expect(page.locator('.trackrow .dl-mark')).toHaveCount(n);
+      const types = await page.evaluate(async () => { const c = await caches.open('slopify-offline'); const ks = (await c.keys()).filter((k) => k.url.includes('/offline/song/')); return [...new Set(await Promise.all(ks.map(async (k) => (await c.match(k))!.headers.get('content-type'))))]; });
+      expect(types).toEqual([lossless ? 'audio/mpeg' : 'audio/mp4']);
       // The menu now offers removal.
       await page.locator('button.more').first().click();
       await expect(page.getByText(/Remove download/)).toBeVisible();

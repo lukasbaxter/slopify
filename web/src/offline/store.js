@@ -28,8 +28,11 @@ export function upsert(lib, col, tracks) {
   const entry = { id: col.id, name: col.name, kind: col.kind || 'playlist', cover: col.cover || null, trackIds: ids, added: Date.now() };
   if (at >= 0) lib.collections[at] = entry; else lib.collections.unshift(entry);
   for (const t of tracks) {
+    // q: the quality it was saved at; saving again at another quality
+    // downloads it again (the new file replaces the old under the same key).
     const was = lib.tracks[t.id];
-    lib.tracks[t.id] = { title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, durationMs: t.durationMs || 0, file: was?.file || null, bytes: was?.bytes || 0, cover: was?.cover || null };
+    const same = was?.file && (was.q || 'aac-320') === (t.q || 'aac-320');
+    lib.tracks[t.id] = { title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, durationMs: t.durationMs || 0, q: same ? was.q : t.q || null, file: same ? was.file : null, bytes: same ? was.bytes : 0, cover: was?.cover || null };
   }
   return [...new Set(ids)].filter((id) => !lib.tracks[id].file);
 }

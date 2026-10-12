@@ -46,7 +46,7 @@ test('summary and page data count what is on the phone', () => {
   upsert(lib, { id: 'p1', name: 'One' }, [tr('a'), tr('b')]);
   assert.equal(hasSongs(lib), false);
   got(lib, 'a');
-  assert.deepEqual(summary(lib), { bytes: 10, collections: [{ id: 'p1', name: 'One', kind: 'playlist', total: 2, have: 1 }] });
+  assert.deepEqual(summary(lib), { bytes: 10, ids: ['a'], collections: [{ id: 'p1', name: 'One', kind: 'playlist', total: 2, have: 1 }] });
   const p = pageData(lib, 'No connection');
   assert.deepEqual(Object.keys(p.tracks), ['a']); assert.equal(p.note, 'No connection'); assert.equal(hasSongs(lib), true);
 });

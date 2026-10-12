@@ -3,6 +3,7 @@ import { syncLyrics, useLyricJob } from '../api/lyricsync.js';
 import ContextMenu from './ContextMenu.jsx';
 import { FORMATS } from '../api/download.js';
 import { useLiked } from '../api/likes.js';
+import { useDownloaded } from '../api/offline.js';
 
 // True on the phone layout (the same breakpoint as app.css's phone block), so
 // components can gate phone-only markup without a prop threaded from App.
@@ -170,6 +171,11 @@ function fmtDur(ticks) {
  * "Add to playlist" menu. `draggable` + `onDragReorder` enable reordering
  * inside a user playlist. `onRemove` shows "Remove from this playlist".
  */
+// Spotify's small green arrow before the artist line: this song is kept for offline.
+const DownloadedMark = () => (
+  <svg className="dl-mark" viewBox="0 0 16 16" width="12" height="12" aria-label="Downloaded"><circle cx="8" cy="8" r="8" fill="currentColor" /><path d="M8 4v6m0 0L5.5 7.5M8 10l2.5-2.5" stroke="#000" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+);
+
 export default function TrackRow({
   track, n, active, isPlaying = false, onPlay, onRowOpen, onToggle, onLike, playlists = [], onAddTo, onNewPlaylist,
   onRemove, draggable = false, onDragStart, onDragOver, onDrop, showArt = false, jf,
@@ -183,6 +189,7 @@ export default function TrackRow({
   const touch = useTouch();
   // From the like store, never from the row's UserData (which can be stale).
   const liked = useLiked(track.Id);
+  const kept = useDownloaded(track.Id);
   const excluded = track.UserData?.Likes === false;
   const artistsOf = track.ArtistItems?.length ? track.ArtistItems : (track.Artists || []).map((n2) => ({ Name: n2 }));
 
@@ -256,7 +263,8 @@ export default function TrackRow({
         <span>{track.Name}</span>
         {/* On an artist's own page the artist line is redundant; Spotify's
             Popular rows show the title alone. */}
-        {subtitle ? <small>{subtitle}</small> : !hideArtists && <small>
+        {subtitle ? <small>{kept && <DownloadedMark />}{subtitle}</small> : !hideArtists && <small>
+          {kept && <DownloadedMark />}
           {/* Phone: plain text, so a tap on the artist line plays the row like
               Spotify; "Go to artist" lives in the ⋯ sheet. */}
           <ArtistLinks artists={artistsOf} fallback={track.AlbumArtist || ''} onOpen={phone ? undefined : onOpenArtist} />

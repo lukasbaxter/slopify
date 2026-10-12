@@ -57,6 +57,7 @@ export function summary(lib) {
   const bytes = Object.values(lib.tracks).reduce((n, t) => n + (t.bytes || 0), 0);
   return {
     bytes,
+    ids: Object.keys(lib.tracks).filter((id) => lib.tracks[id].file),
     collections: lib.collections.map((c) => ({ id: c.id, name: c.name, kind: c.kind, total: c.trackIds.length, have: c.trackIds.filter((t) => lib.tracks[t]?.file).length })),
   };
 }

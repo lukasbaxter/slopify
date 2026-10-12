@@ -1715,3 +1715,11 @@ button:disabled { cursor: default; }
   .dl-art { width: 48px; height: 48px; }
   .dl-status { grid-column: 1 / -1; }
 }
+
+/* Download for offline (api/offline.js): the header button, its count, and
+   the green mark before a kept song's artist line. */
+.iconbtn.dlbtn { color: var(--text-dim, #b3b3b3); }
+.iconbtn.dlbtn.on { color: var(--accent, #1ed760); }
+.dlglyph.busy { animation: none; }
+.dl-status { color: var(--text-dim, #b3b3b3); font-size: 13px; font-variant-numeric: tabular-nums; margin-left: -4px; }
+.dl-mark { color: var(--accent, #1ed760); vertical-align: -1px; margin-right: 5px; flex: none; }

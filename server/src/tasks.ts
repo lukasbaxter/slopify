@@ -18,8 +18,7 @@ import { spawn } from 'node:child_process';
 import { parseFile } from 'music-metadata';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
-import { buildHead, headPath } from './heads.js';
-import { songPath } from './songcache.js';
+import { buildHead } from './heads.js';
 import { releaseInLibrary } from './discover.js';
 import { slskdFind, slskdDownload, slskdWait } from './explore.js';
 import type { Lidarr } from './lidarr.js';
@@ -273,17 +272,8 @@ export type ChoreOptions = {
 
 // A file replaced is a new track id (ids are the audio's own hash): carry
 // the listener's traces over and drop what belonged to the old bytes.
-export function remapTrackId(db: DB, oldId: string, newId: string, cacheDir?: string) {
-  if (!newId || oldId === newId) return;
-  for (const t of ['likes', 'playlist_tracks', 'plays', 'lyrics']) db.prepare(`UPDATE OR IGNORE ${t} SET track_id = ? WHERE track_id = ?`).run(newId, oldId);
-  for (const t of ['likes', 'playlist_tracks', 'plays', 'lyrics', 'heads', 'song_cache']) db.prepare(`DELETE FROM ${t} WHERE track_id = ?`).run(oldId);
-  // The head AND the whole-song copy belong to the old bytes: dropping only
-  // their rows would leave the files stranded on the SSD forever.
-  if (cacheDir) {
-    try { fs.rmSync(headPath(cacheDir, oldId), { force: true }); } catch { /* cache orphan */ }
-    try { fs.rmSync(songPath(cacheDir, oldId), { force: true }); } catch { /* cache orphan */ }
-  }
-}
+import { remapTrackId } from './remap.js';
+export { remapTrackId };
 
 const ff = (args: string[]) => new Promise<boolean>((resolve) => {
   const p = spawn('ffmpeg', ['-nostdin', '-v', 'error', ...args]);

@@ -11,6 +11,7 @@ import { parseLrc, isSynced } from './lyrics.js';
 import { storeArtwork } from './artwork.js';
 import { buildHead, headOf, reconcileHeads } from './heads.js';
 import { dropGenreCache } from './genres.js';
+import { adoptGone, pruneGone, remapTrackId, retireTrack } from './remap.js';
 
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
@@ -80,6 +81,9 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   for (const r of db.prepare('SELECT id, path, mtime, size FROM tracks').all() as any[]) known.set(r.path, r);
   const seen = new Set<string>();
   const seenIds = new Set<string>(); // ids met under some path this scan (a renamed file keeps its id)
+  const newIds: string[] = []; // ids this scan put in the library for the first time
+  // Where the cached heads and whole-song copies live (the scanner's dataDir is the cache dir).
+  const cacheDir = opts.heads?.cacheDir ?? opts.dataDir;
   const coverCache = new Map<string, string | null>();
   const coverHashByFile = new Map<string, string>();
   let files = 0, added = 0, changed = 0;
@@ -169,10 +173,16 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
         jf_id: jfId, added_at: prev ? (db.prepare('SELECT added_at FROM tracks WHERE id = ?').get(id) as any)?.added_at ?? now : now,
       });
     });
-    // Same path, different audio (a re-rip): the old row goes first, or its
-    // UNIQUE path would collide with the new id's row.
-    if (prev && prev.id !== id) db.prepare('DELETE FROM tracks WHERE id = ?').run(prev.id);
+    // Same path, different audio (a re-rip): the old row steps off the path
+    // (UNIQUE) but stays until its likes, playlist spots, plays and lyrics
+    // have moved to the new id; deleting it first cascaded the lyrics away
+    // and left the rest pointing at nothing.
+    const replaced = prev && prev.id !== id ? prev.id : null;
+    const isNew = !db.prepare('SELECT 1 FROM tracks WHERE id = ?').get(id);
+    if (replaced) db.prepare("UPDATE tracks SET path = path || '#replaced' WHERE id = ?").run(replaced);
     tx();
+    if (replaced) { remapTrackId(db, replaced, id, cacheDir); db.prepare('DELETE FROM tracks WHERE id = ?').run(replaced); }
+    else if (isNew) newIds.push(id);
     seenIds.add(id);
     if (prev) changed++; else added++;
     await syncSidecar(db, id, file, upsertLyrics);
@@ -194,8 +204,16 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     if (walkErrors.n) removalSkipped = `removal pass skipped: ${walkErrors.n} unreadable folder(s) during the walk`;
     else if (knownInScope > 0 && knownInScope - gone.length < knownInScope / 2) removalSkipped = `removal pass skipped: walk found only ${knownInScope - gone.length} of ${knownInScope} known files`;
     if (removalSkipped) log(removalSkipped);
-    else for (const id of gone) { db.prepare('DELETE FROM tracks WHERE id = ?').run(id); removed++; }
+    else {
+      // A song that left may have a replacement already (an MP3 swapped for
+      // its FLAC at a new path): its traces go there; else they wait for one.
+      const goneSet = new Set(gone);
+      for (const id of gone) { retireTrack(db, id, goneSet, cacheDir); db.prepare('DELETE FROM tracks WHERE id = ?').run(id); removed++; }
+    }
   }
+  // A song that arrived may be the replacement of one that left earlier.
+  for (const id of newIds) { const old = adoptGone(db, id, cacheDir); if (old) log(`${id} replaces ${old}: likes, playlists and plays moved`); }
+  pruneGone(db);
   if (opts.heads) { const n = await reconcileHeads(db, opts.heads.cacheDir, opts.heads.seconds, log); if (n) log(`recut ${n} heads that belonged to a duplicate`); }
   // The credit-splitting and spelling passes read the whole tracks table; a
   // scoped scan (a download landing, an ingest) skips them and the next full

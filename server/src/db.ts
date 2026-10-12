@@ -199,6 +199,12 @@ const MIGRATIONS: string[] = [
   ALTER TABLE albums ADD COLUMN true_peak REAL;
   CREATE INDEX tracks_loudness_at ON tracks(loudness_at);
   `,
+  // 23: songs that left the library while someone had them (liked, in a
+  // playlist, played), so a replacement landing later takes those back.
+  `
+  CREATE TABLE gone_tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, album_id TEXT NOT NULL, duration_ms INTEGER NOT NULL, removed_at INTEGER NOT NULL);
+  CREATE INDEX gone_tracks_title ON gone_tracks(title COLLATE NOCASE);
+  `,
 ];
 
 export type DB = Database.Database;

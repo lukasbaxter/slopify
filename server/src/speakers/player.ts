@@ -85,6 +85,16 @@ export class ServerPlayer {
       UserData: { IsFavorite: !!this.d.db.prepare('SELECT 1 FROM likes WHERE user_id = ? AND track_id = ?').get(this.uid, t.id) }, _queued: false, _codec: t.codec,
     }));
   }
+  // Carry the sender's "added to queue" marks over (flags line up with ids;
+  // rows may skip ids that left the library).
+  private markQueued(rows: Row[], ids: string[], flags: unknown) {
+    if (!Array.isArray(flags)) return rows;
+    let j = 0;
+    return rows.map((r) => {
+      while (j < ids.length && ids[j] !== r.Id) j += 1;
+      return { ...r, _queued: !!flags[j++] };
+    });
+  }
   private url(path: string) { return `${this.d.publicUrl.replace(/\/+$/, '')}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(this.d.token)}`; }
   private meta(t: Row) {
     const artistId = t.ArtistItems?.[0]?.Id || null;
@@ -116,7 +126,14 @@ export class ServerPlayer {
     try {
       if (a === 'transfer') await this.transfer(cmd);
       else if (a === 'play') await this.play(cmd);
-      else if (a === 'enqueue') { const rows = this.rowsFor(cmd.trackIds || []).map((r) => ({ ...r, _queued: true })); this.queue.splice(this.index + 1, 0, ...rows); this.d.reportQueue(this.queue); }
+      else if (a === 'enqueue') {
+        // Like Spotify (and the web player): after what is playing, behind
+        // anything already added this way, ahead of the rest of the context.
+        const rows = this.rowsFor(cmd.trackIds || []).map((r) => ({ ...r, _queued: true }));
+        let at = this.index + 1;
+        while (at < this.queue.length && this.queue[at]?._queued) at += 1;
+        this.queue.splice(at, 0, ...rows); this.d.reportQueue(this.queue);
+      }
       else if (a === 'queueRemove') { const i = cmd.index | 0; if (i !== this.index && this.queue[i]) { this.queue.splice(i, 1); if (i < this.index) this.index--; this.d.reportQueue(this.queue); this.report(); } }
       else if (a === 'queueMove') { const from = cmd.from | 0, to = cmd.to | 0; if (this.queue[from] && this.queue[to]) { const [m] = this.queue.splice(from, 1); this.queue.splice(to, 0, m); const cur = this.current; this.index = Math.max(0, this.queue.indexOf(cur as Row)); this.d.reportQueue(this.queue); this.report(); } }
       else if (a === 'queueClear') { const cur = this.current; this.queue = this.queue.filter((t, i) => i <= this.index || !t._queued); this.index = cur ? this.queue.indexOf(cur) : -1; this.d.reportQueue(this.queue); }
@@ -146,7 +163,7 @@ export class ServerPlayer {
     // A mirror that never got this session's queue sends only the current
     // song; switching speakers must not throw the rest of the queue away.
     const keep = ids.length === 1 && this.queue.some((r) => r.Id === ids[0]);
-    const rows = keep ? this.queue : this.rowsFor(ids);
+    const rows = keep ? this.queue : this.markQueued(this.rowsFor(ids), ids, cmd.queued);
     const idx = keep ? this.queue.findIndex((r) => r.Id === ids[0]) : Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     // The chosen track first (the speaker starts within a second), the rest around it.
     const chosenId = keep ? ids[0] : ids[idx];

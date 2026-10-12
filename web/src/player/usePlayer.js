@@ -130,6 +130,17 @@ function slimTrack(t) {
   };
 }
 
+// Carry a handed-over queue's "added to queue" marks over (flags line up
+// with ids; the fetched tracks may skip ids that left the library).
+function markQueued(tracks, ids, flags) {
+  if (!tracks || !Array.isArray(flags)) return tracks;
+  let j = 0;
+  return tracks.map((t) => {
+    while (j < ids.length && ids[j] !== t.Id) j += 1;
+    return flags[j++] ? { ...t, _queued: true } : t;
+  });
+}
+
 // Fetch full items for a list of ids, in order, in URL-safe batches.
 async function fetchByIds(jf, ids) {
   return jf.itemsByIds(ids);
@@ -1238,6 +1249,7 @@ export function usePlayer(jf) {
         // The WHOLE session queue moves with the track, so "next" on the
         // target keeps going where this client would have.
         let trackIds = [];
+        let queued;
         let index = 0;
         let pos = 0;
         let wasPlaying = true;
@@ -1247,7 +1259,7 @@ export function usePlayer(jf) {
           const rq = remoteQueuesRef.current[act] || [];
           if (np) {
             const qi = typeof np.queueIndex === 'number' && rq[np.queueIndex]?.Id === np.itemId ? np.queueIndex : -1;
-            if (qi >= 0) { trackIds = rq.map((t) => t.Id); index = qi; }
+            if (qi >= 0) { trackIds = rq.map((t) => t.Id); queued = rq.map((t) => Boolean(t._queued)); index = qi; }
             else if (np.itemId) { trackIds = [np.itemId]; index = 0; }
             pos = np.playing ? (np.position || 0) + Math.max(0, Date.now() - (np.rxAt || np.at || Date.now())) / 1000 : (np.position || 0);
             wasPlaying = np.playing !== false;
@@ -1258,6 +1270,7 @@ export function usePlayer(jf) {
           const a = anchorRef.current;
           if (q[indexRef.current]) {
             trackIds = q.map((t) => t.Id);
+            queued = q.map((t) => Boolean(t._queued));
             index = indexRef.current;
             pos = a.playing ? a.pos + (Date.now() - a.at) / 1000 : positionRef.current;
             wasPlaying = playing;
@@ -1267,7 +1280,7 @@ export function usePlayer(jf) {
         // session and plays it on the named device.
         const target = nextDevice.kind === 'relay' ? nextDevice.relayClientId : nextDevice.viaClient;
         relayRef.current.command(target, {
-          action: 'transfer', trackIds, index, position: pos, playing: wasPlaying,
+          action: 'transfer', trackIds, queued, index, position: pos, playing: wasPlaying,
           // Picking a client means ITS OWN output (Spotify: "This Computer"),
           // even if that client last drove a speaker; the speakers are listed
           // separately.
@@ -2177,7 +2190,7 @@ export function usePlayer(jf) {
           const rest = cmd.trackIds.length > 1 ? fetchByIds(jf, cmd.trackIds, fields).catch(() => null) : null;
           if (!first) throw new Error('track not found');
           await startHereRef.current([first], 0, cmd.position || 0, cmd.playing !== false);
-          const tracks = rest ? await rest : null;
+          const tracks = markQueued(rest ? await rest : null, cmd.trackIds, cmd.queued);
           if (!tracks || !tracks.length || queueRef.current[indexRef.current]?.Id !== chosenId) return;
           const at = Math.max(0, tracks.findIndex((t) => t.Id === chosenId));
           setQueue(tracks); queueRef.current = tracks;

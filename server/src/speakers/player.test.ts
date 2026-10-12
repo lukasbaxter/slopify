@@ -246,3 +246,21 @@ describe('phone volume buttons and lock-screen play/pause', () => {
     expect(flips).toBe(1);
   });
 });
+
+describe('add to queue on a speaker', () => {
+  const r = (id: string, queued = false) => ({ ...row, Id: id, _queued: queued });
+  it('goes behind songs already added, ahead of the rest of the context', async () => {
+    const p = player();
+    p.rowsFor = (ids: string[]) => ids.map((id) => r(id));
+    p.queue = [r('now'), r('ctx1'), r('ctx2')]; p.index = 0;
+    await p.execute({ action: 'enqueue', trackIds: ['a'] });
+    await p.execute({ action: 'enqueue', trackIds: ['b'] });
+    await p.execute({ action: 'enqueue', trackIds: ['c'] });
+    expect(p.queue.map((t: any) => t.Id)).toEqual(['now', 'a', 'b', 'c', 'ctx1', 'ctx2']);
+  });
+  it('a transfer keeps the sender\'s queued marks, so later adds still line up', () => {
+    const p = custom();
+    const rows = ['now', 'a', 'ctx1'].map((id) => r(id));
+    expect(p.markQueued(rows, ['now', 'gone', 'a', 'ctx1'], [false, true, true, false]).map((t: any) => t._queued)).toEqual([false, true, false]);
+  });
+});

@@ -20,6 +20,7 @@ const KBPS = 256;
 const AHEAD = 3;
 const MAX_BYTES = 3.8e9;
 
+// eslint-disable-next-line no-control-regex -- control chars are not allowed in file names
 const safe = (s: string, n = 100) => String(s || '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, n);
 
 export function registerOffline(app: FastifyInstance, db: DB, cacheDir: string, srcOf: (id: string, want?: boolean) => Src | undefined) {

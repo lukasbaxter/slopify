@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive } from './keepalive.js';
 import { createTrackCache } from './trackCache.js';
 import { localUrl, ensureLocal, keepLocal } from '../offline/local.js';
-import { isKept } from '../api/offline.js';
+import { isKept, useDownloadActive } from '../api/offline.js';
 import { isOffline } from '../offline/net.js';
 
 // The local device is always present and is not discovered over mDNS. Named
@@ -2315,7 +2315,12 @@ export function usePlayer(jf) {
   const staying = IN_PHONE_APP && IS_IOS && (msLocal || msRemote) && Date.now() < stayUntilRef.current;
   // The stand-in plays for a session playing elsewhere, and (phone app, within
   // the 2 hours) whenever this phone is not making the sound itself.
-  const standIn = (msRemote && shownPlaying) || (staying && !(msLocal && shownPlaying));
+  // A download running (api/offline.js) on a phone: without sound iOS
+  // suspends the app within a minute and the download stops with it, so the
+  // stand-in plays while this phone is not playing music itself.
+  const downloading = useDownloadActive();
+  const downloadHold = !!downloading && (IS_IOS || IS_ANDROID) && !(msLocal && shownPlaying);
+  const standIn = (msRemote && shownPlaying) || (staying && !(msLocal && shownPlaying)) || downloadHold;
   // Held by the stand-in while paused (silent media keeps the lock screen).
   // Only its play button acts; a pause there just re-syncs the icon.
   const holding = standIn && !shownPlaying;
@@ -2390,6 +2395,13 @@ export function usePlayer(jf) {
     return () => { for (const a of ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto']) { try { ms.setActionHandler(a, null); } catch { /* unsupported */ } } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowPlaying?.itemId, nowPlaying?.title, nowPlaying?.artId, msLocal, msRemote, jf]);
+  // Nothing else on the lock screen while a download holds the app awake:
+  // say what it is doing there.
+  useEffect(() => {
+    const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
+    if (!ms || !downloadHold || msLocal || msRemote) return;
+    try { ms.metadata = new MediaMetadata({ title: `Downloading ${downloading.name}`, artist: `${downloading.done} of ${downloading.total} songs`, album: 'Slopify' }); } catch { /* unsupported */ }
+  }, [downloadHold, downloading?.name, downloading?.done, downloading?.total, msLocal, msRemote]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     // The keep-alive stands in while the sound is elsewhere, and in the phone

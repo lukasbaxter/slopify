@@ -50,6 +50,11 @@ const PLAYS_ORIGINAL = /flac|layer 3|mp3|aac|alac|pcm|wav|aiff/i;
 /** Downloads follow the streaming quality: Lossless keeps the original files. */
 export const savesLossless = (jf) => jf?.quality === 'original';
 
+const songUrl = (jf, id, q, norm = null) => (q === 'original' ? jf.downloadUrl(id, 'original') : jf._url(`/api/stream/${id}/whole/${q}`, norm ? { norm } : {}));
+// Covers are kept small (320 px): enough for rows, the lock screen and the
+// player offline; online the server's sharp ones are shown.
+const coverUrl = (jf, albumId) => jf._url(`/api/image/${albumId}`, { size: '320' });
+
 /**
  * Save a collection. kind: 'playlist' | 'album' | 'liked'. Lossless keeps
  * the file itself (bit-perfect, so no normalization baked in); otherwise
@@ -69,9 +74,9 @@ export async function saveOffline(jf, item, kind, tracks) {
     albumId: t.AlbumId || null,
     durationMs: Math.round((t.RunTimeTicks || 0) / 1e4),
     ...(lossless && PLAYS_ORIGINAL.test(t.Container || '')
-      ? { q: 'original', url: jf.downloadUrl(t.Id, 'original') }
-      : { q: profile, url: jf._url(`/api/stream/${t.Id}/whole/${profile}`, norm ? { norm } : {}) }),
-    coverUrl: t.AlbumId ? jf.imageUrl(t.AlbumId, { maxHeight: 320, full: true }) : null,
+      ? { q: 'original', url: songUrl(jf, t.Id, 'original') }
+      : { q: profile, norm, url: songUrl(jf, t.Id, profile, norm) }),
+    coverUrl: t.AlbumId ? coverUrl(jf, t.AlbumId) : null,
   }));
   const collection = { id: item.Id, name: item.Name, kind, coverUrl: kind === 'liked' || kind === 'album' ? null : jf.imageUrl(item.Id, { maxHeight: 320, full: true }) };
   // Room for it? (Safari gives an installed app a large share of the disk.)
@@ -84,6 +89,24 @@ export async function saveOffline(jf, item, kind, tracks) {
 }
 
 export const removeOffline = (id) => store.removeCollection(id);
+
+/**
+ * Once the server answers (app start, back online): finish downloads that
+ * were cut short, and fetch the album cover of any downloaded song that
+ * lacks one.
+ */
+let resuming = false;
+export async function resumeOffline(jf) {
+  if (resuming || !canSaveOffline() || !jf?.token) return;
+  resuming = true;
+  try {
+    await store.resume((id, t) => ({ song: songUrl(jf, id, t.q || 'aac-320', t.norm), cover: t.albumId ? coverUrl(jf, t.albumId) : null }));
+    await store.backfillCovers((albumId) => coverUrl(jf, albumId));
+  } catch { /* next time */ } finally { resuming = false; }
+}
+
+/** Is a download running (keeps the app awake in the background: usePlayer)? */
+export const useDownloadActive = () => useSyncExternalStore(subscribeOffline, () => last.active, () => null);
 
 // Plays made offline, sent once the server answers again (it keeps their time).
 let flushing = false;

@@ -27,7 +27,10 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
     fs.rmSync(dataDir, { recursive: true, force: true });
     let server = await startServer(port, dataDir);
     const browser = await engine.launch(name === 'chromium' ? { args: ['--autoplay-policy=no-user-gesture-required'] } : {});
-    const context = await browser.newContext({ baseURL: `http://localhost:${port}`, viewport: { width: 1280, height: 800 } });
+    // WebKit as an iPhone (its user agent): a download then holds the app
+    // awake with the silent stand-in, as it must in the background on iOS.
+    const iphone = name === 'webkit' ? { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' } : {};
+    const context = await browser.newContext({ baseURL: `http://localhost:${port}`, viewport: { width: 1280, height: 800 }, ...iphone });
     const page: Page = await context.newPage();
     const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
     try {
@@ -51,6 +54,24 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await expect(page.getByText(/First Light is ready offline/)).toBeVisible({ timeout: 90000 });
       await expect(page.locator('.trackrow .dl-mark')).toHaveCount(n);
       await expect(page.locator('button.dlbtn.on')).toBeVisible();
+      if (name === 'webkit') {
+        // The stand-in was wanted while it downloaded, and let go after.
+        const ka = await page.evaluate(() => (window as any).__conduitKeepAliveState?.());
+        expect(ka.log.join(' ')).toContain('want on');
+        expect(ka.wanted).toBe(false);
+      }
+      // Every downloaded song's album cover is kept.
+      expect(await page.evaluate(async () => { const r = await (await caches.open('slopify-offline')).match('/offline/library.json'); const lib = await r!.json(); return Object.values(lib.tracks).every((t: any) => t.cover); })).toBe(true);
+      // A download cut short (one song gone) is finished on the next start.
+      await page.evaluate(async () => {
+        const c = await caches.open('slopify-offline'); const lib = await (await c.match('/offline/library.json'))!.json();
+        const id = Object.keys(lib.tracks)[0]; await c.delete(lib.tracks[id].file); lib.tracks[id].file = null;
+        await c.put('/offline/library.json', new Response(JSON.stringify(lib), { headers: { 'Content-Type': 'application/json' } }));
+      });
+      await page.reload(); await waitForLibrary(page);
+      await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
+      await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('.trackrow .dl-mark')).toHaveCount(n, { timeout: 30000 });
       const types = await page.evaluate(async () => { const c = await caches.open('slopify-offline'); const ks = (await c.keys()).filter((k) => k.url.includes('/offline/song/')); return [...new Set(await Promise.all(ks.map(async (k) => (await c.match(k))!.headers.get('content-type'))))]; });
       expect(types).toEqual([lossless ? 'audio/mpeg' : 'audio/mp4']);
       // The worker keeps a copy of the app.
@@ -61,11 +82,6 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await page.goto('/?debug'); // ?debug: window.__jf, to report a play below
       await expect(page.locator('.offline-banner')).toBeVisible({ timeout: 30000 });
       await waitForLibrary(page);
-      // The album not downloaded opens, greyed out.
-      await page.locator('.card, .shortcut', { hasText: 'Analytical' }).first().click();
-      await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
-      await expect(page.locator('.trackrow.unavailable').first()).toBeVisible();
-      await page.goBack().catch(() => {});
       // The downloaded one plays, from the device.
       await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
       await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
@@ -81,11 +97,17 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await page.locator('.player button[title="Next"], .player button[aria-label="Next"]').first().click();
       await expect.poll(async () => (await page.locator('.player').textContent()) || '', { timeout: 15000 }).not.toBe(before);
 
+      await page.goBack().catch(() => {});
+      // The album not downloaded opens, greyed out.
+      await page.locator('.card, .shortcut', { hasText: 'Analytical' }).first().click();
+      await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('.trackrow.unavailable').first()).toBeVisible();
       // --- back online: the kept plays reach the server ---
       server = await startServer(port, dataDir);
-      await page.reload();
-      await waitForLibrary(page);
+      // No reload: the app notices by itself (it asks every 15 s).
       await expect(page.locator('.offline-banner')).toHaveCount(0, { timeout: 30000 });
+      // The covers that could not load offline load now, on the same page.
+      await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('.trackrow img.trackrow-art, .hero img')].some((i) => (i as HTMLImageElement).naturalWidth > 0 && /[?&]n=\d/.test((i as HTMLImageElement).src))), { timeout: 20000 }).toBe(true);
       await expect.poll(() => libPlays(page), { timeout: 20000 }).toBe(0);
       const hist = await page.request.get('/api/history?limit=20', { headers: { authorization: `Bearer ${tok}` } });
       expect(JSON.stringify(await hist.json())).toContain('"client":"offline"');

@@ -101,6 +101,18 @@ export function keepAlive(on, position = 0) {
   }
 }
 
+/**
+ * Inside a tap: unlock the stand-in now so it can start later with no tap
+ * (a download about to run in the background, usePlayer). Plays and pauses
+ * at once unless it is wanted by then. Only when not unlocked yet.
+ */
+export function primeKeepAlive() {
+  if (unlocked || typeof document === 'undefined') return;
+  const a = element();
+  if (!a.getAttribute('src')) a.src = SRC();
+  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted) a.pause(); }).catch((e) => note(`prime ${e?.name}`));
+}
+
 export function state() {
   const a = el;
   return { wanted, unlocked, armed, frozen, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };

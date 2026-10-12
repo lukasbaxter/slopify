@@ -16,7 +16,7 @@ import { applyTheme, DEFAULT_THEME } from './api/prefs.js';
 import { search as relaySearch, popular as relayPopular, likes as relayLikes, playlistTracks as relayPlaylist, likedFast } from './api/search.js';
 import { likesLoad, likesSet, likesSnapshot, likedIds, likesReady, isLiked, useLikesVersion } from './api/likes.js';
 import { offsetsMerge } from './api/offsets.js';
-import { canSaveOffline, subscribeOffline, flushOfflinePlays } from './api/offline.js';
+import { canSaveOffline, subscribeOffline, flushOfflinePlays, resumeOffline } from './api/offline.js';
 import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
 import { readLib } from './offline/store.js';
 
@@ -380,6 +380,9 @@ export default function App() {
   // null | 'npv' | 'queue' | 'lyrics'
   const [panel, setPanel] = useState(null);
   const offlineMode = useOfflineMode();
+  // Bumped when the server answers again after a spell offline: a re-render
+  // with new cover URLs (jf.imageUrl).
+  const [, setNetEpoch] = useState(0);
   const player = usePlayer(jf);
 
   // Restore a saved session, but only if the token still works.
@@ -978,9 +981,19 @@ export default function App() {
   // and report plays made offline once the server answers again.
   useEffect(() => {
     if (!jf || !canSaveOffline()) return undefined;
-    const flush = () => { if (!isOffline()) readLib().then((lib) => flushOfflinePlays(jf, lib.plays)).catch(() => {}); };
-    flush();
-    const offNet = subscribeNet(flush);
+    // Online (now, or again): send the kept plays, finish downloads cut
+    // short, fill in missing covers; after a spell offline, reload covers.
+    let wasOffline = isOffline();
+    const online = () => {
+      const off = isOffline();
+      if (!off && wasOffline) { jf._netEpoch = Date.now(); setNetEpoch(jf._netEpoch); }
+      wasOffline = off;
+      if (off) return;
+      readLib().then((lib) => flushOfflinePlays(jf, lib.plays)).catch(() => {});
+      resumeOffline(jf);
+    };
+    online();
+    const offNet = subscribeNet(online);
     const offDl = subscribeOffline((s, d) => {
       const f = d?.finished;
       if (f) notify(f.failed ? `${f.name}: ${f.done} of ${f.total} songs downloaded, ${f.failed} failed (Update download to retry)` : `${f.name} is ready offline (${f.done} songs)`, 5000);

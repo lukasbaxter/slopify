@@ -465,6 +465,9 @@ export class Slopify {
     if (small) { const t = linkTier(); size = t === 'slow' ? 64 : t === 'medium' ? 160 : Math.min(320, Math.max(160, maxHeight)); }
     const q = { size: String(size) };
     if (this._bust?.[itemId]) q.v = String(this._bust[itemId]);
+    // Back online after a spell offline: new URLs, so covers that failed
+    // (or showed the small offline copy) load again (App.jsx).
+    if (this._netEpoch) q.n = String(this._netEpoch);
     return this._url(`/api/image/${itemId}`, q);
   }
   // Wide artist banner (the portrait cropped wide), or nothing.

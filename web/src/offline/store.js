@@ -32,7 +32,7 @@ export function upsert(lib, col, tracks) {
     // downloads it again (the new file replaces the old under the same key).
     const was = lib.tracks[t.id];
     const same = was?.file && (was.q || 'aac-320') === (t.q || 'aac-320');
-    lib.tracks[t.id] = { title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, durationMs: t.durationMs || 0, q: same ? was.q : t.q || null, file: same ? was.file : null, bytes: same ? was.bytes : 0, cover: was?.cover || null };
+    lib.tracks[t.id] = { title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, durationMs: t.durationMs || 0, q: same ? was.q : t.q || null, norm: t.norm || null, file: same ? was.file : null, bytes: same ? was.bytes : 0, cover: was?.cover || null };
   }
   return [...new Set(ids)].filter((id) => !lib.tracks[id].file);
 }
@@ -163,7 +163,40 @@ async function pump() {
   try { while (jobs.length) await runJob(jobs.shift()); } finally { running = false; }
 }
 
-// col: { id, name, kind, coverUrl }; tracks: [{ id, title, artist, album, albumId, durationMs, url, coverUrl }]
+// Downloads cut short (the app closed, the connection dropped): queued again
+// with URLs built for each song from what the library remembers (urlFor:
+// (id, track) => { song, cover }). Nothing to do when all are here.
+export async function resume(urlFor) {
+  const lib = await readLib();
+  for (const c of lib.collections) {
+    if (jobs.some((j) => j.col.id === c.id) || active?.id === c.id) continue;
+    const ids = [...new Set(c.trackIds)].filter((id) => lib.tracks[id] && !lib.tracks[id].file);
+    if (!ids.length) continue;
+    const urls = Object.fromEntries(ids.map((id) => [id, { ...urlFor(id, lib.tracks[id]), albumId: lib.tracks[id].albumId }]));
+    jobs.push({ col: { id: c.id, name: c.name, kind: c.kind, cover: c.cover, coverUrl: null }, ids, urls, total: new Set(c.trackIds).size });
+  }
+  changed();
+  pump();
+}
+
+// Every downloaded song's album cover, kept small: the ones missing (a
+// failed fetch, or saved before covers were) are fetched now.
+export async function backfillCovers(coverUrlFor) {
+  const lib = await readLib();
+  const cache = await caches.open(CACHE);
+  const albums = new Map();
+  for (const [id, t] of Object.entries(lib.tracks)) if (t.file && t.albumId) (albums.get(t.albumId) || albums.set(t.albumId, []).get(t.albumId)).push(id);
+  let got = 0;
+  for (const [albumId, ids] of albums) {
+    const key = coverKey(albumId);
+    if (!(await cache.match(key))) { try { await fetchInto(cache, coverUrlFor(albumId), key); } catch { continue; } }
+    if (ids.some((id) => lib.tracks[id].cover !== key)) got++;
+    await update((l) => { for (const id of ids) if (l.tracks[id]) l.tracks[id].cover = key; });
+  }
+  if (got) changed();
+}
+
+// col: { id, name, kind, coverUrl }; tracks: [{ id, title, artist, album, albumId, durationMs, q, norm, url, coverUrl }]
 export async function save(col, tracks) {
   // Ask the browser not to clear these under storage pressure.
   try { await navigator.storage?.persist?.(); } catch { /* not offered */ }

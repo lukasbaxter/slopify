@@ -3,6 +3,7 @@ import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePh
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { downloadPlaylistZip } from '../api/download.js';
+import { primeKeepAlive } from '../player/keepalive.js';
 import { canSaveOffline, useOffline, saveOffline, removeOffline, estimateBytes, savesLossless } from '../api/offline.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
@@ -1170,6 +1171,9 @@ export default function Library({
               const busy = offline.active?.id === item.Id ? offline.active : null;
               const okind = isLiked ? 'liked' : kind === 'Album' ? 'album' : 'playlist';
               const download = async () => {
+                // Inside this tap: let the silent stand-in start later, so the
+                // download keeps going with the app in the background.
+                if (!player.playing) primeKeepAlive();
                 const gb = estimateBytes(tracks, savesLossless(jf)) / 1e9;
                 if (!held && gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download for offline?`)) return;
                 try { await saveOffline(jf, item, okind, tracks); notify?.(held ? 'Downloading the rest' : `Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000); }

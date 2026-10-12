@@ -191,3 +191,34 @@ test('sleep timer, end of track: the song finishes, the next one waits paused at
   expect(st.sleep).toBeNull();
   expect(firstAt(await events(page), 'playing', ids[1])).toBeUndefined();
 });
+
+// Locked, iOS starts nothing new for a page with no sound: the next song after
+// AirPods or a notification paused the music sat at 'waiting' until the app was
+// opened. A lock-screen / headset press while hidden holds the silent bridge
+// until the music itself is playing.
+test('locked: a lock-screen next holds the silent bridge until the song sounds', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__ms = {};
+    const ms = navigator.mediaSession as any;
+    const orig = ms.setActionHandler.bind(ms);
+    ms.setActionHandler = (a: string, fn: any) => { w.__ms[a] = fn; return orig(a, fn); };
+    w.__hidden = false;
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => w.__hidden, configurable: true });
+    Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (w.__hidden ? 'hidden' : 'visible'), configurable: true });
+  });
+  await open(page);
+  const { ids } = await albumIds(page, 'First Light');
+  await play(page, ids, null);
+  await expect.poll(() => events(page).then((ev) => ev.some((e) => e.t === 'playing'))).toBe(true);
+  // A tap unlocks the stand-in (as on the phone), then the screen goes off.
+  await page.mouse.click(5, 5);
+  await page.evaluate(() => { const w = window as any; w.__hidden = true; document.dispatchEvent(new Event('visibilitychange')); });
+  await page.evaluate(() => { const w = window as any; w.__bridgeSeen = false; const t = setInterval(() => { if (w.__conduitKeepAliveState?.().bridged) { w.__bridgeSeen = true; clearInterval(t); } }, 5); w.__ms.nexttrack(); });
+  await expect.poll(() => page.evaluate(() => (window as any).__bridgeSeen)).toBe(true);
+  // The next song plays: the bridge lets go.
+  await expect.poll(() => page.evaluate(() => (window as any).__conduitKeepAliveState().bridged), { timeout: 10000 }).toBe(false);
+  const log = await page.evaluate(() => (window as any).__conduitKeepAliveState().log.join('\n'));
+  expect(log).toContain('bridge on (lock screen next)');
+  expect(log).toContain('bridge off (playing)');
+});

@@ -230,6 +230,15 @@ export function usePlayer(jf) {
   const spareRef = useRef(null);
   // When the silent bridge across a locked song change went on (0 = off).
   const bridgeSinceRef = useRef(0);
+  // Locked, iOS starts nothing new for a page with no sound playing: a song
+  // still loading when the screen went off, or the next song after AirPods
+  // or a notification paused the music, sat at 'waiting' until the app was
+  // opened. The silent bridge makes this a playing page until the music
+  // itself is sounding (cleared on 'playing', or by the watchdog).
+  const holdBridge = useCallback((why) => {
+    if (typeof document === 'undefined' || !document.hidden || deviceRef.current.kind !== 'local' || bridgeSinceRef.current) return;
+    bridgeKeepAlive(true, why); bridgeSinceRef.current = Date.now();
+  }, []);
   const [activeEl, setActiveEl] = useState(null);
   const localBaseRef = useRef(0); // track time at which the local element's stream starts (transcodes only)
   if (!audioRef.current && typeof Audio !== 'undefined') {
@@ -1489,11 +1498,19 @@ export function usePlayer(jf) {
     // line afterwards: the lock screen kept the wrong icon until a tap. So
     // once a second, outside those windows, the element's real state wins
     // when it has disagreed with ours for two checks running.
-    let disagree = 0;
+    let disagree = 0, retriedSrc = '';
     const reconcile = setInterval(() => {
       if (!el.getAttribute('src') || el.ended || transitionRef.current || Date.now() < ownUntilRef.current) { disagree = 0; return; }
       const sounding = !el.paused;
       if (sounding === playingRef.current) { disagree = 0; return; }
+      // Locked and held by the bridge, a song iOS paused before it started
+      // gets one more play() before the app takes the pause as real.
+      if (!sounding && document.hidden && bridgeSinceRef.current && retriedSrc !== el.src) {
+        retriedSrc = el.src; disagree = 0;
+        mediaLog(`reconcile: ${tag()} paused before it sounded, playing again under the bridge`);
+        el.play().catch((e) => mediaLog(`bridge retry failed: ${e?.name}`));
+        return;
+      }
       if (++disagree >= 2) { disagree = 0; mediaLog(`reconcile: element ${sounding ? 'playing' : 'paused'}, app said ${playingRef.current ? 'playing' : 'paused'}`); followSystem(sounding)(); }
     }, 1000);
     // Stall watchdog: meant to be playing, not paused, and the clock has not
@@ -1561,10 +1578,13 @@ export function usePlayer(jf) {
     const snap = () => {
       const el = audioRef.current;
       mediaLog(`${document.visibilityState}: device=${deviceRef.current?.kind} playing=${playingRef.current} el=${el ? `${(el.dataset.track || '-').slice(0, 6)} paused=${el.paused} t=${el.currentTime.toFixed(1)} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}` : '-'}`);
+      // Locked mid-load (a song change in the same second, 19:01 on 10-12):
+      // iOS paused the song that had not started yet and nothing played again.
+      if (document.hidden && playingRef.current && el && (el.paused || el.readyState < 3)) holdBridge('locked while loading');
     };
     document.addEventListener('visibilitychange', snap);
     return () => document.removeEventListener('visibilitychange', snap);
-  }, []);
+  }, [holdBridge]);
 
   // Remote devices have to be polled; they do not push state to us. Polling
   // alone makes the clock jump in 2s steps, so the poll only moves an anchor
@@ -2400,7 +2420,7 @@ export function usePlayer(jf) {
       else if (!shownPlaying && !el.paused) ownPause(el);
     }
   };
-  msRefs.current = { toggle, setPlaying: setPlayingTo, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding };
+  msRefs.current = { toggle, setPlaying: setPlayingTo, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding, holdBridge };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
   const msNote = (m) => mediaLog(`${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
@@ -2424,7 +2444,7 @@ export function usePlayer(jf) {
       // and reading that as play restarted music paused from another device,
       // again and again.
       if (r.playing === wantPlaying) { r.resync(); return; }
-      if (!r.remote && !r.holding) { r.toggle(); return; }
+      if (!r.remote && !r.holding) { if (wantPlaying) r.holdBridge(`lock screen play`); r.toggle(); return; }
       // For another device (or the 2-hour hold): wait a second, dropped if
       // the app is going away, then ask for the state, never a flip.
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);
@@ -2432,8 +2452,8 @@ export function usePlayer(jf) {
     };
     on('play', playPause(true));
     on('pause', playPause(false));
-    on('previoustrack', () => { msNote('previoustrack'); msRefs.current.previous(); });
-    on('nexttrack', () => { msNote('nexttrack'); msRefs.current.next(); });
+    on('previoustrack', () => { msNote('previoustrack'); if (!msRefs.current.remote) msRefs.current.holdBridge('lock screen previous'); msRefs.current.previous(); });
+    on('nexttrack', () => { msNote('nexttrack'); if (!msRefs.current.remote) msRefs.current.holdBridge('lock screen next'); msRefs.current.next(); });
     on('seekto', (d) => { msNote(`seekto ${d?.seekTime} fast=${!!d?.fastSeek}`); if (typeof d?.seekTime === 'number') msRefs.current.seek(d.seekTime); });
     on('seekbackward', null); on('seekforward', null);
   };

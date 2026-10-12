@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepAlive } from './keepalive.js';
+import { keepAlive, bridgeKeepAlive } from './keepalive.js';
 import { createTrackCache } from './trackCache.js';
 import { localUrl, ensureLocal, keepLocal } from '../offline/local.js';
 import { isKept, useDownloadActive } from '../api/offline.js';
@@ -70,6 +70,20 @@ if (typeof document !== 'undefined') {
   window.addEventListener('slopify:appstate', (e) => { if (e.detail?.state === 'active') comingBackUntil = Math.max(comingBackUntil, Date.now() + 2000); });
 }
 const ownPause = (el) => { ownPauseAt = Date.now(); el.pause(); };
+
+// The page's audio session (Safari 16.4+): 'interrupted' while Siri reading a
+// message, a call or an alarm has the audio. iOS pauses the element for it
+// and, if the music had not just started, never plays it again afterwards.
+// The players below listen here to resume what the interruption stopped.
+const audioSession = typeof navigator !== 'undefined' ? navigator.audioSession : null;
+const sessionListeners = new Set();
+if (audioSession) {
+  const onState = () => { mediaLog(`audio session ${audioSession.state}`); for (const f of sessionListeners) f(audioSession.state); };
+  if (audioSession.addEventListener) audioSession.addEventListener('statechange', onState); else audioSession.onstatechange = onState;
+}
+// How long the silent bridge may hold the app awake for a song that will not
+// start (usePlayer: a song change with the screen locked).
+const BRIDGE_MAX_MS = 2 * 60 * 1000;
 
 export const LOCAL_DEVICE = {
   id: 'local',
@@ -203,6 +217,8 @@ export function usePlayer(jf) {
   // Both get unlocked by the first tap (iOS unlocks per element).
   const audioRef = useRef(null);
   const spareRef = useRef(null);
+  // When the silent bridge across a locked song change went on (0 = off).
+  const bridgeSinceRef = useRef(0);
   const [activeEl, setActiveEl] = useState(null);
   const localBaseRef = useRef(0); // track time at which the local element's stream starts (transcodes only)
   if (!audioRef.current && typeof Audio !== 'undefined') {
@@ -514,6 +530,7 @@ export function usePlayer(jf) {
         // whatever was started by then (two songs at once). Hidden, the
         // element that just ended takes the next src, which iOS always allows.
         const visible = typeof document === 'undefined' || !document.hidden;
+        if (!visible) { bridgeKeepAlive(true, 'song change'); bridgeSinceRef.current = Date.now(); }
         if (visible && !transcoded && seekSeconds === 0 && spare && spare.dataset.track === track.Id && spare.src && !spare.error) {
           // The spare already holds this track: swap. The old element is
           // emptied first, so nothing (iOS resuming its "now playing" element
@@ -1410,11 +1427,35 @@ export function usePlayer(jf) {
         el.play().catch((e) => mediaLog(`unlock resume failed: ${e?.name}`));
         return;
       }
+      if (!nowPlaying && playingRef.current) systemPauseAt = now;
       playingRef.current = nowPlaying;
       setPlaying(nowPlaying);
       anchorAt(localBaseRef.current + el.currentTime, nowPlaying);
     };
     const onPause = followSystem(false), onPlay = followSystem(true);
+    // An interruption (Siri reading a message, a call) pauses the element;
+    // iOS fires the pause either side of the session's 'interrupted'. Music
+    // that was meant to play when it began plays again when it ends: iOS
+    // itself does not, and with the screen locked nothing else would.
+    let systemPauseAt = 0, resumeAfter = false;
+    const onSession = (state) => {
+      if (deviceRef.current.kind !== 'local' || el !== audioRef.current) return;
+      if (state === 'interrupted') {
+        resumeAfter = playingRef.current || Date.now() - systemPauseAt < 2000;
+        if (resumeAfter && document.hidden) { bridgeKeepAlive(true, 'interrupted'); bridgeSinceRef.current = Date.now(); }
+        return;
+      }
+      if (!resumeAfter) return;
+      resumeAfter = false;
+      if (!el.getAttribute('src')) return;
+      mediaLog(`interruption over: resuming ${tag()}`);
+      if (el.paused) el.play().catch((e) => mediaLog(`resume after interruption failed: ${e?.name}`));
+      else if (!playingRef.current) followSystem(true)();
+    };
+    sessionListeners.add(onSession);
+    // The music is sounding again: the bridge (a locked song change) can go.
+    const onPlaying = () => { if (el === audioRef.current && bridgeSinceRef.current) { bridgeSinceRef.current = 0; bridgeKeepAlive(false, 'playing'); } };
+    el.addEventListener('playing', onPlaying);
     // Breadcrumb for a debugger on the phone: every seek the element sees,
     // ours or the system's (window.__slopifyMediaLog).
     const onSeeked = () => mediaLog(`element seeked to ${el.currentTime.toFixed(1)} base=${localBaseRef.current}`);
@@ -1450,6 +1491,12 @@ export function usePlayer(jf) {
     let lastT = -1, stuckSince = 0, recovering = false, recoveryCancel = null;
     const watchdog = setInterval(() => {
       const t = el.currentTime;
+      // The bridge goes when the music was paused or moved elsewhere, and
+      // after BRIDGE_MAX_MS of a song that would not start.
+      if (el === audioRef.current && bridgeSinceRef.current
+        && (!playingRef.current || deviceRef.current.kind !== 'local' || Date.now() - bridgeSinceRef.current > BRIDGE_MAX_MS)) {
+        bridgeSinceRef.current = 0; bridgeKeepAlive(false, playingRef.current && deviceRef.current.kind === 'local' ? 'gave up' : 'stopped');
+      }
       if (recovering || deviceRef.current.kind !== 'local' || !playingRef.current || el !== audioRef.current || el.paused || el.ended
         || !el.getAttribute('src') || transitionRef.current || Date.now() < ownUntilRef.current || jf?.transcoded?.()) { stuckSince = 0; lastT = t; return; }
       if (t !== lastT) { lastT = t; stuckSince = 0; return; }
@@ -1458,6 +1505,7 @@ export function usePlayer(jf) {
       if (Date.now() - stuckSince < (wholeFor(id) ? 3000 : 6000)) return; // from memory it cannot fail, so sooner
       stuckSince = 0; recovering = true;
       mediaLog(`watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
+      if (document.hidden && !bridgeSinceRef.current) { bridgeKeepAlive(true, 'stalled'); bridgeSinceRef.current = Date.now(); }
       const url = wholeFor(id) || jf.playbackUrl(id, { norm: bakeNormRef.current(id) });
       ownUntilRef.current = Date.now() + 10000;
       el.src = url;
@@ -1480,6 +1528,8 @@ export function usePlayer(jf) {
     }, 1000);
     return () => {
       clearInterval(watchdog);
+      sessionListeners.delete(onSession);
+      el.removeEventListener('playing', onPlaying);
       recoveryCancel?.();
       clearInterval(reconcile);
       for (const t of trail) el.removeEventListener(t, onTrail);

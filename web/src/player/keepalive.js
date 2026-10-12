@@ -15,7 +15,7 @@
 // on the iPhone the clock froze at every seek target (mp3 and WAV alike), so
 // each re-sync was another snap to 0. Should the clock ever freeze again the
 // element is left alone after that and setPositionState carries the time.
-let el = null, unlocked = false, wanted = false, armed = false, frozen = false, lastT = -1, lastAt = 0;
+let el = null, unlocked = false, wanted = false, bridged = false, armed = false, frozen = false, lastT = -1, lastAt = 0;
 const log = [];
 const note = (m) => { log.push(`${Math.round(performance.now() / 1000)}s${typeof document !== 'undefined' && document.hidden ? ' bg' : ''} ${m}`); if (log.length > 12) log.shift(); };
 
@@ -33,7 +33,7 @@ function element() {
   // seek applied at loadedmetadata left the clock frozen for good. The
   // element starts at 0, and is moved only once it is seen advancing.
   el.addEventListener('loadedmetadata', () => note(`meta dur=${Math.round(el.duration)}`));
-  el.addEventListener('ended', () => { if (wanted) { el.currentTime = 0; el.play().catch(() => {}); } });
+  el.addEventListener('ended', () => { if (wanted || bridged) { el.currentTime = 0; el.play().catch(() => {}); } });
   el.addEventListener('error', () => note(`error ${el.error?.code}`));
   el.addEventListener('playing', () => note(`playing t=${el.currentTime.toFixed(1)}`));
   el.addEventListener('pause', () => note('pause'));
@@ -46,7 +46,7 @@ function arm() {
   armed = true;
   const unlock = () => {
     const a = element();
-    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted) a.pause(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
+    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) a.pause(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
   };
   const off = () => { for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, unlock, true); armed = false; };
   for (const t of ['pointerdown', 'touchend', 'keydown']) document.addEventListener(t, unlock, true);
@@ -59,11 +59,31 @@ function arm() {
 // iOS shows the elapsed time as 0, so both are kept rare (seeks only when
 // the element is more than 4 s off).
 let pauseTimer = null;
+let lastPosition = 0;
 export function keepAlive(on, position = 0) {
   if (wanted !== !!on) note(`want ${on ? 'on' : 'off'} @${Math.round(position || 0)}`);
   wanted = !!on;
+  lastPosition = position;
+  apply(position);
+}
+
+// Held across a song change with the screen locked (usePlayer): between the
+// old song's end and the new one's first sound nothing plays, and if the new
+// song cannot start right away (a Siri announcement taking the audio, a slow
+// connection) iOS suspends the app within ~15 s and the music is gone until
+// it is opened. The silent element keeps the app a playing app meanwhile, so
+// the stall watchdog keeps retrying. Separate from `wanted`, which the
+// stand-in effect rewrites on every render.
+export function bridgeKeepAlive(on, why = '') {
+  if (bridged === !!on) return;
+  bridged = !!on;
+  note(`bridge ${on ? 'on' : 'off'}${why ? ` (${why})` : ''}`);
+  apply(lastPosition);
+}
+
+function apply(position) {
   const a = element();
-  if (wanted) {
+  if (wanted || bridged) {
     clearTimeout(pauseTimer); pauseTimer = null;
     const p = Math.max(0, (position || 0) % KEEPALIVE_SECONDS);
     // Seek only a clock that is seen moving (two different readings while
@@ -95,7 +115,7 @@ export function keepAlive(on, position = 0) {
     // Without media it can produce no audio and WebKit leaves it out.
     pauseTimer = setTimeout(() => {
       pauseTimer = null;
-      if (wanted || a.paused) return;
+      if (wanted || bridged || a.paused) return;
       a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded');
     }, 2000);
   }
@@ -110,10 +130,10 @@ export function primeKeepAlive() {
   if (unlocked || typeof document === 'undefined') return;
   const a = element();
   if (!a.getAttribute('src')) a.src = SRC();
-  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted) a.pause(); }).catch((e) => note(`prime ${e?.name}`));
+  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) a.pause(); }).catch((e) => note(`prime ${e?.name}`));
 }
 
 export function state() {
   const a = el;
-  return { wanted, unlocked, armed, frozen, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
+  return { wanted, bridged, unlocked, armed, frozen, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
 }

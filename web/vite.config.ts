@@ -9,5 +9,5 @@ export default defineConfig({
   base: './',
   plugins: [react(), keepAlive()],
   server: { port: 5180, proxy: { '/api': { target: 'http://localhost:8080', ws: true } } },
-  build: { outDir: 'dist', rollupOptions: { input: { main: 'index.html', offline: 'offline.html' }, output: { manualChunks: { vendor: ['react', 'react-dom'] } } } },
+  build: { outDir: 'dist', rollupOptions: { output: { manualChunks: { vendor: ['react', 'react-dom'] } } } },
 });

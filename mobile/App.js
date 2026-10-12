@@ -6,17 +6,13 @@
 // becomes a volume step for that device and the phone's own level is put
 // back, so it never drifts; while the phone itself plays, the buttons do
 // what they always do. It draws full-bleed and the page pads for the notch /
-// home indicator (viewport-fit=cover). It also keeps songs on the phone for
-// when there is no connection (offline.js): the page asks for a playlist to
-// be saved, and when the site cannot load (or on request) the WebView shows
-// the offline player instead.
+// home indicator (viewport-fit=cover).
 import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { AppState, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Device from 'expo-device';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
-import { DIR, PAGE_URI, createDownloader, deleteFiles, hasSongs, loadLib, pageData, remove, saveLib, summary } from './offline';
 
 const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || 'https://music.baxtergroup.io/';
 
@@ -25,7 +21,7 @@ const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || 'https://music.baxtergroup.io
 // behind an entitlement, so the model it is.
 const DEVICE_NAME = (Platform.OS === 'android' && Device.deviceName) || Device.modelName || (Platform.OS === 'ios' ? 'iPhone' : 'Android phone');
 const DEVICE_FORM = Device.deviceType === Device.DeviceType.TABLET ? 'tablet' : 'phone';
-const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, offline: 1, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev' })}; true;`;
+const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev' })}; true;`;
 
 // iOS: a music player's audio session. The volume listener switches the
 // session to Ambient as the module starts (only then: VolumeManager init),
@@ -45,36 +41,6 @@ const musicSession = () => {
 export default function App() {
   const web = useRef(null);
   const [error, setError] = useState(null);
-  // 'online' = the site; 'offline' = the offline player over the saved songs.
-  const [mode, setMode] = useState('online');
-  const [offlineNote, setOfflineNote] = useState(null);
-  const [offlineKey, setOfflineKey] = useState(0);
-  const lib = useRef(null);
-  const downloader = useRef(null);
-  const modeRef = useRef('online'); modeRef.current = mode;
-  // The saved songs as the site shows them: per playlist, how many are here,
-  // the download in progress, and plays made offline still to report.
-  const tellPage = (extra = {}) => {
-    if (modeRef.current !== 'online' || !lib.current) return;
-    const detail = { ...summary(lib.current), active: downloader.current?.state.active || null, plays: lib.current.plays, ...extra };
-    web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:offline', { detail: ${JSON.stringify(detail)} })); true;`);
-  };
-  const goOffline = (note) => {
-    setOfflineNote(note || null); setError(null); setMode('offline'); setOfflineKey((k) => k + 1);
-  };
-  // The site failed to load: the saved songs if there are any, else the retry screen.
-  const failed = (why) => {
-    if (modeRef.current !== 'online') return;
-    if (lib.current && hasSongs(lib.current)) goOffline(`Could not reach Slopify (${why}). Playing what is on this phone.`);
-    else setError(why);
-  };
-  useEffect(() => {
-    loadLib().then((l) => {
-      lib.current = l;
-      downloader.current = createDownloader(l, (extra) => { saveLib(l); tellPage(extra); });
-      tellPage();
-    });
-  }, []);
   // What the page last told us: is the sound elsewhere?
   const remote = useRef(false);
   // The phone's own level while the sound is elsewhere; presses are measured
@@ -130,21 +96,6 @@ export default function App() {
   const onMessage = (e) => {
     let msg = null;
     try { msg = JSON.parse(e.nativeEvent.data); } catch { return; }
-    if (msg?.type === 'offline-save' && downloader.current && msg.collection && Array.isArray(msg.tracks)) { downloader.current.add(msg.collection, msg.tracks); return; }
-    if (msg?.type === 'offline-list') { tellPage(); return; }
-    if (msg?.type === 'offline-remove' && lib.current) {
-      downloader.current?.cancel(msg.id);
-      const files = remove(lib.current, msg.id);
-      saveLib(lib.current).then(() => deleteFiles(files));
-      if (modeRef.current === 'offline') setOfflineKey((k) => k + 1); else tellPage();
-      return;
-    }
-    if (msg?.type === 'offline-open') { goOffline(null); return; }
-    if (msg?.type === 'online') { setError(null); setMode('online'); return; }
-    if (msg?.type === 'offline-play' && lib.current) { lib.current.plays.push({ id: msg.id, at: msg.at }); saveLib(lib.current); return; }
-    if (msg?.type === 'offline-plays-sent' && lib.current) {
-      lib.current.plays = lib.current.plays.filter((p) => p.at > msg.upTo); saveLib(lib.current); return;
-    }
     if (msg?.type === 'session') {
       const was = remote.current; remote.current = !!msg.remote;
       if (remote.current && !was) {
@@ -173,21 +124,14 @@ export default function App() {
         <View style={styles.err}>
           <Text style={styles.errText}>Slopify could not load{'\n'}{error}</Text>
           <TouchableOpacity style={styles.btn} onPress={() => { setError(null); web.current?.reload(); }}><Text style={styles.btnText}>Retry</Text></TouchableOpacity>
-          {lib.current && hasSongs(lib.current) ? <TouchableOpacity style={styles.btn} onPress={() => goOffline(null)}><Text style={styles.btnText}>Play downloads</Text></TouchableOpacity> : null}
         </View>
       ) : null}
       <WebView
         ref={web}
-        key={mode === 'online' ? 'online' : `offline-${offlineKey}`}
-        source={{ uri: mode === 'online' ? URL : PAGE_URI }}
+        source={{ uri: URL }}
         style={styles.web}
-        // Tell the page it is the phone app, and which phone, before its
-        // scripts run; the offline player also gets the saved songs.
-        injectedJavaScriptBeforeContentLoaded={mode === 'online' || !lib.current ? SHELL : `${SHELL} window.__offline = ${JSON.stringify(pageData(lib.current, offlineNote))}; true;`}
-        // The offline player reads the songs next to it (file://).
-        allowingReadAccessToURL={mode === 'online' ? undefined : DIR}
-        allowFileAccess={mode !== 'online'}
-        originWhitelist={['*']}
+        // Tell the page it is the phone app, and which phone, before its scripts run.
+        injectedJavaScriptBeforeContentLoaded={SHELL}
         // Safari's Web Inspector can attach (Develop menu) to debug the page.
         webviewDebuggingEnabled
         onMessage={onMessage}
@@ -205,8 +149,8 @@ export default function App() {
         // Never leave the app for our own links; open anything else in the browser.
         setSupportMultipleWindows={false}
         pullToRefreshEnabled={Platform.OS === 'android'}
-        onError={(e) => failed(e.nativeEvent.description || 'network error')}
-        onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) failed(`HTTP ${e.nativeEvent.statusCode}`); }}
+        onError={(e) => setError(e.nativeEvent.description || 'network error')}
+        onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setError(`HTTP ${e.nativeEvent.statusCode}`); }}
         backgroundColor="#000"
         overScrollMode="never"
         bounces={false}

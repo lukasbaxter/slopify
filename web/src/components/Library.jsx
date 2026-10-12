@@ -3,7 +3,7 @@ import TrackRow, { PlayGlyph, PauseGlyph, Heart, ShuffleGlyph, LikedCover, usePh
 import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { downloadPlaylistZip } from '../api/download.js';
-import { canSaveOffline, useOffline, saveOffline, removeOffline, openOffline, estimateBytes, savesLossless } from '../api/offline.js';
+import { canSaveOffline, useOffline, saveOffline, removeOffline, estimateBytes, savesLossless } from '../api/offline.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
@@ -1200,7 +1200,6 @@ export default function Library({
                   ? { label: `Remove download${dl.busy ? ` (${dl.busy.done}/${dl.busy.total})` : ''}`, icon: MI.trash, onClick: dl.remove }
                   : { label: 'Download for offline', icon: MI.down, onClick: dl.download },
                 dl.held && dl.held.have < tracks.length && !dl.busy ? { label: `Update download (${dl.held.have}/${tracks.length})`, icon: MI.down, onClick: dl.download } : null,
-                { label: 'Open downloads (offline)', icon: MI.down, onClick: openOffline },
               ] : []),
               isPlaylist && !isLiked && !item._mix && tracks.length ? { label: 'Download as zip', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,

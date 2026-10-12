@@ -19,8 +19,8 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js')
-          // Keep the offline player current with this deploy (sw.js).
-          .then(() => navigator.serviceWorker.ready).then((r) => r.active && r.active.postMessage('cache-offline-shell'))
+          // Keep the worker's copy of the app current with this deploy (sw.js).
+          .then(() => navigator.serviceWorker.ready).then((r) => r.active && r.active.postMessage('cache-app-shell'))
           .catch(() => {}));
       }
     </script>

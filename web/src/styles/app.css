@@ -1723,3 +1723,6 @@ button:disabled { cursor: default; }
 .dlglyph.busy { animation: none; }
 .dl-status { color: var(--text-dim, #b3b3b3); font-size: 13px; font-variant-numeric: tabular-nums; margin-left: -4px; }
 .dl-mark { color: var(--accent, #1ed760); vertical-align: -1px; margin-right: 5px; flex: none; }
+/* Offline: songs that are not downloaded cannot play (offline/net.js). */
+.trackrow.unavailable { opacity: 0.4; }
+.offline-banner { position: sticky; top: 0; z-index: 30; background: #2a2a2a; color: var(--text-dim, #b3b3b3); font-size: 13px; text-align: center; padding: calc(env(safe-area-inset-top, 0px) + 6px) 12px 6px; }

@@ -4,6 +4,7 @@ import ContextMenu from './ContextMenu.jsx';
 import { FORMATS } from '../api/download.js';
 import { useLiked } from '../api/likes.js';
 import { useDownloaded } from '../api/offline.js';
+import { useOfflineMode } from '../offline/net.js';
 
 // True on the phone layout (the same breakpoint as app.css's phone block), so
 // components can gate phone-only markup without a prop threaded from App.
@@ -190,6 +191,8 @@ export default function TrackRow({
   // From the like store, never from the row's UserData (which can be stale).
   const liked = useLiked(track.Id);
   const kept = useDownloaded(track.Id);
+  // Offline, only downloaded songs can play: the rest grey out (Spotify's way).
+  const unavailable = useOfflineMode() && !kept;
   const excluded = track.UserData?.Likes === false;
   const artistsOf = track.ArtistItems?.length ? track.ArtistItems : (track.Artists || []).map((n2) => ({ Name: n2 }));
 
@@ -221,7 +224,7 @@ export default function TrackRow({
 
   return (
     <div
-      className={`trackrow ${active ? 'active' : ''} ${highlight ? 'hi' : ''}`}
+      className={`trackrow ${active ? 'active' : ''} ${highlight ? 'hi' : ''} ${unavailable ? 'unavailable' : ''}`}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragOver={onDragOver}

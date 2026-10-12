@@ -1,5 +1,7 @@
 import { linkTier } from './linkSpeed.js';
 import { clientIdentity } from './deviceName.js';
+import { noteResponse, setOffline, isOffline } from '../offline/net.js';
+import { addPlay } from '../offline/store.js';
 // The Slopify server client: everything the app reads and writes goes
 // through here, over /api. The components keep the row/card shape they were
 // written for (Id, Name, AlbumId, RunTimeTicks, ImageTags, UserData...), so
@@ -82,6 +84,7 @@ export class Slopify {
         const headers = { Authorization: `Bearer ${this.token || ''}`, ...(opts.headers || {}) };
         if (!raw && opts.body) headers['Content-Type'] = 'application/json';
         const res = await fetch(`${this.baseUrl}${path}`, { ...opts, body: raw || opts.body, signal: ctrl.signal, headers });
+        noteResponse(res); // live server, or the service worker's kept copy (offline)
         if (!res.ok) {
           const body = await res.text().catch(() => '');
           let msg = body; try { msg = JSON.parse(body).error || body; } catch { /* plain */ }
@@ -94,6 +97,7 @@ export class Slopify {
         // body stalls (a phone changing networks) would otherwise hang forever.
         return res.status === 204 ? null : await res.json();
       } catch (e) {
+        if (e instanceof TypeError && !opts.signal?.aborted) setOffline(true); // could not connect
         const transient = e.retry || e.name === 'AbortError' || e instanceof TypeError;
         if (!transient || attempt >= retries) throw e;
         attempt += 1;
@@ -482,7 +486,12 @@ export class Slopify {
   // --- playback reporting ---------------------------------------------------------
   // Plays are logged from the session socket while it is connected; this is
   // the fallback for a client playing with no socket.
-  reportStart(itemId) { return this._fetch('/api/plays', { method: 'POST', body: JSON.stringify({ trackId: itemId, at: Date.now(), client: 'web' }) }).catch(() => null); }
+  // A play the server cannot hear about now (offline) is kept and sent later (api/offline.js).
+  reportStart(itemId) {
+    const at = Date.now();
+    return this._fetch('/api/plays', { method: 'POST', body: JSON.stringify({ trackId: itemId, at, client: 'web' }) })
+      .catch(() => { if (isOffline()) addPlay(itemId, at).catch(() => {}); return null; });
+  }
   reportProgress() { return Promise.resolve(null); }
   reportStop() { return Promise.resolve(null); }
 
@@ -500,4 +509,8 @@ export class Slopify {
 
 export function persistSession(session) { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
 export function loadSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } }
-export function clearSession() { localStorage.removeItem(SESSION_KEY); }
+export function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+  // The service worker's copies of this account's API answers (sw.js).
+  try { navigator.serviceWorker?.controller?.postMessage('clear-api'); } catch { /* none */ }
+}

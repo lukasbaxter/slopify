@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive } from './keepalive.js';
 import { createTrackCache } from './trackCache.js';
+import { localUrl, ensureLocal, keepLocal } from '../offline/local.js';
+import { isKept } from '../api/offline.js';
+import { isOffline } from '../offline/net.js';
 
 // The local device is always present and is not discovered over mDNS. Named
 // for the runtime: the desktop app IS the computer, the PWA is one web player
@@ -227,7 +230,8 @@ export function usePlayer(jf) {
     },
   }) : null), [jf]);
   useEffect(() => () => trackCache?.clear(), [trackCache]);
-  const wholeFor = (id) => (jf?.streamMode?.() === 'hls' ? trackCache?.get(id) || null : null);
+  // A downloaded song plays from the device (offline/local.js), in any mode.
+  const wholeFor = (id) => localUrl(id) || (jf?.streamMode?.() === 'hls' ? trackCache?.get(id) || null : null);
 
   // --- volume normalization -------------------------------------------------
   // Spotify's: every song at -14 LUFS (the server measured it; track._gain
@@ -498,7 +502,10 @@ export function usePlayer(jf) {
         // A song still fading out (or playing out its last moment) under the
         // current one stops: a skip or a seek is a hard cut.
         endFadeRef.current();
-        const transcoded = jf.transcoded?.();
+        // Downloaded: from the device (a few ms from the cache), whatever the
+        // quality setting says, and seekable like any file.
+        const local = isKept(track.Id) ? await ensureLocal(track.Id) : null;
+        const transcoded = !local && jf.transcoded?.();
         const spare = spareRef.current;
         // Only while the page is visible: with the screen locked iOS may hold
         // play() on an element that was not already playing, and the promise
@@ -548,9 +555,9 @@ export function usePlayer(jf) {
         // clock then runs from 0 and localBaseRef holds the offset.
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
         el.dataset.track = track.Id;
-        el.src = (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0, norm: bakeNorm(track) });
+        el.src = local || (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0, norm: bakeNorm(track) });
         applyNorm(el, track); fadeReset(el);
-        mediaLog(`load ${track.Id.slice(0, 6)} at ${Math.round(seekSeconds)} from ${el.src.startsWith('blob:') ? 'memory' : 'network'}`);
+        mediaLog(`load ${track.Id.slice(0, 6)} at ${Math.round(seekSeconds)} from ${local ? 'download' : el.src.startsWith('blob:') ? 'memory' : 'network'}`);
         el.volume = volume / 100;
         if (seekSeconds > 0 && !transcoded) {
           // The seek has to land BEFORE play(), otherwise playback audibly
@@ -644,12 +651,23 @@ export function usePlayer(jf) {
   };
   const playQueue = useCallback(
     async (tracks, startIndex = 0, ctx = null, startAt = 0) => {
+      // Offline: only downloaded songs play, here (no other device can be
+      // reached). A tap on one that is not downloaded does nothing.
+      const off = isOffline();
+      if (off) {
+        const chosen = tracks[startIndex];
+        if (!chosen || !isKept(chosen.Id)) { setError('Offline: only downloaded songs play'); return; }
+        tracks = tracks.filter((t) => isKept(t.Id));
+        startIndex = tracks.indexOf(chosen);
+        // A speaker cannot be reached either: the music plays here.
+        if (deviceRef.current.kind !== 'local') { deviceRef.current = LOCAL_DEVICE; setDeviceState(LOCAL_DEVICE); }
+      }
       // Just opened and not yet told who is playing: wait for that, or a
       // play here would take the music off the device it is already on.
-      const waited = !!relayRef.current && !relayRef.current.rosterSeen;
+      const waited = !off && !!relayRef.current && !relayRef.current.rosterSeen;
       if (waited) await relayRef.current.whenRoster(3000);
       // If another of my clients is the active player, change the song THERE.
-      const act = activePlayerRef.current || (waited ? activeFromRoster() : null);
+      const act = off ? null : activePlayerRef.current || (waited ? activeFromRoster() : null);
       if (act && relayRef.current) {
         relayRef.current.command(act, {
           action: 'play', trackIds: tracks.map((t) => t.Id), index: startIndex, ctx, startAt,
@@ -875,6 +893,18 @@ export function usePlayer(jf) {
       relayRef.current?.sendSleep({ off: true, done: true });
       return undefined;
     }
+    if (isOffline()) {
+      // Offline: the next downloaded song; at the end, the first again
+      // under repeat all, else stop (no similar songs to fetch).
+      if (auto && repeatRef.current === 'one' && isKept(q[i]?.Id)) return skipTo(i);
+      const j = q.findIndex((t, k) => k > i && isKept(t.Id));
+      if (j >= 0) return skipTo(j);
+      const first = q.findIndex((t) => isKept(t.Id));
+      if (repeatRef.current === 'all' && first >= 0) return skipTo(first);
+      await stopOn(deviceRef.current).catch(() => {});
+      anchorAt(0, false); setPlaying(false);
+      return undefined;
+    }
     if (auto && repeatRef.current === 'one') return skipTo(i); // replay the track
     if (i + 1 < q.length) return skipTo(i + 1);
     // Nothing left.
@@ -888,12 +918,12 @@ export function usePlayer(jf) {
 
   // Both route to the active player while mirroring: the queue lives there.
   const next = useCallback(() => {
-    const act = activePlayerRef.current;
+    const act = isOffline() ? null : activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'next' }); return; }
     advanceRef.current(false);
   }, []);
   const previous = useCallback(() => {
-    const act = activePlayerRef.current;
+    const act = isOffline() ? null : activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'previous' }); return; }
     // Match the usual convention: restart the track unless we are near its start.
     if (positionRef.current > 3) {
@@ -902,16 +932,24 @@ export function usePlayer(jf) {
       if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) { el.currentTime = 0; anchorAt(0, playingRef.current); return; }
       return skipTo(indexRef.current);
     }
+    if (isOffline()) {
+      // The previous downloaded song (or this one again).
+      const q = queueRef.current;
+      let j = indexRef.current - 1;
+      while (j >= 0 && !isKept(q[j]?.Id)) j--;
+      return skipTo(j >= 0 ? j : indexRef.current);
+    }
     return skipTo(indexRef.current - 1);
   }, [skipTo, anchorAt]);
 
   const toggle = useCallback(async () => {
     // As in playQueue: a play pressed before the roster arrived would claim
     // the session from the device that is playing.
-    const waited = !!relayRef.current && !relayRef.current.rosterSeen;
+    const off = isOffline();
+    const waited = !off && !!relayRef.current && !relayRef.current.rosterSeen;
     if (waited) await relayRef.current.whenRoster(3000);
     const dev = deviceRef.current;
-    const act = activePlayerRef.current || (waited ? activeFromRoster() : null);
+    const act = off ? null : activePlayerRef.current || (waited ? activeFromRoster() : null);
     // For another device: ask for the opposite of what is shown, never a
     // flip. A play that took a few seconds to land got a second tap, and two
     // flips arriving together played and paused again (2026-10-08, Node).
@@ -1648,11 +1686,13 @@ export function usePlayer(jf) {
     const ahead = [q[i + 1], q[i + 2]].filter(Boolean).map((x) => x.Id);
     if (!ahead.length && repeatRef.current === 'all' && q[0]) ahead.push(q[0].Id);
     const nextItem = q[i + 1] || (repeatRef.current === 'all' ? q[0] : null);
+    // Downloaded songs around the playhead, ready as object URLs.
+    keepLocal([cur.Id, nextItem?.Id, ...ahead].filter((id) => id && isKept(id)));
     if (jf.streamMode?.() === 'hls') {
       const ms = (t) => (t?.RunTimeTicks ? t.RunTimeTicks / 10000 : 0);
-      trackCache?.keep([{ id: cur.Id, durationMs: ms(cur) }, nextItem && { id: nextItem.Id, durationMs: ms(nextItem) }]);
+      trackCache?.keep([!isKept(cur.Id) && { id: cur.Id, durationMs: ms(cur) }, nextItem && !isKept(nextItem.Id) && { id: nextItem.Id, durationMs: ms(nextItem) }]);
     }
-    if (!ahead.length) return;
+    if (!ahead.length || isOffline()) return;
     const bake = bakeNorm(nextItem || cur);
     jf.warm?.(ahead, bake);
     jf.prewarm?.(ahead[0], { gain: bake && nextItem ? gainDbFor(nextItem) : 0 });

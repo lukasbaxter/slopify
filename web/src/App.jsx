@@ -17,6 +17,8 @@ import { search as relaySearch, popular as relayPopular, likes as relayLikes, pl
 import { likesLoad, likesSet, likesSnapshot, likedIds, likesReady, isLiked, useLikesVersion } from './api/likes.js';
 import { offsetsMerge } from './api/offsets.js';
 import { canSaveOffline, subscribeOffline, flushOfflinePlays } from './api/offline.js';
+import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
+import { readLib } from './offline/store.js';
 
 // Everything goes through music.baxtergroup.io (Let's Encrypt on the origin,
 // Cloudflare proxy deliberately off -- it throttles the audio). The browser
@@ -377,6 +379,7 @@ export default function App() {
   const canForward = histRef.current.idx < histRef.current.stack.length - 1;
   // null | 'npv' | 'queue' | 'lyrics'
   const [panel, setPanel] = useState(null);
+  const offlineMode = useOfflineMode();
   const player = usePlayer(jf);
 
   // Restore a saved session, but only if the token still works.
@@ -972,14 +975,17 @@ export default function App() {
   }, [player.volume, player.volumeStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Songs saved on the phone (api/offline.js): say when a download is done,
-  // and report plays made in the offline player once back online.
+  // and report plays made offline once the server answers again.
   useEffect(() => {
     if (!jf || !canSaveOffline()) return undefined;
-    return subscribeOffline((s, d) => {
+    const flush = () => { if (!isOffline()) readLib().then((lib) => flushOfflinePlays(jf, lib.plays)).catch(() => {}); };
+    flush();
+    const offNet = subscribeNet(flush);
+    const offDl = subscribeOffline((s, d) => {
       const f = d?.finished;
       if (f) notify(f.failed ? `${f.name}: ${f.done} of ${f.total} songs downloaded, ${f.failed} failed (Update download to retry)` : `${f.name} is ready offline (${f.done} songs)`, 5000);
-      if (s.plays?.length) flushOfflinePlays(jf, s.plays);
     });
+    return () => { offNet(); offDl(); };
   }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Phone viewport diagnostics, logged by the relay (installed web app layout
@@ -1180,6 +1186,7 @@ export default function App() {
   const detailTitle = detail?.item?.Name || (seeAll === 'albums' ? 'Albums' : seeAll === 'artists' ? 'Artists' : '');
   return (
     <div className={`app ${isMobile ? 'mobile' : ''} ${mobileDetail ? 'mobile-detail' : ''} ${isMobile ? (mobileLib ? 'tab-library' : mobileDetail ? 'tab-detail' : `tab-${view}`) : ''}`}>
+      {offlineMode && <div className="offline-banner">Offline. Only downloaded music plays.</div>}
       {mobileDetail && (
         // Spotify's detail header: a round back chevron floating over the hero
         // that becomes a solid bar carrying the title once the hero scrolls away.

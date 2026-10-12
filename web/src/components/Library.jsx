@@ -4,7 +4,8 @@ import ContextMenu from './ContextMenu.jsx';
 import { ctxOf } from '../api/context.js';
 import { downloadPlaylistZip } from '../api/download.js';
 import { primeKeepAlive } from '../player/keepalive.js';
-import { canSaveOffline, useOffline, saveOffline, removeOffline, estimateBytes, savesLossless } from '../api/offline.js';
+import { useOfflineMode, isOffline } from '../offline/net.js';
+import { canSaveOffline, useOffline, saveOffline, removeOffline, searchOffline, estimateBytes, savesLossless } from '../api/offline.js';
 import { vibrantColor } from '../api/colors.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
@@ -190,6 +191,7 @@ export default function Library({
   const [results, setResults] = useState(null);
   const phone = usePhone();
   const offline = useOffline();
+  const offlineMode = useOfflineMode();
   // Phone search: tapping the field enters Spotify's focus mode (Cancel at the
   // right, browse tiles hidden, recent searches shown) until Cancel or leaving
   // the tab. Blur alone does not end it: taps on the recents would be lost.
@@ -224,7 +226,7 @@ export default function Library({
     try {
       const items = await jf.instantMix(seed.Id, 50);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
-    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+    } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   // Your Top Songs <year>: the year's most played songs (server ranks the
   // account's own plays), shown like a Daily Mix.
@@ -234,7 +236,7 @@ export default function Library({
     try {
       const items = await jf.topSongs(y.year);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
-    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+    } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   const openRadar = async () => {
     setDetail({ item: { Id: 'radar', Name: 'Release Radar', Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
@@ -491,7 +493,7 @@ export default function Library({
     let alive = true;
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      relaySearch(jf, query.trim(), { signal: ctrl.signal }).then((r) => { if (alive) { setResults(r); setErr(null); setHi(-1); } }).catch((e) => { if (alive && e.name !== 'AbortError') setErr(e.message); });
+      (isOffline() ? searchOffline(query.trim()) : relaySearch(jf, query.trim(), { signal: ctrl.signal })).then((r) => { if (alive) { setResults(r); setErr(null); setHi(-1); } }).catch((e) => { if (alive && e.name !== 'AbortError') setErr(e.message); });
     }, 60);
     return () => { alive = false; ctrl.abort(); clearTimeout(t); };
   }, [query, jf, view]);
@@ -659,7 +661,7 @@ export default function Library({
             <div style={{ minWidth: 0 }}>
               <div className="kind">Genre</div>
               <FittedTitle text={item.Name} maxLines={2} />
-              <p className="hero-meta">{hub ? `${(hub.trackCount || 0).toLocaleString()} songs • ${(hub.albumCount || 0).toLocaleString()} albums` : tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : detail.loadFailed ? 'Couldn’t load this — try again' : 'Nothing in this genre yet'}</p>
+              <p className="hero-meta">{hub ? `${(hub.trackCount || 0).toLocaleString()} songs • ${(hub.albumCount || 0).toLocaleString()} albums` : tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : detail.loadFailed ? (offlineMode ? 'Not available offline' : 'Couldn’t load this — try again') : 'Nothing in this genre yet'}</p>
             </div>
           </header>
           <div className="actions">
@@ -1031,6 +1033,17 @@ export default function Library({
       );
     }
 
+    // Offline, an artist never opened with a connection: nothing to show
+    // (the page would sit on its skeleton title for good).
+    if (isArtist && offlineMode && !detail.loading && !item.Name) {
+      return (
+        <div className="content offline-empty">
+          <h2>Not available offline</h2>
+          <p>Open this artist once with a connection, and they show up here offline too.</p>
+        </div>
+      );
+    }
+
     // Phone: no black "dots" pane between pages; the page slides in with a
     // skeleton title and the cover, and fills as the data lands.
     if (detail.loading && !item.Name && !phone) {
@@ -1176,7 +1189,10 @@ export default function Library({
                 if (!player.playing) primeKeepAlive();
                 const gb = estimateBytes(tracks, savesLossless(jf)) / 1e9;
                 if (!held && gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download for offline?`)) return;
-                try { await saveOffline(jf, item, okind, tracks); notify?.(held ? 'Downloading the rest' : `Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000); }
+                try {
+                  const when = await saveOffline(jf, item, okind, tracks);
+                  notify?.(when === 'later' ? 'You’re offline. It downloads when you’re back online.' : held ? 'Downloading the rest' : `Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000);
+                }
                 catch (e) { notify?.(e.message, 5000); }
               };
               const remove = async () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this device?`)) { await removeOffline(item.Id); notify?.('Download removed'); } };
@@ -1245,17 +1261,20 @@ export default function Library({
                   const label = busy ? `Downloading ${have} of ${total}` : full ? 'Downloaded' : held ? `Downloaded ${have} of ${tracks.length}` : 'Download for offline';
                   return (
                     <>
+                      <span className="dlwrap">
                       <button className={`iconbtn dlbtn ${held ? 'on' : ''}`} onClick={busy ? undefined : full ? dl.remove : dl.download} title={full ? 'Remove download' : label} aria-label={label}>
                         <DownloadGlyph state={busy ? 'busy' : full ? 'done' : held ? 'part' : 'none'} progress={total ? have / total : 0} />
                       </button>
+                      {/* Under the button, out of the row's flow: the buttons beside it never move. */}
                       {(busy || (held && !full)) && <span className="dl-status">{busy ? `${have}/${total}` : `${have}/${tracks.length}`}</span>}
+                      </span>
                     </>
                   );
                 })()}
                 <button className="iconbtn more" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHeroMenu({ x: r.left, y: r.bottom + 4 }); }} title={`More options for ${item.Name}`}>
                   <Dots />
                 </button>
-                {heroMenu && <ContextMenu x={heroMenu.x} y={heroMenu.y} items={heroItems} onClose={() => setHeroMenu(null)} header={heroHeader} />}
+                {heroMenu && <ContextMenu x={heroMenu.x} y={heroMenu.y} items={offlineMode ? heroOffline(heroItems) : heroItems} onClose={() => setHeroMenu(null)} header={heroHeader} />}
                 {!isArtist && tracks.length > 8 && (
                   <label className="within" title="Search in this list">
                     <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M7 1.75a5.25 5.25 0 1 0 0 10.5 5.25 5.25 0 0 0 0-10.5zM.25 7a6.75 6.75 0 1 1 12.096 4.12l3.184 3.185a.75.75 0 1 1-1.06 1.06L11.284 12.18A6.75 6.75 0 0 1 .25 7z" /></svg>
@@ -1349,7 +1368,7 @@ export default function Library({
                   <section className="releases">
                     <div className="shelf-head"><h2>Popular releases</h2></div>
                     {dg === null && !top.length && <p className="placeholder-note">Loading…</p>}
-                    {dg?.failed && <p className="placeholder-note">Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></p>}
+                    {dg?.failed && <p className="placeholder-note">{offlineMode ? 'Not available offline.' : <>Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></>}</p>}
                     {top.map(({ key, r, type, year, inLib }) => (
                       <div key={key} className={`release ${inLib ? '' : 'missing'}`} role="button" tabIndex={0}
                         onClick={inLib ? () => openAlbum({ Id: inLib, Name: r.localName || r.title }) : undefined}
@@ -1374,7 +1393,7 @@ export default function Library({
                     <h2>Discography</h2>
                     {dg === null ? <span className="settings-hint">Loading…</span> : all.length ? <span className="settings-hint">{have} of {all.length} in your library</span> : null}
                   </div>
-                  {dg?.failed && <p className="placeholder-note">Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></p>}
+                  {dg?.failed && <p className="placeholder-note">{offlineMode ? 'Not available offline.' : <>Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></>}</p>}
                   <div className="disco-filters">
                     <div className="pills">
                       {libPills.map(([k, label]) => (
@@ -1451,7 +1470,7 @@ export default function Library({
             )}
             {tracks.length === 0 && !detail.loading && (
               <p className="placeholder-note">
-                {detail.loadFailed ? 'Couldn’t load this — try again.'
+                {detail.loadFailed ? (offlineMode ? 'Not available offline. Open it once with a connection, or download it.' : 'Couldn’t load this — try again.')
                   : isLiked ? 'Songs you like will appear here. Save songs by tapping the heart icon.'
                   : isPlaylist ? 'This playlist is empty.'
                   : kind === 'Album' ? 'This album is empty.'
@@ -1492,7 +1511,7 @@ export default function Library({
                 )}
               />
             ); })()}
-            {isPlaylist && !isLiked && !item._mix && !detail.loading && !within.trim() && (() => {
+            {isPlaylist && !isLiked && !item._mix && !detail.loading && !within.trim() && !offlineMode && (() => {
               const rec = reco[item.Id];
               if (!rec || (rec.items && rec.items.length === 0)) return null;
               return (
@@ -1896,6 +1915,14 @@ export default function Library({
     />
   );
 }
+
+// A list's menu offline: what works without the server (queueing, going to
+// the artist, the download itself: removing it, or saving it for later).
+const HERO_OFFLINE = /^(Add to queue|Go to artist|Remove download|Download for offline|Update download)/;
+const heroOffline = (items) => {
+  const kept = items.filter((it) => it && (it.sep || HERO_OFFLINE.test(it.label || '')));
+  return kept.filter((it, i) => !it.sep || (i > 0 && i < kept.length - 1 && !kept[i - 1].sep));
+};
 
 // The header's download button: an outline circle with an arrow; a ring
 // that fills as songs arrive; a filled green circle once all are here.

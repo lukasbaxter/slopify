@@ -116,6 +116,24 @@ function MenuIco({ d }) {
 // .player-row on the phone: the device sheet, its menus, sliders).
 const NOT_A_SWIPE = '.devicemenu, .ctxmenu, .ctxmenu-scrim, input, .dm-volume';
 
+// Offline (offline/net.js): a small pill just above the player bar, out of
+// the page's flow, so nothing on the page moves or is covered at the top.
+function OfflinePill() {
+  const [bottom, setBottom] = useState(null);
+  useEffect(() => {
+    const place = () => {
+      const bar = document.querySelector('.player');
+      const r = bar?.getBoundingClientRect();
+      setBottom(r && r.height ? Math.round(window.innerHeight - r.top + 8) : 16);
+    };
+    place();
+    const t = setInterval(place, 1000); // the bar moves with the keyboard, the queue sheet...
+    window.addEventListener('resize', place);
+    return () => { clearInterval(t); window.removeEventListener('resize', place); };
+  }, []);
+  return <div className="offline-banner" role="status" style={{ bottom: bottom ?? 16 }}>Offline · downloaded music only</div>;
+}
+
 export default function App() {
   const [jf, setJf] = useState(null);
   const [devices, setDevices] = useState([]);
@@ -133,6 +151,10 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [me, setMe] = useState(null);
   const [avatarOk, setAvatarOk] = useState(true);
+  // A picture that failed before its error handler or the reset below ran
+  // (an account with none answers 404 at once): caught when it mounts, so
+  // the initial shows instead of a broken image.
+  const avatarFailedRef = (el) => { if (el && el.complete && el.naturalWidth === 0) setAvatarOk(false); };
   const [userMenu, setUserMenu] = useState(false);
   const drawerSwipe = useRef(null);
   // Desktop app updates (desktop/electron/updater.js): shown in the profile menu.
@@ -1199,7 +1221,7 @@ export default function App() {
   const detailTitle = detail?.item?.Name || (seeAll === 'albums' ? 'Albums' : seeAll === 'artists' ? 'Artists' : '');
   return (
     <div className={`app ${isMobile ? 'mobile' : ''} ${mobileDetail ? 'mobile-detail' : ''} ${isMobile ? (mobileLib ? 'tab-library' : mobileDetail ? 'tab-detail' : `tab-${view}`) : ''}`}>
-      {offlineMode && <div className="offline-banner">Offline. Only downloaded music plays.</div>}
+      {offlineMode && <OfflinePill />}
       {mobileDetail && (
         // Spotify's detail header: a round back chevron floating over the hero
         // that becomes a solid bar carrying the title once the hero scrolls away.
@@ -1243,7 +1265,7 @@ export default function App() {
           <div className="avatarwrap">
             <button className="avatar" onClick={() => setUserMenu((v) => !v)} title={me?.Name || 'Account'}>
               {avatarOk ? (
-                <img key={avatarV} src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} />
+                <img key={avatarV} src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} ref={avatarFailedRef} />
               ) : (
                 (me?.Name || '?').slice(0, 1).toUpperCase()
               )}
@@ -1268,7 +1290,7 @@ export default function App() {
                 onTouchEnd={() => { drawerSwipe.current = null; }}
               >
                 <button className="who" onClick={() => { setUserMenu(false); openProfile(); }}>
-                  <span className="who-avatar">{avatarOk ? <img src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} /> : (me?.Name || '?').slice(0, 1).toUpperCase()}</span>
+                  <span className="who-avatar">{avatarOk ? <img src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} ref={avatarFailedRef} /> : (me?.Name || '?').slice(0, 1).toUpperCase()}</span>
                   <span className="who-text"><b>{me?.Name || 'Signed in'}</b><small>View profile</small></span>
                 </button>
                 <div className="sub">{jf.baseUrl.replace(/^https?:\/\//, '')}</div>

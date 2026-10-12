@@ -3,6 +3,7 @@ import { useOffset } from '../api/offsets.js';
 import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph } from './TrackRow.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import { isLiked } from '../api/likes.js';
+import { useOfflineMode } from '../offline/net.js';
 import { syncLyrics, useLyricJob, jobLabel } from '../api/lyricsync.js';
 
 // This song's lyrics being synced: what stage it is at.
@@ -290,6 +291,7 @@ function phoneLines(lines) {
  * of what most clones do.
  */
 export function Lyrics({ player, jf }) {
+  const offline = useOfflineMode();
   const { position } = player;
   // Follow the session-wide track, not just this client's own queue item, so
   // lyrics load and stay in sync even when we are mirroring another device
@@ -372,6 +374,8 @@ export function Lyrics({ player, jf }) {
   if (state === 'idle') return <p className="placeholder-note">Play something to see lyrics.</p>;
   if (state === 'none') {
     if (job) return <SyncBanner job={job} />;
+    // Offline: lyrics come with a download; finding them needs the server.
+    if (offline) return <div className="placeholder-note"><p>Lyrics aren&rsquo;t available offline for this song.</p></div>;
     return (
       <div className="placeholder-note">
         <p>Looks like we don&rsquo;t have the lyrics for this song.</p>

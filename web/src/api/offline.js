@@ -7,6 +7,7 @@
 // offline (reported once back online).
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import * as store from '../offline/store.js';
+import { isOffline } from '../offline/net.js';
 
 // The desktop app loads the build from disk (no service worker); the old
 // phone app's WebView has none either.
@@ -77,6 +78,7 @@ export async function saveOffline(jf, item, kind, tracks) {
       ? { q: 'original', url: songUrl(jf, t.Id, 'original') }
       : { q: profile, norm, url: songUrl(jf, t.Id, profile, norm) }),
     coverUrl: t.AlbumId ? coverUrl(jf, t.AlbumId) : null,
+    lyricsUrl: jf._url(`/api/lyrics/${t.Id}`),
   }));
   const collection = { id: item.Id, name: item.Name, kind, coverUrl: kind === 'liked' || kind === 'album' ? null : jf.imageUrl(item.Id, { maxHeight: 320, full: true }) };
   // Room for it? (Safari gives an installed app a large share of the disk.)
@@ -85,10 +87,32 @@ export async function saveOffline(jf, item, kind, tracks) {
     const need = estimateBytes(tracks, lossless);
     if (est?.quota && est.quota - (est.usage || 0) < need) throw new Error(`Not enough room: needs about ${(need / 1e9).toFixed(1)} GB, ${((est.quota - (est.usage || 0)) / 1e9).toFixed(1)} GB free`);
   } catch (e) { if (/Not enough room/.test(e.message)) throw e; }
-  await store.save(collection, list);
+  // Offline: remembered now, downloaded once the server answers (resumeOffline).
+  const defer = isOffline();
+  await store.save(collection, list, { defer });
+  return defer ? 'later' : 'now';
 }
 
 export const removeOffline = (id) => store.removeCollection(id);
+
+/**
+ * Search with no connection: the downloaded songs whose title, artist or
+ * album has every word typed, in the shape the search page shows (songs only).
+ */
+export async function searchOffline(q) {
+  const lib = await store.readLib();
+  const words = String(q).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(Boolean);
+  const fold = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const tracks = Object.entries(lib.tracks)
+    .filter(([, t]) => t.file)
+    .filter(([, t]) => { const hay = fold(`${t.title} ${t.artist} ${t.album}`); return words.every((w) => hay.includes(w)); })
+    .slice(0, 50)
+    .map(([id, t]) => ({
+      Id: id, Name: t.title, Type: 'Audio', Artists: String(t.artist || '').split(', ').filter(Boolean), ArtistItems: [],
+      Album: t.album, AlbumId: t.albumId, AlbumArtist: t.artist, RunTimeTicks: (t.durationMs || 0) * 1e4, ImageTags: {}, UserData: { IsFavorite: false },
+    }));
+  return { engine: 'offline', tookMs: 0, chips: [], scoped: false, top: tracks[0] ? { kind: 'Song', item: tracks[0] } : null, tracks, albums: [], artists: [], playlists: [] };
+}
 
 /**
  * Once the server answers (app start, back online): finish downloads that
@@ -100,7 +124,7 @@ export async function resumeOffline(jf) {
   if (resuming || !canSaveOffline() || !jf?.token) return;
   resuming = true;
   try {
-    await store.resume((id, t) => ({ song: songUrl(jf, id, t.q || 'aac-320', t.norm), cover: t.albumId ? coverUrl(jf, t.albumId) : null }));
+    await store.resume((id, t) => ({ song: songUrl(jf, id, t.q || 'aac-320', t.norm), cover: t.albumId ? coverUrl(jf, t.albumId) : null, lyrics: jf._url(`/api/lyrics/${id}`) }));
     await store.backfillCovers((albumId) => coverUrl(jf, albumId));
   } catch { /* next time */ } finally { resuming = false; }
 }

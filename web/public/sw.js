@@ -17,6 +17,7 @@ const API = 'slopify-api';
 const SONGS = 'slopify-offline';
 const KEEP = new Set([SHELL, API, SONGS]);
 const SCOPE = self.registration.scope;
+const PLACEHOLDER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#282828"/><path d="M58 30v30.5a9 9 0 1 1-4-7.5V36l-14 3.5v25a9 9 0 1 1-4-7.5V35.5L58 30z" fill="#7f7f7f"/></svg>';
 const INDEX = new URL('./', SCOPE).href;
 
 async function cacheShell() {
@@ -82,15 +83,18 @@ async function api(req) {
 // (/offline/cover/<albumId> or /offline/cover/col-<playlistId>).
 async function cover(req, id) {
   try {
+    // What the server says goes (a 404 is "no cover", not "offline"); only
+    // no answer, or the server erroring, falls back to the kept copy.
     const res = await withTimeout(fetch(req), 8000);
-    if (res.ok || res.status === 304) return res;
+    if (res.status < 500) return res;
     throw new Error(String(res.status));
   } catch (err) {
     const c = await caches.open(SONGS);
     const hit = (await c.match(`/offline/cover/${encodeURIComponent(id)}`)) || (await c.match(`/offline/cover/${encodeURIComponent(`col-${id}`)}`));
-    // None kept: an answer, not a network error, so the page's own
-    // missing-image handling runs.
-    return hit || new Response('', { status: 504, statusText: String(err?.message || 'offline') });
+    // None kept: a plain dark square with a note (Spotify's empty cover), the
+    // same box as any cover, instead of the browser's broken-image glyph.
+    // Not cached anywhere; back online the app asks again with new URLs.
+    return hit || new Response(PLACEHOLDER, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store', 'X-Slopify-Offline': '1' } });
   }
 }
 

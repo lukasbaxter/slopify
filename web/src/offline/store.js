@@ -145,6 +145,9 @@ async function runJob(job) {
         cover = coverKey(u.albumId);
         if (!(await cache.match(cover))) { try { await fetchInto(cache, u.cover, cover); } catch { cover = null; } }
       }
+      // The song's lyrics: fetched through the service worker, which keeps the
+      // answer like any API answer (sw.js), so they show offline too.
+      if (bytes && u.lyrics) await fetch(u.lyrics).catch(() => {});
       if (bytes) {
         await update((lib) => { const t = lib.tracks[id]; if (t) { t.file = songKey(id); t.bytes = bytes; t.cover = cover; } });
         done++;
@@ -197,12 +200,14 @@ export async function backfillCovers(coverUrlFor) {
 }
 
 // col: { id, name, kind, coverUrl }; tracks: [{ id, title, artist, album, albumId, durationMs, q, norm, url, coverUrl }]
-export async function save(col, tracks) {
+// defer: only remember it (offline); resume() downloads it once online.
+export async function save(col, tracks, { defer = false } = {}) {
   // Ask the browser not to clear these under storage pressure.
   try { await navigator.storage?.persist?.(); } catch { /* not offered */ }
   const entry = { ...col, cover: col.coverUrl ? coverKey(`col-${col.id}`) : null };
   const missing = await update((lib) => upsert(lib, entry, tracks));
-  const urls = Object.fromEntries(tracks.map((t) => [t.id, { song: t.url, cover: t.coverUrl, albumId: t.albumId }]));
+  const urls = Object.fromEntries(tracks.map((t) => [t.id, { song: t.url, cover: t.coverUrl, albumId: t.albumId, lyrics: t.lyricsUrl }]));
+  if (defer) { changed(); return; }
   const job = { col: entry, ids: missing, urls, total: new Set(tracks.map((t) => t.id)).size };
   const queued = jobs.findIndex((j) => j.col.id === col.id);
   if (queued >= 0) jobs[queued] = job; else jobs.push(job);

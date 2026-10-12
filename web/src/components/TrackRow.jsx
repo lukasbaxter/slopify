@@ -177,6 +177,14 @@ const DownloadedMark = () => (
   <svg className="dl-mark" viewBox="0 0 16 16" width="12" height="12" aria-label="Downloaded"><circle cx="8" cy="8" r="8" fill="currentColor" /><path d="M8 4v6m0 0L5.5 7.5M8 10l2.5-2.5" stroke="#000" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
+// The offline subset of a menu: going places, and queueing when the song is
+// downloaded; separators tidied so none leads, trails or doubles.
+const OFFLINE_OK = new Set(['Go to artist', 'Go to album', 'Add to queue']);
+export function offlineMenu(items, playable = true) {
+  const kept = items.filter((it) => it && (it.sep || (OFFLINE_OK.has(it.label) && (it.label !== 'Add to queue' || playable))));
+  return kept.filter((it, i) => !it.sep || (i > 0 && i < kept.length - 1 && !kept[i - 1].sep));
+}
+
 export default function TrackRow({
   track, n, active, isPlaying = false, onPlay, onRowOpen, onToggle, onLike, playlists = [], onAddTo, onNewPlaylist,
   onRemove, draggable = false, onDragStart, onDragOver, onDrop, showArt = false, jf,
@@ -192,12 +200,13 @@ export default function TrackRow({
   const liked = useLiked(track.Id);
   const kept = useDownloaded(track.Id);
   // Offline, only downloaded songs can play: the rest grey out (Spotify's way).
-  const unavailable = useOfflineMode() && !kept;
+  const offline = useOfflineMode();
+  const unavailable = offline && !kept;
   const excluded = track.UserData?.Likes === false;
   const artistsOf = track.ArtistItems?.length ? track.ArtistItems : (track.Artists || []).map((n2) => ({ Name: n2 }));
 
   // Spotify's row menu, top to bottom. Submenus open on hover.
-  const menuItems = [
+  const allItems = [
     onAddToQueue ? { label: 'Add to queue', icon: I.queue, onClick: () => onAddToQueue(track) } : null,
     { label: 'Add to playlist', icon: I.plus, sub: [
       { label: 'New playlist', icon: I.plus, onClick: () => onNewPlaylist?.(track) },
@@ -220,6 +229,9 @@ export default function TrackRow({
     onDownload ? { sep: true } : null,
     onDownload ? { label: 'Download', icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: f.label, onClick: () => onDownload(track, f.id) })) } : null,
   ];
+  // Offline: only what works without the server (queueing a downloaded
+  // song, going to its artist or album).
+  const menuItems = offline ? offlineMenu(allItems, kept) : allItems;
   const openMenuAt = (e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); };
 
   return (

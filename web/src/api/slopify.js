@@ -86,6 +86,9 @@ export class Slopify {
         const res = await fetch(`${this.baseUrl}${path}`, { ...opts, body: raw || opts.body, signal: ctrl.signal, headers });
         noteResponse(res); // live server, or the service worker's kept copy (offline)
         if (!res.ok) {
+          // The service worker's "offline" answer (sw.js): one plain message
+          // for every screen, not "503: offline".
+          if (res.headers.get('X-Slopify-Offline')) throw Object.assign(new Error('Not available offline'), { status: 503, offline: true });
           const body = await res.text().catch(() => '');
           let msg = body; try { msg = JSON.parse(body).error || body; } catch { /* plain */ }
           const err = new Error(`${res.status}${msg ? `: ${String(msg).slice(0, 180)}` : ''}`);
@@ -97,9 +100,10 @@ export class Slopify {
         // body stalls (a phone changing networks) would otherwise hang forever.
         return res.status === 204 ? null : await res.json();
       } catch (e) {
-        if (e instanceof TypeError && !opts.signal?.aborted) setOffline(true); // could not connect
+        const unreachable = e instanceof TypeError && !opts.signal?.aborted; // could not connect
+        if (unreachable) setOffline(true);
         const transient = e.retry || e.name === 'AbortError' || e instanceof TypeError;
-        if (!transient || attempt >= retries) throw e;
+        if (!transient || attempt >= retries) throw unreachable ? Object.assign(new Error('You’re offline'), { offline: true }) : e;
         attempt += 1;
         await new Promise((r) => setTimeout(r, 800 * attempt));
       } finally { clearTimeout(timer); }

@@ -41,7 +41,7 @@ export const LADDER: [string, number][] = [['aac-96', 125000], ['aac-160', 20000
 // segment is ~50 KB, a fifth of 320k) and steps up as segments arrive faster
 // than they play, back down on a weak signal. All rungs are AAC-LC cut at
 // the same frame boundaries, so a switch mid-song is seamless.
-export function masterPlaylist(max: string, gain: number, tok: string) {
+export function masterPlaylist(max: string, gain: number | null | undefined, tok: string) {
   const top = LADDER.findIndex(([p]) => p === max);
   const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
   for (const [profile, bw] of LADDER.slice(0, (top < 0 ? LADDER.length - 1 : top) + 1)) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${variantName(profile, gain)}/index.m3u8?${tok}abr=1`);

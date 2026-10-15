@@ -10,6 +10,9 @@ import { isOffline } from '../offline/net.js';
 // among possibly several (the relay numbers those for the OTHER clients).
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
+// The web app opened from the home screen (iOS: navigator.standalone): its own
+// process like the phone app, suspended the same way once nothing plays.
+const IN_STANDALONE = typeof window !== 'undefined' && (window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
 // iPhone / iPad: the element plays straight to the speaker, never through Web
 // Audio. Locked, a track change left the element playing (clock running) into
 // a graph iOS had stopped: silence, the lock screen showing paused, and play
@@ -2380,12 +2383,15 @@ export function usePlayer(jf) {
   const msRemote = !msLocal && !!nowPlaying;
   const msRefs = useRef({});
   const lastToldRef = useRef('');
-  // Phone app: the lock-screen player stays for 2 hours after the last music
-  // anywhere on the account. Without sound iOS suspends the app within a
-  // minute, the player leaves the lock screen and nothing can bring it back
-  // (a suspended app runs no code). So while nothing plays the silent
-  // stand-in keeps running: the app stays connected, and music started on any
-  // device shows up on the lock screen with working controls.
+  // Phone app and home-screen web app: the lock-screen player stays for 2
+  // hours after the last music anywhere on the account. Without sound iOS
+  // suspends the app within a minute, the player leaves the lock screen and
+  // nothing can bring it back (a suspended app runs no code): the AirPods'
+  // own play when they go back in, or a lock-screen play, reached nothing
+  // (10-15 01:48 UTC: paused by the headset, nothing until the app was
+  // opened). So while nothing plays the silent stand-in keeps running: the
+  // app stays connected, hears the headset, and music started on any device
+  // shows up on the lock screen with working controls.
   const stayUntilRef = useRef(0);
   if (shownPlaying) stayUntilRef.current = Date.now() + STAY_ON_LOCK_SCREEN_MS;
   const [, setStayTick] = useState(0);
@@ -2395,7 +2401,7 @@ export function usePlayer(jf) {
     const t = setTimeout(() => { mediaLog('lock screen hold: 2 h without music, letting go'); setStayTick((n) => n + 1); }, left + 100);
     return () => clearTimeout(t);
   }, [shownPlaying]);
-  const staying = IN_PHONE_APP && IS_IOS && (msLocal || msRemote) && Date.now() < stayUntilRef.current;
+  const staying = (IN_PHONE_APP || IN_STANDALONE) && IS_IOS && (msLocal || msRemote) && Date.now() < stayUntilRef.current;
   // The stand-in plays for a session playing elsewhere, and (phone app, within
   // the 2 hours) whenever this phone is not making the sound itself.
   // A download running (api/offline.js) on a phone: without sound iOS
@@ -2444,9 +2450,12 @@ export function usePlayer(jf) {
       // and reading that as play restarted music paused from another device,
       // again and again.
       if (r.playing === wantPlaying) { r.resync(); return; }
-      if (!r.remote && !r.holding) { if (wantPlaying) r.holdBridge(`lock screen play`); r.toggle(); return; }
-      // For another device (or the 2-hour hold): wait a second, dropped if
-      // the app is going away, then ask for the state, never a flip.
+      // Our own music, or a play for it while the stand-in holds the lock
+      // screen (the AirPods going back in, a lock-screen tap): at once.
+      if (!r.remote && (!r.holding || wantPlaying)) { if (wantPlaying) r.holdBridge(`lock screen play`); r.toggle(); return; }
+      // For another device (or a pause during the 2-hour hold): wait a
+      // second, dropped if the app is going away, then ask for the state,
+      // never a flip.
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);
       remotePauseHold.start(() => { msNote('sent'); msRefs.current.setPlaying(wantPlaying); });
     };

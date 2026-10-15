@@ -19,6 +19,12 @@ const KEEP = new Set([SHELL, API, SONGS]);
 const SCOPE = self.registration.scope;
 const PLACEHOLDER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#282828"/><path d="M58 30v30.5a9 9 0 1 1-4-7.5V36l-14 3.5v25a9 9 0 1 1-4-7.5V35.5L58 30z" fill="#7f7f7f"/></svg>';
 const INDEX = new URL('./', SCOPE).href;
+// The silent stand-in (web/src/player/keepalive.js): 9.6 MB of silence the
+// phone plays, by range requests, whenever it holds the lock screen after a
+// pause. Always the same bytes, so it is kept with the app and served from
+// here: not fetched again for every hold (29 MB an hour on a phone plan),
+// and there with no connection.
+const WAV = new URL('./keepalive.wav', SCOPE).href;
 
 async function cacheShell() {
   const res = await fetch(INDEX, { cache: 'no-store' });
@@ -31,8 +37,30 @@ async function cacheShell() {
   const c = await caches.open(SHELL);
   for (const [u, r] of got) await c.put(u, r);
   await c.put(INDEX, res);
-  const want = new Set([INDEX, ...assets]);
+  const want = new Set([INDEX, WAV, ...assets]);
   for (const k of await c.keys()) if (!want.has(k.url)) await c.delete(k);
+  if (!(await c.match(WAV))) await keepWav(c).catch(() => {});
+}
+async function keepWav(c) {
+  const r = await fetch(WAV, { cache: 'no-store' });
+  if (r.ok && /audio/i.test(r.headers.get('Content-Type') || '') && !portalPage(r)) await c.put(WAV, r);
+}
+// The stand-in's media, from the kept copy: the player asks for byte ranges
+// (the OS seeks it), answered as a server would (206 + Content-Range).
+async function wav(req) {
+  const c = await caches.open(SHELL);
+  let hit = await c.match(WAV);
+  if (!hit) { await keepWav(c).catch(() => {}); hit = await c.match(WAV); }
+  if (!hit) return fetch(req);
+  const blob = await hit.blob();
+  const size = blob.size;
+  const common = { 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('Range') || '');
+  if (!m) return new Response(blob, { headers: { ...common, 'Content-Length': String(size) } });
+  const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+  const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  if (!(start <= end && start < size)) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+  return new Response(blob.slice(start, end + 1), { status: 206, headers: { ...common, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) } });
 }
 
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(cacheShell().catch(() => {})); });
@@ -118,6 +146,7 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(withTimeout(fetch(req), 8000).then(async (r) => ((await notTheApp(r)) && (await caches.match(INDEX, { cacheName: SHELL })) ? app() : r)).catch(app));
     return;
   }
+  if (url.href === WAV) { e.respondWith(wav(req)); return; }
   if (url.pathname.includes('/assets/')) {
     const name = url.pathname.slice(url.pathname.lastIndexOf('/assets/'));
     e.respondWith(fetch(req).catch(async () => (await caches.match(new URL(`.${name}`, SCOPE).href, { cacheName: SHELL })) || Response.error()));

@@ -222,3 +222,47 @@ test('locked: a lock-screen next holds the silent bridge until the song sounds',
   expect(log).toContain('bridge on (lock screen next)');
   expect(log).toContain('bridge off (playing)');
 });
+
+// The web app from the home screen on an iPhone: paused, iOS suspends the app
+// within a minute of silence, and the AirPods' own play when they go back in
+// (a remote 'play', as from the lock screen) reached nothing: the music stayed
+// paused until the app was opened (10-15 01:48 UTC). The silent stand-in now
+// holds the app after a pause there too (the phone app's 2-hour hold), and
+// that play starts the music at once, not after the hold's 1 s wait.
+test('iPhone home-screen app: paused, the stand-in keeps the app alive and a headset play resumes at once', async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148' });
+  const page = await ctx.newPage();
+  // The stand-in's media comes from the service worker's kept copy, in
+  // byte ranges as the player asks (sw.js: no re-download for every hold,
+  // and there with no connection).
+  const wav: { status: number; sw: boolean }[] = [];
+  page.on('response', (r) => { if (r.url().endsWith('/keepalive.wav')) wav.push({ status: r.status(), sw: r.fromServiceWorker() }); });
+  await page.addInitScript(() => {
+    const w = window as any;
+    Object.defineProperty(navigator, 'standalone', { get: () => true, configurable: true });
+    w.__ms = {};
+    const ms = navigator.mediaSession as any;
+    const orig = ms.setActionHandler.bind(ms);
+    ms.setActionHandler = (a: string, fn: any) => { w.__ms[a] = fn; return orig(a, fn); };
+  });
+  await open(page);
+  const { ids } = await albumIds(page, 'First Light');
+  await play(page, ids, null);
+  await expect.poll(() => events(page).then((ev) => ev.some((e) => e.t === 'playing'))).toBe(true);
+  await page.mouse.click(5, 5); // a tap unlocks the stand-in, as on the phone
+  const ka = () => page.evaluate(() => (window as any).__conduitKeepAliveState?.());
+  await page.evaluate(() => (window as any).__player.toggle());
+  await expect.poll(async () => (await ka())?.wanted).toBe(true);
+  await expect.poll(async () => { const s = await ka(); return s.paused === false && s.ready >= 3; }, { timeout: 10000 }).toBe(true);
+  // The AirPods go back in: iOS sends the page a 'play'.
+  const before = (await events(page)).length;
+  const t0 = Date.now();
+  await page.evaluate(() => (window as any).__ms.play());
+  await expect.poll(async () => (await events(page)).slice(before).some((e) => e.t === 'playing' && e.track === ids[0])).toBe(true);
+  expect(Date.now() - t0).toBeLessThan(900);
+  await expect.poll(async () => (await ka())?.wanted, { timeout: 5000 }).toBe(false);
+  const log = await page.evaluate(() => ((window as any).__slopifyMediaLog || []).join('\n'));
+  expect(log).toContain('lock screen play');
+  await expect.poll(() => wav.some((r) => r.sw && r.status === 206), { timeout: 10000 }).toBe(true);
+  await ctx.close();
+});

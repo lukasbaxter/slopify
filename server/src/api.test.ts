@@ -91,13 +91,13 @@ describe('streaming', () => {
     expect(fs.existsSync(path.join(DATA, 'transcodes', tid, 'aac-160', 'done'))).toBe(true);
     expect((await get(`/api/stream/${tid}/hls/mp3-999/index.m3u8`)).statusCode).toBe(404);
   }, 60000);
-  it('offers every quality up to the chosen one, best first, carrying the token', async () => {
+  it('offers every quality up to the chosen one, lowest first, carrying the token', async () => {
     const id = (await get('/api/albums?limit=1')).json().items[0];
     const tid = (await get(`/api/albums/${id.id}`)).json().tracks[1].id;
     const top = (await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-320&token=${tok}`)).body;
-    expect(top.match(/^aac-\d+/gm)).toEqual(['aac-320', 'aac-160', 'aac-96']);
+    expect(top.match(/^aac-\d+/gm)).toEqual(['aac-96', 'aac-160', 'aac-320']);
     expect(top).toContain(`aac-320/index.m3u8?token=${tok}&abr=1`);
-    expect((await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160`)).body.match(/^aac-\d+/gm)).toEqual(['aac-160', 'aac-96']);
+    expect((await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160`)).body.match(/^aac-\d+/gm)).toEqual(['aac-96', 'aac-160']);
     expect((await get('/api/stream/nope/hls/master.m3u8')).statusCode).toBe(404);
   });
   it('normalization: measures a song, reports its gains, and bakes the gain into a phone transcode', async () => {
@@ -106,7 +106,7 @@ describe('streaming', () => {
     expect((await get(`/api/albums/${al.id}`)).json().tracks[2].gain).toEqual({ track: null, album: null });
     // Not measured yet: the plain stream, and the song is queued for measuring.
     const before = (await get(`/api/stream/${tid}/hls/master.m3u8?max=aac-160&norm=track`)).body;
-    expect(before.match(/^aac-\d+[^/]*/gm)).toEqual(['aac-160', 'aac-96']);
+    expect(before.match(/^aac-\d+[^/]*/gm)).toEqual(['aac-96', 'aac-160']);
     expect(await (app as any).measureTrack(tid)).toBe(true);
     const row = (await get(`/api/albums/${al.id}`)).json().tracks[2];
     // The fixtures are quiet sine tones (about -21 LUFS): turned up.

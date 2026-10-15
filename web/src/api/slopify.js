@@ -175,14 +175,16 @@ export class Slopify {
   // playlist comes back complete once it has), and the first segments are
   // fetched so they sit in the browser's disk cache. iOS's native HLS loader
   // reads that cache (it never writes it), so a warmed track starts without
-  // a round trip per segment. ~300 KB per warmed track at 320k.
+  // a round trip per segment. Always the start rung (96k, the first variant
+  // of every master playlist, so the one every start fetches): ~100 KB per
+  // warmed track.
   // gain: the normalization gain baked into the transcode (dB), when the
   // player has it applied by the server (iPhone); it names the cache variant.
   prewarm(itemId, { segments = 2, gain = 0 } = {}) {
     if (!itemId || this.streamMode() !== 'hls') return;
     const at = this._warm.get(itemId); if (at && Date.now() - at < 60000) return;
     this._warm.set(itemId, Date.now());
-    const variant = gain ? `${this._profile()}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : this._profile();
+    const variant = gain ? `${this._startProfile()}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : this._startProfile();
     const url = this._url(`/api/stream/${itemId}/hls/${variant}/index.m3u8`);
     const base = url.slice(0, url.lastIndexOf('/') + 1);
     const tok = url.includes('?') ? url.slice(url.indexOf('?')) : '';
@@ -201,14 +203,15 @@ export class Slopify {
     return this._fetch('/api/stream/warm', { method: 'POST', body: JSON.stringify({ ids, profile: this._profile(), norm }), timeoutMs: 8000 }).catch(() => null);
   }
   _profile() { return { high: 'aac-320', normal: 'aac-160', low: 'aac-96' }[this.quality] || 'aac-320'; }
+  _startProfile() { return 'aac-96'; }
   // norm ('track' | 'album'): have the server bake the normalization gain into
   // the transcode (HLS only: a player that cannot scale the audio itself).
   playbackUrl(itemId, { startAt = 0, norm = null } = {}) {
     const mode = this.streamMode();
     if (mode === 'file') return this.streamUrl(itemId);
-    // Adaptive up to the chosen quality: on a weak signal iOS drops to a
-    // lower one instead of stopping to buffer. (The first segments of the
-    // top quality are what prewarm() puts in the cache, so starts stay fast.)
+    // Adaptive: every start is on 96k (the first variant listed, the one
+    // prewarm() puts in the cache) and iOS climbs to the chosen quality as
+    // the link allows, back down on a weak signal instead of stopping.
     if (mode === 'hls') return this._url(`/api/stream/${itemId}/hls/master.m3u8`, norm ? { max: this._profile(), norm } : { max: this._profile() });
     return this.transcodeUrl(itemId, { codec: 'mp3', bitrate: { high: 320000, normal: 160000, low: 96000 }[this.quality], startAt });
   }

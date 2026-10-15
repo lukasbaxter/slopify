@@ -77,19 +77,40 @@ segments (no startup gain; it is the right container only if sample-accurate
 gapless matters, since TS cannot signal AAC encoder delay and Apple trims a
 fixed 2112 samples).
 
+## Start low, climb (2026-10-15)
+
+The master playlist (`masterPlaylist()` in `server/src/stream.ts`) lists the
+rungs **lowest first**: `aac-96`, then `aac-160`, then `aac-320`, up to the
+quality the account chose. iOS starts on the first variant listed, so every
+song begins on 96k (a 4 s segment is ~50 KB, a fifth of 320k) and AVFoundation
+steps up as segments arrive faster than they play, back down on a weak
+signal. Before this the ladder was best-first, so a phone on hotel wifi had to
+pull 4 s of 320k before a note played. The switch is seamless because all
+rungs are AAC-LC cut at the same frame boundaries.
+
+Not covered: a phone set to *Lossless (original file)* streams the FLAC with
+byte ranges and never sees the ladder at all (that was the Cancun report:
+FLAC at 900-1450 kbps, 20-30 s to start). Set the phone quality to Very high
+to get 96k starts that climb to 320k.
+
 ## Warming ahead
 
+- **Start rung first.** Every warm (session, client, nightly) queues the
+  `aac-96` start rung of each track before the profile it climbs to, so a
+  skip lands on the rung the phone will actually fetch first.
 - **From the session.** `server/src/session.ts` already receives each
   client's queue and index, so on every queue or now-playing message the
-  next three tracks are queued for transcode. This works for skips from the
+  next five tracks are queued for transcode. This works for skips from the
   lock screen or another client, not just taps in the app.
 - **From the client.** `POST /api/stream/warm { ids, profile }` for the next
-  two items, so the server uses the profile that client actually plays.
+  three items, so the server uses the profile that client actually plays.
 - **Low priority, bounded.** Warms run `nice -n 10`, two at a time, and a
   slot is held until ffmpeg *exits*. Freeing the slot as soon as a track was
   merely startable fanned out to ~30 encoders and spiked load to 16.
-- **Browser cache.** `jf.prewarm()` fetches the playlist (retrying until it
-  carries ENDLIST) and the first two segments with `fetch()`. WebKit stores
+- **Browser cache.** `jf.prewarm()` fetches the start rung's playlist
+  (retrying until it carries ENDLIST) and its first two segments with
+  `fetch()`, for the next three queue items, 3 s apart (each playlist fetch
+  is a short foreground transcode on the server). WebKit stores
   `fetch()` responses in the disk cache and the native HLS loader reads that
   cache, though its own downloads never write to it. Segments are therefore
   served `private, max-age=604800, immutable` with a `Content-Length`.
@@ -176,8 +197,13 @@ is no use in the car or the shower. Smart shuffle is now only about
   cannot reach either.
 - Sample-accurate gapless within an album would mean fMP4 segments, which
   carry the encoder delay in an edit list where MPEG-TS cannot.
-- Phones default to `aac-320`; `aac-160` would halve bytes-before-play, and
-  iOS exposes no way to detect cellular, so it would be a default change.
+- The whole-song downloads (`trackCache.js`, this song then the next at the
+  chosen quality) are held until the playing track has 12 s buffered ahead,
+  plays from memory already, or has run 45 s, so on a weak link they never
+  starve the start rung's segments. `keep(tracks, { hold: true })` settles
+  the wanted set at once; `resume()` opens the connection.
+- Segments are 4 s, so the smallest first fetch is 4 s of audio. A shorter
+  first segment on the 96k rung would be the next step if starts still lag.
 - Casting to a PS5 is impossible, not merely unbuilt: it has no Cast
   receiver, no DLNA renderer since the PS4, no usable browser and no
   third-party app SDK. Spotify works there because Sony ships its app. The

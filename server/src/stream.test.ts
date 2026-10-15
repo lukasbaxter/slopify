@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { syntheticPlaylist } from './stream.js';
+import { masterPlaylist, syntheticPlaylist } from './stream.js';
 import fixtures from './fixtures.hls-durations.json' with { type: 'json' };
 
 // The EXTINF sequences ffmpeg actually wrote for three real tracks (44.1, 48
@@ -23,4 +23,20 @@ describe('syntheticPlaylist', () => {
     });
   }
   it('is null without a duration', () => { expect(syntheticPlaylist(0, 44100)).toBeNull(); });
+});
+
+describe('masterPlaylist', () => {
+  const rungs = (pl: string) => [...pl.matchAll(/^(aac-[^/]+)\/index\.m3u8/gm)].map((m) => m[1]);
+  it('lists the lowest rung first and climbs to the chosen quality', () => {
+    expect(rungs(masterPlaylist('aac-320', 0, ''))).toEqual(['aac-96', 'aac-160', 'aac-320']);
+    expect(rungs(masterPlaylist('aac-160', 0, ''))).toEqual(['aac-96', 'aac-160']);
+    expect(rungs(masterPlaylist('aac-96', 0, ''))).toEqual(['aac-96']);
+  });
+  it('declares a rising BANDWIDTH per rung and carries the gain and token', () => {
+    const pl = masterPlaylist('aac-320', -5.2, 'token=abc&');
+    const bw = [...pl.matchAll(/BANDWIDTH=(\d+)/g)].map((m) => Number(m[1]));
+    expect(bw).toEqual([...bw].sort((a, b) => a - b));
+    expect(pl).toContain('aac-96g-5.2/index.m3u8?token=abc&abr=1');
+    expect(pl).toContain('#EXT-X-INDEPENDENT-SEGMENTS');
+  });
 });

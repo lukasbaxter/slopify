@@ -31,6 +31,22 @@ import { registerOffline } from './offline.js';
 import { gainFor, measure, refreshAlbumLoudness, saveTrackLoudness, type GainMode } from './loudness.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
+// Every start is on the lowest rung (see masterPlaylist): the one profile
+// that is warmed for everything coming up, before the profile it climbs to.
+export const START_PROFILE = 'aac-96';
+// The adaptive ladder, lowest first, with the BANDWIDTH each rung declares.
+export const LADDER: [string, number][] = [['aac-96', 125000], ['aac-160', 200000], ['aac-320', 400000]];
+// The master playlist for one song: every rung up to `max`, lowest first.
+// iOS starts on the first variant listed, so a song begins on 96k (a 4 s
+// segment is ~50 KB, a fifth of 320k) and steps up as segments arrive faster
+// than they play, back down on a weak signal. All rungs are AAC-LC cut at
+// the same frame boundaries, so a switch mid-song is seamless.
+export function masterPlaylist(max: string, gain: number, tok: string) {
+  const top = LADDER.findIndex(([p]) => p === max);
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
+  for (const [profile, bw] of LADDER.slice(0, (top < 0 ? LADDER.length - 1 : top) + 1)) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${variantName(profile, gain)}/index.m3u8?${tok}abr=1`);
+  return lines.join('\n') + '\n';
+}
 // A transcode variant: a profile, optionally with a volume-normalization gain
 // baked in (loudness.ts), e.g. 'aac-320g-5.2'. Each is its own cache dir.
 export function parseVariant(v: string): { profile: string; gain: number } | null {
@@ -312,14 +328,19 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const last = uid ? lastProfile.get(uid) : undefined;
     const prof = profile && PROFILES[profile] ? profile : last?.profile || 'aac-320';
     const norm = normArg !== undefined ? normArg : last?.norm ?? null;
-    for (const id of ids.slice(0, 10)) {
-      if (typeof id !== 'string') continue;
-      // Not measured yet: measure, then warm at the gain it turns out to need.
-      if (norm && unmeasured(id)) { measureSoon(id, () => warm(uid, [id], prof, norm)); continue; }
-      const v = variantFor(id, prof, norm);
-      if (warmQueue.some((w) => w.id === id && w.profile === v)) continue;
-      if (running.has(`${id}:${v}`) || fs.existsSync(path.join(transcodeDir(dataDir, id, v), 'done'))) continue;
-      warmQueue.push({ id, profile: v });
+    // The start rung of every track first (that is what a skip lands on),
+    // then the profile each one climbs to.
+    const rungs = prof === START_PROFILE ? [prof] : [START_PROFILE, prof];
+    for (const p of rungs) {
+      for (const id of ids.slice(0, 10)) {
+        if (typeof id !== 'string') continue;
+        // Not measured yet: measure, then warm at the gain it turns out to need.
+        if (norm && unmeasured(id)) { if (p === rungs[0]) measureSoon(id, () => warm(uid, [id], prof, norm)); continue; }
+        const v = variantFor(id, p, norm);
+        if (warmQueue.some((w) => w.id === id && w.profile === v)) continue;
+        if (running.has(`${id}:${v}`) || fs.existsSync(path.join(transcodeDir(dataDir, id, v), 'done'))) continue;
+        warmQueue.push({ id, profile: v });
+      }
     }
     pumpWarm(dataDir, srcOf, log);
   };
@@ -398,11 +419,8 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // A phone pulls 40-60 segments per track in a burst: keep the HLS routes out
   // of the per-IP rate limit (which, behind nginx, is one bucket for everyone).
   const hls = { ...auth, config: { rateLimit: false } };
-  // Adaptive: every quality up to `max`, best first. iOS starts on the first
-  // and steps down by itself when segments arrive slower than they play (a
-  // phone on a weak signal), back up when they come fast again. All three are
-  // AAC-LC cut at the same frame boundaries, so a switch mid-song is seamless.
-  const LADDER: [string, number][] = [['aac-320', 400000], ['aac-160', 200000], ['aac-96', 125000]];
+  // Adaptive, lowest rung first (masterPlaylist above): starts are cheap and
+  // the quality climbs to `max` as the link allows.
   app.get('/api/stream/:id/hls/master.m3u8', hls, async (req, reply) => {
     const { id } = req.params as any; const q = req.query as any;
     const src = srcOf(id);
@@ -416,10 +434,8 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const gain = norm ? gainFor(db, id, norm) : 0;
     if (norm && gain == null) measureSoon(id);
     const tok = q.token ? `token=${encodeURIComponent(q.token)}&` : '';
-    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
-    for (const [profile, bw] of LADDER.slice(LADDER.findIndex(([p]) => p === max))) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${variantName(profile, gain)}/index.m3u8?${tok}abr=1`);
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
-    return lines.join('\n') + '\n';
+    return masterPlaylist(max, gain, tok);
   });
   // The whole song as one AAC file (see joinSegments). Waits for the
   // transcode to finish; a phone asks for it while the song before plays.

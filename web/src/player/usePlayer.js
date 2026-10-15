@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive, bridgeKeepAlive } from './keepalive.js';
 import { createTrackCache } from './trackCache.js';
+const WHOLE_AFTER_S = 12;            // buffered ahead before whole-song downloads start
+const WHOLE_AFTER_MAX_MS = 45000;    // or this long into the track, whatever the buffer
 import { localUrl, ensureLocal, keepLocal } from '../offline/local.js';
 import { isKept, useDownloadActive } from '../api/offline.js';
 import { isOffline } from '../offline/net.js';
@@ -1760,28 +1762,34 @@ export function usePlayer(jf) {
     return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [device, next, remote, startOn]);
 
-  // As soon as a track is playing, the next two are transcoded on the server
-  // (one request) and the next one's playlist and first segments are pulled
-  // into the browser cache, so a skip lands on a finished, half-loaded track.
-  // Delayed a little so it never competes with this track's own first segments.
+  // As soon as a track is playing, the next few are transcoded on the server
+  // (one request; the server also warms five ahead from the session) and the
+  // next three get their playlist and first segments (the 96k start rung)
+  // pulled into the browser cache, so skipping around lands on finished,
+  // half-loaded tracks. Delayed a little so it never competes with this
+  // track's own first segments; the whole-song downloads wait longer still
+  // (see the buffer gate below).
   const preloadRef = useRef(() => {});
   preloadRef.current = () => {
     if (deviceRef.current.kind !== 'local' || !playingRef.current || !jf) return;
     const q = queueRef.current, i = indexRef.current;
     const cur = q[i]; if (!cur) return;
-    const ahead = [q[i + 1], q[i + 2]].filter(Boolean).map((x) => x.Id);
-    if (!ahead.length && repeatRef.current === 'all' && q[0]) ahead.push(q[0].Id);
+    const aheadItems = [q[i + 1], q[i + 2], q[i + 3]].filter(Boolean);
+    if (!aheadItems.length && repeatRef.current === 'all' && q[0]) aheadItems.push(q[0]);
+    const ahead = aheadItems.map((x) => x.Id);
     const nextItem = q[i + 1] || (repeatRef.current === 'all' ? q[0] : null);
     // Downloaded songs around the playhead, ready as object URLs.
     keepLocal([cur.Id, nextItem?.Id, ...ahead].filter((id) => id && isKept(id)));
     if (jf.streamMode?.() === 'hls') {
       const ms = (t) => (t?.RunTimeTicks ? t.RunTimeTicks / 10000 : 0);
-      trackCache?.keep([!isKept(cur.Id) && { id: cur.Id, durationMs: ms(cur) }, nextItem && !isKept(nextItem.Id) && { id: nextItem.Id, durationMs: ms(nextItem) }]);
+      trackCache?.keep([!isKept(cur.Id) && { id: cur.Id, durationMs: ms(cur) }, nextItem && !isKept(nextItem.Id) && { id: nextItem.Id, durationMs: ms(nextItem) }], { hold: true });
     }
     if (!ahead.length || isOffline()) return;
     const bake = bakeNorm(nextItem || cur);
     jf.warm?.(ahead, bake);
-    jf.prewarm?.(ahead[0], { gain: bake && nextItem ? gainDbFor(nextItem) : 0 });
+    // A few seconds apart: each one costs the server a short foreground
+    // transcode, and this track may be climbing rungs of its own right now.
+    aheadItems.forEach((item, k) => setTimeout(() => jf.prewarm?.(item.Id, { gain: bakeNorm(item) ? gainDbFor(item) : 0 }), k * 3000));
     // The next song's loudness, when the row was fetched before the server
     // measured it (the server measures what is coming up as it is queued).
     if (nextItem && jf.normalize !== false && nextItem._gain?.track == null) {
@@ -1817,6 +1825,31 @@ export function usePlayer(jf) {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device.kind, playing, current?.Id, jf]);
+  // The buffer gate for the whole-song downloads (this song, then the next,
+  // at the chosen quality: what rides out a dead zone, and what lets the
+  // next song start from memory at full quality). They begin once this
+  // track has WHOLE_AFTER_S buffered ahead, or is itself playing from
+  // memory, or has simply been playing a while: on a weak link the start
+  // rung's segments come first, a 320k whole file second.
+  useEffect(() => {
+    if (device.kind !== 'local' || !playing || !jf || !current || jf.streamMode?.() !== 'hls' || !trackCache) return undefined;
+    const t0 = Date.now();
+    let t;
+    const bufferedAhead = (el) => {
+      if (!el) return 0;
+      const at = el.currentTime;
+      for (let k = 0; k < el.buffered.length; k++) if (el.buffered.start(k) <= at && at <= el.buffered.end(k)) return el.buffered.end(k) - at;
+      return 0;
+    };
+    const tick = () => {
+      const el = audioRef.current;
+      const ready = wholeFor(current.Id) || bufferedAhead(el) >= WHOLE_AFTER_S || el?.ended || Date.now() - t0 > WHOLE_AFTER_MAX_MS;
+      if (ready) trackCache.resume(); else t = setTimeout(tick, 2000);
+    };
+    t = setTimeout(tick, 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.kind, playing, current?.Id, jf, trackCache]);
 
   // --- crossfade and gapless ---------------------------------------------------
   // Where Web Audio carries the sound (computers, Android; not iPhone), the

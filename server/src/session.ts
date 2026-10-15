@@ -286,11 +286,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
 
   app.decorate('speakers', { list: () => (discovery ? discovery.list().map((d) => ({ ...d, playing: [...clients.values()].some((c) => c.kind === 'server' && c.player?.device?.id === d.id && c.player.playing) })) : []) });
 
-  // The next few tracks of whatever is playing get transcoded ahead of time
-  // (low priority), so a skip lands on a finished playlist.
+  // The next five tracks of whatever is playing get transcoded ahead of time
+  // (low priority, the start rung first), so skipping around the queue lands
+  // on finished playlists.
   const warmAhead = (uid: string, ids: string[], index: number) => {
     if (index < 0 || !(app as any).warmTracks) return;
-    (app as any).warmTracks(uid, ids.slice(index + 1, index + 4));
+    (app as any).warmTracks(uid, ids.slice(index + 1, index + 6));
   };
 
   // --- sleep timer --------------------------------------------------------------------

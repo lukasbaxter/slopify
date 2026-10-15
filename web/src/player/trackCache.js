@@ -15,10 +15,11 @@ export function createTrackCache(urlFor, { onReady } = {}) {
   const loading = new Map(); // id -> { abort } (one at a time)
   const failed = new Set(); // gave up (404, or ~5 straight failures): no retry until re-requested
   let wanted = new Set();
+  let held = false; // keep() asked to wait: nothing new starts until resume()
 
   let order = [];
   const pump = () => {
-    if (loading.size) return;
+    if (held || loading.size) return;
     const id = order.find((x) => wanted.has(x) && !ready.has(x) && !failed.has(x));
     if (!id) return;
     const ctrl = new AbortController();
@@ -79,8 +80,11 @@ export function createTrackCache(urlFor, { onReady } = {}) {
     get: (id) => ready.get(id) || null,
     // Keep exactly these tracks (the current one, then the next); download
     // what is missing one at a time, in that order, so the song that matters
-    // first gets the whole connection.
-    keep(tracks) {
+    // first gets the whole connection. `hold`: settle what is wanted (and
+    // drop the rest) now, but start no new download until resume(): the
+    // player holds it until the song playing has buffer in hand, so a whole
+    // song never starves the segments the ear is waiting on.
+    keep(tracks, { hold = false } = {}) {
       const list = tracks.filter((t) => t && t.id && !(t.durationMs > MAX_MS));
       const next = new Set(list.map((t) => t.id));
       // A track asked for anew (it left the wanted set in between) gets a
@@ -89,8 +93,10 @@ export function createTrackCache(urlFor, { onReady } = {}) {
       wanted = next;
       for (const id of [...ready.keys(), ...loading.keys()]) if (!wanted.has(id)) release(id);
       order = list.map((t) => t.id);
+      held = hold;
       pump();
     },
+    resume() { held = false; pump(); },
     clear() { wanted = new Set(); order = []; failed.clear(); for (const id of [...ready.keys(), ...loading.keys()]) release(id); },
   };
 }

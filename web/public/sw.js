@@ -53,6 +53,11 @@ const withTimeout = (p, ms) => new Promise((resolve, reject) => {
   p.then((r) => { clearTimeout(t); resolve(r); }, (err) => { clearTimeout(t); reject(err); });
 });
 const marked = async (r) => new Response(await r.blob(), { status: r.status, headers: { 'Content-Type': r.headers.get('Content-Type') || 'application/json', 'X-Slopify-Offline': '1' } });
+// A captive portal (a plane's or a hotel's Wi-Fi before signing in) answers
+// every URL with its own sign-in page, status 200: that is no answer from
+// the server. The API never answers HTML; covers are never HTML.
+const portalPage = (res) => res.ok && /text\/html/i.test(res.headers.get('Content-Type') || '');
+const offlineJson = () => new Response(JSON.stringify({ error: 'offline' }), { status: 503, headers: { 'Content-Type': 'application/json', 'X-Slopify-Offline': '1' } });
 
 // What the API answers that is worth keeping for offline: the library and
 // its pages. Not media, not searches, not admin or job polling.
@@ -66,6 +71,7 @@ async function api(req) {
     // Kept answer at hand: do not hang on a dead connection for long.
     const has = await kept();
     const res = await (has ? withTimeout(fetch(req), 10000) : fetch(req));
+    if (portalPage(res)) return has ? marked(has) : offlineJson();
     if (res.ok && (res.headers.get('Content-Type') || '').includes('json')) {
       const copy = res.clone();
       caches.open(API).then((c) => c.put(key, copy)).catch(() => {});
@@ -75,7 +81,7 @@ async function api(req) {
     const has = await kept();
     if (has) return marked(has);
     // Nothing kept: an answer the app reads as offline, not a network error.
-    return new Response(JSON.stringify({ error: 'offline' }), { status: 503, headers: { 'Content-Type': 'application/json', 'X-Slopify-Offline': '1' } });
+    return offlineJson();
   }
 }
 
@@ -86,7 +92,7 @@ async function cover(req, id) {
     // What the server says goes (a 404 is "no cover", not "offline"); only
     // no answer, or the server erroring, falls back to the kept copy.
     const res = await withTimeout(fetch(req), 8000);
-    if (res.status < 500) return res;
+    if (res.status < 500 && !portalPage(res)) return res;
     throw new Error(String(res.status));
   } catch (err) {
     const c = await caches.open(SONGS);
@@ -106,7 +112,10 @@ self.addEventListener('fetch', (e) => {
   if (req.mode === 'navigate') {
     // The server down (a 5xx from the proxy) counts as unreachable too.
     const app = async () => (await caches.match(INDEX, { cacheName: SHELL })) || Response.error();
-    e.respondWith(withTimeout(fetch(req), 8000).then(async (r) => (r.status >= 500 && (await caches.match(INDEX, { cacheName: SHELL })) ? app() : r)).catch(app));
+    // The server down (a 5xx) or a captive portal's page in place of the
+    // app (no built assets in it) both mean: the kept app, when there is one.
+    const notTheApp = async (r) => r.status >= 500 || (portalPage(r) && !/\/assets\//.test(await r.clone().text()));
+    e.respondWith(withTimeout(fetch(req), 8000).then(async (r) => ((await notTheApp(r)) && (await caches.match(INDEX, { cacheName: SHELL })) ? app() : r)).catch(app));
     return;
   }
   if (url.pathname.includes('/assets/')) {

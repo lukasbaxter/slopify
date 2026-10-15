@@ -173,7 +173,7 @@ function fmtDur(ticks) {
  * inside a user playlist. `onRemove` shows "Remove from this playlist".
  */
 // Spotify's small green arrow before the artist line: this song is kept for offline.
-const DownloadedMark = () => (
+export const DownloadedMark = () => (
   <svg className="dl-mark" viewBox="0 0 16 16" width="12" height="12" aria-label="Downloaded"><circle cx="8" cy="8" r="8" fill="currentColor" /><path d="M8 4v6m0 0L5.5 7.5M8 10l2.5-2.5" stroke="#000" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 

@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ContextMenu from './ContextMenu.jsx';
-import { Heart, LikedCover, usePhone, I as MI, shareItem } from './TrackRow.jsx';
+import { LikedCover, usePhone, I as MI, shareItem, DownloadedMark } from './TrackRow.jsx';
+import { LIKED_ID } from './Library.jsx';
+import { useOffline } from '../api/offline.js';
+import { useOfflineMode } from '../offline/net.js';
 
 const ICONS = {
   home: 'M12 3 3 10v11h6v-6h6v6h6V10z',
@@ -59,6 +62,18 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     const list = [...fresh, ...known];
     return [...list.filter((e) => pinned.has(e.id)), ...list.filter((e) => !pinned.has(e.id))];
   }, [playlists, savedAlbums, followedArtists, prefs?.libraryOrder, prefs?.libraryPinned]);
+  // Downloaded lists (api/offline.js): Spotify's green mark on one kept
+  // whole, and with no connection the Library is only what is downloaded,
+  // since anything else would open to nothing that plays.
+  const offlineLib = useOffline();
+  const offlineMode = useOfflineMode();
+  const downloaded = useMemo(() => new Map((offlineLib.collections || []).filter((c) => c.have > 0).map((c) => [c.id, c])), [offlineLib.collections]);
+  const dlSub = (id) => {
+    const d = downloaded.get(id);
+    if (!d) return null;
+    if (d.have >= d.total) return <DownloadedMark />;
+    return offlineMode ? <span className="libitem-partial">{d.have} of {d.total} downloaded • </span> : null;
+  };
   const pinned = new Set(Array.isArray(prefs?.libraryPinned) ? prefs.libraryPinned : []);
   const togglePin = (id) => {
     const next = pinned.has(id) ? [...pinned].filter((x) => x !== id) : [...pinned, id];
@@ -137,8 +152,10 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
   ].filter(Boolean);
   const q = libQuery.trim().toLowerCase();
   const matches = (n) => !q || (n || '').toLowerCase().includes(q);
-  const showLiked = (!libFilter || libFilter === 'playlist') && matches('Liked Songs');
-  const shownEntries = entries.filter((e) => (!libFilter || e.kind === libFilter) && matches(e.item.Name));
+  const showLiked = (!libFilter || libFilter === 'playlist') && matches('Liked Songs') && (!offlineMode || downloaded.has(LIKED_ID));
+  const shownEntries = entries.filter((e) => (!libFilter || e.kind === libFilter) && matches(e.item.Name) && (!offlineMode || downloaded.has(e.id)));
+  // Artists cannot be downloaded: offline the chip goes, and a filter on it with it.
+  useEffect(() => { if (offlineMode && libFilter === 'artist') setLibFilter(null); }, [offlineMode, libFilter]);
 
   const submit = (e) => {
     e.preventDefault();
@@ -179,7 +196,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
 
         <div className="libchips">
           {libFilter && <button className="pill x" onClick={() => setLibFilter(null)} aria-label="Clear filter">×</button>}
-          {[['playlist', 'Playlists'], ['album', 'Albums'], ['artist', 'Artists']].map(([k, label]) => (!libFilter || libFilter === k) && (
+          {[['playlist', 'Playlists'], ['album', 'Albums'], ['artist', 'Artists']].filter(([k]) => !(offlineMode && k === 'artist')).map(([k, label]) => (!libFilter || libFilter === k) && (
             <button key={k} className={`pill ${libFilter === k ? 'on' : ''}`} onClick={() => setLibFilter(libFilter === k ? null : k)}>{label}</button>
           ))}
         </div>
@@ -216,7 +233,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
             <LikedCover />
             <span className="libitem-text">
               <span className="libitem-name">Liked Songs</span>
-              <span className="libitem-sub"><Pin />Playlist{likedCount != null ? ` • ${likedCount} songs` : ''}</span>
+              <span className="libitem-sub"><Pin />{dlSub(LIKED_ID)}Playlist{likedCount != null ? ` • ${likedCount} songs` : ''}</span>
             </span>
           </button>}
 
@@ -244,7 +261,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
                 {art ? <img src={art} alt="" loading="lazy" draggable={false} /> : <div className="ph" />}
                 <span className="libitem-text">
                   <span className="libitem-name">{it.Name}</span>
-                  <span className="libitem-sub">{pinned.has(e.id) && <Pin />}{sub}</span>
+                  <span className="libitem-sub">{pinned.has(e.id) && <Pin />}{e.kind !== 'artist' && dlSub(e.id)}{sub}</span>
                 </span>
               </button>
             );
@@ -267,7 +284,13 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
             document.body,
           )}
 
-          {!shownEntries.length && !loading && settled && likedCount != null && !q && (!libFilter || libFilter === 'playlist') && (phone ? (
+          {offlineMode && !showLiked && !shownEntries.length && !q && (
+            <div className="libempty">
+              <b>Nothing downloaded</b>
+              <p>Download a playlist or album while you have a connection and it shows here.</p>
+            </div>
+          )}
+          {!offlineMode && !shownEntries.length && !loading && settled && likedCount != null && !q && (!libFilter || libFilter === 'playlist') && (phone ? (
             <div className="libempty">
               <b>Create your first playlist</b>
               <p>It's easy, we'll help you.</p>
@@ -284,13 +307,13 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
               <p>Try a different playlist, album or artist name.</p>
             </div>
           )}
-          {!q && phone && libFilter === 'artist' && !shownEntries.length && !loading && (
+          {!q && !offlineMode && phone && libFilter === 'artist' && !shownEntries.length && !loading && (
             <div className="libempty">
               <b>No artists yet</b>
               <p>Follow an artist and they show up here.</p>
             </div>
           )}
-          {!q && phone && libFilter === 'album' && !shownEntries.length && !loading && (
+          {!q && !offlineMode && phone && libFilter === 'album' && !shownEntries.length && !loading && (
             <div className="libempty">
               <b>Save your first album</b>
               <p>Add an album to Your Library and it shows up here.</p>

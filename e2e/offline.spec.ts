@@ -40,7 +40,12 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       const lossless = name === 'webkit';
       const tok = await page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token || '');
       await page.request.patch('/api/prefs', { headers: { authorization: `Bearer ${tok}` }, data: { quality: lossless ? 'original' : 'high' } });
+      // Both albums in Your Library, so the Library offline can be checked below.
+      const albums = (await (await page.request.get('/api/albums', { headers: { authorization: `Bearer ${tok}` } })).json()).items;
+      for (const name of ['Analytical', 'First Light']) await page.request.put(`/api/likes/${albums.find((a: any) => a.name === name).id}`, { headers: { authorization: `Bearer ${tok}` } });
       await page.reload(); await waitForLibrary(page);
+      await expect(page.locator('.sidebar .libitem', { hasText: 'Analytical' })).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('.sidebar .libitem', { hasText: 'First Light' })).toBeVisible({ timeout: 15000 });
 
       // An album that will NOT be downloaded, seen once online.
       await page.locator('.card, .shortcut', { hasText: 'Analytical' }).first().click();
@@ -82,6 +87,11 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await page.goto('/?debug'); // ?debug: window.__jf, to report a play below
       await expect(page.locator('.offline-banner')).toBeVisible({ timeout: 30000 });
       await waitForLibrary(page);
+      // Your Library is only what is downloaded (Spotify's way), with the
+      // green mark; the album not downloaded is not listed.
+      await expect(page.locator('.sidebar .libitem', { hasText: 'First Light' })).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('.sidebar .libitem', { hasText: 'First Light' }).locator('.dl-mark')).toBeVisible();
+      await expect(page.locator('.sidebar .libitem', { hasText: 'Analytical' })).toHaveCount(0);
       // The downloaded one plays, from the device.
       await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
       await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
@@ -106,6 +116,8 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       server = await startServer(port, dataDir);
       // No reload: the app notices by itself (it asks every 15 s).
       await expect(page.locator('.offline-banner')).toHaveCount(0, { timeout: 30000 });
+      // The rest of Your Library is back.
+      await expect(page.locator('.sidebar .libitem', { hasText: 'Analytical' })).toBeVisible({ timeout: 15000 });
       // The covers that could not load offline load now, on the same page.
       await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('.trackrow img.trackrow-art, .hero img')].some((i) => (i as HTMLImageElement).naturalWidth > 0 && /[?&]n=\d/.test((i as HTMLImageElement).src))), { timeout: 20000 }).toBe(true);
       await expect.poll(() => libPlays(page), { timeout: 20000 }).toBe(0);

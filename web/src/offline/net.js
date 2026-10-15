@@ -19,7 +19,13 @@ export function setOffline(v) {
   if (offline && typeof window !== 'undefined') timer = setInterval(probe, 15000);
 }
 async function probe() {
-  try { const r = await fetch('/healthz', { cache: 'no-store' }); if (r.ok && !r.headers.get('X-Slopify-Offline')) setOffline(false); } catch { /* still offline */ }
+  try {
+    const r = await fetch('/healthz', { cache: 'no-store' });
+    // The server's own answer only: a captive portal (a plane's or a hotel's
+    // Wi-Fi before signing in) answers every URL with its sign-in page, 200.
+    if (!r.ok || r.headers.get('X-Slopify-Offline') || !(r.headers.get('Content-Type') || '').includes('json')) return;
+    if ((await r.json())?.ok === true) setOffline(false);
+  } catch { /* still offline */ }
 }
 /** After every API response: was it the live server or the worker's copy? */
 export const noteResponse = (res) => setOffline(!!res.headers.get('X-Slopify-Offline'));

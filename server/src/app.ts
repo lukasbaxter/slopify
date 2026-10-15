@@ -15,7 +15,7 @@ import { registerStream } from './stream.js';
 import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
-import { registerSession } from './session.js';
+import { registerSession, WS_MAX_PAYLOAD } from './session.js';
 import { registerExplore } from './explore.js';
 import { registerDiscover } from './discover.js';
 import { registerPlaylistReco } from './playlistreco.js';
@@ -70,7 +70,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   // origin's request arrives unauthenticated, same as curl.
   await app.register(cors, { origin: true });
   await app.register(rateLimit, { max: config.rateMax, timeWindow: '1 minute' });
-  await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
+  await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
   // Light security headers. CSP is deliberately skipped: the SPA relies on
   // inline scripts/styles and a workable policy would break it.
   app.addHook('onSend', async (_req, reply) => {

@@ -48,6 +48,14 @@ const sleeps = new Map<string, Sleep & { timer?: NodeJS.Timeout }>();
 const sessions = new Map<string, Session>();        // uid -> session
 const saveTimers = new Map<string, NodeJS.Timeout>();
 
+// A frame over the socket's limit closes the socket, and a client re-sends
+// its queue on every reconnect: with the limit at 1 MiB, a 2,607-song
+// playlist (about 1.1 MB slimmed) was one reconnect every 2 s for 40 minutes
+// on a phone (2026-10-13). The limit now has room for the 5,000-entry cap
+// below; a queue past QUEUE_MAX_BYTES is dropped, never the socket.
+export const WS_MAX_PAYLOAD = 4 * 1024 * 1024;
+const QUEUE_MAX_BYTES = 3 * 1024 * 1024;
+
 export const emptySession = (): Session => ({ rev: 0, active: null, trackId: null, queue: [], index: -1, playing: false, positionMs: 0, anchorAt: Date.now(), device: null, lastEventTs: 0, updatedAt: Date.now(), nowPlaying: null, queueItems: [] });
 
 export function positionNow(s: Session, now = Date.now()) { return s.playing ? s.positionMs + (now - s.anchorAt) : s.positionMs; }
@@ -321,7 +329,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       case 'devices': me.devices = Array.isArray(msg.devices) ? msg.devices.slice(0, 50) : []; broadcastRoster(me.uid); break;
       case 'queue': {
         me.queue = Array.isArray(msg.queue) ? msg.queue.slice(0, 5000) : null;
-        if (me.queue && JSON.stringify(me.queue).length > 2 * 1024 * 1024) { app.log.warn(`oversize queue from ${me.name} dropped`); me.queue = null; break; }
+        if (me.queue && JSON.stringify(me.queue).length > QUEUE_MAX_BYTES) { app.log.warn(`oversize queue from ${me.name} dropped`); me.queue = null; break; }
         if (me.queue && (!s.active || s.active === me.id)) {
           const ids = me.queue.map((t: any) => t?.Id).filter((x: any) => typeof x === 'string');
           const idx = s.trackId ? ids.indexOf(s.trackId) : -1;
@@ -433,7 +441,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     ws.on('pong', () => { if (pongWait) clearTimeout(pongWait); pongWait = null; });
     ws.on('message', (raw: Buffer | string) => {
       // No frame we send or expect comes near 1 MiB: close before even parsing one.
-      if ((typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > 1024 * 1024) { ws.close(1009, 'too large'); return; }
+      if ((typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > WS_MAX_PAYLOAD) { ws.close(1009, 'too large'); return; }
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
       // Anyone can open this socket before signing in: a frame that is not an
       // object ('null', a number) or a token that is not a string used to throw

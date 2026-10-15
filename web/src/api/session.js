@@ -6,6 +6,10 @@
 // Audio never flows through here. This is presence + command routing only.
 
 // Same-origin in the browser; the desktop app points at the server it logged in to.
+// What a published queue may take on the wire (the server's frame limit is
+// 4 MiB; titles are mostly ASCII, so characters are about bytes).
+const QUEUE_MAX_CHARS = 2.5 * 1024 * 1024;
+
 function defaultUrl(baseUrl) {
   const base = baseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
   return `${base.replace(/^http/, 'ws')}/api/ws`;
@@ -66,7 +70,7 @@ export class SessionLink {
     this.ws = ws;
 
     ws.onopen = () => {
-      this._backoff = 1000;
+      this._openedAt = Date.now();
       this._send({ type: 'hello', token: this.token, clientId: this.id, instance: this.instance, name: this.name, kind: this.kind, form: this.form, canPlay: this.canPlay });
       this._ping = setInterval(() => this._send({ type: 'ping' }), 25000);
     };
@@ -112,7 +116,15 @@ export class SessionLink {
         this.onCommand(m.command, m.from);
       }
     };
-    ws.onclose = () => { if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed`); this.connected = false; this.rosterSeen = false; clearInterval(this._ping); this._retry(); };
+    ws.onclose = () => {
+      if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed`);
+      this.connected = false; this.rosterSeen = false; clearInterval(this._ping);
+      // A connection that lived starts the backoff over; one the server
+      // closed right away (a frame it refused, a token it rejected) keeps
+      // doubling, so a refused message is not a reconnect every second.
+      if (Date.now() - (this._openedAt || 0) > 5000) this._backoff = 1000;
+      this._retry();
+    };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
@@ -132,9 +144,19 @@ export class SessionLink {
   }
 
   // Publish this client's queue (slim tracks) for the user's other clients.
+  // Bounded: the server closes the socket on a frame over its limit, and the
+  // queue is re-sent on every reconnect, so one queue that did not fit (a
+  // 2,607-song playlist, 2026-10-13) was a reconnect every 2 s for 40
+  // minutes on the phone. A queue past the budget is cut at its end.
   reportQueue(queue) {
-    this._pending.queue = queue;
-    this._send({ type: 'queue', queue });
+    let q = queue;
+    let frame = JSON.stringify({ type: 'queue', queue: q });
+    while (Array.isArray(q) && q.length > 1 && frame.length > QUEUE_MAX_CHARS) {
+      q = q.slice(0, Math.ceil(q.length * 0.8));
+      frame = JSON.stringify({ type: 'queue', queue: q });
+    }
+    this._pending.queue = q;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(frame);
   }
 
   reportNowPlaying(np) {

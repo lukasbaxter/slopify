@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
-import { applyEvent, emptySession, positionNow, registerSession } from './session.js';
+import { applyEvent, emptySession, positionNow, registerSession, WS_MAX_PAYLOAD } from './session.js';
 
 describe('session reconciliation', () => {
   it('newest event wins; older ones are rejected', () => {
@@ -52,7 +52,7 @@ describe('ws client ids across accounts', () => {
   beforeAll(async () => {
     app = Fastify();
     app.decorate('requireUser', (_req: any, _reply: any, done: any) => done());
-    await app.register(websocket);
+    await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
     registerSession(app, db);
     await app.listen({ host: '127.0.0.1', port: 0 });
     port = (app.server.address() as any).port;
@@ -118,6 +118,24 @@ describe('ws client ids across accounts', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(atPhone.filter((m) => m.type === 'sleep').at(-1)?.sleep).toBeNull();
     laptop.ws.terminate(); phone.ws.terminate(); late.ws.terminate();
+  });
+  it('a long queue (3,000 songs is over 1 MiB) reaches the other devices instead of closing the socket', async () => {
+    const phone = await hello('tokA', 'c_bigq_phone');
+    const laptop = await hello('tokA', 'c_bigq_laptop');
+    const seen: any[] = []; laptop.ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));
+    const queue = Array.from({ length: 3000 }, (_, i) => ({
+      Id: `t${i}`, Name: `Song number ${i} with a title of ordinary length`, Artists: ['Some Artist', 'Another Artist'], AlbumArtist: 'Some Artist',
+      Album: `Album ${i % 50} (Deluxe Edition)`, AlbumId: `al${i % 50}`, RunTimeTicks: 2400000000,
+      ArtistItems: [{ Id: `ar${i % 90}`, Name: 'Some Artist' }], AlbumArtists: [{ Id: `ar${i % 90}`, Name: 'Some Artist' }],
+      UserData: { IsFavorite: false }, _queued: false, _gain: null,
+    }));
+    const frame = JSON.stringify({ type: 'queue', queue });
+    expect(frame.length).toBeGreaterThan(1024 * 1024);
+    phone.ws.send(frame);
+    for (let i = 0; i < 100 && !seen.some((m) => m.type === 'queue'); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(seen.find((m) => m.type === 'queue')?.queue?.length).toBe(3000);
+    expect(phone.closed()).toBe(false);
+    phone.ws.terminate(); laptop.ws.terminate();
   });
   it('another account cannot take over a connected client id', async () => {
     const a = await hello('tokA', 'c_crossacct1');

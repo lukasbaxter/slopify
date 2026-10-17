@@ -160,6 +160,23 @@ describe('external failures are never cached and burn no tries', () => {
     expect((db.prepare("SELECT cover_tries FROM albums WHERE id = 'al1'").get() as any).cover_tries).toBe(1);
     expect(cacheRows('deezer:album:%')).toBe(1);
   });
+
+  it('an album Deezer does not have is found on iTunes, at 1200 px', async () => {
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, added_at, sort_name, track_count) VALUES ('al_va','Monstercat – 9 Year Anniversary','va','VA','/nowhere',0,'m',1)").run();
+    const fetcher: Fetcher = async (url) => {
+      if (url.startsWith('https://api.deezer.com/')) return { status: 200, json: async () => ({ data: [] }) };
+      expect(url).toContain('monstercat%20-%209%20year%20anniversary'); // the folded query, en dash included
+      return { status: 200, json: async () => ({ results: [{ collectionName: 'Monstercat - 9 Year Anniversary', artistName: 'Various Artists', artworkUrl100: 'https://is1.example/image/thumb/x/100x100bb.jpg' }] }) };
+    };
+    const asked: string[] = [];
+    const sharp = (await import('sharp')).default;
+    const jpg = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 0, g: 0, b: 200 } } }).jpeg().toBuffer();
+    const r = await albumCoversPass(db, { fetcher, bytes: async (u) => { asked.push(u); return Buffer.concat([jpg, Buffer.alloc(Math.max(0, 2001 - jpg.length))]); }, dataDir: data, max: 10 });
+    expect(r.found).toBe(1);
+    expect(asked).toEqual(['https://is1.example/image/thumb/x/1200x1200bb.jpg']);
+    expect((db.prepare("SELECT cover_hash FROM albums WHERE id = 'al_va'").get() as any).cover_hash).toBeTruthy();
+    expect(cacheRows('itunes:album:va|monstercat%')).toBe(1);
+  });
 });
 
 describe('parseLrc with mixed timed and plain lines', () => {

@@ -227,6 +227,7 @@ export default function App() {
   // Quality plus the account's other playback settings, onto the client the player streams through.
   const applyPlayback = (p) => {
     jf.quality = deviceQuality(p);
+    jf.losslessHls = isMobileRef.current;
     jf.normalize = p.normalize !== false;
     jf.crossfade = Math.max(0, Math.min(12, Number(p.crossfade) || 0));
     jf.gapless = p.gapless !== false;

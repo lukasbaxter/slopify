@@ -31,6 +31,16 @@ import { registerOffline } from './offline.js';
 import { gainFor, measure, refreshAlbumLoudness, saveTrackLoudness, type GainMode } from './loudness.js';
 
 export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitrate: '320k' }, 'aac-160': { bitrate: '160k' }, 'aac-96': { bitrate: '96k' } };
+// Lossless as a stream: ALAC in fragmented MP4 (the one container Apple takes
+// it in, authoring spec 2.25), one rung, no gain baked in (that would not be
+// lossless). What a phone set to Lossless plays. The original FLAC with byte
+// ranges is not an option there: iOS probes a FLAC it has no seek table for
+// with 25-odd range requests before the first note, 2 MiB on the wire each
+// (2026-10-16: 2.7 s to start on the home Wi-Fi, 20-30 s on hotel Wi-Fi).
+export const LOSSLESS = 'alac';
+export const isLossless = (p: string) => p === LOSSLESS;
+export const knownProfile = (p: string) => !!PROFILES[p] || isLossless(p);
+export const segmentExt = (p: string) => (isLossless(p) ? 'm4s' : 'ts');
 // Every start is on the lowest rung (see masterPlaylist): the one profile
 // that is warmed for everything coming up, before the profile it climbs to.
 export const START_PROFILE = 'aac-96';
@@ -42,14 +52,18 @@ export const LADDER: [string, number][] = [['aac-96', 125000], ['aac-160', 20000
 // than they play, back down on a weak signal. All rungs are AAC-LC cut at
 // the same frame boundaries, so a switch mid-song is seamless.
 export function masterPlaylist(max: string, gain: number | null | undefined, tok: string) {
-  const top = LADDER.findIndex(([p]) => p === max);
   const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
+  // Lossless is its own one-rung ladder: a TS AAC rung next to an fMP4 ALAC
+  // one is a container mix Apple's spec never promises a switch between.
+  if (isLossless(max)) { lines.push('#EXT-X-STREAM-INF:BANDWIDTH=1500000,CODECS="alac"', `${LOSSLESS}/index.m3u8?${tok}abr=1`); return lines.join('\n') + '\n'; }
+  const top = LADDER.findIndex(([p]) => p === max);
   for (const [profile, bw] of LADDER.slice(0, (top < 0 ? LADDER.length - 1 : top) + 1)) lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},CODECS="mp4a.40.2"`, `${variantName(profile, gain)}/index.m3u8?${tok}abr=1`);
   return lines.join('\n') + '\n';
 }
 // A transcode variant: a profile, optionally with a volume-normalization gain
 // baked in (loudness.ts), e.g. 'aac-320g-5.2'. Each is its own cache dir.
 export function parseVariant(v: string): { profile: string; gain: number } | null {
+  if (isLossless(String(v || ''))) return { profile: LOSSLESS, gain: 0 };
   const m = /^(aac-\d+)(?:g(-?\d{1,2}(?:\.\d)?))?$/.exec(String(v || ''));
   if (!m || !PROFILES[m[1]]) return null;
   const gain = m[2] == null ? 0 : Number(m[2]);
@@ -67,7 +81,7 @@ const RUNWAY_WAIT = 1500;  // ms cap on waiting for them
 const SEG_WAIT_MS = 30000; // how long a segment request waits for ffmpeg
 
 function transcodeDir(dataDir: string, id: string, profile: string) { return path.join(dataDir, 'transcodes', id, profile); }
-const segmentCount = (txt: string) => (txt.match(/^s\d+\.ts\s*$/gm) || []).length;
+const segmentCount = (txt: string) => (txt.match(/^s\d+\.(?:ts|m4s)\s*$/gm) || []).length;
 
 // The playlist ffmpeg will end up writing, from the track's duration and
 // sample rate: segment k ends at the first AAC frame boundary at or past
@@ -75,21 +89,26 @@ const segmentCount = (txt: string) => (txt.match(/^s\d+\.ts\s*$/gm) || []).lengt
 // 4.01067/3.98933 at 48 kHz, 4.0 at 96 kHz; totals within 25 ms of the
 // database). A sliver under 150 ms at the end folds into the segment before
 // it, so a duration a few ms off never lists a segment that never comes.
-export function syntheticPlaylist(durationMs: number, sampleRate: number): string | null {
+// ALAC frames are 4096 samples (measured 4.086712/3.993832 s alternating at
+// 44.1 kHz), and its fMP4 segments need the init segment mapped in.
+export function syntheticPlaylist(durationMs: number, sampleRate: number, profile = 'aac-320'): string | null {
   const dur = durationMs / 1000;
   const sr = sampleRate > 0 ? sampleRate : 44100;
   if (!(dur > 0)) return null;
+  const lossless = isLossless(profile);
+  const frame = lossless ? 4096 : 1024;
   const ends: number[] = [];
   for (let k = 1; ; k++) {
-    const end = Math.ceil((k * SEG * sr) / 1024) * (1024 / sr);
+    const end = Math.ceil((k * SEG * sr) / frame) * (frame / sr);
     if (end >= dur) break;
     ends.push(end);
   }
   if (ends.length && dur - ends[ends.length - 1] < 0.15) ends.pop();
   ends.push(dur);
-  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', `#EXT-X-TARGETDURATION:${Math.ceil(SEG + 0.05)}`, '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:VOD'];
+  const lines = ['#EXTM3U', `#EXT-X-VERSION:${lossless ? 7 : 3}`, `#EXT-X-TARGETDURATION:${Math.ceil(SEG + 0.05)}`, '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:VOD'];
+  if (lossless) lines.push('#EXT-X-MAP:URI="init.mp4"');
   let prev = 0;
-  ends.forEach((end, i) => { lines.push(`#EXTINF:${(end - prev).toFixed(6)},`, `s${String(i).padStart(4, '0')}.ts`); prev = end; });
+  ends.forEach((end, i) => { lines.push(`#EXTINF:${(end - prev).toFixed(6)},`, `s${String(i).padStart(4, '0')}.${segmentExt(profile)}`); prev = end; });
   lines.push('#EXT-X-ENDLIST', '');
   return lines.join('\n');
 }
@@ -161,8 +180,12 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
         await fsp.rm(dir, { recursive: true, force: true });
         await fsp.mkdir(dir, { recursive: true });
         const v = parseVariant(profile)!;
-        ff = spawnFf([], src, ['-map', '0:a:0', '-vn', ...(v.gain ? ['-af', `volume=${v.gain}dB`] : []), '-c:a', 'aac', '-b:a', PROFILES[v.profile].bitrate, '-ac', '2',
-          '-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments', '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
+        const hlsArgs = ['-f', 'hls', '-hls_time', String(SEG), '-hls_playlist_type', 'event', '-hls_flags', 'temp_file+independent_segments'];
+        ff = isLossless(v.profile)
+          // The samples as they are: no channel or bit-depth change, no gain.
+          ? spawnFf([], src, ['-map', '0:a:0', '-vn', '-c:a', 'alac', ...hlsArgs, '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', path.join(dir, 's%04d.m4s'), index], 'ignore', nice)
+          : spawnFf([], src, ['-map', '0:a:0', '-vn', ...(v.gain ? ['-af', `volume=${v.gain}dB`] : []), '-c:a', 'aac', '-b:a', PROFILES[v.profile].bitrate, '-ac', '2',
+            ...hlsArgs, '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
       } catch (e) { release?.(); throw e; }
       let err = '';
       ff.stderr!.on('data', (d) => { err += d; });
@@ -326,11 +349,11 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   const variantFor = (id: string, profile: string, norm: GainMode | null) => variantName(profile, norm ? gainFor(db, id, norm) : 0);
   const warm = (uid: string | null, ids: string[], profile?: string, normArg?: GainMode | null) => {
     const last = uid ? lastProfile.get(uid) : undefined;
-    const prof = profile && PROFILES[profile] ? profile : last?.profile || 'aac-320';
-    const norm = normArg !== undefined ? normArg : last?.norm ?? null;
+    const prof = profile && knownProfile(profile) ? profile : last?.profile || 'aac-320';
+    const norm = isLossless(prof) ? null : normArg !== undefined ? normArg : last?.norm ?? null;
     // The start rung of every track first (that is what a skip lands on),
-    // then the profile each one climbs to.
-    const rungs = prof === START_PROFILE ? [prof] : [START_PROFILE, prof];
+    // then the profile each one climbs to. Lossless is its own only rung.
+    const rungs = prof === START_PROFILE || isLossless(prof) ? [prof] : [START_PROFILE, prof];
     for (const p of rungs) {
       for (const id of ids.slice(0, 10)) {
         if (typeof id !== 'string') continue;
@@ -425,11 +448,11 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const { id } = req.params as any; const q = req.query as any;
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
-    const max = PROFILES[q.max] ? q.max : 'aac-320';
+    const max = knownProfile(q.max) ? q.max : 'aac-320';
     // norm=track|album: the gain is baked into the transcode (a phone cannot
     // scale the audio itself). Not measured yet: plain this time, measured
-    // for the next.
-    const norm = normOf(q);
+    // for the next. Never into lossless.
+    const norm = isLossless(max) ? null : normOf(q);
     lastProfile.set(req.user!.id, { profile: max, norm });
     const gain = norm ? gainFor(db, id, norm) : 0;
     if (norm && gain == null) measureSoon(id);
@@ -447,6 +470,8 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const norm = normOf(req.query);
     if (norm && PROFILES[profile]) profile = variantFor(id, profile, norm);
     if (!variantOk(id, profile)) return reply.code(404).send({ error: 'no such profile' });
+    // Lossless is fMP4 segments; the one-file join is for the AAC rungs.
+    if (isLossless(profile)) return reply.code(404).send({ error: 'no whole file for lossless' });
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const dir = transcodeDir(dataDir, id, profile);
@@ -468,7 +493,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     // A step down inside an adaptive stream is not the quality they chose.
-    if (!(req.query as any).abr && PROFILES[profile]) lastProfile.set(req.user!.id, { profile, norm: null });
+    if (!(req.query as any).abr && knownProfile(profile)) lastProfile.set(req.user!.id, { profile, norm: null });
     let index: string;
     try { index = await ensureHls(dataDir, id, src, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
@@ -478,18 +503,18 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     else {
       // Still encoding: the complete playlist it is going to be (see top).
       const t = db.prepare('SELECT duration_ms, sample_rate FROM tracks WHERE id = ?').get(id) as any;
-      const synth = t && syntheticPlaylist(t.duration_ms, t.sample_rate);
+      const synth = t && syntheticPlaylist(t.duration_ms, t.sample_rate, profile);
       // No duration on file: the open playlist, start pinned (best effort).
       body = synth || body.replace(/^(#EXT-X-VERSION:\d+\n)/m, '$1#EXT-X-START:TIME-OFFSET=0.01,PRECISE=YES\n');
     }
-    body = body.replace(/^(s\d+\.ts)$/gm, `$1${tok}`);
+    body = body.replace(/^(s\d+\.(?:ts|m4s))$/gm, `$1${tok}`).replace(/^#EXT-X-MAP:URI="init\.mp4"$/m, `#EXT-X-MAP:URI="init.mp4${tok}"`);
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return body;
   });
   const segTouched = new Map<string, number>(); // dir -> last done-mtime refresh
   app.get('/api/stream/:id/hls/:profile/:seg', hls, async (req, reply) => {
     const { id, profile, seg } = req.params as any;
-    if (!/^[0-9a-f]{32}$/.test(id) || !parseVariant(profile) || !/^s\d{4}\.ts$/.test(seg)) return reply.code(404).send();
+    if (!/^[0-9a-f]{32}$/.test(id) || !parseVariant(profile) || !/^(?:s\d{4}\.(?:ts|m4s)|init\.mp4)$/.test(seg)) return reply.code(404).send();
     const p = path.join(transcodeDir(dataDir, id, profile), seg);
     // A segment ffmpeg has not written yet: wait for it rather than 404 (the
     // synthetic playlist lists every segment from the start). No transcode
@@ -507,7 +532,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const size = (await fsp.stat(p)).size;
     // Immutable once written; a fetch() of it lands in the browser's disk
     // cache, which the native HLS loader on iOS reads (it never writes it).
-    reply.header('Cache-Control', 'private, max-age=604800, immutable').header('Content-Length', String(size)).type('video/mp2t');
+    reply.header('Cache-Control', 'private, max-age=604800, immutable').header('Content-Length', String(size)).type(seg.endsWith('.ts') ? 'video/mp2t' : seg === 'init.mp4' ? 'video/mp4' : 'video/iso.segment');
     return reply.send(fs.createReadStream(p));
   });
   // The client's own warm: the next few queue items at the profile it plays.

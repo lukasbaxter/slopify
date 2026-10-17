@@ -272,7 +272,7 @@ export function usePlayer(jf) {
   }) : null), [jf]);
   useEffect(() => () => trackCache?.clear(), [trackCache]);
   // A downloaded song plays from the device (offline/local.js), in any mode.
-  const wholeFor = (id) => localUrl(id) || (jf?.streamMode?.() === 'hls' ? trackCache?.get(id) || null : null);
+  const wholeFor = (id) => localUrl(id) || (jf?.hasWhole?.() ? trackCache?.get(id) || null : null);
 
   // --- volume normalization -------------------------------------------------
   // Spotify's: every song at -14 LUFS (the server measured it; track._gain
@@ -684,13 +684,6 @@ export function usePlayer(jf) {
 
   // --- public controls ----------------------------------------------------
 
-  // The other client the session is on, straight from the latest roster (the
-  // effect that sets activePlayerRef runs a render after a roster arrives).
-  const activeFromRoster = () => {
-    const r = rosterRef.current, me = relayRef.current?.id;
-    const a = r?.activeClientId && r.activeClientId !== me && (r.players || []).find((p) => p.id === r.activeClientId);
-    return a ? a.id : null;
-  };
   const playQueue = useCallback(
     async (tracks, startIndex = 0, ctx = null, startAt = 0) => {
       // Offline: only downloaded songs play, here (no other device can be
@@ -704,12 +697,12 @@ export function usePlayer(jf) {
         // A speaker cannot be reached either: the music plays here.
         if (deviceRef.current.kind !== 'local') { deviceRef.current = LOCAL_DEVICE; setDeviceState(LOCAL_DEVICE); }
       }
-      // Just opened and not yet told who is playing: wait for that, or a
-      // play here would take the music off the device it is already on.
-      const waited = !off && !!relayRef.current && !relayRef.current.rosterSeen;
-      if (waited) await relayRef.current.whenRoster(3000);
-      // If another of my clients is the active player, change the song THERE.
-      const act = off ? null : activePlayerRef.current || (waited ? activeFromRoster() : null);
+      // If another of my clients is known to be the active player, change
+      // the song THERE. Not known yet (just opened, the socket still
+      // connecting): play here, now, and claim the session; the claim is
+      // re-sent when the socket is up and the latest press wins (the other
+      // device is told to stop, or this one is, if it pressed play later).
+      const act = off ? null : activePlayerRef.current;
       if (act && relayRef.current) {
         relayRef.current.command(act, {
           action: 'play', trackIds: tracks.map((t) => t.Id), index: startIndex, ctx, startAt,
@@ -738,9 +731,14 @@ export function usePlayer(jf) {
       setDuration(ticksToSeconds(track?.RunTimeTicks));
       // startAt: play from a moment inside the track (a lyric line you searched for).
       anchorAt(startAt > 0 ? startAt : 0, true);
+      // Playing from the tap, not from the first decoded frame: the button,
+      // the lock screen and the mirrors said "paused" for the 1-3 s a load
+      // took, so a tap meanwhile flipped the wrong way (10-16 breadcrumbs:
+      // "lock screen told: paused" at every song change, fixed by the
+      // reconcile only 4 s later).
+      setPlaying(true);
       try {
         await startOn(deviceRef.current, track, startAt > 0 ? startAt : 0);
-        setPlaying(true);
       } catch (e) {
         setError(e.message);
         setPlaying(false);
@@ -832,6 +830,7 @@ export function usePlayer(jf) {
       const track = q[nextIndex];
       setDuration(ticksToSeconds(track?.RunTimeTicks));
       anchorAt(0, true);
+      setPlaying(true); // from the tap (see playQueue)
       const gen = ++startGenRef.current;
       // Hunting through the queue: the UI moves at once, but the load waits
       // until the taps stop (300 ms), so ten quick skips cost one start, not
@@ -845,10 +844,8 @@ export function usePlayer(jf) {
       }
       try {
         await startOn(deviceRef.current, track, 0, gen);
-        if (startGenRef.current !== gen) return;
-        setPlaying(true);
       } catch (e) {
-        if (startGenRef.current === gen) setError(e.message);
+        if (startGenRef.current === gen) { setError(e.message); setPlaying(false); }
       }
     },
     [anchorAt, startOn, stopOn]
@@ -985,13 +982,11 @@ export function usePlayer(jf) {
   }, [skipTo, anchorAt]);
 
   const toggle = useCallback(async () => {
-    // As in playQueue: a play pressed before the roster arrived would claim
-    // the session from the device that is playing.
+    // As in playQueue: another device known to be playing gets the tap;
+    // nobody known, the music plays here and the claim sorts it out.
     const off = isOffline();
-    const waited = !off && !!relayRef.current && !relayRef.current.rosterSeen;
-    if (waited) await relayRef.current.whenRoster(3000);
     const dev = deviceRef.current;
-    const act = off ? null : activePlayerRef.current || (waited ? activeFromRoster() : null);
+    const act = off ? null : activePlayerRef.current;
     // For another device: ask for the opposite of what is shown, never a
     // flip. A play that took a few seconds to land got a second tap, and two
     // flips arriving together played and paused again (2026-10-08, Node).
@@ -1010,9 +1005,9 @@ export function usePlayer(jf) {
       // poke a Cast media session that does not exist.)
       if (current && loadedRef.current !== current.Id && (!playing || dev.kind !== 'local')) {
         relayRef.current?.claim();
-        await startOn(dev, current, positionRef.current);
         anchorAt(positionRef.current, true);
-        setPlaying(true);
+        setPlaying(true); // from the tap (see playQueue)
+        try { await startOn(dev, current, positionRef.current); } catch (e) { setPlaying(false); throw e; }
         return;
       }
       if (!playing) relayRef.current?.claim();
@@ -1020,6 +1015,8 @@ export function usePlayer(jf) {
         const el = audioRef.current;
         if (playing) { mediaLog('toggle pause'); endFadeRef.current(); ownPause(el); }
         else {
+          anchorAt(positionRef.current, true);
+          setPlaying(true); // from the tap (see playQueue)
           webAudioRef.current?.ctx.resume?.().catch(() => {});
           // Back from the lock screen the element can be dead: its stream cut
           // off while iOS had the app suspended, or a play() iOS is holding.
@@ -1033,7 +1030,7 @@ export function usePlayer(jf) {
           mediaLog(`toggle play: ${outcome} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
           if (outcome !== 'ok' && outcome !== 'abort' && current) {
             el.pause();
-            await startOn(dev, current, positionRef.current);
+            try { await startOn(dev, current, positionRef.current); } catch (e) { setPlaying(false); throw e; }
           }
         }
       } else if (playing) {
@@ -1780,7 +1777,7 @@ export function usePlayer(jf) {
     const nextItem = q[i + 1] || (repeatRef.current === 'all' ? q[0] : null);
     // Downloaded songs around the playhead, ready as object URLs.
     keepLocal([cur.Id, nextItem?.Id, ...ahead].filter((id) => id && isKept(id)));
-    if (jf.streamMode?.() === 'hls') {
+    if (jf.hasWhole?.()) {
       const ms = (t) => (t?.RunTimeTicks ? t.RunTimeTicks / 10000 : 0);
       trackCache?.keep([!isKept(cur.Id) && { id: cur.Id, durationMs: ms(cur) }, nextItem && !isKept(nextItem.Id) && { id: nextItem.Id, durationMs: ms(nextItem) }], { hold: true });
     }
@@ -1832,7 +1829,7 @@ export function usePlayer(jf) {
   // memory, or has simply been playing a while: on a weak link the start
   // rung's segments come first, a 320k whole file second.
   useEffect(() => {
-    if (device.kind !== 'local' || !playing || !jf || !current || jf.streamMode?.() !== 'hls' || !trackCache) return undefined;
+    if (device.kind !== 'local' || !playing || !jf || !current || !jf.hasWhole?.() || !trackCache) return undefined;
     const t0 = Date.now();
     let t;
     const bufferedAhead = (el) => {
@@ -2200,11 +2197,9 @@ export function usePlayer(jf) {
     const track = tracks[startIndex];
     setDuration(ticksToSeconds(track?.RunTimeTicks));
     anchorAt(position, shouldPlay);
+    if (shouldPlay) setPlaying(true); // from the handoff (see playQueue)
     try {
-      if (shouldPlay) {
-        await startOn(deviceRef.current, track, position);
-        setPlaying(true);
-      }
+      if (shouldPlay) await startOn(deviceRef.current, track, position);
     } catch (e) {
       setError(e.message);
       setPlaying(false);

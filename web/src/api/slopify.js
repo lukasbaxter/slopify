@@ -154,6 +154,11 @@ export class Slopify {
   // --- what the local player streams ---------------------------------------
   // 'original' or a transcode. Speakers always get the original file.
   quality = 'original';
+  // Phones (App sets it): 'original' streams as Apple Lossless over HLS
+  // instead of the file itself. iOS probes a FLAC file with dozens of range
+  // requests before the first note (2-3 s on the home Wi-Fi, 20-30 s in a
+  // hotel); an ALAC segment is one request. Still bit-perfect, no gain baked.
+  losslessHls = false;
   // Playback settings from the account prefs (App sets them, like quality):
   // volume normalization on/off, crossfade seconds (0 = off), gapless on/off.
   normalize = true;
@@ -165,10 +170,13 @@ export class Slopify {
   //  'chunked' everything else: one progressive MP3 (no ranges), seeking by
   //            asking for a new stream that starts at `startAt`.
   streamMode() {
-    if (!{ high: 320000, normal: 160000, low: 96000 }[this.quality]) return 'file';
     const hls = typeof document !== 'undefined' && !!document.createElement('audio').canPlayType('application/vnd.apple.mpegurl');
+    if (this.quality === 'original') return hls && this.losslessHls ? 'hls' : 'file';
+    if (!{ high: 320000, normal: 160000, low: 96000 }[this.quality]) return 'file';
     return hls ? 'hls' : 'chunked';
   }
+  // The whole-song file (wholeUrl) exists for the AAC rungs only.
+  hasWhole() { return this.streamMode() === 'hls' && this._profile() !== 'alac'; }
   transcoded() { return this.streamMode() === 'chunked'; }
   _warm = new Map();
   // HLS only. Two things at once: the server transcodes the track (and the
@@ -184,13 +192,15 @@ export class Slopify {
     if (!itemId || this.streamMode() !== 'hls') return;
     const at = this._warm.get(itemId); if (at && Date.now() - at < 60000) return;
     this._warm.set(itemId, Date.now());
-    const variant = gain ? `${this._startProfile()}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : this._startProfile();
+    const start = this._startProfile();
+    const variant = gain && start !== 'alac' ? `${start}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : start;
     const url = this._url(`/api/stream/${itemId}/hls/${variant}/index.m3u8`);
     const base = url.slice(0, url.lastIndexOf('/') + 1);
     const tok = url.includes('?') ? url.slice(url.indexOf('?')) : '';
     const pull = (tries) => fetch(url).then((r) => r.text()).then((txt) => {
       if (!/#EXT-X-ENDLIST/.test(txt)) { if (tries > 0) setTimeout(() => pull(tries - 1), 2500); return; }
-      const segs = (txt.match(/^s\d+\.ts$/gm) || []).slice(0, segments);
+      // Lossless (fMP4): its init segment too, ~1 KB, needed before any segment.
+      const segs = [...(/#EXT-X-MAP/.test(txt) ? ['init.mp4'] : []), ...(txt.match(/^s\d+\.(?:ts|m4s)$/gm) || []).slice(0, segments)];
       for (const sg of segs) fetch(`${base}${sg}${tok}`).then((r) => r.arrayBuffer()).catch(() => {});
     }).catch(() => {});
     pull(3);
@@ -202,8 +212,9 @@ export class Slopify {
     if (!ids.length || this.streamMode() !== 'hls') return Promise.resolve(null);
     return this._fetch('/api/stream/warm', { method: 'POST', body: JSON.stringify({ ids, profile: this._profile(), norm }), timeoutMs: 8000 }).catch(() => null);
   }
-  _profile() { return { high: 'aac-320', normal: 'aac-160', low: 'aac-96' }[this.quality] || 'aac-320'; }
-  _startProfile() { return 'aac-96'; }
+  _profile() { return { high: 'aac-320', normal: 'aac-160', low: 'aac-96', original: 'alac' }[this.quality] || 'aac-320'; }
+  // Every AAC start is on 96k; lossless is one rung, so it starts on itself.
+  _startProfile() { return this._profile() === 'alac' ? 'alac' : 'aac-96'; }
   // norm ('track' | 'album'): have the server bake the normalization gain into
   // the transcode (HLS only: a player that cannot scale the audio itself).
   playbackUrl(itemId, { startAt = 0, norm = null } = {}) {

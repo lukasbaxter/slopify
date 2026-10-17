@@ -80,6 +80,24 @@ describe('streaming', () => {
     const suf = await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: 'bytes=-999999999' } });
     expect(suf.statusCode).toBe(206); expect(suf.headers['content-range']).toBe(`bytes 0-${size - 1}/${size}`); expect(suf.headers['content-length']).toBe(String(size));
   });
+  it('streams lossless as ALAC in fragmented MP4: one rung, init segment, no whole file', async () => {
+    const id = (await get('/api/albums?limit=1')).json().items[0];
+    const tid = (await get(`/api/albums/${id.id}`)).json().tracks[0].id;
+    const master = (await get(`/api/stream/${tid}/hls/master.m3u8?max=alac&norm=track&token=${tok}`)).body;
+    expect(master.match(/^[^#].*$/gm)).toEqual([`alac/index.m3u8?token=${tok}&abr=1`]);
+    expect(master).toContain('CODECS="alac"');
+    const pl = await get(`/api/stream/${tid}/hls/alac/index.m3u8?token=${tok}`);
+    expect(pl.statusCode).toBe(200);
+    expect(pl.body).toContain(`#EXT-X-MAP:URI="init.mp4?token=${tok}"`);
+    expect(pl.body).toMatch(new RegExp(`^s0000\\.m4s\\?token=${tok}$`, 'm'));
+    expect(pl.body).toContain('#EXT-X-ENDLIST');
+    const init = await get(`/api/stream/${tid}/hls/alac/init.mp4`); expect(init.statusCode).toBe(200); expect(init.headers['content-type']).toBe('video/mp4');
+    const seg = await get(`/api/stream/${tid}/hls/alac/s0000.m4s`); expect(seg.statusCode).toBe(200); expect(seg.headers['content-type']).toBe('video/iso.segment');
+    expect(seg.rawPayload.length).toBeGreaterThan(1000);
+    expect((await get(`/api/stream/${tid}/hls/alac/s0000.ts`)).statusCode).toBe(404);
+    expect((await get(`/api/stream/${tid}/hls/alacg-3/index.m3u8`)).statusCode).toBe(404);
+    expect((await get(`/api/stream/${tid}/whole/alac`)).statusCode).toBe(404);
+  });
   it('transcodes to HLS, once, and serves segments', async () => {
     const id = (await get('/api/albums?limit=1')).json().items[0];
     const tid = (await get(`/api/albums/${id.id}`)).json().tracks[1].id;

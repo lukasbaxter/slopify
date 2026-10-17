@@ -4,7 +4,7 @@
 // device; pushed live to the account's other open clients over the relay.
 
 export const QUALITIES = [
-  { id: 'original', label: 'Lossless (original file)', hint: 'FLAC / whatever was ripped. Bit-perfect.' },
+  { id: 'original', label: 'Lossless (original file)', hint: 'FLAC / whatever was ripped. Bit-perfect; phones stream it as Apple Lossless.' },
   { id: 'high', label: 'Very high (320 kbps)', hint: 'MP3 transcode. Good for a phone on data.', bitrate: 320000 },
   { id: 'normal', label: 'Normal (160 kbps)', bitrate: 160000 },
   { id: 'low', label: 'Low (96 kbps)', bitrate: 96000 },

@@ -289,17 +289,34 @@ export async function albumCoversPass(db: DB, opts: EnrichOptions = {}): Promise
   for (const al of due) {
     let url: string | null = null;
     let failed = false;
+    // The query as the match sees it (dashes, quotes, odd spaces folded): a
+    // U+2010 hyphen in "Anne‐Marie" found nothing on Deezer for 16 songs.
+    const q = `${normName(al.artist)} ${normName(al.name)}`;
+    const isVA = (a: string) => /^(va|various( artists?)?)$/.test(normName(a));
+    const same = (d: { title: string; artist: string; cover: string | null }) => !!d.cover && normName(d.title) === normName(al.name) && (normName(d.artist) === normName(al.artist) || (isVA(d.artist) && isVA(al.artist)));
     try {
       const list = await cached(db, `deezer:album:${normName(al.artist)}|${normName(al.name)}`, 30 * DAY, async () => {
-        const r = await fetcher(`https://api.deezer.com/search/album?q=${encodeURIComponent(`${al.artist} ${al.name}`)}&limit=10`);
+        const r = await fetcher(`https://api.deezer.com/search/album?q=${encodeURIComponent(q)}&limit=10`);
         const j = r.status === 200 ? await r.json() : null;
         // 200-with-{error} (quota) is a failure like any non-200: throw so nothing is cached for 30 days.
         if (!j || j.error) throw new Error(`deezer ${j?.error ? JSON.stringify(j.error).slice(0, 80) : r.status}`);
         return (j.data || []).map((d: any) => ({ title: d.title, artist: d.artist?.name ?? '', cover: d.cover_xl || d.cover_big || null }));
       }) as { title: string; artist: string; cover: string | null }[];
-      const hit = list.find((d) => normName(d.title) === normName(al.name) && normName(d.artist) === normName(al.artist) && d.cover);
-      url = hit?.cover ?? null;
+      url = list.find(same)?.cover ?? null;
     } catch (e: any) { failed = true; log(`deezer album ${al.artist} - ${al.name}: ${e.message}`); }
+    // Not on Deezer: the iTunes Search API (no key, 1200 px art), which has
+    // the compilations and EPs Deezer lacks (402 albums had no cover 2026-10-16).
+    if (!url) {
+      try {
+        const list = await cached(db, `itunes:album:${normName(al.artist)}|${normName(al.name)}`, 30 * DAY, async () => {
+          const r = await fetcher(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=album&limit=10`);
+          const j = r.status === 200 ? await r.json() : null;
+          if (!j) throw new Error(`itunes ${r.status}`);
+          return (Array.isArray(j.results) ? j.results : []).map((d: any) => ({ title: String(d.collectionName || ''), artist: String(d.artistName || ''), cover: typeof d.artworkUrl100 === 'string' ? d.artworkUrl100.replace(/\/\d+x\d+bb\./, '/1200x1200bb.') : null }));
+        }) as { title: string; artist: string; cover: string | null }[];
+        url = list.find(same)?.cover ?? null;
+      } catch (e: any) { failed = true; log(`itunes album ${al.artist} - ${al.name}: ${e.message}`); }
+    }
     let stored = false;
     if (url) {
       try {

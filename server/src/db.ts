@@ -205,6 +205,9 @@ const MIGRATIONS: string[] = [
   CREATE TABLE gone_tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, album_id TEXT NOT NULL, duration_ms INTEGER NOT NULL, removed_at INTEGER NOT NULL);
   CREATE INDEX gone_tracks_title ON gone_tracks(title COLLATE NOCASE);
   `,
+  // 24: the cover lookup gained a second source (iTunes) and a cleaner
+  // query: every album that gave up gets its tries back.
+  `UPDATE albums SET cover_tries = 0 WHERE cover_hash IS NULL;`,
 ];
 
 export type DB = Database.Database;

@@ -85,11 +85,11 @@ export class SessionLink {
         // still verifying the token was dropped -- which is how the desktop's
         // speaker list went missing from the web player after a restart.
         // Re-assert the claim first so the server re-marks us active before
-        // any roster goes out, then flush whatever we last knew. Only a
-        // re-assert: if another device took over while we were away (a
-        // locked phone misses the yield), the server keeps it there and
-        // yields us instead.
-        if (this._claimed) this._send({ type: 'claim', reassert: true });
+        // any roster goes out, then flush whatever we last knew. With how
+        // long ago play was pressed here: the latest press on the account
+        // wins. Pressed here after the device that has the session now, that
+        // device is told to stop; pressed before it, this one is yielded.
+        if (this._claimed) this._send({ type: 'claim', reassert: true, ago: Math.max(0, Date.now() - (this._claimedAt || 0)) });
         if (this._pending.devices.length) this.reportDevices(this._pending.devices);
         if (this._pending.nowPlaying) this.reportNowPlaying(this._pending.nowPlaying);
         if (this._pending.queue) this.reportQueue(this._pending.queue);
@@ -165,7 +165,7 @@ export class SessionLink {
   }
 
   // I just started playing here: make the user's other clients yield.
-  claim() { this._claimed = true; this._send({ type: 'claim' }); }
+  claim() { this._claimed = true; this._claimedAt = Date.now(); this._send({ type: 'claim' }); }
   // Resolves once this connection has the roster (true), or after `ms` (false).
   whenRoster(ms = 3000) {
     if (this.rosterSeen) return Promise.resolve(true);

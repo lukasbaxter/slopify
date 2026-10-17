@@ -162,7 +162,7 @@ describe('ws client ids across accounts', () => {
     expect(seen.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_1');
     laptop.ws.terminate();
   });
-  it('a device coming back with an old claim yields to the one that took over, instead of pausing it', async () => {
+  it('a device coming back with an older press yields to the one that pressed play since; a newer press takes over', async () => {
     const phone = await hello('tokA', 'c_phone_2');
     phone.ws.send(JSON.stringify({ type: 'claim' }));
     await new Promise((r) => setTimeout(r, 50));
@@ -172,13 +172,26 @@ describe('ws client ids across accounts', () => {
     const atLaptop: any[] = []; laptop.ws.on('message', (d: any) => atLaptop.push(JSON.parse(String(d))));
     laptop.ws.send(JSON.stringify({ type: 'claim' }));
     await new Promise((r) => setTimeout(r, 50));
-    // The phone reconnects and re-asserts the claim it still remembers.
+    // The phone reconnects and re-asserts the claim it still remembers: a
+    // press from 5 s ago, before the laptop's.
     const back = await hello('tokA', 'c_phone_2');
     const atPhone: any[] = []; back.ws.on('message', (d: any) => atPhone.push(JSON.parse(String(d))));
-    back.ws.send(JSON.stringify({ type: 'claim', reassert: true }));
+    back.ws.send(JSON.stringify({ type: 'claim', reassert: true, ago: 5000 }));
     await new Promise((r) => setTimeout(r, 150));
     expect(atLaptop.filter((m) => m.type === 'command' && m.command?.action === 'yield')).toEqual([]);
     expect(atPhone.some((m) => m.type === 'command' && m.command?.action === 'yield')).toBe(true);
+    expect(atLaptop.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_2');
+    // Play pressed on the phone (with no connection) AFTER the laptop's press:
+    // on reconnect the phone takes the session and the laptop is told to stop.
+    atLaptop.length = 0; atPhone.length = 0;
+    back.ws.send(JSON.stringify({ type: 'claim', reassert: true, ago: 0 }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(atLaptop.some((m) => m.type === 'command' && m.command?.action === 'yield')).toBe(true);
+    expect(atPhone.filter((m) => m.type === 'command' && m.command?.action === 'yield')).toEqual([]);
+    expect(atLaptop.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_phone_2');
+    // The laptop presses play again: latest press wins, back and forth.
+    laptop.ws.send(JSON.stringify({ type: 'claim' }));
+    await new Promise((r) => setTimeout(r, 100));
     expect(atLaptop.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_2');
     // With nobody else holding it, a re-assert still takes the session (server restart, own reconnect).
     laptop.ws.terminate();

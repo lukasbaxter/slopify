@@ -3,15 +3,16 @@ import { masterPlaylist, syntheticPlaylist } from './stream.js';
 import fixtures from './fixtures.hls-durations.json' with { type: 'json' };
 
 // The EXTINF sequences ffmpeg actually wrote for three real tracks (44.1, 48
-// and 96 kHz), captured from /data/transcodes: the synthetic playlist must
-// list the same segments with the same durations (to the ms), except that a
-// final sliver under 150 ms is folded into the segment before it.
+// and 96 kHz), captured from /data/transcodes, plus the ALAC (fMP4) playlist
+// of a 44.1 kHz FLAC: the synthetic playlist must list the same segments with
+// the same durations (to the ms), except that a final sliver under 150 ms is
+// folded into the segment before it.
 const durs = (pl: string) => [...pl.matchAll(/#EXTINF:([\d.]+)/g)].map((m) => Number(m[1]));
 
 describe('syntheticPlaylist', () => {
-  for (const f of fixtures as { sr: number; ms: number; durs: number[] }[]) {
-    it(`matches ffmpeg at ${f.sr} Hz`, () => {
-      const pl = syntheticPlaylist(f.ms, f.sr)!;
+  for (const f of fixtures as { sr: number; ms: number; durs: number[]; profile?: string }[]) {
+    it(`matches ffmpeg at ${f.sr} Hz${f.profile ? ` (${f.profile})` : ''}`, () => {
+      const pl = syntheticPlaylist(f.ms, f.sr, f.profile)!;
       const d = durs(pl);
       const real = f.durs;
       const folded = real[real.length - 1] < 0.15;
@@ -20,6 +21,8 @@ describe('syntheticPlaylist', () => {
       // Total within the database's 25 ms of the decoder's duration.
       expect(Math.abs(d.reduce((a, b) => a + b, 0) - real.reduce((a, b) => a + b, 0))).toBeLessThan(0.03);
       expect(pl).toContain('#EXT-X-PLAYLIST-TYPE:VOD'); expect(pl).toContain('#EXT-X-ENDLIST');
+      if (f.profile === 'alac') { expect(pl).toContain('#EXT-X-MAP:URI="init.mp4"'); expect(pl).toMatch(/^s0000\.m4s$/m); expect(pl).not.toContain('.ts'); }
+      else { expect(pl).not.toContain('#EXT-X-MAP'); expect(pl).toMatch(/^s0000\.ts$/m); }
     });
   }
   it('is null without a duration', () => { expect(syntheticPlaylist(0, 44100)).toBeNull(); });
@@ -38,5 +41,13 @@ describe('masterPlaylist', () => {
     expect(bw).toEqual([...bw].sort((a, b) => a - b));
     expect(pl).toContain('aac-96g-5.2/index.m3u8?token=abc&abr=1');
     expect(pl).toContain('#EXT-X-INDEPENDENT-SEGMENTS');
+  });
+  it('lossless is one ALAC rung, never with a gain', () => {
+    const pl = masterPlaylist('alac', -5.2, 'token=abc&');
+    expect(rungs(pl)).toEqual([]);
+    expect(pl).toContain('CODECS="alac"');
+    expect(pl.match(/^alac\/index\.m3u8\?token=abc&abr=1$/m)).toBeTruthy();
+    expect(pl).not.toContain('aac-');
+    expect(pl).not.toContain('g-5.2');
   });
 });

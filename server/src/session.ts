@@ -26,6 +26,9 @@ export type Device = { id: string; name: string; kind: string } | null;
 export type Session = {
   rev: number; active: string | null; trackId: string | null; queue: string[]; index: number; playing: boolean;
   positionMs: number; anchorAt: number; device: Device; lastEventTs: number; updatedAt: number;
+  // When play was pressed on the active client (server clock): a client
+  // coming back with a press from before this yields, one from after takes over.
+  claimedAt?: number;
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
@@ -350,7 +353,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
           else if (now - me._playSince.at >= 8000 && np.itemId !== me._lastPlayId) { me._lastPlayId = np.itemId; logPlay(me.uid, np.itemId, me.name); }
         }
         // Sound coming out of a client nobody else has claimed makes it the active one.
-        if (np?.playing && !s.active) { s.active = me.id; s.rev++; }
+        if (np?.playing && !s.active) { s.active = me.id; s.claimedAt = now; s.rev++; }
         // The active client has nothing playing any more: release the session,
         // frozen where it was, so the others keep it (the server's speaker
         // client never disconnects, so this is how it lets go).
@@ -369,18 +372,24 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         break;
       }
       case 'claim': {
-        // A reconnecting client re-asserting the claim it held before the drop
-        // (a locked phone, a server restart). If another connected device took
-        // the session meanwhile, that one keeps it: the comer is the one that
-        // yields, never the device that is playing now.
-        if (msg.reassert && s.active && s.active !== me.id && clients.get(String(s.active))) {
-          app.log.info(`session: ${me.name} came back; ${clients.get(String(s.active))!.name} has the session, so ${me.name} yields`);
+        // The latest press of play on the account is the one making sound.
+        // A fresh claim is a press now. A reconnecting client re-asserting
+        // the claim it held before the drop (a locked phone, a play pressed
+        // with no connection, a server restart) says how long ago it pressed:
+        // if another connected device pressed play since, that one keeps the
+        // session and the comer yields; pressed later than that device, the
+        // comer takes over and that device is told to stop.
+        const at = msg.reassert ? now - Math.min(Math.max(0, Number(msg.ago) || 0), 7 * 86400000) : now;
+        const holder = s.active && s.active !== me.id ? clients.get(String(s.active)) : undefined;
+        if (msg.reassert && holder && (s.claimedAt ?? 0) > at) {
+          app.log.info(`session: ${me.name} came back; ${holder.name} pressed play since, so ${me.name} yields`);
           send(me, { type: 'command', from: String(s.active), command: { action: 'yield' } });
           broadcastRoster(me.uid);
           break;
         }
         // "Play here": this client becomes the one making sound; the others yield.
-        if (s.active !== me.id) { app.log.info(`session: ${me.name} claims playback from ${clients.get(String(s.active))?.name || s.active || 'nobody'}`); s.lastEventTs = now; s.active = me.id; s.rev++; s.updatedAt = now; }
+        if (s.active !== me.id) { app.log.info(`session: ${me.name} ${msg.reassert ? `came back with a newer press and ` : ''}claims playback from ${holder?.name || s.active || 'nobody'}`); s.lastEventTs = now; s.active = me.id; s.rev++; s.updatedAt = now; }
+        s.claimedAt = at;
         for (const c of ofUser(me.uid)) if (c.id !== me.id) send(c, { type: 'command', from: me.id, command: { action: 'yield' } });
         broadcastRoster(me.uid);
         break;

@@ -593,6 +593,11 @@ export function usePlayer(jf) {
         // Nothing but the active element may hold media now: a loaded spare is
         // one more thing iOS could start when the app comes back.
         if (spare && spare !== el && spare.getAttribute('src')) { spare.pause(); spare.removeAttribute('src'); spare.load(); delete spare.dataset.track; }
+        // iOS: a new src set on an element still playing let the last second
+        // of the OLD song out once the new one started (10-17: "stops, plays
+        // a 1 s clip of the previous track, then switches"; the 2-3 s FLAC
+        // load used to hide it). Stop and empty it first, then load.
+        if (IS_IOS && el.getAttribute('src') && !el.paused) { mediaLog(`stop ${(el.dataset.track || '-').slice(0, 6)} before the next load`); ownPause(el); el.removeAttribute('src'); el.load(); }
         // A transcode starts at the wanted moment on the server; the element's
         // clock then runs from 0 and localBaseRef holds the offset.
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;

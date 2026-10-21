@@ -14,4 +14,4 @@ npm run dist:mac         # dmg + zip in release/
 ```
 
 Releases are built by `.github/workflows/release.yml` on a `v*` tag.
-Trace log while running: `$TMPDIR/slopify-trace.log`.
+Trace log while running with `SLOPIFY_TRACE=1`: `$TMPDIR/slopify-trace.log` (tokens masked).

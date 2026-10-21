@@ -71,8 +71,10 @@ function createWindow() {
   });
 
   // Open external links in the real browser, never inside the app shell.
+  // Web links only: the "Source code" link comes from the server, and a
+  // file: or custom-scheme URL must not reach the OS.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -152,17 +154,21 @@ app.on('before-quit', () => {
 
 // Set SLOPIFY_TRACE=1 to log every device call with timings. Invaluable for
 // telling "the speaker is misbehaving" apart from "the UI is calling us wrong",
-// which look identical from the renderer.
+// which look identical from the renderer. Off unless asked for: the file is
+// in the temp folder, readable by other programs, and a line used to carry
+// most of the session token (the stream URL's last 40 characters).
 // Written to a file rather than stdout: Electron's stdout does not survive the
 // concurrently wrapper in dev, so console logging here silently goes nowhere.
-const TRACE = process.env.SLOPIFY_TRACE !== '0';
+const TRACE = process.env.SLOPIFY_TRACE === '1';
 const TRACE_FILE = path.join(require('os').tmpdir(), 'slopify-trace.log');
 const t0 = Date.now();
-try { if (TRACE) fs.writeFileSync(TRACE_FILE, `--- slopify trace ${new Date().toISOString()} ---\n`); } catch (e) { /* non-fatal */ }
+try { if (TRACE) fs.writeFileSync(TRACE_FILE, `--- slopify trace ${new Date().toISOString()} ---\n`, { mode: 0o600 }); } catch (e) { /* non-fatal */ }
+// Never a credential in the file: tokens ride in URLs (?token=) and are masked.
+const mask = (x) => String(x).replace(/([?&](?:token|api_key|key)=)[^&#\s]*/gi, '$1***');
 const trace = (...a) => {
   if (!TRACE) return;
-  const line = `[+${((Date.now() - t0) / 1000).toFixed(1)}s] ${a.join(' ')}\n`;
-  try { fs.appendFileSync(TRACE_FILE, line); } catch (e) { /* non-fatal */ }
+  const line = `[+${((Date.now() - t0) / 1000).toFixed(1)}s] ${a.map(mask).join(' ')}\n`;
+  try { fs.appendFileSync(TRACE_FILE, line, { mode: 0o600 }); } catch (e) { /* non-fatal */ }
 };
 
 const handle = (channel, fn) => {
@@ -176,7 +182,7 @@ const handle = (channel, fn) => {
         } else if (channel === 'device:status') {
           trace(`status  ${dev} -> playing=${value?.playing} pos=${value?.position}`);
         } else {
-          trace(`${channel.replace('device:', '').padEnd(7)} ${dev}`, channel === 'device:play' ? String(args[1]).slice(-40) : (args[1] ?? ''));
+          trace(`${channel.replace('device:', '').padEnd(7)} ${dev}`, channel === 'device:play' ? mask(String(args[1])).split('/').slice(-2).join('/').slice(0, 60) : (args[1] ?? ''));
         }
       }
       return { ok: true, value };

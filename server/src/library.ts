@@ -186,6 +186,7 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     // Albums and artists: every word of the query somewhere in name + artist
     // ("ok computer radiohead" finds the album), the exact name first.
     const words = q.normalize('NFKC').replace(/[%_]/g, '').split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!words.length) return { tracks, albums: [], artists: [] }; // only wildcards: no album/artist predicate to build
     const where = (expr: string) => words.map(() => `${expr} LIKE ? COLLATE NOCASE`).join(' AND ');
     const params = words.map((w) => `%${w}%`);
     const albums = (db.prepare(`SELECT * FROM albums WHERE ${where("(name || ' ' || artist)")} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(albumOut);

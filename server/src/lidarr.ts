@@ -472,7 +472,7 @@ export function registerLidarrHook(app: FastifyInstance, opts: { apiKey: string;
     const b = req.body || {};
     if (b.eventType === 'Test') return { ok: true };
     const root = path.posix.resolve(opts.lidarrRoot || '/music');
-    const dirs = [...new Set<string>(((b.trackFiles || []) as any[])
+    const dirs = [...new Set<string>((Array.isArray(b.trackFiles) ? b.trackFiles as any[] : [])
       .map((t) => path.posix.dirname(String(t.path || '')))
       .filter((d) => d.startsWith(root + '/'))
       .map((d) => path.posix.relative(root, d)))];

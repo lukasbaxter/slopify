@@ -57,7 +57,7 @@ describe('a speaker on its own', () => {
   it('an input takes the speaker away from the Slopify music on it', async () => {
     const p = new ServerPlayer('u', {
       db: { prepare: () => ({ get: () => undefined, run: () => {}, all: () => [] }) } as any,
-      discovery: discovery(), publicUrl: 'http://music', token: 't', log: () => {}, claim: () => {}, reportQueue: () => {}, report: () => {},
+      discovery: discovery(), publicUrl: 'http://music', token: () => 't', log: () => {}, claim: () => {}, reportQueue: () => {}, report: () => {},
     });
     await p.execute({ action: 'transfer', deviceId: 'bluos:towers', trackIds: ['t1'], index: 0, position: 0, playing: true });
     expect(p.transport).not.toBeNull();

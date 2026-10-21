@@ -39,7 +39,7 @@ export const PROFILES: Record<string, { bitrate: string }> = { 'aac-320': { bitr
 // (2026-10-16: 2.7 s to start on the home Wi-Fi, 20-30 s on hotel Wi-Fi).
 export const LOSSLESS = 'alac';
 export const isLossless = (p: string) => p === LOSSLESS;
-export const knownProfile = (p: string) => !!PROFILES[p] || isLossless(p);
+export const knownProfile = (p: unknown): p is string => typeof p === 'string' && (Object.hasOwn(PROFILES, p) || isLossless(p));
 export const segmentExt = (p: string) => (isLossless(p) ? 'm4s' : 'ts');
 // Every start is on the lowest rung (see masterPlaylist): the one profile
 // that is warmed for everything coming up, before the profile it climbs to.
@@ -77,7 +77,6 @@ const running = new Map<string, Promise<void>>(); // key -> startable (RUNWAY se
 const finishing = new Map<string, Promise<void>>(); // key -> ffmpeg exited (what a warm slot waits for)
 const SEG = 4;             // -hls_time
 const RUNWAY = 1;          // segments written before the (synthetic) playlist is answered
-const RUNWAY_WAIT = 1500;  // ms cap on waiting for them
 const SEG_WAIT_MS = 30000; // how long a segment request waits for ffmpeg
 
 function transcodeDir(dataDir: string, id: string, profile: string) { return path.join(dataDir, 'transcodes', id, profile); }
@@ -149,21 +148,52 @@ export function spawnFf(pre: string[], src: Src, post: string[], out: 'pipe' | '
   return ff;
 }
 
-// Foreground transcodes running at once (warms have their own cap below): a
-// burst of plays must not fork one ffmpeg per request. Waiters re-check in a
-// loop, so a wake-up race can never oversubscribe.
+// Foreground transcodes (someone pressed play) starting at once, plus a hard
+// cap on ffmpeg encodes alive at once (foreground encodes past their first
+// segment, climbs, warms): a burst of plays must not fork one ffmpeg per
+// request. A foreground slot is given back as soon as the playlist is
+// startable, so the next press of play never waits for a whole song to finish
+// encoding (it used to: 3-9 s playlist waits at every song boundary). Waiters
+// give up after a while with Busy (a 503 the player retries) instead of
+// hanging behind a wedged encode forever.
 let fgActive = 0;
-const fgWaiters: (() => void)[] = [];
-async function fgAcquire(): Promise<() => void> {
-  while (fgActive >= config.transcodeConcurrency) await new Promise<void>((r) => fgWaiters.push(r));
-  fgActive++;
+let liveFf = 0;
+const waiters: (() => void)[] = [];
+const wake = () => waiters.splice(0).forEach((w) => w());
+const maxLive = () => Math.max(config.transcodeConcurrency * 2, 6);
+export class Busy extends Error { constructor() { super('transcoder busy'); } }
+type Slot = (() => void) & { startable: () => void };
+async function acquire(kind: 'fg' | 'live', timeoutMs = 20000): Promise<Slot> {
+  const full = () => liveFf >= maxLive() || (kind === 'fg' && fgActive >= config.transcodeConcurrency);
+  const t0 = Date.now();
+  while (full()) {
+    const left = timeoutMs - (Date.now() - t0);
+    if (left <= 0) throw new Busy();
+    await new Promise<void>((resolve) => {
+      const w = () => { clearTimeout(t); resolve(); };
+      const t = setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) waiters.splice(i, 1); resolve(); }, left);
+      waiters.push(w);
+    });
+  }
+  liveFf++;
+  let fgHeld = kind === 'fg';
+  if (fgHeld) fgActive++;
+  const startable = () => { if (!fgHeld) return; fgHeld = false; fgActive--; wake(); };
   let released = false;
-  return () => { if (released) return; released = true; fgActive--; fgWaiters.splice(0).forEach((w) => w()); };
+  const release = () => { if (released) return; released = true; startable(); liveFf--; wake(); };
+  return Object.assign(release, { startable });
 }
+export const transcodeLoad = () => ({ foreground: fgActive, live: liveFf, waiting: waiters.length });
 
 // Starts (or joins) the transcode and resolves once the playlist is startable.
-// `nice` runs ffmpeg at low priority: warms must never slow a foreground start.
-async function ensureHls(dataDir: string, id: string, src: Src, profile: string, log: (m: string) => void, nice = false): Promise<string> {
+// `nice` runs ffmpeg at low priority and outside the foreground slots: warms,
+// prewarms and the quality climb must never slow a foreground start.
+// `deadlineMs`: an encode still running this long after it became startable
+// (a wedged NAS read, usually) is killed so it cannot pin a slot forever.
+type HlsOpts = { nice?: boolean; deadlineMs?: number };
+async function ensureHls(dataDir: string, id: string, src: Src, profile: string, log: (m: string) => void, opts: HlsOpts = {}): Promise<string> {
+  const nice = !!opts.nice;
+  const deadlineMs = opts.deadlineMs ?? 10 * 60000;
   const dir = transcodeDir(dataDir, id, profile);
   const index = path.join(dir, 'index.m3u8');
   const done = path.join(dir, 'done');
@@ -174,7 +204,7 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
     let p: Promise<void> | undefined; // the closure compares against it: only the run that owns the entry may delete it
     p = (async () => {
       /* eslint-enable prefer-const */
-      const release = nice ? null : await fgAcquire(); // held until ffmpeg exits
+      const slot = await acquire(nice ? 'live' : 'fg');
       let ff;
       try {
         await fsp.rm(dir, { recursive: true, force: true });
@@ -186,22 +216,26 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
           ? spawnFf([], src, ['-map', '0:a:0', '-vn', '-c:a', 'alac', ...hlsArgs, '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', path.join(dir, 's%04d.m4s'), index], 'ignore', nice)
           : spawnFf([], src, ['-map', '0:a:0', '-vn', ...(v.gain ? ['-af', `volume=${v.gain}dB`] : []), '-c:a', 'aac', '-b:a', PROFILES[v.profile].bitrate, '-ac', '2',
             ...hlsArgs, '-hls_segment_filename', path.join(dir, 's%04d.ts'), index], 'ignore', nice);
-      } catch (e) { release?.(); throw e; }
+      } catch (e) { slot(); throw e; }
       let err = '';
       ff.stderr!.on('data', (d) => { err += d; });
       const exit = new Promise<void>((resolve, reject) => { ff.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.slice(0, 300)}`)))); ff.on('error', reject); });
       let finished = false;
+      let deadline: NodeJS.Timeout | null = null;
       const fin = exit.then(() => { finished = true; return fsp.writeFile(done, '1'); }).catch((e) => { finished = true; log(`hls ${key}: ${e.message}`); })
-        .finally(() => { release?.(); if (running.get(key) === p) running.delete(key); if (finishing.get(key) === fin) finishing.delete(key); });
+        .finally(() => { if (deadline) clearTimeout(deadline); slot(); if (running.get(key) === p) running.delete(key); if (finishing.get(key) === fin) finishing.delete(key); });
       finishing.set(key, fin);
       const t0 = Date.now();
-      let first = 0;
       while (Date.now() - t0 < 30000) {
         if (finished) { if (ff.exitCode === 0) return; throw new Error('transcode failed'); }
         try {
-          const n = segmentCount(await fsp.readFile(index, 'utf8'));
-          if (n && !first) first = Date.now();
-          if (n >= RUNWAY || (first && Date.now() - first > RUNWAY_WAIT)) return;
+          if (segmentCount(await fsp.readFile(index, 'utf8')) >= RUNWAY) {
+            // Startable: the foreground slot goes back now; the encode runs on
+            // (bounded by the live cap) and is killed if it overstays.
+            slot.startable();
+            deadline = setTimeout(() => { if (!finished) { log(`hls ${key}: still encoding after ${Math.round(deadlineMs / 1000)} s, killed`); try { ff.kill('SIGKILL'); } catch { /* gone */ } } }, deadlineMs);
+            return;
+          }
         } catch { /* not yet */ }
         await new Promise((r) => setTimeout(r, 50));
       }
@@ -222,6 +256,7 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
 // time; foreground playlist requests never wait on it (they call ensureHls
 // directly and simply join a warm already running for the same key).
 const WARM_CONCURRENCY = 2;
+const WARM_QUEUE_MAX = 60;
 const warmQueue: { id: string; profile: string }[] = [];
 let warmActive = 0;
 function pumpWarm(dataDir: string, srcOf: (id: string) => Src | undefined, log: (m: string) => void) {
@@ -231,7 +266,7 @@ function pumpWarm(dataDir: string, srcOf: (id: string) => Src | undefined, log: 
     if (!file || fs.existsSync(path.join(transcodeDir(dataDir, id, profile), 'done'))) continue;
     warmActive++;
     // The slot is held until ffmpeg exits, not just until the track is startable.
-    ensureHls(dataDir, id, file, profile, log, true).then(() => finishing.get(`${id}:${profile}`)).catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
+    ensureHls(dataDir, id, file, profile, log, { nice: true }).then(() => finishing.get(`${id}:${profile}`)).catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
       .finally(() => { warmActive--; pumpWarm(dataDir, srcOf, log); });
   }
 }
@@ -356,12 +391,14 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const rungs = prof === START_PROFILE || isLossless(prof) ? [prof] : [START_PROFILE, prof];
     for (const p of rungs) {
       for (const id of ids.slice(0, 10)) {
-        if (typeof id !== 'string') continue;
+        if (typeof id !== 'string' || !/^[0-9a-f]{32}$/.test(id)) continue;
         // Not measured yet: measure, then warm at the gain it turns out to need.
         if (norm && unmeasured(id)) { if (p === rungs[0]) measureSoon(id, () => warm(uid, [id], prof, norm)); continue; }
         const v = variantFor(id, p, norm);
         if (warmQueue.some((w) => w.id === id && w.profile === v)) continue;
         if (running.has(`${id}:${v}`) || fs.existsSync(path.join(transcodeDir(dataDir, id, v), 'done'))) continue;
+        // Bounded: a client posting its whole library warms the newest asks, not everything.
+        if (warmQueue.length >= WARM_QUEUE_MAX) warmQueue.shift();
         warmQueue.push({ id, profile: v });
       }
     }
@@ -377,6 +414,9 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     if (!p.gain) return true;
     return p.gain === gainFor(db, id, 'track') || p.gain === gainFor(db, id, 'album');
   };
+  // An encode may run three times the song's length past its first segment
+  // (a minute at least) before it is taken for wedged and killed.
+  const deadlineFor = (id: string) => { const t = db.prepare('SELECT duration_ms FROM tracks WHERE id = ?').get(id) as any; return t?.duration_ms ? Math.max(60000, 3 * t.duration_ms) : 10 * 60000; };
   const normOf = (q: any): GainMode | null => (q?.norm === 'track' || q?.norm === 'album' ? q.norm : null);
 
   // Original file, byte ranges honoured by @fastify/static-free code (ranges by hand: it is 20 lines).
@@ -397,11 +437,14 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const q = req.query as any;
     const kbps = Math.min(320, Math.max(64, Math.round((Number(q.bitrate) || 320000) / 1000)));
     const startAt = Math.max(0, Number(q.startAt) || 0);
+    // One live encode per listener, bounded like every other ffmpeg here.
+    let slot: Slot; try { slot = await acquire('live', 15000); } catch { return reply.code(503).send({ error: 'busy' }); }
     const ff = spawnFf(startAt ? ['-ss', String(startAt)] : [], src, ['-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', `${kbps}k`, '-ac', '2', '-f', 'mp3', '-id3v2_version', '0', '-write_xing', '0', 'pipe:1'], 'pipe');
     ff.stderr!.resume();
+    ff.on('exit', () => slot());
     // Without a handler a failed spawn is an uncaught 'error' and kills the process.
-    ff.on('error', (e) => { log(`mp3 ${id}: ffmpeg: ${e.message}`); if (!reply.raw.headersSent) reply.code(503); ff.stdout?.destroy(e); });
-    reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
+    ff.on('error', (e) => { slot(); log(`mp3 ${id}: ffmpeg: ${e.message}`); if (!reply.raw.headersSent) reply.code(503); ff.stdout?.destroy(e); });
+    reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } slot(); });
     reply.header('Cache-Control', 'no-store').header('Accept-Ranges', 'none').type('audio/mpeg');
     return reply.send(ff.stdout);
   });
@@ -423,15 +466,17 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const base = safe(q.name) || safe(`${t.artist} - ${t.title}`);
     const fmt = String(q.fmt || 'original');
     const disposition = (name: string) => `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(name)}`;
-    if (fmt === 'original' || !DL[fmt]) {
+    if (fmt === 'original' || !Object.hasOwn(DL, fmt)) {
       const ext = path.extname(t.path).toLowerCase();
       reply.header('Content-Disposition', disposition(`${base}${ext}`)).header('Content-Length', src.size).type(MIME[ext] || 'application/octet-stream');
       return reply.send(openBytes(src.file, src.head, 0, src.size - 1, src.alt));
     }
     const d = DL[fmt];
+    let slot: Slot; try { slot = await acquire('live', 15000); } catch { return reply.code(503).send({ error: 'busy' }); }
     const ff = spawnFf([], src, ['-map', '0:a:0', '-vn', ...d.args, ...(d.args.includes('-f') ? [] : ['-f', d.ext]), 'pipe:1'], 'pipe');
     ff.stderr!.resume();
-    ff.on('error', (e) => { log(`download ${id}: ffmpeg: ${e.message}`); if (!reply.raw.headersSent) reply.code(503); ff.stdout?.destroy(e); });
+    ff.on('exit', () => slot());
+    ff.on('error', (e) => { slot(); log(`download ${id}: ffmpeg: ${e.message}`); if (!reply.raw.headersSent) reply.code(503); ff.stdout?.destroy(e); });
     reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } });
     reply.header('Content-Disposition', disposition(`${base}.${d.ext}`)).type(d.mime);
     return reply.send(ff.stdout);
@@ -478,11 +523,12 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     let out = path.join(dir, 'whole.m4a');
     if (!fs.existsSync(out)) {
       try {
-        await ensureHls(dataDir, id, src, profile, log);
+        // Asked for ahead of time (the next song): never a foreground slot.
+        await ensureHls(dataDir, id, src, profile, log, { nice: true, deadlineMs: deadlineFor(id) });
         await finishing.get(`${id}:${profile}`);
         if (!fs.existsSync(path.join(dir, 'done'))) return reply.code(503).send({ error: 'transcode failed' });
         out = await joinSegments(dir);
-      } catch (e: any) { return reply.code(503).send({ error: e.message }); }
+      } catch (e: any) { log(`whole ${id}:${profile}: ${e.message}`); return reply.code(503).send({ error: e instanceof Busy ? 'busy' : 'transcode failed' }); }
     }
     return sendRanged(req, reply, out, 'audio/mp4', 'private, max-age=86400, immutable');
   });
@@ -492,10 +538,17 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     if (!variantOk(id, profile)) return reply.code(404).send({ error: 'no such profile' });
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
+    const q = req.query as any;
     // A step down inside an adaptive stream is not the quality they chose.
-    if (!(req.query as any).abr && knownProfile(profile)) lastProfile.set(req.user!.id, { profile, norm: null });
+    if (!q.abr && knownProfile(profile)) lastProfile.set(req.user!.id, { profile, norm: null });
+    // A foreground start is the rung every start lands on (or lossless, its
+    // only rung) asked for by a player, not a prewarm (?pre=1, the client
+    // warming the songs after this one) and not the adaptive climb to a
+    // higher rung: those run at low priority outside the foreground slots.
+    const foreground = !q.pre && (!q.abr || isLossless(profile) || parseVariant(profile)?.profile === START_PROFILE);
     let index: string;
-    try { index = await ensureHls(dataDir, id, src, profile, log); } catch (e: any) { return reply.code(503).send({ error: e.message }); }
+    try { index = await ensureHls(dataDir, id, src, profile, log, { nice: !foreground, deadlineMs: deadlineFor(id) }); }
+    catch (e: any) { log(`hls ${id}:${profile}: ${e.message}`); return reply.code(503).send({ error: e instanceof Busy ? 'busy' : 'transcode failed' }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
     const tok = (req.query as any).token ? `?token=${encodeURIComponent((req.query as any).token)}` : '';
     let body = await fsp.readFile(index, 'utf8');
@@ -541,7 +594,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const b = Warm.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'ids required' });
     warm(req.user!.id, b.data.ids, b.data.profile, b.data.norm);
-    return { ok: true, queued: warmQueue.length, active: warmActive };
+    return { ok: true, queued: warmQueue.length, active: warmActive, ...transcodeLoad() };
   });
 
   // --- nightly: the hot set pre-transcoded, the cache trimmed --------------------

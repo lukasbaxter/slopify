@@ -22,15 +22,23 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     const full = (req.query as any).full === '1';
     return full ? { at, items: tracksByIds(db, rows.map((r) => r.track_id)) } : { at };
   });
+  // Only ids of tracks the library has go into a playlist (a 32-hex id, and a
+  // row for it): a client cannot fill the database with strings nothing reads.
+  const TRACK_ID = /^[0-9a-f]{32}$/;
+  const hasTrack = db.prepare('SELECT 1 FROM tracks WHERE id = ?');
+  const knownTracks = (ids: string[]) => ids.filter((t) => TRACK_ID.test(t) && hasTrack.get(t));
+  const PLAYLIST_MAX = 10000;
   // A like on a track, or on an album (saved to Your Library).
   const isAlbum = (id: string) => !!db.prepare('SELECT 1 FROM albums WHERE id = ?').get(id);
   // A "like" on an artist is a follow (the artist page's Follow button).
   const isArtist = (id: string) => !!db.prepare('SELECT 1 FROM artists WHERE id = ?').get(id);
-  app.put('/api/likes/:id', auth, async (req) => {
+  app.put('/api/likes/:id', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
     const at = Number((req.body as any)?.at) || Date.now();
+    if (!/^[0-9a-f]{32}$/.test(id)) return reply.code(404).send({ error: 'no such item' });
     if (isAlbum(id)) { db.prepare('INSERT INTO album_likes (user_id, album_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid(req), id, at); return { ok: true, at, album: true }; }
     if (isArtist(id)) { db.prepare('INSERT INTO artist_follows (user_id, artist_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid(req), id, at); return { ok: true, at, artist: true }; }
+    if (!hasTrack.get(id)) return reply.code(404).send({ error: 'no such item' });
     db.prepare('INSERT INTO likes (user_id, track_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid(req), id, at);
     (app as any).sessionLike?.(uid(req), id, true, at);
     return { ok: true, at };
@@ -83,13 +91,13 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     FROM playlists p WHERE p.user_id = ? ORDER BY p.updated DESC`);
   const onePl = db.prepare(listPl.source.replace('WHERE p.user_id = ? ORDER BY p.updated DESC', 'WHERE p.id = ? AND p.user_id = ?'));
   app.get('/api/playlists', auth, async (req) => ({ items: (listPl.all(uid(req)) as any[]).map(plOut) }));
-  const PlBody = z.object({ name: z.string().min(1).max(120), trackIds: z.array(z.string()).max(5000).optional() });
+  const PlBody = z.object({ name: z.string().min(1).max(120), trackIds: z.array(z.string().max(64)).max(5000).optional() });
   app.post('/api/playlists', auth, async (req, reply) => {
     const b = PlBody.safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'name required' });
     const id = playlistId(), now = Date.now();
     db.transaction(() => {
       db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid(req), b.data.name, now, now);
-      (b.data.trackIds ?? []).forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t, now));
+      knownTracks(b.data.trackIds ?? []).forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t, now));
     })();
     return { id, name: b.data.name };
   });
@@ -118,10 +126,13 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   const renumber = db.prepare(`WITH o AS (SELECT rowid AS r, ROW_NUMBER() OVER (ORDER BY pos) - 1 AS n FROM playlist_tracks WHERE playlist_id = ?) UPDATE playlist_tracks SET pos = (SELECT n FROM o WHERE o.r = playlist_tracks.rowid) WHERE playlist_id = ?`);
   app.post('/api/playlists/:id/tracks', auth, async (req, reply) => {
     const p = own(req, (req.params as any).id); if (!p) return reply.code(404).send({ error: 'no such playlist' });
-    const b = z.object({ trackIds: z.array(z.string()).min(1).max(2000) }).safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'trackIds required' });
+    const b = z.object({ trackIds: z.array(z.string().max(64)).min(1).max(2000) }).safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'trackIds required' });
+    const ids = knownTracks(b.data.trackIds);
+    const have = (db.prepare('SELECT COUNT(*) n FROM playlist_tracks WHERE playlist_id = ?').get(p.id) as any).n as number;
+    if (have + ids.length > PLAYLIST_MAX) return reply.code(400).send({ error: `a playlist holds at most ${PLAYLIST_MAX} songs` });
     db.transaction(() => {
       let pos = ((db.prepare('SELECT COALESCE(MAX(pos), -1) m FROM playlist_tracks WHERE playlist_id = ?').get(p.id) as any).m as number) + 1;
-      for (const t of b.data.trackIds) db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(p.id, pos++, t, Date.now());
+      for (const t of ids) db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(p.id, pos++, t, Date.now());
       db.prepare('UPDATE playlists SET updated = ? WHERE id = ?').run(Date.now(), p.id);
     })();
     return { ok: true };
@@ -147,7 +158,7 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
 
   // --- plays + home ---
   app.post('/api/plays', auth, async (req, reply) => {
-    const b = z.object({ trackId: z.string(), at: z.number().optional(), client: z.string().max(80).optional() }).safeParse(req.body);
+    const b = z.object({ trackId: z.string().regex(/^[0-9a-f]{32}$/), at: z.number().optional(), client: z.string().max(80).optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'trackId required' });
     const at = b.data.at ?? Date.now();
     // The same track again within 60 s is the same play.

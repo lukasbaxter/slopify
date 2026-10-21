@@ -22,7 +22,7 @@ const STEP_GAP_MS = 300;
 const STEP_RUN_REST_MS = 3000;
 const STEP_RUN_MAX_RISE = 20;
 export type PlayerDeps = {
-  db: DB; discovery: Discovery; publicUrl: string; token: string;
+  db: DB; discovery: Discovery; publicUrl: string; token: () => string; // read at each use: the row can be re-minted after a revoke
   report: (np: any | null) => void; reportQueue: (rows: Row[]) => void; claim: () => void; log: (m: string) => void; scrobble?: (trackId: string, at: number) => void;
   // The speaker's group (itself first); alone, just itself.
   groupOf?: (id: string) => string[];
@@ -95,7 +95,10 @@ export class ServerPlayer {
       return { ...r, _queued: !!flags[j++] };
     });
   }
-  private url(path: string) { return `${this.d.publicUrl.replace(/\/+$/, '')}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(this.d.token)}`; }
+  // Streams carry the account's speaker token (the speaker cannot send a
+  // header); covers are public by id and get none, so the token never rides
+  // in a metadata URL a speaker shows to the whole LAN.
+  private url(path: string) { const base = `${this.d.publicUrl.replace(/\/+$/, '')}${path}`; return path.startsWith('/api/image/') ? base : `${base}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(this.d.token())}`; }
   private meta(t: Row) {
     const artistId = t.ArtistItems?.[0]?.Id || null;
     return { title: t.Name, artist: t.Artists?.join(', ') || t.AlbumArtist || '', album: t.Album || '', artwork: this.url(`/api/image/${t.AlbumId || t.Id}?size=640`), artworkFallback: artistId ? this.url(`/api/image/${artistId}?size=640`) : undefined, contentType: MIME[(t._codec || 'mp3').toLowerCase()] || 'audio/mpeg' };

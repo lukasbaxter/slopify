@@ -121,6 +121,9 @@ class Aligner {
   constructor(python: string, script: string, env: Record<string, string>) {
     this.proc = spawn(python, [script], { env: { ...process.env, ...env, PYTHONUNBUFFERED: '1' } });
     this.proc.stderr.on('data', (b) => { this.stderr.push(String(b)); if (this.stderr.length > 40) this.stderr.shift(); });
+    // A write to a pipe the process has already closed must not be an uncaught
+    // 'error' (that took the whole server down with it).
+    this.proc.stdin.on('error', () => {});
     const rl = readline.createInterface({ input: this.proc.stdout });
     let readyResolve!: (v: any) => void;
     // The first load downloads the model (~1.6 GB) into the cache.
@@ -143,10 +146,13 @@ class Aligner {
     return new Promise((resolve) => {
       const timer = setTimeout(() => { this.pending.delete(id); resolve({ ok: false, error: 'timed out' }); this.close(); }, timeoutMs);
       this.pending.set(id, { resolve, timer });
+      // Closed (a request that timed out, a crash): nothing to write to.
+      if (this.dead || this.proc.exitCode !== null) { clearTimeout(timer); this.pending.delete(id); resolve({ ok: false, error: 'the aligner stopped' }); return; }
       this.proc.stdin.write(JSON.stringify({ id, ...body }) + '\n');
     });
   }
-  close() { try { this.proc.stdin.end(); this.proc.kill('SIGTERM'); } catch { /* gone */ } }
+  dead = false;
+  close() { this.dead = true; try { this.proc.stdin.end(); this.proc.kill('SIGTERM'); } catch { /* gone */ } }
 }
 
 
@@ -237,7 +243,7 @@ export function lyricSyncTask(app: FastifyInstance, o: LyricSyncOptions): TaskDe
     await makeRoom(ctx);
     const isolate = Boolean(ctx.setting('isolate'));
     const key = `align:${isolate ? 1 : 0}`;
-    if (!aligner || mode !== key) {
+    if (!aligner || aligner.dead || mode !== key) {
       unload();
       ctx.step('Starting the aligner');
       const a = new Aligner(o.python, o.script, {

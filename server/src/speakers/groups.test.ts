@@ -74,7 +74,7 @@ describe('playing on speaker groups', () => {
   const player = (uid: string) => new ServerPlayer(uid, {
     db: { prepare: () => ({ get: () => undefined, run: () => {}, all: () => [] }) } as any,
     discovery: { get: (id: string) => speakers.get(id) ?? null } as any,
-    publicUrl: 'http://music', token: 't', log: () => {}, claim: () => {}, reportQueue: () => {},
+    publicUrl: 'http://music', token: () => 't', log: () => {}, claim: () => {}, reportQueue: () => {},
     report: (np) => { reports[uid] = np; }, groupOf: (id) => groups.groupOf(id),
   });
 

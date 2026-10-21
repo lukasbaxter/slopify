@@ -32,7 +32,7 @@ export type Session = {
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
-type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; player?: ServerPlayer; instance?: string | null; open?: () => boolean };
+type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; _lastDiag?: number; player?: ServerPlayer; instance?: string | null; open?: () => boolean; token?: string; kick?: (code: number, reason: string) => void };
 
 export const Event = z.object({
   type: z.enum(['play', 'pause', 'toggle', 'seek', 'next', 'previous', 'queue', 'transfer', 'progress', 'stop']),
@@ -172,6 +172,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   };
   app.decorate('sessionOf', (uid: string) => loadSession(db, uid));
   // Likes changed over HTTP reach the open clients too.
+  // A token that was logged out, removed or outlived by a password change:
+  // the socket it signed in on is closed, so the account's session is not
+  // driven by a credential that no longer exists.
+  app.decorate('sessionRevoke', (token: string) => {
+    for (const c of [...clients.values()]) if (c.token === token) { try { c.kick?.(4003, 'signed out'); } catch { /* gone */ } }
+  });
   app.decorate('sessionLike', (uid: string, itemId: string, liked: boolean, at: number) => { for (const c of ofUser(uid)) send(c, { type: 'like', itemId, liked, at }); });
 
   // --- the server's own speakers -----------------------------------------------
@@ -198,7 +204,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     const c: Client = { id, uid, name: 'Home speakers', kind: 'server', canPlay: false, net: 'lan', lastSeen: Date.now(), devices: discovery.list(), nowPlaying: null, queue: null, close: () => {}, send: () => {} };
     c.send = (obj: any) => { if (obj?.type === 'command') void c.player?.execute(obj.command); };
     c.player = new ServerPlayer(uid, {
-      db, discovery, publicUrl: opts.publicUrl || '', token: speakerToken(uid), log: (m) => app.log.info(m),
+      db, discovery, publicUrl: opts.publicUrl || '', token: () => speakerToken(uid), log: (m) => app.log.info(m),
       report: (np) => handle(c, { type: 'nowplaying', nowPlaying: np }),
       groupOf: (id) => groups.groupOf(id),
       scrobble: (trackId, at) => (app as any).scrobbleStart?.(uid, trackId, at),
@@ -431,7 +437,15 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         else setSleep(me.uid, null, msg.done ? 'end of track' : `turned off on ${me.name}`);
         break;
       }
-      case 'diag': app.log.info({ client: me.name, diag: msg.data || {} }, 'diag'); break;
+      case 'diag': {
+        // A page's own report, a few KB at most, not more than one every 10 s.
+        const now = Date.now();
+        if (now - (me._lastDiag || 0) < 10000) break;
+        let data = msg.data || {};
+        try { if (JSON.stringify(data).length > 16384) data = { truncated: true }; } catch { data = {}; }
+        me._lastDiag = now;
+        app.log.info({ client: me.name, diag: data }, 'diag'); break;
+      }
     }
   };
 
@@ -451,8 +465,13 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     ws.on('pong', () => { if (pongWait) clearTimeout(pongWait); pongWait = null; });
     ws.on('message', (raw: Buffer | string) => {
       // No frame we send or expect comes near 1 MiB: close before even parsing one.
-      if ((typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length) > WS_MAX_PAYLOAD) { ws.close(1009, 'too large'); return; }
+      const len = typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length;
+      if (len > WS_MAX_PAYLOAD) { ws.close(1009, 'too large'); return; }
+      // Before hello (anyone can open this socket) only a small frame is
+      // parsed at all; after it, only the queue may be big.
+      if (!self && len > 2048) { ws.close(1009, 'too large'); return; }
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
+      if (self && msg && msg.type !== 'queue' && len > 64 * 1024) return;
       // Anyone can open this socket before signing in: a frame that is not an
       // object ('null', a number) or a token that is not a string used to throw
       // in this listener, and an uncaught throw takes the whole server down.
@@ -460,7 +479,8 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       if (!self) {
         if (msg.type !== 'hello' || typeof msg.token !== 'string' || !msg.token || msg.token.length > 256) return;
         const who = userByToken(db, msg.token);
-        if (!who) { ws.close(4003, 'bad token'); return; }
+        if (!who || who.tokenKind === 'speaker') { ws.close(4003, 'bad token'); return; }
+        if (who.must_change_pw) { ws.close(4003, 'password change required'); return; }
         clearTimeout(timeout);
         const kind = String(msg.kind || 'web').slice(0, 20);
         let id = typeof msg.clientId === 'string' && /^[\w-]{4,64}$/.test(msg.clientId) && !msg.clientId.startsWith('server:') ? msg.clientId : `c_${Math.random().toString(36).slice(2)}`;
@@ -489,7 +509,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         const used = new Set(ofUser(who.id).filter((c) => c.id !== id).map((c) => c.name));
         let name = base; for (let n = 2; used.has(name); n += 1) name = `${base} (${n})`;
         const form = ['desktop', 'laptop', 'phone', 'tablet'].includes(msg.form) ? msg.form : null;
-        self = { id, uid: who.id, net, name, kind, form, instance, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced') };
+        self = { id, uid: who.id, net, name, kind, form, instance, token: msg.token, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced'), kick: (code, reason) => ws.close(code, reason) };
         clients.set(id, self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);

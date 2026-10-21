@@ -27,7 +27,7 @@ const row = { Id: 't1', Name: 'Song', Artists: ['A'], AlbumArtist: 'A', Album: '
 const row2 = { ...row, Id: 't2', Name: 'Song 2' };
 
 function player() {
-  const p = new ServerPlayer('u', { db: noopDb, discovery: {} as any, publicUrl: 'http://x', token: 't', report: () => {}, reportQueue: () => {}, claim: () => {}, log: () => {} });
+  const p = new ServerPlayer('u', { db: noopDb, discovery: {} as any, publicUrl: 'http://x', token: () => 't', report: () => {}, reportQueue: () => {}, claim: () => {}, log: () => {} });
   const any = p as any;
   any.device = { id: 'bluos:1', kind: 'bluos', name: 'NODE' };
   any.transport = transportFor(any.device);
@@ -36,7 +36,7 @@ function player() {
 }
 // A bare player with its deps pluggable (report sink, discovery), no transport yet.
 function custom(opts: { report?: (np: any) => void; discovery?: any; uid?: string } = {}) {
-  const p = new ServerPlayer(opts.uid || 'u', { db: noopDb, discovery: opts.discovery || ({} as any), publicUrl: 'http://x', token: 't', report: opts.report || (() => {}), reportQueue: () => {}, claim: () => {}, log: () => {} });
+  const p = new ServerPlayer(opts.uid || 'u', { db: noopDb, discovery: opts.discovery || ({} as any), publicUrl: 'http://x', token: () => 't', report: opts.report || (() => {}), reportQueue: () => {}, claim: () => {}, log: () => {} });
   return p as any;
 }
 
@@ -181,7 +181,7 @@ describe('BluOS end of track', () => {
 
   it('sleep timer at the end of the track: stops there, on the next track paused at 0, and play starts it', async () => {
     let done = 0;
-    const p = new ServerPlayer('u', { db: noopDb, discovery: {} as any, publicUrl: 'http://x', token: 't', report: () => {}, reportQueue: () => {}, claim: () => {}, log: () => {}, sleepAtTrackEnd: () => done === 0, sleepDone: () => { done++; } }) as any;
+    const p = new ServerPlayer('u', { db: noopDb, discovery: {} as any, publicUrl: 'http://x', token: () => 't', report: () => {}, reportQueue: () => {}, claim: () => {}, log: () => {}, sleepAtTrackEnd: () => done === 0, sleepDone: () => { done++; } }) as any;
     p.device = { id: 'cast:x', kind: 'cast', name: 'TV' };
     p.queue = [row, row2]; p.index = 0; p.duration = 300;
     p.playing = true; p.anchor = { pos: 298, at: Date.now() };

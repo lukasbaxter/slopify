@@ -8,7 +8,7 @@ import type { DB } from './db.js';
 import { token as newToken, userId } from './ids.js';
 import { config } from './config.js';
 
-export type User = { id: string; name: string; role: 'admin' | 'user'; must_change_pw: number };
+export type User = { id: string; name: string; role: 'admin' | 'user'; must_change_pw: number; tokenKind?: string };
 declare module 'fastify' { interface FastifyRequest { user?: User; tokenId?: string } }
 
 const INVITE_TTL = 7 * 86400000;
@@ -26,22 +26,27 @@ export async function ensureAdmin(db: DB, name: string, pass: string) {
 }
 
 export function userByToken(db: DB, tok: string): User | undefined {
-  const row = db.prepare('SELECT u.id, u.name, u.role, u.must_change_pw, t.last_seen AS seen FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token = ?').get(tok) as (User & { seen?: number }) | undefined;
+  const row = db.prepare('SELECT u.id, u.name, u.role, u.must_change_pw, t.kind AS tokenKind, t.last_seen AS seen FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token = ?').get(tok) as (User & { seen?: number }) | undefined;
   // Once a minute per token: a phone streaming HLS makes 50+ requests a track.
   if (row && Date.now() - (row.seen || 0) > 60000) db.prepare('UPDATE tokens SET last_seen = ? WHERE token = ?').run(Date.now(), tok);
   if (row) delete row.seen;
   return row;
 }
 
-// Bearer, Jellyfin's MediaBrowser Token="..." / X-Emby-Token, or ?token= /
-// ?api_key= for media URLs.
+// Bearer, or ?token= on a GET (media URLs: <audio>, <img> and speakers cannot
+// send headers). A token in the URL of a POST/PUT/DELETE is never honoured:
+// one copied out of a stream link must not be able to change the password.
 export function tokenFromRequest(req: FastifyRequest): string | null {
   const h = String(req.headers.authorization || '');
   if (h.startsWith('Bearer ')) return h.slice(7);
-  // <audio>, <img> and speakers cannot send headers: the token rides in the URL.
+  if (req.method !== 'GET' && req.method !== 'HEAD') return null;
   const q = (req.query as any) || {};
   return typeof q.token === 'string' && q.token ? q.token : null;
 }
+// What a speaker token may reach: the stream it was handed and the covers.
+// It rides in cleartext to Cast and BluOS (which show their stream URL to
+// anyone on the LAN), so it must be worth nothing anywhere else.
+const SPEAKER_SCOPE = /^\/api\/(stream|image|art)\//;
 
 export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, mustChangePassword: !!u.must_change_pw });
 
@@ -49,8 +54,14 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   // Every request: resolve the token if there is one.
   app.addHook('onRequest', async (req) => {
     const t = tokenFromRequest(req);
-    if (t) { const u = userByToken(db, t); if (u) { req.user = u; req.tokenId = t; } }
+    if (!t) return;
+    const u = userByToken(db, t);
+    if (!u) return;
+    if (u.tokenKind === 'speaker' && !SPEAKER_SCOPE.test(req.url.split('?')[0])) return; // out of scope: as if unsigned
+    req.user = u; req.tokenId = t;
   });
+  // Sessions over the socket are told when their token goes (session.ts).
+  const revoke = (tokens: string[]) => { for (const t of tokens) (app as any).sessionRevoke?.(t); };
   // While a password change is forced, the account can only change it, see
   // itself and log out — everything else is refused server-side, not just
   // hidden by the UI.
@@ -67,17 +78,25 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   });
 
   const Login = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(256), device: z.string().max(80).default('web'), kind: z.enum(['web', 'desktop', 'phone', 'service']).default('web') });
+  // Besides the per-address limit (which a forged X-Forwarded-For can dodge
+  // when no proxy fronts the server): wrong passwords per account, per minute.
+  const misses = new Map<string, number[]>();
+  const tooMany = (name: string) => { const now = Date.now(); const l = (misses.get(name) || []).filter((t) => now - t < 60000); misses.set(name, l); return l.length >= config.loginRateMax; };
+  const miss = (name: string) => { if (misses.size > 10000) misses.clear(); misses.set(name, [...(misses.get(name) || []), Date.now()]); };
   app.post('/api/auth/login', { config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = Login.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad request', issues: body.error.issues });
+    const name = body.data.username.toLowerCase();
+    if (tooMany(name)) return reply.code(429).send({ error: 'too many attempts, try again in a minute' });
     const u = db.prepare('SELECT id, name, role, must_change_pw, pass_hash FROM users WHERE name = ?').get(body.data.username) as (User & { pass_hash: string }) | undefined;
-    if (!(await argon2.verify(u ? u.pass_hash : await DUMMY_HASH, body.data.password)) || !u) return reply.code(401).send({ error: 'wrong username or password' });
+    if (!(await argon2.verify(u ? u.pass_hash : await DUMMY_HASH, body.data.password)) || !u) { miss(name); return reply.code(401).send({ error: 'wrong username or password' }); }
+    misses.delete(name);
     const t = newToken();
     db.prepare('INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)').run(t, u.id, body.data.device, body.data.kind, Date.now(), Date.now());
     db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').run(Date.now(), u.id);
     return { token: t, user: publicUser(u) };
   });
-  app.post('/api/auth/logout', { preHandler: (app as any).requireUser }, async (req) => { db.prepare('DELETE FROM tokens WHERE token = ?').run(req.tokenId); return { ok: true }; });
+  app.post('/api/auth/logout', { preHandler: (app as any).requireUser }, async (req) => { db.prepare('DELETE FROM tokens WHERE token = ?').run(req.tokenId); revoke([req.tokenId!]); return { ok: true }; });
   app.get('/api/auth/me', { preHandler: (app as any).requireUser }, async (req) => publicUser(req.user!));
 
   const Password = z.object({ current: z.string().optional(), password: z.string().min(8).max(256) });
@@ -87,8 +106,11 @@ export function registerAuth(app: FastifyInstance, db: DB) {
     const row = db.prepare('SELECT pass_hash, must_change_pw FROM users WHERE id = ?').get(req.user!.id) as any;
     if (!row.must_change_pw && !(body.data.current && (await argon2.verify(row.pass_hash, body.data.current)))) return reply.code(401).send({ error: 'current password is wrong' });
     db.prepare('UPDATE users SET pass_hash = ?, must_change_pw = 0 WHERE id = ?').run(await argon2.hash(body.data.password, { type: argon2.argon2id }), req.user!.id);
-    // Other sessions of this account are logged out; this one stays.
-    db.prepare('DELETE FROM tokens WHERE user_id = ? AND token != ?').run(req.user!.id, req.tokenId);
+    // Other sessions of this account are logged out; this one stays. The
+    // speakers' own token stays too: it opens nothing but streams.
+    const gone = (db.prepare("SELECT token FROM tokens WHERE user_id = ? AND token != ? AND kind != 'speaker'").all(req.user!.id, req.tokenId) as any[]).map((r) => r.token as string);
+    db.prepare("DELETE FROM tokens WHERE user_id = ? AND token != ? AND kind != 'speaker'").run(req.user!.id, req.tokenId);
+    revoke(gone);
     return { ok: true };
   });
   app.get('/api/auth/devices', { preHandler: (app as any).requireUser }, async (req) => ({
@@ -96,7 +118,9 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   }));
   app.delete('/api/auth/devices/:id', { preHandler: (app as any).requireUser }, async (req) => {
     const id = (req.params as any).id as string;
+    const gone = (db.prepare('SELECT token FROM tokens WHERE user_id = ? AND substr(token, 1, 8) = ?').all(req.user!.id, id) as any[]).map((r) => r.token as string);
     db.prepare('DELETE FROM tokens WHERE user_id = ? AND substr(token, 1, 8) = ?').run(req.user!.id, id);
+    revoke(gone);
     return { ok: true };
   });
 
@@ -114,8 +138,16 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   app.delete('/api/users/:id', { preHandler: (app as any).requireAdmin }, async (req, reply) => {
     const id = (req.params as any).id as string;
     if (id === req.user!.id) return reply.code(400).send({ error: 'you cannot delete yourself' });
-    const r = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    const gone = (db.prepare('SELECT token FROM tokens WHERE user_id = ?').all(id) as any[]).map((r) => r.token as string);
+    // Everything of theirs goes with them (nothing cascades but tokens).
+    const r = db.transaction(() => {
+      const r = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      if (!r.changes) return r;
+      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      return r;
+    })();
     if (!r.changes) return reply.code(404).send({ error: 'no such user' });
+    revoke(gone);
     return { ok: true };
   });
   // A household controller signed in as an admin (Home Assistant) follows every

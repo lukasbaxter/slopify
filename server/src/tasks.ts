@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process';
 import { parseFile } from 'music-metadata';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
+import { config } from './config.js';
 import { buildHead } from './heads.js';
 import { releaseInLibrary } from './discover.js';
 import { slskdFind, slskdDownload, slskdWait } from './explore.js';
@@ -628,7 +629,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
           if (t.track_no) meta.push('-metadata', `track=${t.track_no}`);
           if (t.disc_no) meta.push('-metadata', `disc=${t.disc_no}`);
           if (t.year) meta.push('-metadata', `date=${t.year}`);
-          if (!(await ff(['-y', '-i', src, '-map', '0:a:0', '-c:a', 'copy', '-map_metadata', '-1', ...meta, tmp]))) { noteSkip(key); failed++; continue; }
+          if (!(await ff(['-y', '-i', src, '-map', '0:a:0', '-c:a', 'copy', '-map_metadata', '-1', ...meta, '-f', 'flac', tmp]))) { noteSkip(key); failed++; continue; }
           if (dest !== t.path && await exists(dest)) { ctx.log(`${dest}: appeared mid-upgrade, not overwriting`); noteSkip(key); blocked++; continue; }
           const lyr = db.prepare('SELECT kind, lines, source, fetched_at FROM lyrics WHERE track_id = ?').get(t.id) as JEntry['lyrics'] ?? null;
           const entry: JEntry = { oldId: t.id, newPath: dest, rel: path.relative(o.musicDir, path.dirname(dest)), lyrics: lyr };
@@ -672,10 +673,19 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         out.push(`${r.watching} wanted${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
       } else out.push('Lidarr is not configured');
       if (o.slskdDownloadsDir && ctx.setting('clean')) {
+        // Never inside (or around) the library, the drop folder, the state or
+        // the cache: a wrong SLSKD_DOWNLOADS_DIR must not become a deleter of music.
+        const inside = (a: string, b: string) => a === b || a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
+        const staging = path.resolve(o.slskdDownloadsDir);
+        const guarded = [o.musicDir, o.cacheDir, config.ingest.incomingDir, config.dataDir].filter((d): d is string => !!d).map((d) => path.resolve(d));
+        const clash = guarded.find((d) => inside(staging, d));
+        if (clash) { ctx.log(`not clearing ${staging}: it is inside or around ${clash}`); out.push('download folder not cleared: it overlaps the library or state folders'); }
+        else {
         ctx.step('Clearing the download folder');
         const c = await cleanStaging(o.slskdDownloadsDir);
         if (c.removed) out.push(`cleared ${c.removed} spent folders (${(c.bytes / 1e9).toFixed(1)} GB)`);
         if (c.failed.length) out.push(`failed imports waiting in ${path.join(o.slskdDownloadsDir, 'failed_imports')}: ${c.failed.map((x) => x.name).join('; ')} (${(c.failed.reduce((t, x) => t + x.bytes, 0) / 1e9).toFixed(1)} GB)`);
+        }
       }
       return out.join('; ');
     },

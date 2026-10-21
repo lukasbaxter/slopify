@@ -1839,8 +1839,10 @@ export function usePlayer(jf) {
     if (device.kind !== 'local' || !playing || !jf || !current) return undefined;
     const t = setTimeout(() => preloadRef.current(), 1500);
     return () => clearTimeout(t);
+    // queue.length: a routed play starts with one track and the rest of the
+    // queue arrives after; the next song was not warmed until a skip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.kind, playing, current?.Id, jf]);
+  }, [device.kind, playing, current?.Id, jf, queue.length]);
   // The buffer gate for the whole-song downloads (this song, then the next,
   // at the chosen quality: what rides out a dead zone, and what lets the
   // next song start from memory at full quality). They begin once this

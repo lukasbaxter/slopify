@@ -222,6 +222,10 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   if (fullScan) splitCollabCredits(db);
   recount(db);
   if (fullScan) canonicalArtistNames(db);
+  // The search index is keyed on tracks' rowids, which a VACUUM may renumber
+  // (no explicit integer key): rebuilt after every full scan so a search
+  // can never quietly return the wrong songs for long.
+  if (fullScan) { try { db.exec("INSERT INTO tracks_fts(tracks_fts) VALUES('rebuild')"); } catch (e: any) { log(`search index rebuild failed: ${e.message}`); } }
   bumpLibraryVersion(db);
   if (added || changed || removed) dropGenreCache(); // new or gone tags shift the live genre vote
   const ms = Date.now() - t0;

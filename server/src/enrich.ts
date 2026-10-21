@@ -153,9 +153,21 @@ async function artistPicFrom(dir: string): Promise<{ file: string; buf: Buffer }
 // Artist pictures (portrait + wide banner): Deezer's artist search, exact
 // name match only, the 1000 px picture stored like a cover. Tried a few
 // times over increasing gaps; artists Deezer does not know stay blank.
+// An image named by a third party's answer (Deezer, iTunes, TheAudioDB):
+// https only, 15 s, 20 MB at most. Their JSON is trusted for what to fetch,
+// not for where (an internal address) or how much.
+const IMAGE_MAX = 20 * 1024 * 1024;
+async function fetchImage(url: string): Promise<Buffer | null> {
+  if (!/^https:\/\//i.test(url)) return null;
+  const r = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return null;
+  if (Number(r.headers.get('content-length') || 0) > IMAGE_MAX) return null;
+  const buf = Buffer.from(await r.arrayBuffer());
+  return buf.length > IMAGE_MAX ? null : buf;
+}
 export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promise<{ found: number; missing: number }> {
   const fetcher: Fetcher = opts.fetcher ?? ((url) => fetch(url, { headers: { 'User-Agent': UA } }));
-  const bytes = opts.bytes ?? (async (url: string) => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; });
+  const bytes = opts.bytes ?? fetchImage;
   const log = opts.log ?? (() => {});
   const dataDir = opts.dataDir; if (!dataDir) return { found: 0, missing: 0 };
   const due = db.prepare('SELECT id, name, image_tries FROM artists WHERE image_hash IS NULL AND image_tries < 4 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 300) as any[];
@@ -226,7 +238,7 @@ const BACKDROPS = ['backdrop.jpg', 'backdrop.png', 'fanart.jpg', 'fanart.png'];
 export async function artistBannersPass(db: DB, opts: EnrichOptions & { audioDbKey?: string } = {}): Promise<{ found: number; missing: number }> {
   const key = opts.audioDbKey ?? '123';
   const fetcher: Fetcher = opts.fetcher ?? ((url) => fetch(url, { headers: { 'User-Agent': UA } }));
-  const bytes = opts.bytes ?? (async (url: string) => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; });
+  const bytes = opts.bytes ?? fetchImage;
   const log = opts.log ?? (() => {});
   const dataDir = opts.dataDir; if (!dataDir) return { found: 0, missing: 0 };
   const due = db.prepare('SELECT id, name FROM artists WHERE banner_hash IS NULL AND banner_tries < 3 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 100) as any[];
@@ -279,7 +291,7 @@ export async function artistBannersPass(db: DB, opts: EnrichOptions & { audioDbK
 // on it is simply part of the library.
 export async function albumCoversPass(db: DB, opts: EnrichOptions = {}): Promise<{ found: number; missing: number }> {
   const fetcher: Fetcher = opts.fetcher ?? ((url) => fetch(url, { headers: { 'User-Agent': UA } }));
-  const bytes = opts.bytes ?? (async (url: string) => { const r = await fetch(url, { headers: { 'User-Agent': UA } }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; });
+  const bytes = opts.bytes ?? fetchImage;
   const log = opts.log ?? (() => {});
   const dataDir = opts.dataDir; if (!dataDir) return { found: 0, missing: 0 };
   const due = db.prepare('SELECT id, name, artist, dir, cover_tries FROM albums WHERE cover_hash IS NULL AND cover_tries < 4 ORDER BY track_count DESC LIMIT ?').all(opts.max ?? 300) as any[];

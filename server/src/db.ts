@@ -208,6 +208,22 @@ const MIGRATIONS: string[] = [
   // 24: the cover lookup gained a second source (iTunes) and a cleaner
   // query: every album that gave up gets its tries back.
   `UPDATE albums SET cover_tries = 0 WHERE cover_hash IS NULL;`,
+  // 25 (audit 2026-10-21): a track that leaves without a replacement takes
+  // its lyrics and alignment into gone_tracks (they cascade-deleted and
+  // never came back); the search index is only touched by the columns it
+  // holds (every loudness write re-indexed the song); the two tables the
+  // retire pass scans per track get an index.
+  `
+  ALTER TABLE gone_tracks ADD COLUMN lyrics_json TEXT;
+  ALTER TABLE gone_tracks ADD COLUMN align_json TEXT;
+  CREATE INDEX IF NOT EXISTS likes_track ON likes(track_id);
+  CREATE INDEX IF NOT EXISTS playlist_tracks_track ON playlist_tracks(track_id);
+  DROP TRIGGER IF EXISTS tracks_au;
+  CREATE TRIGGER tracks_au AFTER UPDATE OF title, artist, album ON tracks BEGIN
+    INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) VALUES ('delete', old.rowid, old.title, old.artist, old.album);
+    INSERT INTO tracks_fts(rowid, title, artist, album) VALUES (new.rowid, new.title, new.artist, new.album);
+  END;
+  `,
 ];
 
 export type DB = Database.Database;
@@ -220,6 +236,9 @@ export function openDb(dataDir: string): DB {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   const v = db.pragma('user_version', { simple: true }) as number;
+  // A database from a newer Slopify: this build does not know its shape and
+  // would fail on odd requests, or write rows the newer one does not expect.
+  if (v > MIGRATIONS.length) throw new Error(`this database is from a newer Slopify (schema ${v}; this build knows ${MIGRATIONS.length}). Upgrade the image, or restore the backup taken before the upgrade.`);
   for (let i = v; i < MIGRATIONS.length; i++) {
     // Each step lands with its version bump or not at all: a crash between
     // exec and the bump used to re-run the half-applied step on the next

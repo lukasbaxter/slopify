@@ -13,6 +13,7 @@ import type { ChildProcess } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import { Zip, ZipPassThrough } from 'fflate';
 import type { DB } from './db.js';
+import sharp from 'sharp';
 import { artPath } from './artwork.js';
 import { spawnFf, type Src } from './stream.js';
 
@@ -38,32 +39,52 @@ export function registerOffline(app: FastifyInstance, db: DB, cacheDir: string, 
     const tmp = path.join(cacheDir, 'tmp', `zip-${crypto.randomBytes(6).toString('hex')}`);
     await fsp.mkdir(tmp, { recursive: true });
     const procs = new Set<ChildProcess>();
+    // Covers for ffmpeg: a baseline JPEG, made once per album here. The
+    // rendered ones are progressive (mozjpeg), which the mjpeg decoder in
+    // some ffmpeg builds (Ubuntu's 6.1) refuses, and the song came out with
+    // no cover or not at all.
+    const coverFor = new Map<string, Promise<string | null>>();
+    const baselineCover = (hash: string) => {
+      let p = coverFor.get(hash);
+      if (!p) {
+        p = (async () => {
+          const src = artPath(cacheDir, hash, 640, 'jpg');
+          if (!fs.existsSync(src)) return null;
+          const out = path.join(tmp, `cover-${hash}.jpg`);
+          try { await sharp(src).jpeg({ quality: 85, progressive: false }).toFile(out); return out; } catch { return null; }
+        })();
+        coverFor.set(hash, p);
+      }
+      return p;
+    };
     const pad = String(tracks.length).length < 2 ? 2 : String(tracks.length).length;
     const nameOf = (t: any, i: number) => `${String(i + 1).padStart(pad, '0')} - ${safe(t.artist, 60)} - ${safe(t.title, 80)}.m4a`;
 
     // One song to a temp .m4a; resolves to its path, or null when it fails
     // (a missing or corrupt source is skipped, not the whole download).
-    const encode = (t: any, i: number) => new Promise<string | null>((resolve) => {
+    const encode = async (t: any, i: number): Promise<string | null> => {
       const src = srcOf(t.id, false);
-      if (!src) return resolve(null);
+      if (!src) return null;
       const out = path.join(tmp, `${i}.m4a`);
-      const cover = t.cover_hash ? artPath(cacheDir, t.cover_hash, 640, 'jpg') : null;
-      const withCover = !!cover && fs.existsSync(cover);
+      const cover = t.cover_hash ? await baselineCover(t.cover_hash) : null;
+      const withCover = !!cover;
       const meta = (k: string, v: any) => (v == null || v === '' ? [] : ['-metadata', `${k}=${v}`]);
-      const ff = spawnFf([], src, [
-        ...(withCover ? ['-i', cover!] : []),
-        '-map', '0:a:0', ...(withCover ? ['-map', '1:v:0', '-c:v', 'copy', '-disposition:v:0', 'attached_pic'] : []),
-        '-c:a', 'aac', '-b:a', `${KBPS}k`, '-ac', '2', '-map_metadata', '-1',
-        ...meta('title', t.title), ...meta('artist', t.artist), ...meta('album', t.album), ...meta('album_artist', t.album_artist),
-        ...meta('track', t.track_no), ...meta('disc', t.disc_no), ...meta('date', t.year),
-        '-movflags', '+faststart', '-f', 'ipod', '-y', out,
-      ], 'ignore', true);
-      procs.add(ff);
-      let err = '';
-      ff.stderr!.on('data', (d) => { if (err.length < 2000) err += d; });
-      ff.on('error', (e) => { procs.delete(ff); req.log.warn(`zip ${t.id}: ${e.message}`); resolve(null); });
-      ff.on('close', (code) => { procs.delete(ff); if (code === 0) resolve(out); else { req.log.warn(`zip ${t.id}: ffmpeg ${code} ${err.trim()}`); resolve(null); } });
-    });
+      return new Promise<string | null>((resolve) => {
+        const ff = spawnFf([], src, [
+          ...(withCover ? ['-i', cover!] : []),
+          '-map', '0:a:0', ...(withCover ? ['-map', '1:v:0', '-c:v', 'copy', '-disposition:v:0', 'attached_pic'] : []),
+          '-c:a', 'aac', '-b:a', `${KBPS}k`, '-ac', '2', '-map_metadata', '-1',
+          ...meta('title', t.title), ...meta('artist', t.artist), ...meta('album', t.album), ...meta('album_artist', t.album_artist),
+          ...meta('track', t.track_no), ...meta('disc', t.disc_no), ...meta('date', t.year),
+          '-movflags', '+faststart', '-f', 'ipod', '-y', out,
+        ], 'ignore', true);
+        procs.add(ff);
+        let err = '';
+        ff.stderr!.on('data', (d) => { if (err.length < 2000) err += d; });
+        ff.on('error', (e) => { procs.delete(ff); req.log.warn(`zip ${t.id}: ${e.message}`); resolve(null); });
+        ff.on('close', (code) => { procs.delete(ff); if (code === 0) resolve(out); else { req.log.warn(`zip ${t.id}: ffmpeg ${code} ${err.trim()}`); resolve(null); } });
+      });
+    };
 
     async function* body() {
       const chunks: Uint8Array[] = [];

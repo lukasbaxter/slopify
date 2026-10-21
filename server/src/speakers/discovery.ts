@@ -65,9 +65,11 @@ export class Discovery {
   list(): Speaker[] { return [...this.devices.values()].sort((a, b) => a.name.localeCompare(b.name)); }
   get(id: string) { return this.devices.get(id) ?? null; }
 
+  // Only an address on a home network: an announcement is unauthenticated,
+  // and the stream URL (with the account's speaker token) goes to this host.
   private address(service: any): string {
-    const v4 = (service.addresses || []).find((a: string) => /^\d+\.\d+\.\d+\.\d+$/.test(a));
-    return v4 || (service.addresses || [])[0] || service.host;
+    const v4 = (service.addresses || []).find((a: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)\d+\.\d+(\.\d+)?$/.test(a) && /^\d+\.\d+\.\d+\.\d+$/.test(a));
+    return v4 || '';
   }
   private fromCast(service: any): Speaker {
     const txt = service.txt || {};

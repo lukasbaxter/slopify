@@ -8,7 +8,14 @@
 // Download URLs carry the login token, so they are never stored.
 
 export const CACHE = 'slopify-offline';
-const LIB = '/offline/library.json';
+// The library is per account (two people sharing a phone each see their own
+// downloads); the song and cover files are shared by id, and a removal
+// deletes only what no account's library still holds.
+const SESSION_KEY = 'slopify.session'; // api/slopify.js writes it: { baseUrl, token, userId }
+const uid = () => { try { return String(JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')?.userId || 'x').replace(/[^\w-]/g, '_'); } catch { return 'x'; } };
+const LEGACY_LIB = '/offline/library.json';
+const libKey = () => `/offline/${uid()}/library.json`;
+const LIB_RE = /^\/offline\/[^/]+\/library\.json$/;
 export const songKey = (id) => `/offline/song/${encodeURIComponent(id)}`;
 export const coverKey = (id) => `/offline/cover/${encodeURIComponent(id)}`;
 const PARALLEL = 2;
@@ -76,7 +83,10 @@ async function locked(fn) {
 export async function readLib() {
   try {
     const c = await caches.open(CACHE);
-    const r = await c.match(LIB);
+    let r = await c.match(libKey());
+    // Downloads made before libraries were per account: the first account
+    // to look takes them over (the files are shared anyway).
+    if (!r && uid() !== 'x') { const old = await c.match(LEGACY_LIB); if (old) { await c.put(libKey(), new Response(await old.clone().text(), { headers: { 'Content-Type': 'application/json' } })); await c.delete(LEGACY_LIB); r = await c.match(libKey()); } }
     const lib = r ? await r.json() : emptyLib();
     lib.plays = lib.plays || [];
     return lib;
@@ -84,7 +94,22 @@ export async function readLib() {
 }
 async function writeLib(lib) {
   const c = await caches.open(CACHE);
-  await c.put(LIB, new Response(JSON.stringify(lib), { headers: { 'Content-Type': 'application/json' } }));
+  await c.put(libKey(), new Response(JSON.stringify(lib), { headers: { 'Content-Type': 'application/json' } }));
+}
+// Files (songs, covers) some other account's library on this device still holds.
+async function heldElsewhere(c) {
+  const held = new Set();
+  try {
+    for (const k of await c.keys()) {
+      const p = new URL(k.url).pathname;
+      if (!LIB_RE.test(p) || p === new URL(libKey(), location.href).pathname) continue;
+      const lib = await (await c.match(k)).json().catch(() => null);
+      if (!lib) continue;
+      for (const t of Object.values(lib.tracks || {})) { if (t.file) held.add(t.file); if (t.cover) held.add(t.cover); }
+      for (const col of lib.collections || []) if (col.cover) held.add(col.cover);
+    }
+  } catch { /* none */ }
+  return held;
 }
 export async function update(fn) {
   return locked(async () => { const lib = await readLib(); const out = await fn(lib); await writeLib(lib); return out; });
@@ -98,7 +123,8 @@ export async function blobUrl(key) {
 export async function removeCollection(id) {
   const keys = await update((lib) => remove(lib, id));
   const c = await caches.open(CACHE);
-  await Promise.all(keys.map((k) => c.delete(k)));
+  const held = await heldElsewhere(c);
+  await Promise.all(keys.filter((k) => !held.has(k)).map((k) => c.delete(k)));
   changed();
 }
 export const addPlay = (id, at) => update((lib) => { lib.plays.push({ id, at }); });

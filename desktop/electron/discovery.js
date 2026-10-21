@@ -136,6 +136,8 @@ class Discovery {
       for (const a of list || []) {
         if (a.family !== 'IPv4' && a.family !== 4) continue;
         if (a.internal || a.address.startsWith('169.254.')) continue;
+        // Home networks only: never a VPN's or an office's range.
+        if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) continue;
         out.add(a.address.split('.').slice(0, 3).join('.'));
       }
     }

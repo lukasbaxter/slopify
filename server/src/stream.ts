@@ -643,10 +643,21 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     // warm at the per-track gain then, as phones will ask for it.
     const prefs = (db.prepare('SELECT json FROM prefs').all() as any[]).map((r) => { try { return JSON.parse(r.json) || {}; } catch { return {}; } });
     const norm: GainMode | null = !prefs.length || prefs.some((p) => p.normalize !== false) ? 'track' : null;
+    // Room first (the oldest-used go), then the hot set until the cap is
+    // near: encoding thousands of songs only to trim them the same night was
+    // a wasted night of CPU.
+    const cap = config.transcodeCacheGb * 1024 ** 3;
+    let t = await trimCache();
+    let total = t.total;
     const ids = hotSet().filter((id) => !fs.existsSync(path.join(transcodeDir(dataDir, id, variantFor(id, 'aac-320', norm)), 'done')));
-    app.log.info(`transcodes: warming ${ids.length} hot tracks`);
-    for (let i = 0; i < ids.length; i += 10) { warm(null, ids.slice(i, i + 10), 'aac-320', norm); while (warmQueue.length > 4 || measureQueue.length > 20) await new Promise((r) => setTimeout(r, 2000)); }
-    const t = await trimCache();
+    app.log.info(`transcodes: warming ${ids.length} hot tracks (${(total / 1024 ** 3).toFixed(1)} GB of ${config.transcodeCacheGb} GB used)`);
+    const PER_SONG = 12 * 1024 ** 2; // ~ one song at 320 plus its start rung
+    for (let i = 0; i < ids.length; i += 10) {
+      if (total + 10 * PER_SONG > cap) { app.log.info(`transcodes: cache near its cap, ${ids.length - i} hot tracks left for another night`); break; }
+      warm(null, ids.slice(i, i + 10), 'aac-320', norm); total += 10 * PER_SONG;
+      while (warmQueue.length > 4 || measureQueue.length > 20) await new Promise((r) => setTimeout(r, 2000));
+    }
+    t = await trimCache();
     app.log.info(`transcodes: ${(t.total / 1024 ** 3).toFixed(1)} GB after trim, ${t.removed} removed`);
   };
   app.decorate('transcodeNightly', nightly);

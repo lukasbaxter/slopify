@@ -4,7 +4,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
 
 export const SIZES = [64, 160, 320, 640] as const;
 export type ArtSize = (typeof SIZES)[number];
@@ -14,7 +14,7 @@ export function artDir(dataDir: string) { return path.join(dataDir, 'art'); }
 // The size variants are served as immutable: write to a tmp name and rename,
 // so a crash mid-render never leaves a truncated file at the served path.
 // (sharp's format comes from .webp()/.jpeg(), not the extension.)
-async function toFileAtomic(img: sharp.Sharp, dst: string) {
+async function toFileAtomic(img: Sharp, dst: string) {
   const tmp = `${dst}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   try { await img.toFile(tmp); await fs.rename(tmp, dst); } catch (e) { await fs.rm(tmp, { force: true }).catch(() => {}); throw e; }
 }
@@ -36,7 +36,7 @@ export async function storeArtwork(dataDir: string, bytes: Buffer, opts: { banne
   const width = meta.width ?? 0, height = meta.height ?? 0;
   await Promise.all(SIZES.flatMap((s) => [
     toFileAtomic(img.clone().resize(s, s, { fit: 'cover' }).webp({ quality: 78 }), path.join(dir, `${s}.webp`)),
-    toFileAtomic(img.clone().resize(s, s, { fit: 'cover' }).jpeg({ quality: 80, mozjpeg: true }), path.join(dir, `${s}.jpg`)),
+    toFileAtomic(img.clone().resize(s, s, { fit: 'cover' }).jpeg({ quality: 80, mozjpeg: true, progressive: false }), path.join(dir, `${s}.jpg`)), // baseline: ffmpeg embeds it (zip, FLAC upgrade)
   ]));
   if (opts.banner) await renderBanner(bytes, dir);
   await fs.writeFile(done, JSON.stringify({ width, height }));

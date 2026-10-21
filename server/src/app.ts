@@ -116,6 +116,17 @@ export async function buildServer(opts: BuildOptions = {}) {
   })]);
   registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 
+  // Every /api route must carry a sign-in check unless it is one of the few
+  // public ones by design: a route registered without its `auth` options
+  // used to come up open and nobody would know.
+  const PUBLIC_API = new Set(['/api/healthz', '/api/auth/login', '/api/auth/register', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
+  const open: string[] = [];
+  app.addHook('onRoute', (r) => {
+    if (!r.url.startsWith('/api/') || PUBLIC_API.has(r.url) || (r as any).websocket) return;
+    const pre = r.preHandler; const hooks = Array.isArray(pre) ? pre : pre ? [pre] : [];
+    if (!hooks.includes((app as any).requireUser) && !hooks.includes((app as any).requireAdmin)) open.push(`${r.method} ${r.url}`);
+  });
+  app.addHook('onReady', async () => { if (open.length) throw new Error(`routes without a sign-in check: ${open.join(', ')}`); });
   // No version on the unauthenticated health checks (don't hand scanners a
   // fingerprint); nothing in web/src consumes it.
   const health = async () => ({ ok: true });

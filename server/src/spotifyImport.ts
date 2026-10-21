@@ -24,6 +24,7 @@ import { playlistId } from './ids.js';
 import { matchTrack } from './explore.js';
 import { startJob, jobOut, type Job } from './jobs.js';
 import type { Lidarr } from './lidarr.js';
+import { config } from './config.js';
 import { recordRequest } from './downloads.js';
 
 type Song = { artist: string; title: string; album?: string };
@@ -181,9 +182,15 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
 // import and on start, two at a time; a row that keeps failing (Lidarr
 // still adding the artist, a lookup timing out) is given up after 3 tries.
 export async function requestPending(db: DB, lidarr: Lidarr, log: (m: string) => void = () => {}) {
-  const rows = db.prepare("SELECT * FROM spotify_pending WHERE state = 'new' ORDER BY id").all() as any[];
-  if (!rows.length) return { requested: 0, notfound: 0, failed: 0 };
-  log(`spotify import: requesting ${rows.length} missing songs/albums in Lidarr`);
+  const pending = db.prepare("SELECT * FROM spotify_pending WHERE state = 'new' ORDER BY id").all() as any[];
+  if (!pending.length) return { requested: 0, notfound: 0, failed: 0 };
+  // Only as much as the wanted list has room for, and at most a hundred a
+  // pass: a 5,000-song import used to put thousands of albums and artists
+  // into Lidarr at once, and everyone's own asks waited behind them.
+  const wanted = typeof lidarr.wantedCount === 'function' ? await lidarr.wantedCount().catch(() => 0) : 0;
+  const rows = pending.slice(0, Math.max(0, Math.min(100, config.tasks.wantedTarget - wanted)));
+  if (!rows.length) { log(`spotify import: ${pending.length} missing songs/albums wait, Lidarr's wanted list is full (${wanted})`); return { requested: 0, notfound: 0, failed: 0 }; }
+  log(`spotify import: requesting ${rows.length} of ${pending.length} missing songs/albums in Lidarr`);
   const releases = new Map<string, Promise<{ album_id: string; artist: string; title: string } | null>>();
   const requests = new Map<string, Promise<{ id?: number; album_id: string; artist: string; title: string; status: string }>>();
   const releaseFor = (r: any) => {
@@ -282,7 +289,13 @@ export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: str
   const MAX_PENDING = 3;
   const MAX_PENDING_BYTES = 512 * 1024 * 1024;
   // One file per request, streamed to disk (an extended history zip can run to hundreds of MB).
+  const uploading = new Set<string>(); // one upload at a time per account: the budget below is read before the file exists
   app.post('/api/import/spotify/upload', auth, async (req: any, reply) => {
+    if (uploading.has(req.user.id)) return reply.code(409).send({ error: 'an upload is already running' });
+    uploading.add(req.user.id);
+    try { return await upload(req, reply); } finally { uploading.delete(req.user.id); }
+  });
+  const upload = async (req: any, reply: any) => {
     fs.mkdirSync(dir, { recursive: true });
     for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { force: true }); }
     const mine = fs.readdirSync(dir).filter((f) => f.startsWith(`${req.user.id}-`) && f.endsWith('.bin'));
@@ -300,7 +313,7 @@ export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: str
     } catch (e: any) { out.destroy(); fs.rmSync(file, { force: true }); return reply.code(e?.message === 'too large' ? 413 : 400).send({ error: e?.message || 'upload failed' }); }
     fs.writeFileSync(path.join(dir, `${id}.name`), name);
     return { fileId: id, bytes: n };
-  });
+  };
   app.post('/api/import/spotify', auth, async (req: any, reply) => {
     const b = z.object({ fileIds: z.array(z.string().regex(/^[\w-]+$/)).min(1).max(40) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'fileIds required' });

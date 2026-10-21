@@ -15,7 +15,8 @@ environment values for them only seed the defaults.
 | `CACHE_DIR` | = `CONFIG_DIR` | Song heads, transcodes, artwork sizes — rebuildable, put it on an SSD |
 | `HEADS` | `1` | Copy the first seconds of every track into the cache at scan; `0` disables |
 | `HEAD_SECONDS` | `5` | Length of those heads |
-| `TRANSCODE_CONCURRENCY` | `4` | Foreground HLS transcodes allowed at once; extra requests wait. |
+| `TRANSCODE_CONCURRENCY` | `4` | Songs allowed to start transcoding at once (a slot is free again once the song is startable); twice this many encodes may be alive. Extra requests wait up to 20 s, then get a 503 the player retries. Raise it toward the core count on a big box. |
+| `UV_THREADPOOL_SIZE` | Node's `4` | Node's file thread pool. With the library on a NAS, `16` keeps slow reads for the transcoder from queueing covers and the database behind them. |
 | `TRANSCODE_CACHE_GB` | `60` | HLS transcode cache cap; nightly trim drops oldest-used |
 | `SAVE_TO_LIBRARY` | `0` | `1` writes found lyrics and artwork into `MUSIC_DIR` (`.lrc` sidecars, `<album>/cover.jpg`, `<artist>/artist.jpg`) so they travel with your files. Needs the library writable by `PUID`; if it is not, the server says so and keeps them to itself |
 | `SONG_CACHE_GB` | `0` | Whole songs copied to cache before playing; `0` = off |

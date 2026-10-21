@@ -15,7 +15,11 @@
 const SHELL = 'slopify-app-shell';
 const API = 'slopify-api';
 const SONGS = 'slopify-offline';
-const KEEP = new Set([SHELL, API, SONGS]);
+// API answers are kept per account (slopify-api-<user id>, the id rides in
+// the X-Slopify-User header the app sends): one person's playlists and
+// history were served to the next person signing in on the same phone.
+const keepCache = (k) => k === SHELL || k === SONGS || k.startsWith(API);
+const apiCacheOf = (req) => { const u = req.headers.get('X-Slopify-User'); return u && /^[\w-]{1,64}$/.test(u) ? `${API}-${u}` : API; };
 const SCOPE = self.registration.scope;
 const PLACEHOLDER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#282828"/><path d="M58 30v30.5a9 9 0 1 1-4-7.5V36l-14 3.5v25a9 9 0 1 1-4-7.5V35.5L58 30z" fill="#7f7f7f"/></svg>';
 const INDEX = new URL('./', SCOPE).href;
@@ -67,13 +71,13 @@ self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(cacheS
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => !KEEP.has(k)).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => !keepCache(k)).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 self.addEventListener('message', (e) => {
   if (e.data === 'cache-app-shell') e.waitUntil(cacheShell().catch(() => {}).then(pruneApi));
-  if (e.data === 'clear-api') e.waitUntil(caches.delete(API)); // logged out
+  if (e.data === 'clear-api') e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith(API)).map((k) => caches.delete(k))))); // logged out
 });
 
 const withTimeout = (p, ms) => new Promise((resolve, reject) => {
@@ -87,10 +91,12 @@ const marked = async (r, header = 'X-Slopify-Offline') => new Response(await r.b
 const API_MAX_KEYS = 1500;
 async function pruneApi() {
   try {
-    const c = await caches.open(API);
-    const keys = await c.keys();
-    if (keys.length <= API_MAX_KEYS) return;
-    for (const k of keys.slice(0, keys.length - API_MAX_KEYS + 300)) await c.delete(k);
+    for (const name of (await caches.keys()).filter((k) => k.startsWith(API))) {
+      const c = await caches.open(name);
+      const keys = await c.keys();
+      if (keys.length <= API_MAX_KEYS) continue;
+      for (const k of keys.slice(0, keys.length - API_MAX_KEYS + 300)) await c.delete(k);
+    }
   } catch { /* best effort */ }
 }
 // A captive portal (a plane's or a hotel's Wi-Fi before signing in) answers
@@ -113,7 +119,8 @@ const apiKey = (url) => { const u = new URL(url); u.searchParams.delete('token')
 // arrived, then bring them back, then hide them again.
 async function api(req) {
   const key = apiKey(req.url);
-  const kept = () => caches.match(key, { cacheName: API });
+  const cacheName = apiCacheOf(req);
+  const kept = () => caches.match(key, { cacheName });
   let has;
   try {
     // Kept answer at hand: do not hang on a dead connection for long.
@@ -122,7 +129,7 @@ async function api(req) {
     if (portalPage(res)) return has ? marked(has) : offlineJson();
     if (res.ok && (res.headers.get('Content-Type') || '').includes('json')) {
       const copy = res.clone();
-      caches.open(API).then((c) => c.put(key, copy)).catch(() => {});
+      caches.open(cacheName).then((c) => c.put(key, copy)).catch(() => {});
     } else if ((res.status === 502 || res.status === 503 || res.status === 504) && has) return marked(has);
     return res;
   } catch (err) {

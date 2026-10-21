@@ -86,7 +86,8 @@ export class Slopify {
       // A caller's own signal (a superseded search) aborts too.
       opts.signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
       try {
-        const headers = { Authorization: `Bearer ${this.token || ''}`, ...(opts.headers || {}) };
+        // X-Slopify-User: the service worker keeps API answers per account (sw.js).
+        const headers = { Authorization: `Bearer ${this.token || ''}`, ...(this.userId ? { 'X-Slopify-User': String(this.userId) } : {}), ...(opts.headers || {}) };
         if (!raw && opts.body) headers['Content-Type'] = 'application/json';
         const res = await fetch(`${this.baseUrl}${path}`, { ...opts, body: raw || opts.body, signal: ctrl.signal, headers });
         noteResponse(res); // live server, or the service worker's kept copy (offline)

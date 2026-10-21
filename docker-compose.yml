@@ -4,6 +4,7 @@ services:
     image: ghcr.io/lukasbaxter/slopify:latest
     container_name: slopify
     restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: "50m", max-file: "5" } }  # the log would otherwise grow without bound
     # Host networking so the server can find Chromecast / BluOS speakers and
     # announce itself to Home Assistant. Docker's default network
     # (ports: ["8080:8080"]) works for everything else.

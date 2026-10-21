@@ -12,9 +12,16 @@ if [ "$(id -u)" = 0 ]; then
   for d in "${CONFIG_DIR:-${DATA_DIR:-/data}}" "${CACHE_DIR:-}"; do
     [ -n "$d" ] || continue
     mkdir -p "$d"
-    if [ "$(stat -c %u "$d")" != "$PUID" ] || [ -n "$(find "$d" \( ! -user "$PUID" -o ! -group "$PGID" \) -print -quit 2>/dev/null)" ]; then
-      echo "slopify: making $d owned by $PUID:$PGID"
-      chown -R "$PUID:$PGID" "$d"
+    # A marker says the tree was made theirs once; without it (or with another
+    # PUID in it) the tree is walked. Walking a 60 GB cache on every start
+    # took minutes for nothing.
+    marker="$d/.owned-by"
+    if [ "$(cat "$marker" 2>/dev/null)" != "$PUID:$PGID" ]; then
+      if [ "$(stat -c %u "$d")" != "$PUID" ] || [ -n "$(find "$d" \( ! -user "$PUID" -o ! -group "$PGID" \) -print -quit 2>/dev/null)" ]; then
+        echo "slopify: making $d owned by $PUID:$PGID"
+        chown -R "$PUID:$PGID" "$d" || echo "slopify: could not chown $d (a share without ownership?); carrying on"
+      fi
+      echo "$PUID:$PGID" > "$marker" 2>/dev/null && chown "$PUID:$PGID" "$marker" 2>/dev/null
     fi
   done
   if [ "$PUID" = 1000 ]; then export HOME=/home/node; else export HOME=/tmp; fi

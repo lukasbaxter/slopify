@@ -124,9 +124,9 @@ const isPrivate = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|1
 // Which network a client is on: 'lan' for the house, else its public address.
 // Speakers found by one client are offered only to clients on the same network.
 function networkOf(req: FastifyRequest) {
-  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
-  let ip = xff[xff.length - 1] || req.socket.remoteAddress || 'unknown';
-  ip = ip.replace(/^::ffff:/, '');
+  // req.ip honours TRUST_PROXY (app.ts): a client reaching the server
+  // directly cannot claim the house with a forged X-Forwarded-For.
+  const ip = String(req.ip || req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
   return isPrivate(ip) ? 'lan' : ip;
 }
 // A socket that stopped reading must not buffer the whole firehose: past

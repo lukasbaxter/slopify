@@ -11,7 +11,9 @@ test('the Conduit UI logs in, shows the library, plays a song, likes it', async 
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
   const row = page.locator('.trackrow').nth(1);
   const title = (await row.locator('.trackrow-name, .trackrow-title').first().textContent())!.trim();
-  await row.dblclick();
+  // A phone row plays on one tap (and a second tap on the playing row pauses
+  // it, now that "playing" shows from the tap); the desktop row needs two.
+  if (isMobile) await row.click(); else await row.dblclick();
   await expect(page.locator('.player button[title="Pause"], .player button[aria-label="Pause"]').first()).toBeVisible({ timeout: 20000 });
   await expect.poll(async () => (await page.locator('.player').textContent()) || '', { timeout: 15000 }).toMatch(/0:0[1-9]|0:[1-5]\d/);
   await expect(page.locator('.player')).toContainText(title.slice(0, 12));

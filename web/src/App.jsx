@@ -1041,7 +1041,9 @@ export default function App() {
       // re-requested every cover on the page, through the very link that
       // had just stalled).
       if (off && !wasOffline) offlineSince = Date.now();
-      if (!off && wasOffline && Date.now() - offlineSince > 20000) { jf._netEpoch = Date.now(); setNetEpoch(jf._netEpoch); }
+      // (offline is only declared after a failed health check, so a spell
+      // this short was a real one, not a slow answer.)
+      if (!off && wasOffline && Date.now() - offlineSince > 3000) { jf._netEpoch = Date.now(); setNetEpoch(jf._netEpoch); }
       wasOffline = off;
       if (off) return;
       readLib().then((lib) => flushOfflinePlays(jf, lib.plays)).catch(() => {});

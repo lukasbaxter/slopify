@@ -17,7 +17,7 @@ async function startServer(port: number, dataDir: string): Promise<ChildProcess>
   return p;
 }
 const stop = (p: ChildProcess) => new Promise<void>((r) => { if (p.exitCode !== null || p.signalCode) { r(); return; } p.once('exit', () => r()); p.kill('SIGTERM'); });
-const libPlays = (page: Page) => page.evaluate(async () => { const r = await (await caches.open('slopify-offline')).match('/offline/library.json'); return r ? (await r.json()).plays.length : -1; });
+const libPlays = (page: Page) => page.evaluate(async () => { const r = await (await caches.open('slopify-offline')).match(`/offline/${JSON.parse(localStorage.getItem('slopify.session') || '{}').userId}/library.json`); return r ? (await r.json()).plays.length : -1; });
 
 for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chromium, 8094]] as const) {
   test(`offline: the app works with no connection (${name})`, async ({ isMobile }) => {
@@ -66,12 +66,12 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
         expect(ka.wanted).toBe(false);
       }
       // Every downloaded song's album cover is kept.
-      expect(await page.evaluate(async () => { const r = await (await caches.open('slopify-offline')).match('/offline/library.json'); const lib = await r!.json(); return Object.values(lib.tracks).every((t: any) => t.cover); })).toBe(true);
+      expect(await page.evaluate(async () => { const r = await (await caches.open('slopify-offline')).match(`/offline/${JSON.parse(localStorage.getItem('slopify.session') || '{}').userId}/library.json`); const lib = await r!.json(); return Object.values(lib.tracks).every((t: any) => t.cover); })).toBe(true);
       // A download cut short (one song gone) is finished on the next start.
       await page.evaluate(async () => {
-        const c = await caches.open('slopify-offline'); const lib = await (await c.match('/offline/library.json'))!.json();
+        const c = await caches.open('slopify-offline'); const lib = await (await c.match(`/offline/${JSON.parse(localStorage.getItem('slopify.session') || '{}').userId}/library.json`))!.json();
         const id = Object.keys(lib.tracks)[0]; await c.delete(lib.tracks[id].file); lib.tracks[id].file = null;
-        await c.put('/offline/library.json', new Response(JSON.stringify(lib), { headers: { 'Content-Type': 'application/json' } }));
+        await c.put(`/offline/${JSON.parse(localStorage.getItem('slopify.session') || '{}').userId}/library.json`, new Response(JSON.stringify(lib), { headers: { 'Content-Type': 'application/json' } }));
       });
       await page.reload(); await waitForLibrary(page);
       await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();

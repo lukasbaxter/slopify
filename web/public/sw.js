@@ -72,7 +72,7 @@ self.addEventListener('activate', (e) => {
   );
 });
 self.addEventListener('message', (e) => {
-  if (e.data === 'cache-app-shell') e.waitUntil(cacheShell().catch(() => {}));
+  if (e.data === 'cache-app-shell') e.waitUntil(cacheShell().catch(() => {}).then(pruneApi));
   if (e.data === 'clear-api') e.waitUntil(caches.delete(API)); // logged out
 });
 
@@ -80,7 +80,19 @@ const withTimeout = (p, ms) => new Promise((resolve, reject) => {
   const t = setTimeout(() => reject(new Error('timeout')), ms);
   p.then((r) => { clearTimeout(t); resolve(r); }, (err) => { clearTimeout(t); reject(err); });
 });
-const marked = async (r) => new Response(await r.blob(), { status: r.status, headers: { 'Content-Type': r.headers.get('Content-Type') || 'application/json', 'X-Slopify-Offline': '1' } });
+const marked = async (r, header = 'X-Slopify-Offline') => new Response(await r.blob(), { status: r.status, headers: { 'Content-Type': r.headers.get('Content-Type') || 'application/json', [header]: '1' } });
+// The kept copies of API answers, pruned when they pile up (a long listen
+// keeps lyrics for every song): Safari evicts a whole origin under quota
+// pressure, downloaded songs included.
+const API_MAX_KEYS = 1500;
+async function pruneApi() {
+  try {
+    const c = await caches.open(API);
+    const keys = await c.keys();
+    if (keys.length <= API_MAX_KEYS) return;
+    for (const k of keys.slice(0, keys.length - API_MAX_KEYS + 300)) await c.delete(k);
+  } catch { /* best effort */ }
+}
 // A captive portal (a plane's or a hotel's Wi-Fi before signing in) answers
 // every URL with its own sign-in page, status 200: that is no answer from
 // the server. The API never answers HTML; covers are never HTML.
@@ -89,24 +101,32 @@ const offlineJson = () => new Response(JSON.stringify({ error: 'offline' }), { s
 
 // What the API answers that is worth keeping for offline: the library and
 // its pages. Not media, not searches, not admin or job polling.
-const SKIP = /^\/api\/(stream|image|art|download|ws|search|gsearch|jobs|admin|downloads|auth\/(login|devices)|users|ai\/|relay)/;
+const SKIP = /^\/api\/(stream|image|art|download|ws|search|gsearch|jobs|admin|downloads|auth\/|users|ai\/|relay|prefs|history)/;
 const apiKey = (url) => { const u = new URL(url); u.searchParams.delete('token'); return u.href; };
 
+// Slow is not offline. A server that is merely slow to answer (a phone on a
+// weak link) gets its kept copy back marked X-Slopify-Stale: the page shows
+// it, nothing else changes. Only no answer at all (the fetch failing), the
+// proxy answering for a server that is down (502/503/504) or a captive
+// portal's page count as offline (X-Slopify-Offline). Marking slowness as
+// offline used to hide every playlist not downloaded until the next answer
+// arrived, then bring them back, then hide them again.
 async function api(req) {
   const key = apiKey(req.url);
   const kept = () => caches.match(key, { cacheName: API });
+  let has;
   try {
     // Kept answer at hand: do not hang on a dead connection for long.
-    const has = await kept();
+    has = await kept();
     const res = await (has ? withTimeout(fetch(req), 10000) : fetch(req));
     if (portalPage(res)) return has ? marked(has) : offlineJson();
     if (res.ok && (res.headers.get('Content-Type') || '').includes('json')) {
       const copy = res.clone();
       caches.open(API).then((c) => c.put(key, copy)).catch(() => {});
-    } else if (res.status >= 500 && has) return marked(has);
+    } else if ((res.status === 502 || res.status === 503 || res.status === 504) && has) return marked(has);
     return res;
   } catch (err) {
-    const has = await kept();
+    if (err && err.message === 'timeout' && has) return marked(has, 'X-Slopify-Stale');
     if (has) return marked(has);
     // Nothing kept: an answer the app reads as offline, not a network error.
     return offlineJson();
@@ -118,8 +138,10 @@ async function api(req) {
 async function cover(req, id) {
   try {
     // What the server says goes (a 404 is "no cover", not "offline"); only
-    // no answer, or the server erroring, falls back to the kept copy.
-    const res = await withTimeout(fetch(req), 8000);
+    // no answer, or the server erroring, falls back to the kept copy. A page
+    // of 40 covers on a slow link shares one pipe, so a slow one is left to
+    // arrive (the placeholder it used to get after 8 s was never retried).
+    const res = await withTimeout(fetch(req), 45000);
     if (res.status < 500 && !portalPage(res)) return res;
     throw new Error(String(res.status));
   } catch (err) {
@@ -148,8 +170,25 @@ self.addEventListener('fetch', (e) => {
   }
   if (url.href === WAV) { e.respondWith(wav(req)); return; }
   if (url.pathname.includes('/assets/')) {
+    // Built files are named by their content hash, so a kept one is the one
+    // asked for: served first, with no network. A new one comes from the
+    // server; a server answer that is not the file (a 404 for a hash this
+    // deploy no longer has, a 5xx) or no answer falls back to the kept copy.
+    // Passing a 404 through used to leave the page blank (black with the
+    // old CSS, white without) after a deploy until a fast reload.
     const name = url.pathname.slice(url.pathname.lastIndexOf('/assets/'));
-    e.respondWith(fetch(req).catch(async () => (await caches.match(new URL(`.${name}`, SCOPE).href, { cacheName: SHELL })) || Response.error()));
+    const key = new URL(`.${name}`, SCOPE).href;
+    e.respondWith((async () => {
+      const kept = await caches.match(key, { cacheName: SHELL });
+      if (kept) return kept;
+      try {
+        const r = await fetch(req);
+        if (r.ok) return r;
+        return (await caches.match(key, { cacheName: SHELL })) || r;
+      } catch (err) {
+        return (await caches.match(key, { cacheName: SHELL })) || Response.error();
+      }
+    })());
     return;
   }
   const img = /^\/api\/image\/([^/?]+)/.exec(url.pathname);

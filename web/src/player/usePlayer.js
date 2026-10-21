@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepAlive, bridgeKeepAlive } from './keepalive.js';
+import { keepAlive, bridgeKeepAlive, quietKeepAlive } from './keepalive.js';
+// When the page last went hidden or visible: iOS sends the stand-in a pause
+// by itself around a switch, and that is not a person's tap.
+let lastVisibilityChange = 0;
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { lastVisibilityChange = Date.now(); });
 import { createTrackCache } from './trackCache.js';
 const WHOLE_AFTER_S = 12;            // buffered ahead before whole-song downloads start
 const WHOLE_AFTER_MAX_MS = 45000;    // or this long into the track, whatever the buffer
@@ -745,9 +749,13 @@ export function usePlayer(jf) {
       // "lock screen told: paused" at every song change, fixed by the
       // reconcile only 4 s later).
       setPlaying(true);
+      // A newer start (a skip, another tap) supersedes this one: its abort
+      // must not undo the newer start's "playing".
+      const gen = ++startGenRef.current;
       try {
-        await startOn(deviceRef.current, track, startAt > 0 ? startAt : 0);
+        await startOn(deviceRef.current, track, startAt > 0 ? startAt : 0, gen);
       } catch (e) {
+        if (startGenRef.current !== gen) return;
         setError(e.message);
         setPlaying(false);
       }
@@ -1015,7 +1023,8 @@ export function usePlayer(jf) {
         relayRef.current?.claim();
         anchorAt(positionRef.current, true);
         setPlaying(true); // from the tap (see playQueue)
-        try { await startOn(dev, current, positionRef.current); } catch (e) { setPlaying(false); throw e; }
+        const gen = ++startGenRef.current;
+        try { await startOn(dev, current, positionRef.current, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
         return;
       }
       if (!playing) relayRef.current?.claim();
@@ -1036,9 +1045,11 @@ export function usePlayer(jf) {
             new Promise((r) => setTimeout(() => r('timeout'), 3000)),
           ]);
           mediaLog(`toggle play: ${outcome} ready=${el.readyState} net=${el.networkState} err=${el.error?.code ?? '-'}`);
-          if (outcome !== 'ok' && outcome !== 'abort' && current) {
+          if (outcome === 'abort') return; // another toggle or start took over meanwhile
+          if (outcome !== 'ok' && current) {
             el.pause();
-            try { await startOn(dev, current, positionRef.current); } catch (e) { setPlaying(false); throw e; }
+            const gen = ++startGenRef.current;
+            try { await startOn(dev, current, positionRef.current, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
           }
         }
       } else if (playing) {
@@ -2206,9 +2217,11 @@ export function usePlayer(jf) {
     setDuration(ticksToSeconds(track?.RunTimeTicks));
     anchorAt(position, shouldPlay);
     if (shouldPlay) setPlaying(true); // from the handoff (see playQueue)
+    const gen = ++startGenRef.current;
     try {
-      if (shouldPlay) await startOn(deviceRef.current, track, position);
+      if (shouldPlay) await startOn(deviceRef.current, track, position, gen);
     } catch (e) {
+      if (startGenRef.current !== gen) return;
       setError(e.message);
       setPlaying(false);
     }
@@ -2462,7 +2475,9 @@ export function usePlayer(jf) {
       else if (!shownPlaying && !el.paused) ownPause(el);
     }
   };
-  msRefs.current = { toggle, setPlaying: setPlayingTo, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding, holdBridge };
+  const pausedAtRef = useRef(0);
+  useEffect(() => { if (!shownPlaying) pausedAtRef.current = Date.now(); else quietKeepAlive(false); }, [shownPlaying]);
+  msRefs.current = { toggle, setPlaying: setPlayingTo, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding, holdBridge, pausedAt: pausedAtRef.current };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
   const msNote = (m) => mediaLog(`${m} | local=${msLocal} remote=${msRemote} active=${activePlayerRef.current || '-'} device=${deviceRef.current?.kind} pos=${Math.round(shownPosition || 0)} transcoded=${!!jf?.transcoded?.()}`);
@@ -2485,7 +2500,17 @@ export function usePlayer(jf) {
       // (when the music is paused elsewhere, when the app is switched from),
       // and reading that as play restarted music paused from another device,
       // again and again.
-      if (r.playing === wantPlaying) { r.resync(); return; }
+      if (r.playing === wantPlaying) {
+        // A pause for a session already paused while the silent stand-in
+        // holds the lock screen: iOS shows the stand-in as playing (the
+        // element decides the button, not what the page declares), so this
+        // is a person tapping what looks like pause. Quiet the stand-in
+        // (loaded, paused: the button becomes play, the next tap is a real
+        // play) instead of re-playing it. Not the pauses iOS sends by itself
+        // right after the music paused elsewhere or the app was switched.
+        if (!wantPlaying && r.holding && Date.now() - r.pausedAt > 3000 && Date.now() - lastVisibilityChange > 1500) { msNote('pause while held: stand-in quieted'); quietKeepAlive(true); return; }
+        r.resync(); return;
+      }
       // Our own music, or a play for it while the stand-in holds the lock
       // screen (the AirPods going back in, a lock-screen tap): at once.
       if (!r.remote && (!r.holding || wantPlaying)) { if (wantPlaying) r.holdBridge(`lock screen play`); r.toggle(); return; }

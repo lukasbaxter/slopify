@@ -353,6 +353,7 @@ export default function App() {
       // Leaving the now-playing step closes the player and nothing else.
       if (fullScreenRef.current && !ev.state?.np) { setFullScreen(false); fullScreenRef.current = false; }
       if (ev.state?.np && !fullScreenRef.current) { setFullScreen(true); fullScreenRef.current = true; }
+      navPendingRef.current = 0; // the step landed; the next press may go
       const to = ev.state && typeof ev.state.conduit === 'number' ? ev.state.conduit : 0;
       if (to === h.idx || to < 0 || to >= h.stack.length) return;
       saveScroll(); // the DOM still shows the page we are leaving
@@ -378,12 +379,20 @@ export default function App() {
   // When the browser history is in step with ours, let it drive (so its own
   // Back/Forward and ours stay consistent); otherwise walk the stack directly.
   const inStep = () => { try { return window.history.state?.conduit === histRef.current.idx; } catch { return false; } };
-  const goBack = () => { const h = histRef.current; if (h.idx <= 0) return; if (inStep()) { window.history.back(); return; } saveScroll(); h.idx -= 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
-  const goForward = () => { const h = histRef.current; if (h.idx >= h.stack.length - 1) return; if (inStep()) { window.history.forward(); return; } saveScroll(); h.idx += 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
+  // One step per press. A mouse back button arrives twice on the desktop
+  // (the DOM mouseup and, on Linux and Windows, Electron's app-command relay),
+  // and history.back() is asynchronous: two calls before the popstate both
+  // saw the history in step and went two pages back. A step holds the door
+  // for 350 ms (or until the popstate lands).
+  const navPendingRef = useRef(0);
+  const navOnce = () => { if (Date.now() < navPendingRef.current) return false; navPendingRef.current = Date.now() + 350; return true; };
+  const goBack = () => { const h = histRef.current; if (h.idx <= 0 || !navOnce()) return; if (inStep()) { window.history.back(); return; } saveScroll(); h.idx -= 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
+  const goForward = () => { const h = histRef.current; if (h.idx >= h.stack.length - 1 || !navOnce()) return; if (inStep()) { window.history.forward(); return; } saveScroll(); h.idx += 1; applyEntry(h.stack[h.idx]); setHistTick((t) => t + 1); };
   const canBack = histRef.current.idx > 0;
   // Mouse back / forward buttons (buttons 3 and 4) drive the in-app history in
   // the browser and on the desktop; the browser's own navigation is suppressed.
-  // Electron on macOS also delivers them as app-command events via the main process.
+  // Electron on Windows and Linux also delivers them as app-command events via
+  // the main process (never on macOS); goBack/goForward take one per press.
   const navRef = useRef({ goBack, goForward }); navRef.current = { goBack, goForward };
   useEffect(() => {
     const onMouse = (e) => {
@@ -475,14 +484,18 @@ export default function App() {
     // core tonight, per app launch, per device. The persisted copies are used
     // for 6 h; a library change (relay ping) or a stale copy refetches.
     const fresh = (key) => { const at = Number(jf.persisted(`${key}At`) || 0); return Date.now() - at < 6 * 3600 * 1000 && Array.isArray(jf.persisted(key)); };
+    // An answer landing after a sign-out (or for a previous account) is dropped.
+    let alive = true;
+    const ok = (f) => (v) => { if (alive) f(v); };
     if (fresh('albums')) setLibLoading(false);
-    else jf.albums({ limit: 500 }).then((a) => { setAlbums(a.items); jf._persist('albums', a.items); jf._persist('albumsAt', Date.now()); })
-      .catch((e) => { if (String(e).includes('401')) { clearSession(); setJf(null); } })
-      .finally(() => setLibLoading(false));
-    if (!fresh('artists')) jf.artists({ limit: 500 }).then((r) => { setArtists(r.items); jf._persist('artists', r.items); jf._persist('artistsAt', Date.now()); }).catch(() => {});
-    jf.playlists().then((p) => { setPlaylists(p.items); jf._persist('playlists', p.items); }).catch(() => {});
-    jf.favoriteAlbums().then((a) => { setSavedAlbums(a.items); jf._persist('savedAlbums', a.items); }).catch(() => {});
-    jf.followedArtists().then((a) => setFollowedArtists(a.items)).catch(() => {});
+    else jf.albums({ limit: 500 }).then(ok((a) => { setAlbums(a.items); jf._persist('albums', a.items); jf._persist('albumsAt', Date.now()); }))
+      .catch((e) => { if (alive && String(e).includes('401')) { clearSession(); setJf(null); } })
+      .finally(() => { if (alive) setLibLoading(false); });
+    if (!fresh('artists')) jf.artists({ limit: 500 }).then(ok((r) => { setArtists(r.items); jf._persist('artists', r.items); jf._persist('artistsAt', Date.now()); })).catch(() => {});
+    jf.playlists().then(ok((p) => { setPlaylists(p.items); jf._persist('playlists', p.items); })).catch(() => {});
+    jf.favoriteAlbums().then(ok((a) => { setSavedAlbums(a.items); jf._persist('savedAlbums', a.items); })).catch(() => {});
+    jf.followedArtists().then(ok((a) => setFollowedArtists(a.items))).catch(() => {});
+    return () => { alive = false; };
   }, [jf]);
 
   const syncing = useLyricJobs();
@@ -587,7 +600,21 @@ export default function App() {
     adoptActive(devices).catch(() => {});
   }, [devices, jf, adoptActive]);
 
-  const signOut = () => { clearSession(); setJf(null); };
+  // Sign out: the token, and everything of the account kept in memory, so the
+  // next account on this device does not see the last one's library while
+  // its own loads.
+  const signOut = () => {
+    clearSession(); setJf(null);
+    setPlaylists([]); setAlbums([]); setArtists([]); setSavedAlbums([]); setFollowedArtists([]);
+    setDetailRaw(null); setSeeAllRaw(null); likesLoad({});
+  };
+  const signOutRef = useRef(signOut); signOutRef.current = signOut;
+  // A 401 from any call, or the socket refusing the token: back to the form.
+  useEffect(() => {
+    const onLost = () => { if (jf) signOutRef.current(); };
+    window.addEventListener('slopify:unauthorized', onLost);
+    return () => window.removeEventListener('slopify:unauthorized', onLost);
+  }, [jf]);
 
   const goView = (v) => { setDetailRaw(null); setSeeAllRaw(null); setView(v); pushEntry({ view: v, detail: null, seeAll: null }); };
 
@@ -1007,9 +1034,14 @@ export default function App() {
     // Online (now, or again): send the kept plays, finish downloads cut
     // short, fill in missing covers; after a spell offline, reload covers.
     let wasOffline = isOffline();
+    let offlineSince = wasOffline ? Date.now() : 0;
     const online = () => {
       const off = isOffline();
-      if (!off && wasOffline) { jf._netEpoch = Date.now(); setNetEpoch(jf._netEpoch); }
+      // Covers are asked for again only after a real spell offline (a blip
+      // re-requested every cover on the page, through the very link that
+      // had just stalled).
+      if (off && !wasOffline) offlineSince = Date.now();
+      if (!off && wasOffline && Date.now() - offlineSince > 20000) { jf._netEpoch = Date.now(); setNetEpoch(jf._netEpoch); }
       wasOffline = off;
       if (off) return;
       readLib().then((lib) => flushOfflinePlays(jf, lib.plays)).catch(() => {});

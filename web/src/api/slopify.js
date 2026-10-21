@@ -63,7 +63,12 @@ export class Slopify {
   // Per-user localStorage namespace, computed (login builds the client before it knows the user).
   get _lsPrefix() { return `${CACHE_PREFIX}${this.userId || 'x'}.`; }
   persisted(key) { try { const raw = localStorage.getItem(this._lsPrefix + key); return raw ? JSON.parse(raw) : null; } catch { return null; } }
-  _persist(key, value) { try { localStorage.setItem(this._lsPrefix + key, JSON.stringify(value)); } catch { /* quota or private mode */ } }
+  _persist(key, value) {
+    // A third-party credential (the ListenBrainz token) is not written to
+    // the device; the live /api/prefs answer carries it when it is needed.
+    if (key === 'prefs' && value && value.listenbrainz && value.listenbrainz.token) value = { ...value, listenbrainz: { ...value.listenbrainz, token: undefined } };
+    try { localStorage.setItem(this._lsPrefix + key, JSON.stringify(value)); } catch { /* quota or private mode */ }
+  }
   _cached(key, fn) { if (this._cache.has(key)) return Promise.resolve(this._cache.get(key)); return fn().then((v) => { this._cache.set(key, v); return v; }); }
   _cachedFor(key, ms, fn) {
     const hit = this._cache.get(key);
@@ -85,6 +90,11 @@ export class Slopify {
         if (!raw && opts.body) headers['Content-Type'] = 'application/json';
         const res = await fetch(`${this.baseUrl}${path}`, { ...opts, body: raw || opts.body, signal: ctrl.signal, headers });
         noteResponse(res); // live server, or the service worker's kept copy (offline)
+        if (res.status === 401 && !path.startsWith('/api/auth/login') && typeof window !== 'undefined') {
+          // The token is gone (signed out elsewhere, removed by an admin): the
+          // app returns to the sign-in form instead of failing every call.
+          try { window.dispatchEvent(new CustomEvent('slopify:unauthorized')); } catch { /* no window */ }
+        }
         if (!res.ok) {
           // The service worker's "offline" answer (sw.js): one plain message
           // for every screen, not "503: offline".
@@ -194,9 +204,10 @@ export class Slopify {
     this._warm.set(itemId, Date.now());
     const start = this._startProfile();
     const variant = gain && start !== 'alac' ? `${start}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : start;
-    const url = this._url(`/api/stream/${itemId}/hls/${variant}/index.m3u8`);
+    // pre=1: a warm, not a press of play; the server runs it at low priority.
+    const url = this._url(`/api/stream/${itemId}/hls/${variant}/index.m3u8`, { pre: '1' });
     const base = url.slice(0, url.lastIndexOf('/') + 1);
-    const tok = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+    const tok = url.includes('?') ? url.slice(url.indexOf('?')).replace(/[?&]pre=1/, '') : '';
     const pull = (tries) => fetch(url).then((r) => r.text()).then((txt) => {
       if (!/#EXT-X-ENDLIST/.test(txt)) { if (tries > 0) setTimeout(() => pull(tries - 1), 2500); return; }
       // Lossless (fMP4): its init segment too, ~1 KB, needed before any segment.
@@ -532,6 +543,9 @@ export function persistSession(session) { localStorage.setItem(SESSION_KEY, JSON
 export function loadSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } }
 export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
+  // What this module remembered of the account (saved albums, follows):
+  // the next account signing in on this device starts clean.
+  savedAlbums.clear(); followedArtists.clear();
   // The service worker's copies of this account's API answers (sw.js).
   try { navigator.serviceWorker?.controller?.postMessage('clear-api'); } catch { /* none */ }
 }

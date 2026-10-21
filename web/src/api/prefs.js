@@ -34,7 +34,10 @@ function isLight(hex) { const [r, g, b] = hexToRgb(hex); return (r * 299 + g * 5
 
 /** Push a theme into the CSS variables the whole app is painted from. */
 export function applyTheme(theme) {
-  const t = { ...DEFAULT_THEME, ...(theme || {}) };
+  // A colour that is not a colour (a hand-edited pref, an old client) falls
+  // back to the default one; a throw here used to unmount the whole app.
+  const t = { ...DEFAULT_THEME };
+  for (const k of Object.keys(DEFAULT_THEME)) if (theme && hexToRgb(theme[k])) t[k] = theme[k];
   const s = document.documentElement.style;
   const light = isLight(t.bg);
   const fgDim = mix(t.fg, t.bg, light ? .45 : .3);

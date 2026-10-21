@@ -116,9 +116,12 @@ export class SessionLink {
         this.onCommand(m.command, m.from);
       }
     };
-    ws.onclose = () => {
-      if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed`);
+    ws.onclose = (ev) => {
+      if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed${ev && ev.code ? ` ${ev.code}` : ''}`);
       this.connected = false; this.rosterSeen = false; clearInterval(this._ping);
+      // 4003: the token is refused (signed out elsewhere, removed). Nothing to
+      // reconnect with; the app goes back to the sign-in form.
+      if (ev && ev.code === 4003 && typeof window !== 'undefined') { this.closed = true; try { window.dispatchEvent(new CustomEvent('slopify:unauthorized')); } catch { /* none */ } return; }
       // A connection that lived starts the backoff over; one the server
       // closed right away (a frame it refused, a token it rejected) keeps
       // doubling, so a refused message is not a reconnect every second.

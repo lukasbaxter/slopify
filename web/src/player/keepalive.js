@@ -60,11 +60,24 @@ function arm() {
 // the element is more than 4 s off).
 let pauseTimer = null;
 let lastPosition = 0;
+// Quiet: wanted, loaded, but paused. iOS draws the lock screen's play/pause
+// from the element (not from what the page declares), so while the stand-in
+// plays for a paused session the lock screen shows a pause button that does
+// nothing. A pause tap there quiets the stand-in instead: the button becomes
+// play, and the next tap is a real play. Ends with the next want-off or play.
+let quiet = false;
 export function keepAlive(on, position = 0) {
   if (wanted !== !!on) note(`want ${on ? 'on' : 'off'} @${Math.round(position || 0)}`);
+  if (!on && quiet) quiet = false;
   wanted = !!on;
   lastPosition = position;
   apply(position);
+}
+export function quietKeepAlive(on) {
+  if (quiet === !!on) return;
+  quiet = !!on;
+  note(`quiet ${on ? 'on' : 'off'}`);
+  apply(lastPosition);
 }
 
 // Held across a song change with the screen locked (usePlayer): between the
@@ -85,6 +98,7 @@ function apply(position) {
   const a = element();
   if (wanted || bridged) {
     clearTimeout(pauseTimer); pauseTimer = null;
+    if (quiet && !bridged) { if (!a.paused) { a.pause(); note('held quiet'); } return; }
     const p = Math.max(0, (position || 0) % KEEPALIVE_SECONDS);
     // Seek only a clock that is seen moving (two different readings while
     // playing); one that has not moved in 3 s of "playing" is frozen and is
@@ -135,5 +149,5 @@ export function primeKeepAlive() {
 
 export function state() {
   const a = el;
-  return { wanted, bridged, unlocked, armed, frozen, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
+  return { wanted, bridged, quiet, unlocked, armed, frozen, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
 }

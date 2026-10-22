@@ -26,7 +26,9 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
     const dataDir = `/tmp/slopify-e2e-offline-${name}`;
     fs.rmSync(dataDir, { recursive: true, force: true });
     let server = await startServer(port, dataDir);
-    const browser = await engine.launch(name === 'chromium' ? { args: ['--autoplay-policy=no-user-gesture-required'] } : {});
+    // args: [] for WebKit: the chromium project's launch args (a Chrome-only
+    // flag) otherwise ride along and WebKit refuses to start.
+    const browser = await engine.launch(name === 'chromium' ? { args: ['--autoplay-policy=no-user-gesture-required'] } : { args: [] });
     // WebKit as an iPhone (its user agent): a download then holds the app
     // awake with the silent stand-in, as it must in the background on iOS.
     const iphone = name === 'webkit' ? { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' } : {};

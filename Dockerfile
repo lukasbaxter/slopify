@@ -47,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 COPY aligner/requirements.txt /opt/align/requirements.txt
 RUN python3 -m venv /opt/align \
  && /opt/align/bin/pip install --no-cache-dir -U pip setuptools wheel \
- && /opt/align/bin/pip install --no-cache-dir -r /opt/align/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
+ && /opt/align/bin/pip install --no-cache-dir -r /opt/align/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 
 # The default target: the slim image.
 FROM base AS runtime

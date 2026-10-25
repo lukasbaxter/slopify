@@ -1,8 +1,10 @@
-# The lyric aligner's Python side (the gpu image only). Versions proven on an
-# RTX 4060 / driver 535: the cu121 torch wheels bundle their own CUDA runtime,
-# so the host needs only the NVIDIA driver and container toolkit (CDI).
-torch==2.5.1+cu121
-torchaudio==2.5.1+cu121
+# The lyric aligner's Python side (the gpu image only). The cu128 torch wheels
+# bundle their own CUDA runtime, so the host needs only an NVIDIA driver (570
+# or newer) and the container toolkit (CDI). cu128 because the cu121 build's
+# kernels stop at sm_90: on an RTX 5060 Ti (Blackwell, sm_120) every sync
+# failed with "no kernel image is available for execution on the device".
+torch==2.7.1+cu128
+torchaudio==2.7.1+cu128
 openai-whisper==20250625
 stable-ts==2.19.1
 demucs==4.1.0

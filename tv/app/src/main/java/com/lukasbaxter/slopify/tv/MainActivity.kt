@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private val handler = Handler(Looper.getMainLooper())
     @Volatile private var nowPlayingOpen = false
+    private var debugJs: String? = null
     private val prefs by lazy { getSharedPreferences("slopify", Context.MODE_PRIVATE) }
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         intent?.getStringExtra("tvcss")?.let { prefs.edit().putString("tvcss", it).apply() }
+        debugJs = intent?.getStringExtra("tvjs") ?: intent?.getStringExtra("tvjs64")?.let { String(android.util.Base64.decode(it, android.util.Base64.DEFAULT)) }
         intent?.getStringExtra("token")?.let { t ->
             prefs.edit().putString("token", t).putString("userId", intent.getStringExtra("userId") ?: "").apply()
         }
@@ -73,6 +75,7 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView, url: String) {
                 view.evaluateJavascript(HELPER, null)
                 val css = prefs.getString("tvcss", "") ?: ""
+                debugJs?.let { d -> handler.postDelayed({ view.evaluateJavascript(d, null) }, 3000) }
                 if (css.isNotEmpty()) view.evaluateJavascript("(function(){var s=document.getElementById('tvcss')||document.createElement('style');s.id='tvcss';s.textContent=${JSONObject.quote(css)};document.head.appendChild(s);})()", null)
             }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -95,8 +98,8 @@ class MainActivity : Activity() {
         }
         val script = """
             window.slopifyShell = { deviceName: ${JSONObject.quote(name)}, deviceForm: 'tablet', platform: 'androidtv', version: '1.0' };
-            // The panel is 1920x1080; the page is laid out at exactly that, so canvases (the visualizer) draw 1:1
-            // instead of at the TV's 2x density, which this SoC cannot push at 60 fps.
+            // The visualizer sizes its canvas by devicePixelRatio: at the TV's real 2x (3072x1120) this SoC managed ~5 fps,
+            // at 1x it holds ~58 fps. Only the artist banner size reads this value otherwise.
             try { Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true }); } catch (e) {}
             $seed
         """.trimIndent()
@@ -147,7 +150,7 @@ class MainActivity : Activity() {
               vp.content = 'width=1600, initial-scale=' + (screen.width / 1600) + ', minimum-scale=' + (screen.width / 1600) + ', maximum-scale=' + (screen.width / 1600);
               console.log('slopify-tv viewport', window.innerWidth, 'x', window.innerHeight, 'dpr', window.devicePixelRatio);
               let frames = 0, last = performance.now();
-              const fpsLoop = () => { frames++; const now = performance.now(); if (now - last >= 3000) { console.log('slopify-tv fps ' + (frames * 1000 / (now - last)).toFixed(1) + ' tab=' + (document.querySelector('.fs-tabs button[aria-pressed="true"]')?.getAttribute('aria-label') || '-')); frames = 0; last = now; } requestAnimationFrame(fpsLoop); };
+              const fpsLoop = () => { frames++; const now = performance.now(); if (now - last >= 10000) { console.log('slopify-tv fps ' + (frames * 1000 / (now - last)).toFixed(1) + ' tab=' + (document.querySelector('.fs-tabs button[aria-pressed="true"]')?.getAttribute('aria-label') || '-')); frames = 0; last = now; } requestAnimationFrame(fpsLoop); };
               requestAnimationFrame(fpsLoop);
               if (!document.getElementById('tvcss-base')) { const st = document.createElement('style'); st.id = 'tvcss-base'; st.textContent = '.fs-close{display:none!important}'; document.head.appendChild(st); }
               const q = (s) => document.querySelector(s);

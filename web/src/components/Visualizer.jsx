@@ -24,10 +24,22 @@ let sharedCtx = null;
 export function unlockShadowAudio() {
   const Ctx = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
   if (!Ctx) return null;
-  if (!sharedCtx || sharedCtx.state === 'closed') sharedCtx = new Ctx();
+  if (!sharedCtx || sharedCtx.state === 'closed') {
+    // Nothing from the shadow ever reaches a speaker, so render it with no output
+    // device at all. That also frees it from the device's buffer size: a TV's
+    // HDMI path renders audio in 100 ms blocks, so an analyser on a context tied
+    // to it only saw new data ten times a second and the bars moved in steps.
+    // With no sink Chromium renders in 10 ms blocks. Browsers without the option
+    // ignore it (older Chromium) or throw (WebKit): then the plain context.
+    try { sharedCtx = new Ctx({ sinkId: { type: 'none' } }); } catch { sharedCtx = new Ctx(); }
+  }
   sharedCtx.resume?.().catch(() => {});
   return sharedCtx;
 }
+
+// A context whose clock advances in big blocks (a TV's HDMI output: 100 ms) cannot
+// feed a smooth visualizer; above this the shadow copy is analysed even for local playback.
+const COARSE_LATENCY = 0.04;
 
 export const EQ_STYLES = [
   // "Line": Feishin's default preset (mode 10 line graph, 1.9px, prism, faint reflection).
@@ -59,7 +71,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   const local = !player.mirroring && player.device?.kind === 'local' && !!player.current;
   // Tapping the element needs it routed through Web Audio, which iOS never is:
   // there the shadow copy stands in for local playback too.
-  const tap = local && ROUTES_WEB_AUDIO;
+  const tap = local && ROUTES_WEB_AUDIO && !((player.webAudio?.()?.ctx?.baseLatency || 0) > COARSE_LATENCY);
   const trackId = player.nowPlayingId;
   const cfg = settings || DEFAULT_VIZ;
   const style = EQ_STYLES.find((x) => x.id === cfg.style) || EQ_STYLES[0];
@@ -94,6 +106,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
     // reported playhead jitters by is another fresh transcode.
     const load = () => {
       const at = Math.max(0, want() + sh.lead);
+      if (sh.id !== trackId) sh.retried = false;
       sh.id = trackId;
       sh.load(jf.transcodeUrl(trackId, { codec: 'mp3', bitrate: 192000, startAt: at }), at);
     };
@@ -101,6 +114,11 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
       // Behind at start-up (drift < 0) means ask further ahead next time.
       const drift = sh.position - want();
       sh.lead = Math.min(3, Math.max(0.2, sh.lead - drift));
+      // A slow device (a TV decoding on a 1.4 GHz core) misses by a third of a
+      // second on the first try, under the 0.6 s the sync tick tolerates, so the
+      // bars ran visibly late for the whole track. One retry with the lead it
+      // just learned lands within a frame or two; never more than one per load.
+      if (Math.abs(drift) > 0.15 && !sh.retried) { sh.retried = true; load(); } else sh.retried = false;
     });
     const tick = () => {
       const c = clockRef.current;

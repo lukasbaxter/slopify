@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { usePlayhead } from '../player/playhead.js';
 import Marquee from './Marquee.jsx';
 // Same list as App's swipe-to-skip (kept here: App imports this file).
 const NOT_A_SWIPE = '.devicemenu, .ctxmenu, .ctxmenu-scrim, input, .dm-volume';
@@ -189,7 +190,8 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
   const quality = useQuality(player, jf);
   const phone = usePhone();
   const elsewhere = elsewhereLabel(player);
-  const { current, nowPlaying, playing, position, duration, volume, device, error, roster, relay, repeat, shuffle } = player;
+  const { current, nowPlaying, playing, duration, volume, device, error, roster, relay, repeat, shuffle } = player;
+  const position = usePlayhead(player);
   const sessionDevice = sessionDeviceOf(player, devices);
   // A speaker gets at most one volume command every 120 ms (SheetVolume's
   // throttle); the local device still follows every step of the drag.

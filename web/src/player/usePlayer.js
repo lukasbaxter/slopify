@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive, bridgeKeepAlive, quietKeepAlive, state as keepAliveState } from './keepalive.js';
+
+// What a roster looks like with the reported playheads taken out: two rosters
+// with the same shape differ only in where the songs are (see applyRoster).
+const rosterShape = (r) => JSON.stringify(r, (k, v) => (k === 'position' || k === 'at' || k === 'serverAt' || k === 'rxAt' ? undefined : v));
 // When the page last went hidden or visible: iOS sends the stand-in a pause
 // by itself around a switch, and that is not a person's tap.
 let lastVisibilityChange = 0;
@@ -367,6 +371,13 @@ export function usePlayer(jf) {
   // being re-created on every tick.
   const deviceRef = useRef(device);
   const positionRef = useRef(0);
+  // The playhead right now, wherever it is kept (the local anchor, a speaker
+  // poll, a mirrored report), for code that acts between renders. The React
+  // `position` state is only a coarse copy of it (see usePlayhead).
+  const positionNowRef = useRef(null);
+  const coarseRef = useRef(0);
+  const relayNowRef = useRef(null);
+  const livePos = () => (positionNowRef.current ? positionNowRef.current() : positionRef.current);
   const durationRef = useRef(0);
   const queueRef = useRef([]);
   const indexRef = useRef(-1);
@@ -426,7 +437,7 @@ export function usePlayer(jf) {
   useEffect(() => { repeatRef.current = repeat; }, [repeat]);
   useEffect(() => { contextRef.current = contextId; }, [contextId]);
   useEffect(() => { shuffleRef.current = shuffle; }, [shuffle]);
-  useEffect(() => { positionRef.current = position; }, [position]);
+  useEffect(() => { positionRef.current = position; coarseRef.current = position; }, [position]);
   useEffect(() => { durationRef.current = duration; }, [duration]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { indexRef.current = index; }, [index]);
@@ -435,8 +446,19 @@ export function usePlayer(jf) {
   // clock does not drift back to a stale value before the next poll.
   const anchorAt = useCallback((seconds, isPlaying = true) => {
     anchorRef.current = { pos: seconds, at: Date.now(), playing: isPlaying };
+    positionRef.current = seconds; coarseRef.current = seconds;
     setPosition(seconds);
+    // A moved playhead is reported at once (the periodic report is 2 s apart).
+    setTimeout(() => { if (!relayNowRef.current?.() && relayRef.current && nowPlayingReportRef.current) relayRef.current.reportNowPlaying(nowPlayingReportRef.current()); }, 0);
   }, []);
+  // Paused: the coarse state catches up with the live clock (it is what the
+  // bar shows while nothing moves, and what the lock screen and a report use).
+  useEffect(() => {
+    if (playing) return;
+    const p = livePos();
+    if (Math.abs(p - coarseRef.current) > 0.05) { coarseRef.current = p; positionRef.current = p; setPosition(p); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing]);
 
   const current = index >= 0 ? queue[index] || null : null;
   const remote = typeof window !== 'undefined' ? window.conduit?.remote : null;
@@ -445,7 +467,15 @@ export function usePlayer(jf) {
   const attachRelay = useCallback((relay) => { relayRef.current = relay; setRelayInstance(relay); }, []);
   // Display and control-routing follow the shared session (derived at render),
   // so this just stores the roster.
-  const applyRoster = useCallback((r) => { rosterRef.current = r; setRoster(r); }, []);
+  const applyRoster = useCallback((r) => {
+    const prev = rosterRef.current; rosterRef.current = r;
+    // A roster that differs only in reported playheads is not a re-render:
+    // positionNow() reads the fresh report straight from rosterRef and the
+    // seek bar ticks on its own. Anything else (track, playing, devices,
+    // volumes, names) still goes through state.
+    if (prev && rosterShape(prev) === rosterShape(r)) return;
+    setRoster(r);
+  }, []);
   const applyRemoteQueue = useCallback((from, q) => {
     const next = { ...remoteQueuesRef.current, [from]: q || [] };
     remoteQueuesRef.current = next; setRemoteQueues(next);
@@ -982,7 +1012,7 @@ export function usePlayer(jf) {
     const act = isOffline() ? null : activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'previous' }); return; }
     // Match the usual convention: restart the track unless we are near its start.
-    if (positionRef.current > 3) {
+    if (livePos() > 3) {
       // Same track: rewind in place rather than reloading the stream.
       const el = audioRef.current;
       if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) { el.currentTime = 0; anchorAt(0, playingRef.current); return; }
@@ -1022,10 +1052,11 @@ export function usePlayer(jf) {
       // poke a Cast media session that does not exist.)
       if (current && loadedRef.current !== current.Id && (!playing || dev.kind !== 'local')) {
         relayRef.current?.claim();
-        anchorAt(positionRef.current, true);
+        const from = livePos();
+        anchorAt(from, true);
         setPlaying(true); // from the tap (see playQueue)
         const gen = ++startGenRef.current;
-        try { await startOn(dev, current, positionRef.current, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
+        try { await startOn(dev, current, from, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
         return;
       }
       if (!playing) relayRef.current?.claim();
@@ -1326,7 +1357,7 @@ export function usePlayer(jf) {
           if (dev.kind === 'local') { endFadeRef.current(); const el = audioRef.current; if (el) ownPause(el); }
           else if (dev.kind !== 'relay' && remote) remote.stop(dev).catch(() => {});
           setPlaying(false);
-          anchorRef.current = { pos: positionRef.current, at: Date.now(), playing: false };
+          anchorRef.current = { pos: livePos(), at: Date.now(), playing: false };
         }
         return;
       }
@@ -1444,8 +1475,13 @@ export function usePlayer(jf) {
       // Writing that through would wipe the position we are carrying over.
       if (transitionRef.current) return;
       const pos = localBaseRef.current + el.currentTime;
-      setPosition(pos);
+      positionRef.current = pos;
       anchorRef.current = { pos, at: Date.now(), playing: !el.paused };
+      // The seek bar, the lyrics and the visualizer clock read positionNow();
+      // the state is a coarse copy refreshed every few seconds. Setting it on
+      // every timeupdate re-rendered the whole app four times a second, and
+      // each of those dropped a visualizer frame on a TV.
+      if (Math.abs(pos - coarseRef.current) >= 5) { coarseRef.current = pos; setPosition(pos); }
     };
     const onEnded = () => {
       if (deviceRef.current.kind === 'local') advanceRef.current(true);
@@ -2015,12 +2051,14 @@ export function usePlayer(jf) {
   // Interpolate the remote clock between polls so the seek bar moves smoothly.
   useEffect(() => {
     if (device.kind === 'local' || !playing) return undefined;
+    // Coarse: the bar itself follows positionNow() (see usePlayhead).
     const tick = setInterval(() => {
       const a = anchorRef.current;
       if (!a.playing) return;
       const next = a.pos + (Date.now() - a.at) / 1000;
-      setPosition(durationRef.current ? Math.min(next, durationRef.current) : next);
-    }, 200);
+      const pos = durationRef.current ? Math.min(next, durationRef.current) : next;
+      positionRef.current = pos; coarseRef.current = pos; setPosition(pos);
+    }, 5000);
     return () => clearInterval(tick);
   }, [device, playing]);
 
@@ -2158,6 +2196,15 @@ export function usePlayer(jf) {
     ? (roster.players || []).find((p) => p.id === roster.activeClientId)
     : null;
   const relayTarget = activePlayer?.nowPlaying || null;
+  const myClientIdRef = useRef(null); myClientIdRef.current = myClientId;
+  // The same, read between renders from the latest roster (position-only
+  // roster updates skip state, see applyRoster).
+  const relayNow = () => {
+    const rr = rosterRef.current; const id = rr?.activeClientId;
+    if (!id || id === myClientIdRef.current) return null;
+    return (rr.players || []).find((p) => p.id === id)?.nowPlaying || null;
+  };
+  relayNowRef.current = relayNow;
   const relayTargetId = activePlayer?.id || null;
 
   // Either the mirrored active session, our own queue item, or an adopted speaker.
@@ -2348,7 +2395,7 @@ export function usePlayer(jf) {
     if (dev.kind === 'local') { endFadeRef.current(); const el = audioRef.current; if (el) ownPause(el); }
     else if (dev.kind !== 'relay' && remote) remote.pause(dev).catch(() => {});
     setPlaying(false);
-    anchorRef.current = { pos: positionRef.current, at: Date.now(), playing: false };
+    anchorRef.current = { pos: livePos(), at: Date.now(), playing: false };
   };
   useEffect(() => { playQueueRef.current = playQueue; }, [playQueue]);
   useEffect(() => { toggleRef.current = toggle; }, [toggle]);
@@ -2366,13 +2413,27 @@ export function usePlayer(jf) {
   // Broadcast what we're playing so the roster shows it on other clients. The
   // song AND the playhead go together, so a controller never shows a different
   // track from the position it displays.
+  const nowPlayingReportRef = useRef(null); nowPlayingReportRef.current = nowPlayingReport;
   useEffect(() => {
     const r = relayRef.current;
     if (!r) return;
     // Do not report while mirroring someone else's session -- only the active
     // player reports its state (title, playhead, volume) for everyone to sync to.
     if (relayTarget) return;
-    r.reportNowPlaying(current ? {
+    r.reportNowPlaying(nowPlayingReportRef.current());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, index, playing, duration, volume, repeat, shuffle, relayTarget, device]);
+  // While playing, a fresh playhead every 2 s. It used to ride on the position
+  // state changing every second, which re-rendered this client and, through
+  // the roster broadcast, every mirror. Mirrors interpolate between reports
+  // on the shared clock, so 2 s is plenty.
+  useEffect(() => {
+    if (relayTarget || !playing || !current) return undefined;
+    const t = setInterval(() => { const r = relayRef.current; if (r) r.reportNowPlaying(nowPlayingReportRef.current()); }, 2000);
+    return () => clearInterval(t);
+  }, [relayTarget, playing, current]);
+  function nowPlayingReport() {
+    return current ? {
       itemId: current.Id,
       title: current.Name,
       artist: current.Artists?.join(', ') || current.AlbumArtist || '',
@@ -2387,9 +2448,8 @@ export function usePlayer(jf) {
       device: { id: device.id, kind: device.kind, name: device.name },
       queueIndex: index,
       playing, position: positionNowRef.current ? positionNowRef.current() : position, duration, volume, repeat, shuffle, at: Date.now(),
-    } : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, index, playing, Math.floor(position), duration, volume, repeat, shuffle, relayTarget, device]);
+    } : null;
+  }
 
   // Publish the queue itself (not the index; that rides on now-playing) when
   // its identity changes. Debounced: a like re-creates the array, a shuffle
@@ -2402,12 +2462,8 @@ export function usePlayer(jf) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue, relayTarget, relayInstance]);
 
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    if (!relayTarget?.playing) return undefined;
-    const t = setInterval(() => forceTick((n) => n + 1), 500);
-    return () => clearInterval(t);
-  }, [relayTarget?.playing]);
+  // (No periodic re-render for the mirrored playhead: the bar reads
+  // positionNow() on its own clock, see usePlayhead.)
 
   // Interpolate the active player's playhead so the mirrored bar moves smoothly.
   const shownPosition = relayTarget
@@ -2417,12 +2473,12 @@ export function usePlayer(jf) {
   // every 100 ms): the mirrored report on the shared clock, or our own anchor.
   const relayTargetRef = useRef(null); relayTargetRef.current = relayTarget;
   const positionNow = useCallback(() => {
-    const rt = relayTargetRef.current;
+    const rt = relayNow() || relayTargetRef.current;
     if (rt) return relayRef.current?.playheadOf ? relayRef.current.playheadOf(rt) : (Number(rt.position) || 0);
     const a = anchorRef.current;
     return a.playing ? a.pos + Math.max(0, Date.now() - a.at) / 1000 : positionRef.current;
   }, []);
-  const positionNowRef = useRef(positionNow); positionNowRef.current = positionNow;
+  positionNowRef.current = positionNow;
   const shownDuration = relayTarget ? (relayTarget.duration || 0) : duration;
   const shownPlaying = relayTarget ? Boolean(relayTarget.playing) : playing;
   // While casting, the slider follows the mirrored session's volume -- except

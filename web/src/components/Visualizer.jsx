@@ -43,7 +43,7 @@ const COARSE_LATENCY = 0.04;
 
 export const EQ_STYLES = [
   // "Line": Feishin's default preset (mode 10 line graph, 1.9px, prism, faint reflection).
-  { id: 'line', name: 'Line', opts: { mode: 10, lineWidth: 1.9, fillAlpha: 0, barSpace: .7, reflexRatio: .5, reflexAlpha: .1, reflexBright: 1, showPeaks: false, ledBars: false, lumiBars: false, radial: false, mirror: 0, smoothing: .6, fftSize: 16384, maxFreq: 22050, minFreq: 20, gravity: 11, linearBoost: 4, maxDecibels: -25, minDecibels: -85 } },
+  { id: 'line', name: 'Line', opts: { mode: 10, lineWidth: 1.9, fillAlpha: 0, barSpace: .7, reflexRatio: .5, reflexAlpha: .1, reflexBright: 1, showPeaks: false, ledBars: false, lumiBars: false, radial: false, mirror: 0, smoothing: .6, fftSize: 8192, maxFreq: 22050, minFreq: 20, gravity: 11, linearBoost: 4, maxDecibels: -25, minDecibels: -85 } },
   { id: 'area', name: 'Area', opts: { mode: 10, lineWidth: 1.5, fillAlpha: .35, reflexRatio: .4, reflexAlpha: .15, showPeaks: false, ledBars: false, radial: false, mirror: 0, smoothing: .65, fftSize: 8192 } },
   { id: 'led', name: 'LED bars', opts: { mode: 6, ledBars: true, barSpace: .25, reflexRatio: 0, showPeaks: true, radial: false, mirror: 0, lumiBars: false, fillAlpha: 1, lineWidth: 0 } },
   { id: 'bars', name: 'Bars', opts: { mode: 5, ledBars: false, barSpace: .3, reflexRatio: 0, showPeaks: true, radial: false, mirror: 0, roundBars: true, fillAlpha: 1, lineWidth: 0 } },
@@ -93,7 +93,11 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   offsetRef.current = Number.isFinite(offset) ? offset : 0;
   // What the speaker REPORTS right now (no offset): the calibration measures
   // the delay against this.
-  const reported = (at = Date.now()) => { const c = clockRef.current; return c.pos + (c.playing ? (at - c.at) / 1000 : 0); };
+  const posNowRef = useRef(null); posNowRef.current = player.positionNow || null;
+  const reported = (at = Date.now()) => {
+    if (posNowRef.current) return posNowRef.current() + (at - Date.now()) / 1000;
+    const c = clockRef.current; return c.pos + (c.playing ? (at - c.at) / 1000 : 0);
+  };
   useEffect(() => {
     if (!active || tap) { shadowRef.current?.stop(); return undefined; }
     const sh = shadow();
@@ -157,7 +161,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
         const am = new AudioMotion(stage, {
           audioCtx: wa.ctx, source: wa.source, connectSpeakers: false,
           overlay: true, bgAlpha: 0, showBgColor: false, showScaleX: false, showScaleY: false,
-          minFreq: 30, maxFreq: 16000, weightingFilter: 'D', maxFPS: 60,
+          minFreq: 30, maxFreq: 16000, weightingFilter: 'D', maxFPS: 0,
           ...style.opts, gradient: cfg.gradient === 'album' ? 'classic' : cfg.gradient, smoothing: cfg.smoothing ?? style.opts.smoothing ?? .6,
         });
         amRef.current = am;

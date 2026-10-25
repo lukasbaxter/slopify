@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { usePlayhead } from '../player/playhead.js';
 import Marquee from './Marquee.jsx';
 import { Lyrics } from './RightPanel.jsx';
 import Visualizer, { EQ_STYLES, GRADIENTS, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
@@ -97,7 +98,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   // held until the mirrored position has caught up.
   const [scrub, setScrub] = useState(null);
   const scrubHold = useRef(null);
-  const onScrubStart = () => { clearTimeout(scrubHold.current); setScrub((s) => (s == null ? Math.min(player.position || 0, player.duration || 0) : s)); };
+  const onScrubStart = () => { clearTimeout(scrubHold.current); setScrub((s) => (s == null ? Math.min((player.positionNow ? player.positionNow() : player.position) || 0, player.duration || 0) : s)); };
   const onScrubMove = (e) => setScrub(Number(e.target.value));
   // Touch: the finger's own x drives the value. iOS's native range drag only
   // sometimes follows a finger that started on the thumb (it lit up, the
@@ -155,7 +156,8 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
       ...(offset != null ? [{ key: 'cal-reset', label: 'Forget calibration', onClick: () => saveOffset(null) }] : []),
     ] : []),
   ];
-  const { nowPlaying, playing, position, duration, shuffle, repeat, volume } = player;
+  const { nowPlaying, playing, duration, shuffle, repeat, volume } = player;
+  const position = usePlayhead(player);
   // Same 120 ms throttle as SheetVolume when the session is on a speaker;
   // the local device keeps its instant slider.
   const remoteVol = Boolean(sessionDevice?.kind && sessionDevice.kind !== 'local');

@@ -165,13 +165,22 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         if (c.kind === 'server' && d.kind === 'cast' && appOnTv(self.uid, d.host)) continue;
         // A client's own copy of such a TV (the desktop finds Cast devices itself) would be
         // played by that client as plain Cast: the server's copy is the one offered.
-        if (c.kind !== 'server' && d.kind === 'cast' && discovery) { const sd = discovery.get(String(d.id)); if (sd && discovery.agentAt(sd.host)) continue; }
+        if (c.kind !== 'server' && d.kind === 'cast' && discovery && isAgentTv(d)) continue;
         lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
       }
     }
     return { type: 'roster', players, lanDevices, activeClientId: s.active };
   };
   const broadcastRoster = (uid: string) => { const s = loadSession(db, uid); for (const c of ofUser(uid)) send(c, rosterFor(c, s)); };
+  // A Cast device that is one of the agent TVs, however a client identifies it
+  // (the desktop's own ids differ from the server's): by id, address or name.
+  const isAgentTv = (d: any) => {
+    if (!discovery) return false;
+    const sd = discovery.get(String(d.id));
+    if (sd && discovery.agentAt(sd.host)) return true;
+    if (d.host && discovery.agentAt(String(d.host))) return true;
+    return [...discovery.agents.values()].some((a) => a.name === d.name);
+  };
   // The account's Slopify TV app connected from that TV's address (its home screen agent says it is a TV).
   const appOnTv = (uid: string, host: string | undefined): Client | null => {
     if (!host || !discovery?.agentAt(host)) return null;

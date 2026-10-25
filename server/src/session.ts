@@ -169,6 +169,13 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
       }
     }
+    // An agent TV the server cannot see as a Cast device (some TVs keep the
+    // Cast setup port closed) is still offered, as the app it can open.
+    if (discovery) for (const a of discovery.agents.values()) {
+      if (!a.app || appOnTv(self.uid, a.host)) continue;
+      if (discovery.list().some((d) => d.kind === 'cast' && d.host === a.host)) continue;
+      lanDevices.push({ id: `tv:${a.host}`, kind: 'tv', name: a.name, model: 'Slopify TV', host: a.host, port: a.port, viaClient: `server:${self.uid}` });
+    }
     return { type: 'roster', players, lanDevices, activeClientId: s.active };
   };
   const broadcastRoster = (uid: string) => { const s = loadSession(db, uid); for (const c of ofUser(uid)) send(c, rosterFor(c, s)); };
@@ -192,23 +199,26 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   // bare Cast receiver. Any failure (no agent, not signed in there, slow) falls
   // back to casting as before.
   const transferViaTv = async (me: Client, server: Client, cmd: any) => {
-    const dev = discovery?.get(String(cmd.deviceId || ''));
-    const agent = dev && dev.kind === 'cast' ? discovery?.agentAt(dev.host) : null;
+    const id = String(cmd.deviceId || '');
+    const dev = discovery?.get(id);
+    const agent = dev && dev.kind === 'cast' ? discovery?.agentAt(dev.host) : id.startsWith('tv:') ? discovery?.agentAt(id.slice(3)) : null;
     const forward = (target: Client, c: any) => send(target, { type: 'command', from: me.id, command: c });
     if (!agent) { forward(server, cmd); return; }
-    let tv = appOnTv(me.uid, dev!.host);
+    const host = agent.host, tvName = dev?.name || agent.name;
+    let tv = appOnTv(me.uid, host);
     if (!tv) {
-      app.log.info(`session: ${me.name} -> ${dev!.name}: opening the Slopify TV app via ${agent.host}`);
+      app.log.info(`session: ${me.name} -> ${tvName}: opening the Slopify TV app via ${agent.host}`);
       try {
         const res = await fetch(`http://${agent.host}:${agent.port}/open`, { method: 'POST', signal: AbortSignal.timeout(4000) });
         if (!res.ok) throw new Error(`agent ${res.status}`);
         const until = Date.now() + 20000;
-        while (!tv && Date.now() < until) { await new Promise((r) => setTimeout(r, 500)); tv = appOnTv(me.uid, dev!.host); }
+        while (!tv && Date.now() < until) { await new Promise((r) => setTimeout(r, 500)); tv = appOnTv(me.uid, host); }
         if (tv) await new Promise((r) => setTimeout(r, 1200)); // the page is up; let its player settle
       } catch (e: any) { app.log.info(`session: tv agent ${agent.host}: ${e?.message || e}`); }
     }
     if (tv) { app.log.info(`session: ${me.name} -> ${tv.name} (TV app) : transfer`); forward(tv, { ...cmd, deviceId: 'local' }); broadcastRoster(me.uid); }
-    else { app.log.info(`session: ${dev!.name}: TV app did not connect, casting`); forward(server, cmd); }
+    else if (dev) { app.log.info(`session: ${tvName}: TV app did not connect, casting`); forward(server, cmd); }
+    else app.log.info(`session: ${tvName}: TV app did not connect and the TV is not a Cast target here; nothing played`);
   };
   // The remembered session, with the position as it is now.
   const sessionMsg = (s: Session) => (s.nowPlaying ? { type: 'session', nowPlaying: { ...s.nowPlaying, playing: s.playing, position: positionNow(s) / 1000 }, queue: s.queueItems || [], at: s.updatedAt } : null);

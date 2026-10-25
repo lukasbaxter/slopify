@@ -163,6 +163,9 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       // A Cast TV whose Slopify TV app is connected right now is listed once, as that app.
       if (c.kind === 'server' || c.net === self.net) for (const d of c.devices || []) {
         if (c.kind === 'server' && d.kind === 'cast' && appOnTv(self.uid, d.host)) continue;
+        // A client's own copy of such a TV (the desktop finds Cast devices itself) would be
+        // played by that client as plain Cast: the server's copy is the one offered.
+        if (c.kind !== 'server' && d.kind === 'cast' && discovery) { const sd = discovery.get(String(d.id)); if (sd && discovery.agentAt(sd.host)) continue; }
         lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
       }
     }

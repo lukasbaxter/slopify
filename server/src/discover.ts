@@ -38,9 +38,36 @@ const libraryAlbums = (db: DB, artistId: string) => db.prepare('SELECT id, name,
 // them: a collaboration stored under a combined album artist ("Porter
 // Robinson; League of Legends") is still theirs. Own albums last, so they
 // win a title clash in the matcher's map.
+// The credits come from one pass over the tracks table, kept while the
+// library is unchanged (count and newest row as the key, re-checked at most
+// every 10 s): the per-artist LIKE scan it replaced cost 25 ms over 140k
+// tracks, and the Downloads page ran it for each of 500 albums per poll.
+let credited: { key: string; at: number; v: Map<string, LibAlbum[]> } | null = null;
+const creditedIndex = (db: DB): Map<string, LibAlbum[]> => {
+  const now = Date.now();
+  if (credited && now - credited.at < 10000) return credited.v;
+  const key = JSON.stringify(db.prepare('SELECT COUNT(*) n, MAX(added_at) a, MAX(mtime) m FROM tracks').get());
+  if (credited && credited.key === key) { credited.at = now; return credited.v; }
+  const albums = new Map<string, LibAlbum & { artist_id: string }>();
+  for (const a of db.prepare('SELECT id, name, year, track_count, artist_id FROM albums').all() as (LibAlbum & { artist_id: string })[]) albums.set(a.id, a);
+  const v = new Map<string, LibAlbum[]>();
+  const seen = new Map<string, Set<string>>();
+  for (const t of db.prepare('SELECT album_id, artist_ids FROM tracks').all() as { album_id: string; artist_ids: string | null }[]) {
+    const al = albums.get(t.album_id); if (!al) continue;
+    let ids: unknown; try { ids = JSON.parse(t.artist_ids || '[]'); } catch { continue; }
+    if (!Array.isArray(ids)) continue;
+    for (const id of ids) {
+      if (typeof id !== 'string' || id === al.artist_id) continue;
+      let s = seen.get(id); if (!s) { s = new Set(); seen.set(id, s); v.set(id, []); }
+      if (s.has(al.id)) continue;
+      s.add(al.id); v.get(id)!.push({ id: al.id, name: al.name, year: al.year, track_count: al.track_count });
+    }
+  }
+  credited = { key, at: now, v };
+  return v;
+};
 const creditedAlbums = (db: DB, artistId: string) => [
-  ...db.prepare(`SELECT DISTINCT a.id, a.name, a.year, a.track_count FROM albums a JOIN tracks t ON t.album_id = a.id
-    WHERE t.artist_ids LIKE ? AND a.artist_id != ?`).all(`%"${artistId}"%`, artistId) as LibAlbum[],
+  ...(creditedIndex(db).get(artistId) || []),
   ...libraryAlbums(db, artistId),
 ];
 const matcher = (albums: { id: string; name: string }[]) => {

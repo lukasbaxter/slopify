@@ -214,12 +214,23 @@ export function lidarrClient(opts: LidarrOptions) {
   // Albums by Lidarr id, in chunks: the ids ride the query string and
   // Lidarr's request line tops out near 8KB (~550 ids), so 100 per GET,
   // a few in flight at once.
+  // One id Lidarr no longer knows (an album deleted there after it was
+  // requested) makes the whole /album?albumIds call a 500: a failing chunk
+  // is split until the bad ids are alone, and those are left out.
+  const albumChunk = async (c: number[]): Promise<any[]> => {
+    try { return ((await api(`/album?${c.map((i) => `albumIds=${i}`).join('&')}`)) || []) as any[]; }
+    catch (e: any) {
+      if (c.length === 1) { log(`lidarr: album ${c[0]} not fetched (${e.message})`); return []; }
+      const mid = c.length >> 1;
+      return [...await albumChunk(c.slice(0, mid)), ...await albumChunk(c.slice(mid))];
+    }
+  };
   const albumsByIds = async (ids: number[]): Promise<any[]> => {
     const chunks: number[][] = [];
     for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
     const out: any[] = [];
     await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, async () => {
-      for (let c = chunks.shift(); c; c = chunks.shift()) out.push(...(((await api(`/album?${c.map((i) => `albumIds=${i}`).join('&')}`)) || []) as any[]));
+      for (let c = chunks.shift(); c; c = chunks.shift()) out.push(...await albumChunk(c));
     }));
     return out;
   };

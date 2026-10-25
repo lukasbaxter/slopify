@@ -103,9 +103,13 @@ export default function Downloads({ jf, notify, onPlay, onOpen }) {
   useEffect(() => {
     let alive = true;
     setData(null); setError(null);
+    let busy = false; // a slow answer must not stack the next poll behind it
     const load = async () => {
+      if (busy) return;
+      busy = true;
       try { const r = await jf.downloads(scope); if (alive) { setData(r); setError(null); } }
       catch (e) { if (alive) setError(String(e.message || e).replace(/^\d+: /, '')); }
+      finally { busy = false; }
     };
     reloadRef.current = load;
     load();

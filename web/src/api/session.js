@@ -56,6 +56,7 @@ export class SessionLink {
     this.closed = false;
     this._backoff = 1000;
     this._pending = { devices: [], nowPlaying: null, queue: null };
+    this.clockOffset = null; this._rtt = Infinity;
     // True while THIS client holds the active-player claim. Survives socket
     // drops so a reconnect (e.g. after the server restarts and forgets who was
     // active) re-asserts it, restoring the green bar on every other client.
@@ -72,12 +73,24 @@ export class SessionLink {
     ws.onopen = () => {
       this._openedAt = Date.now();
       this._send({ type: 'hello', token: this.token, clientId: this.id, instance: this.instance, name: this.name, kind: this.kind, form: this.form, canPlay: this.canPlay });
-      this._ping = setInterval(() => this._send({ type: 'ping' }), 25000);
+      this._ping = setInterval(() => this._send({ type: 'ping', t: Date.now() }), 25000);
     };
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
+      if (m.type === 'pong') {
+        // Clock offset to the server (server = local + offset), from the round
+        // trip: the best (shortest) samples win, so a slow one does not drag it.
+        if (typeof m.t === 'number' && typeof m.now === 'number') {
+          const rtt = Date.now() - m.t;
+          if (rtt >= 0 && rtt <= this._rtt + 15) { this._rtt = Math.min(this._rtt, rtt); this.clockOffset = m.now - (m.t + rtt / 2); }
+        }
+        return;
+      }
       if (m.type === 'hello-ok') {
         this.connected = true;
+        // A first, rough offset from the hello itself; the first pong refines it.
+        if (typeof m.now === 'number' && this.clockOffset == null) { const rtt = Math.max(0, Date.now() - this._openedAt); this._rtt = rtt; this.clockOffset = m.now - (Date.now() - rtt / 2); }
+        setTimeout(() => this._send({ type: 'ping', t: Date.now() }), 400);
         if (typeof m.clientId === 'string' && m.clientId) this.id = m.clientId;
         if (m.offsets) this.onOffsets(m.offsets);
         this.onSleep(m.sleep || null);
@@ -165,6 +178,18 @@ export class SessionLink {
   reportNowPlaying(np) {
     this._pending.nowPlaying = np;
     this._send({ type: 'nowplaying', nowPlaying: np });
+  }
+  // The server's clock, as this client estimates it (null offset = unknown yet).
+  serverNow() { return Date.now() + (this.clockOffset || 0); }
+  // Where a report's playhead is now: elapsed since the server stamped it, on
+  // the server's clock, so every mirror lands on the same second. Before the
+  // first pong (or for an old server) it falls back to our receipt time.
+  playheadOf(np) {
+    if (!np) return 0;
+    const p = Number(np.position) || 0;
+    if (!np.playing) return p;
+    const since = typeof np.serverAt === 'number' && this.clockOffset != null ? this.serverNow() - np.serverAt : Date.now() - (np.rxAt || np.at || Date.now());
+    return p + Math.max(0, since) / 1000;
   }
 
   // I just started playing here: make the user's other clients yield.

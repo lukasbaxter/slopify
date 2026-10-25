@@ -391,7 +391,10 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     const s = loadSession(db, me.uid);
     const now = Date.now();
     switch (msg.type) {
-      case 'ping': send(me, { type: 'pong', now }); break;
+      // The client's send time comes back with ours: it measures the round trip and
+      // keeps a clock offset, so every mirror extrapolates the playhead on the SAME
+      // clock (the one the server stamped the report with), not its own receipt time.
+      case 'ping': send(me, { type: 'pong', now, t: typeof msg.t === 'number' ? msg.t : undefined }); break;
       case 'devices': me.devices = Array.isArray(msg.devices) ? msg.devices.slice(0, 50) : []; broadcastRoster(me.uid); break;
       case 'queue': {
         me.queue = Array.isArray(msg.queue) ? msg.queue.slice(0, 5000) : null;
@@ -407,7 +410,9 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       }
       case 'nowplaying': {
         const np = msg.nowPlaying && typeof msg.nowPlaying === 'object' ? msg.nowPlaying : null;
-        me.nowPlaying = np;
+        // Stamped with the server clock at receipt: mirrors measure elapsed time from
+        // this (with their pong-derived offset), so they all agree with each other.
+        me.nowPlaying = np ? { ...np, serverAt: now } : null;
         // A play is logged once the same track has been reported playing for
         // 8 s: songs skipped past while hunting for one never enter history.
         if (me.kind !== 'server' && np?.playing && typeof np.itemId === 'string') {

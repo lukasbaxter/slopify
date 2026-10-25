@@ -41,7 +41,7 @@ function secs(ticks) {
 
 function QueueRow({ track, jf, active, onPlay, onOpenArtist, onOpenAlbum, menuItems, draggable, onDragStart, onDragOver, onDrop, onDragEnd, over, dragging, pos, onHandleDown, phone = false, lift = null }) {
   const [menu, setMenu] = useState(null);
-  const art = jf.imageUrl(track.AlbumId || track.Id, { maxHeight: 80 });
+  const art = jf.imageUrl(track.Id || track.AlbumId, { maxHeight: 80 });
   const artists = track.ArtistItems?.length ? track.ArtistItems : (track.Artists || []).map((n) => ({ Name: n }));
   // A long-press opens the sheet while the finger is still down; the release
   // then synthesizes a mousedown that would count as an outside tap and close
@@ -332,10 +332,24 @@ export function Lyrics({ player, jf }) {
   // A speaker reports the position it is decoding; the sound leaves it its
   // measured delay later (the calibration in the full-screen visualizer).
   const speakerDelay = useOffset(player.nowPlaying?.device?.id) || 0;
-  const at = position - speakerDelay + LEAD_SECONDS;
-  const activeIndex = lines
-    ? lines.reduce((acc, l, i) => (l.start != null && at >= l.start ? i : acc), -1)
-    : -1;
+  // The active line is picked from the live playhead ten times a second, not
+  // from the half-second display tick: every device (and every mirror of the
+  // same session, which reads the same server-stamped report) changes line at
+  // the same moment.
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const pickRef = useRef(null);
+  pickRef.current = () => {
+    if (!lines) return -1;
+    const now = player.positionNow ? player.positionNow() : position;
+    const at = now - speakerDelay + LEAD_SECONDS;
+    return lines.reduce((acc, l, i) => (l.start != null && at >= l.start ? i : acc), -1);
+  };
+  useEffect(() => {
+    const tick = () => { const i = pickRef.current(); setActiveIndex((o) => (o === i ? o : i)); };
+    tick();
+    const t = setInterval(tick, 100);
+    return () => clearInterval(t);
+  }, [lines, trackId]);
 
   // Following stops the moment the user scrolls (wheel / touch), so reading
   // ahead is not yanked back; a Sync button brings the view back to the song.

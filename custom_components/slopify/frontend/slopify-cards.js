@@ -178,7 +178,9 @@ class NowPlayingView {
     if (!this.lyrics || !this.synced) return;
     const ls = this.lyrics.lines;
     let i = -1;
-    for (let n = 0; n < ls.length; n++) if (typeof ls[n].start === 'number' && ls[n].start / 1000 <= pos + 0.25) i = n;
+    // Same rule as the web app's lyrics: a quarter second of lead, minus the output's measured delay.
+    const at = pos - (Number(a.lyrics_delay) || 0) + 0.25;
+    for (let n = 0; n < ls.length; n++) if (typeof ls[n].start === 'number' && ls[n].start / 1000 <= at) i = n;
     if (i === this.activeLine) return;
     this.activeLine = i;
     const els = this.$('.snp-lines').children;

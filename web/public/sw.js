@@ -149,6 +149,14 @@ async function cover(req, id) {
     // of 40 covers on a slow link shares one pipe, so a slow one is left to
     // arrive (the placeholder it used to get after 8 s was never retried).
     const res = await withTimeout(fetch(req), 45000);
+    if (res.status === 404) {
+      // "No cover" from the server: still the copy saved with downloaded
+      // music, if there is one (a downloaded album keeps its old id after the
+      // library retagged it; the server no longer knows that id).
+      const c = await caches.open(SONGS);
+      const kept = (await c.match(`/offline/cover/${encodeURIComponent(id)}`)) || (await c.match(`/offline/cover/${encodeURIComponent(`col-${id}`)}`));
+      return kept || res;
+    }
     if (res.status < 500 && !portalPage(res)) return res;
     throw new Error(String(res.status));
   } catch (err) {

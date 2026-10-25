@@ -316,6 +316,13 @@ class SlopifySession:
         # When each player's nowPlaying last changed, by our clock (monotonic):
         # positions are extrapolated from receipt, never from a sender's clock.
         self.np_received: dict[str, float] = {}
+        # Server clock = local epoch ms + offset, from ping round trips (the
+        # shortest samples win). With it a report's age is measured from the
+        # server's own stamp, so this mirror agrees with every other one.
+        self.clock_offset_ms: float | None = None
+        self._best_rtt_ms: float = float("inf")
+        # Measured speaker delays (seconds) by device id, for lyric timing.
+        self.offsets: dict[str, float] = {}
         self.remembered: dict[str, Any] | None = None
         self.remembered_queue: list[dict[str, Any]] = []
         self.remembered_received: float = 0.0
@@ -414,6 +421,9 @@ class SlopifySession:
             self._reset()
             self.client_id = str(hello.get("clientId") or self._wanted_id)
             self.user_id = hello.get("userId")
+            offs = hello.get("offsets")
+            if isinstance(offs, dict):
+                self.offsets = {k: float(v) for k, v in offs.items() if isinstance(k, str) and isinstance(v, (int, float))}
             self.last_error = None
             self._set_connected(True, notify=False)
             self._connected_once.set()
@@ -435,10 +445,25 @@ class SlopifySession:
             raise CannotConnect(f"socket closed ({ws.close_code})")
 
     async def _ping(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        first = True
         while not ws.closed:
-            await asyncio.sleep(WS_PING_EVERY)
+            await asyncio.sleep(0.4 if first else WS_PING_EVERY)
+            first = False
             with contextlib.suppress(Exception):
-                await ws.send_json({"type": "ping"})
+                await ws.send_json({"type": "ping", "t": time.time() * 1000})
+
+    def server_now_ms(self) -> float | None:
+        """The server's clock as estimated here, or None before the first pong."""
+        return None if self.clock_offset_ms is None else time.time() * 1000 + self.clock_offset_ms
+
+    def _pong(self, msg: dict[str, Any]) -> None:
+        sent, now = msg.get("t"), msg.get("now")
+        if not isinstance(sent, (int, float)) or not isinstance(now, (int, float)):
+            return
+        rtt = time.time() * 1000 - sent
+        if 0 <= rtt <= self._best_rtt_ms + 15:
+            self._best_rtt_ms = min(self._best_rtt_ms, rtt)
+            self.clock_offset_ms = now - (sent + rtt / 2)
 
     def _set_connected(self, value: bool, notify: bool = True) -> None:
         if self.connected == value:
@@ -455,7 +480,16 @@ class SlopifySession:
 
     def _handle(self, msg: dict[str, Any]) -> None:
         kind = msg.get("type")
-        if kind == "roster":
+        if kind == "pong":
+            self._pong(msg)
+        elif kind == "offset":
+            dev, off = msg.get("id"), msg.get("offset")
+            if isinstance(dev, str):
+                if isinstance(off, (int, float)):
+                    self.offsets[dev] = float(off)
+                else:
+                    self.offsets.pop(dev, None)
+        elif kind == "roster":
             self._roster(msg)
         elif kind == "queue":
             sender = msg.get("from")
@@ -488,10 +522,16 @@ class SlopifySession:
         now = time.monotonic()
         before = {p.get("id"): p.get("nowPlaying") for p in self.players}
         players = [p for p in msg.get("players") or [] if isinstance(p, dict) and isinstance(p.get("id"), str)]
+        server_now = self.server_now_ms()
         for p in players:
             pid = p["id"]
             if pid not in before or before[pid] != p.get("nowPlaying"):
-                self.np_received[pid] = now
+                np = p.get("nowPlaying")
+                # Age the report by the server's stamp when the clock is known: the
+                # receipt-time anchor is shifted back by the time it spent in flight.
+                stamped = np.get("serverAt") if isinstance(np, dict) else None
+                age = max(0.0, (server_now - stamped) / 1000) if server_now is not None and isinstance(stamped, (int, float)) else 0.0
+                self.np_received[pid] = now - age
         ids = {p["id"] for p in players}
         self.np_received = {k: v for k, v in self.np_received.items() if k in ids}
         self.queues = {k: v for k, v in self.queues.items() if k in ids}

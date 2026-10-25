@@ -268,7 +268,7 @@ export default function TrackRow({
       {showArt && jf && (
         <img
           className={`trackrow-art ${track.AlbumId && onOpenAlbum ? 'link' : ''}`}
-          src={jf.imageUrl(track.AlbumId || track.Id, { maxHeight: 80 })} alt="" loading="lazy"
+          src={jf.imageUrl(track.Id || track.AlbumId, { maxHeight: 80 })} alt="" loading="lazy"
           title={track.AlbumId && onOpenAlbum ? track.Album || 'Open album' : undefined}
           onClick={track.AlbumId && onOpenAlbum ? (e) => { e.stopPropagation(); onOpenAlbum(track.AlbumId); } : undefined}
         />
@@ -328,7 +328,7 @@ export default function TrackRow({
           <Dots />
         </button>
         {menu && <ContextMenu x={menu.x} y={menu.y} anchorRight={Boolean(menu.fromButton)} items={menuItems} onClose={() => setMenu(null)}
-          header={{ image: jf ? jf.imageUrl(track.AlbumId || track.Id, { maxHeight: 120 }) : null, title: track.Name, sub: artistsOf.map((a) => a.Name).join(', ') || track.AlbumArtist || '' }} />}
+          header={{ image: jf ? jf.imageUrl(track.Id || track.AlbumId, { maxHeight: 120 }) : null, title: track.Name, sub: artistsOf.map((a) => a.Name).join(', ') || track.AlbumArtist || '' }} />}
       </span>
     </div>
   );

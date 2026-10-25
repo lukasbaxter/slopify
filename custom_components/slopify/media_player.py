@@ -11,7 +11,7 @@ picking "Slopify - <name>" moves that account's music onto the speaker.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import logging
 import time
@@ -158,7 +158,13 @@ class PositionClock:
         if self.position is not None and self.updated_at is not None:
             expected = self.position + ((now - self.updated_at).total_seconds() if self._playing else 0.0)
         if self._track != item or self._playing != playing or expected is None or abs(expected - pos) > POSITION_SLACK:
-            self.position, self.updated_at = round(pos), now
+            # media_position is whole seconds; the anchor time is set to when the
+            # playhead WAS at that whole second, so a card extrapolating from
+            # media_position_updated_at lands on the true playhead, not up to a
+            # second off.
+            whole = int(pos)
+            self.position = whole
+            self.updated_at = now - timedelta(seconds=max(0.0, pos - whole)) if playing else now
             self._track, self._playing = item, playing
 
 
@@ -452,9 +458,13 @@ class _SlopifyMedia(MediaPlayerEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Whether the current song is liked."""
+        """Whether the current song is liked, and the output's measured delay (s) for lyric timing."""
         np = self._now_playing or {}
-        return {"liked": bool(np.get("liked"))} if np.get("itemId") else {}
+        if not np.get("itemId"):
+            return {}
+        dev = np.get("device") if isinstance(np.get("device"), dict) else {}
+        delay = self._entry.runtime_data.session.offsets.get(str(dev.get("id") or ""), 0.0) if dev else 0.0
+        return {"liked": bool(np.get("liked")), "lyrics_delay": round(float(delay), 3)}
 
 
 class SlopifyPlayer(_SlopifyMedia):

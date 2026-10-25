@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepAlive, bridgeKeepAlive, quietKeepAlive } from './keepalive.js';
+import { keepAlive, bridgeKeepAlive, quietKeepAlive, state as keepAliveState } from './keepalive.js';
 // When the page last went hidden or visible: iOS sends the stand-in a pause
 // by itself around a switch, and that is not a person's tap.
 let lastVisibilityChange = 0;
@@ -523,7 +523,7 @@ export function usePlayer(jf) {
       // Album art first; the artist portrait is a fallback for tracks whose
       // album has none, which is most of this library until the retag lands.
       const artistId = track.ArtistItems?.[0]?.Id || track.AlbumArtists?.[0]?.Id || null;
-      const art = jf?.imageUrl(track.AlbumId || track.Id, { maxHeight: 1000 });
+      const art = jf?.imageUrl(track.Id || track.AlbumId, { maxHeight: 1000 });
       const artistArt = artistId ? jf?.imageUrl(artistId, { maxHeight: 1000 }) : null;
       return {
         title: track.Name || 'Unknown title',
@@ -1292,7 +1292,7 @@ export function usePlayer(jf) {
             const qi = typeof np.queueIndex === 'number' && rq[np.queueIndex]?.Id === np.itemId ? np.queueIndex : -1;
             if (qi >= 0) { trackIds = rq.map((t) => t.Id); queued = rq.map((t) => Boolean(t._queued)); index = qi; }
             else if (np.itemId) { trackIds = [np.itemId]; index = 0; }
-            pos = np.playing ? (np.position || 0) + Math.max(0, Date.now() - (np.rxAt || np.at || Date.now())) / 1000 : (np.position || 0);
+            pos = relayRef.current?.playheadOf ? relayRef.current.playheadOf(np) : (np.playing ? (np.position || 0) + Math.max(0, Date.now() - (np.rxAt || np.at || Date.now())) / 1000 : (np.position || 0));
             wasPlaying = np.playing !== false;
           }
         } else {
@@ -2170,7 +2170,7 @@ export function usePlayer(jf) {
     ? (relayTarget ? {
         title: relayTarget.title,
         artist: relayTarget.artist,
-        artId: relayTarget.albumId || relayTarget.itemId || null,
+        artId: relayTarget.itemId || relayTarget.albumId || null,
         artUrl: relayTarget.artUrl || null,
         albumId: relayTarget.albumId || null,
         artistId: relayTarget.artistId || null,
@@ -2183,7 +2183,7 @@ export function usePlayer(jf) {
     ? {
         title: current.Name,
         artist: current.Artists?.join(', ') || current.AlbumArtist || '',
-        artId: current.AlbumId || current.Id,
+        artId: current.Id || current.AlbumId,
         itemId: current.Id,
         liked: Boolean(current.UserData?.IsFavorite),
         device: { id: device.id, kind: device.kind, name: device.name },
@@ -2377,7 +2377,7 @@ export function usePlayer(jf) {
       title: current.Name,
       artist: current.Artists?.join(', ') || current.AlbumArtist || '',
       album: current.Album || null,
-      artUrl: jf ? jf.imageUrl(current.AlbumId || current.Id, { maxHeight: 128 }) : null,
+      artUrl: jf ? jf.imageUrl(current.Id || current.AlbumId, { maxHeight: 128 }) : null,
       albumId: current.AlbumId || null,
       artistId: current.ArtistItems?.[0]?.Id || current.AlbumArtists?.[0]?.Id || null,
       artists: (current.ArtistItems?.length ? current.ArtistItems : current.AlbumArtists || []).map((a) => ({ Id: a.Id, Name: a.Name })),
@@ -2386,7 +2386,7 @@ export function usePlayer(jf) {
       // on Node" when the session is on a speaker rather than on a client.
       device: { id: device.id, kind: device.kind, name: device.name },
       queueIndex: index,
-      playing, position, duration, volume, repeat, shuffle, at: Date.now(),
+      playing, position: positionNowRef.current ? positionNowRef.current() : position, duration, volume, repeat, shuffle, at: Date.now(),
     } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, index, playing, Math.floor(position), duration, volume, repeat, shuffle, relayTarget, device]);
@@ -2411,8 +2411,18 @@ export function usePlayer(jf) {
 
   // Interpolate the active player's playhead so the mirrored bar moves smoothly.
   const shownPosition = relayTarget
-    ? (relayTarget.playing ? (relayTarget.position || 0) + Math.max(0, Date.now() - (relayTarget.rxAt || relayTarget.at || Date.now())) / 1000 : (relayTarget.position || 0))
+    ? (relayRef.current?.playheadOf ? relayRef.current.playheadOf(relayTarget) : (relayTarget.playing ? (relayTarget.position || 0) + Math.max(0, Date.now() - (relayTarget.rxAt || relayTarget.at || Date.now())) / 1000 : (relayTarget.position || 0)))
     : position;
+  // The playhead right now, read on demand (the lyrics line picker polls this
+  // every 100 ms): the mirrored report on the shared clock, or our own anchor.
+  const relayTargetRef = useRef(null); relayTargetRef.current = relayTarget;
+  const positionNow = useCallback(() => {
+    const rt = relayTargetRef.current;
+    if (rt) return relayRef.current?.playheadOf ? relayRef.current.playheadOf(rt) : (Number(rt.position) || 0);
+    const a = anchorRef.current;
+    return a.playing ? a.pos + Math.max(0, Date.now() - a.at) / 1000 : positionRef.current;
+  }, []);
+  const positionNowRef = useRef(positionNow); positionNowRef.current = positionNow;
   const shownDuration = relayTarget ? (relayTarget.duration || 0) : duration;
   const shownPlaying = relayTarget ? Boolean(relayTarget.playing) : playing;
   // While casting, the slider follows the mirrored session's volume -- except
@@ -2568,7 +2578,11 @@ export function usePlayer(jf) {
     try { ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
     // What the lock screen is told, each time it changes (not every second).
     const told = `${shownPlaying ? 'playing' : 'paused'} ${msLocal ? 'local' : 'remote'} ${nowPlaying?.itemId?.slice(0, 6) || '-'}`;
-    if (told !== lastToldRef.current) { lastToldRef.current = told; mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState})`); }
+    if (told !== lastToldRef.current) {
+      lastToldRef.current = told;
+      const ka = keepAliveState(); const el = audioRef.current;
+      mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState}; stand-in ${ka.paused == null ? 'none' : ka.paused ? 'paused' : 'playing'}${ka.quiet ? ' quiet' : ''} ready=${ka.ready}; element ${el ? (el.paused ? 'paused' : 'playing') : 'none'})`);
+    }
     // iOS reads the action handlers when the media starts or stops: set
     // before the keep-alive element played, they were sometimes ignored and
     // the lock screen showed 10-second skips instead of previous / next.
@@ -2594,7 +2608,7 @@ export function usePlayer(jf) {
       device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, clearQueued, webAudio,
       relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relay: relayInstance,
       queue: shownQueue, index: shownIndex, current, applyRemoteQueue, applySession, mirroring: !!relayTarget,
-      playing: shownPlaying, position: shownPosition, duration: shownDuration, volume: shownVolume, error,
+      playing: shownPlaying, position: shownPosition, positionNow, duration: shownDuration, volume: shownVolume, error,
       repeat: shownRepeat, shuffle: shownShuffle, cycleRepeat, cycleShuffle, setShuffle: setShuffleRouted,
       playQueue, toggle, next, previous, seek, setVolume, volumeStep, skipTo,
       sleep, setSleepTimer, applySleep,

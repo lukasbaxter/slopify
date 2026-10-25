@@ -324,6 +324,9 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     if (id.startsWith('pl_')) { const p = db.prepare('SELECT cover_hash FROM playlists WHERE id = ?').get(id) as any; if (!p) return null; return p.cover_hash ?? (db.prepare('SELECT a.cover_hash FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id JOIN albums a ON a.id = t.album_id WHERE x.playlist_id = ? AND a.cover_hash IS NOT NULL ORDER BY x.pos LIMIT 1').get(id) as any)?.cover_hash ?? null; }
     const al = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(id) as any; if (al) return al.cover_hash ?? null;
     const tr = db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?').get(id) as any; if (tr) return tr.cover_hash ?? null;
+    // A track that left the library (replaced file = new id) still names its album:
+    // rows a client kept from before the change keep their cover.
+    const gt = db.prepare('SELECT a.cover_hash FROM gone_tracks g JOIN albums a ON a.id = g.album_id WHERE g.id = ?').get(id) as any; if (gt?.cover_hash) return gt.cover_hash;
     const ar = db.prepare('SELECT image_hash, banner_hash FROM artists WHERE id = ?').get(id) as any;
     if (ar) {
       // A banner: the artist's wide photo when there is one (its size is

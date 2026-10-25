@@ -34,6 +34,7 @@ const FORM_ICONS = {
   desktop: 'M3 3h18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6.5v2H17v1.5H7V20h2.5v-2H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h18a.5.5 0 0 0 .5-.5V5a.5.5 0 0 0-.5-.5H3zM11 18v2h2v-2h-2z',
   laptop: PHONE_ICONS.relay,
   phone: PHONE_ICONS.local,
+  tv: PHONE_ICONS.cast,
   tablet: 'M5 2h14a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v16a.5.5 0 0 0 .5.5h14a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H5zm7 14.25a1 1 0 1 1 0 2 1 1 0 0 1 0-2z',
 };
 const LOCAL_FORM = clientIdentity().form;

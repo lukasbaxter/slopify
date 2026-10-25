@@ -32,7 +32,7 @@ export type Session = {
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
-type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; _lastDiag?: number; player?: ServerPlayer; instance?: string | null; open?: () => boolean; token?: string; kick?: (code: number, reason: string) => void };
+type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; ip?: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; _lastDiag?: number; player?: ServerPlayer; instance?: string | null; open?: () => boolean; token?: string; kick?: (code: number, reason: string) => void };
 
 export const Event = z.object({
   type: z.enum(['play', 'pause', 'toggle', 'seek', 'next', 'previous', 'queue', 'transfer', 'progress', 'stop']),
@@ -123,10 +123,11 @@ export function applyEvent(s: Session, e: SessionEvent, from: string, now: numbe
 const isPrivate = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|fc|fd|::1)/.test(ip);
 // Which network a client is on: 'lan' for the house, else its public address.
 // Speakers found by one client are offered only to clients on the same network.
+const ipOf = (req: FastifyRequest) => String(req.ip || req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
 function networkOf(req: FastifyRequest) {
   // req.ip honours TRUST_PROXY (app.ts): a client reaching the server
   // directly cannot claim the house with a forged X-Forwarded-For.
-  const ip = String(req.ip || req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+  const ip = ipOf(req);
   return isPrivate(ip) ? 'lan' : ip;
 }
 // A socket that stopped reading must not buffer the whole firehose: past
@@ -159,11 +160,44 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     for (const c of ofUser(self.uid)) {
       if (c.id !== self.id) players.push({ id: c.id, name: c.name, kind: c.kind, form: c.form ?? null, canPlay: c.canPlay, nowPlaying: c.nowPlaying || null, sameNetwork: c.kind === 'server' || c.net === self.net });
       // The server's speakers are for everyone; a client's own only for clients on its network.
-      if (c.kind === 'server' || c.net === self.net) for (const d of c.devices || []) lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
+      // A Cast TV whose Slopify TV app is connected right now is listed once, as that app.
+      if (c.kind === 'server' || c.net === self.net) for (const d of c.devices || []) {
+        if (c.kind === 'server' && d.kind === 'cast' && appOnTv(self.uid, d.host)) continue;
+        lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
+      }
     }
     return { type: 'roster', players, lanDevices, activeClientId: s.active };
   };
   const broadcastRoster = (uid: string) => { const s = loadSession(db, uid); for (const c of ofUser(uid)) send(c, rosterFor(c, s)); };
+  // The account's Slopify TV app connected from that TV's address (its home screen agent says it is a TV).
+  const appOnTv = (uid: string, host: string | undefined): Client | null => {
+    if (!host || !discovery?.agentAt(host)) return null;
+    return ofUser(uid).find((c) => c.kind !== 'server' && c.canPlay && c.ip === host && c.open?.() !== false) ?? null;
+  };
+  // Picking a Cast TV that runs the Slopify TV app: open the app (through the
+  // home screen's agent), wait for it to connect, and hand the session to it as
+  // a normal player, so the TV shows the lyrics and visualizer instead of the
+  // bare Cast receiver. Any failure (no agent, not signed in there, slow) falls
+  // back to casting as before.
+  const transferViaTv = async (me: Client, server: Client, cmd: any) => {
+    const dev = discovery?.get(String(cmd.deviceId || ''));
+    const agent = dev && dev.kind === 'cast' ? discovery?.agentAt(dev.host) : null;
+    const forward = (target: Client, c: any) => send(target, { type: 'command', from: me.id, command: c });
+    if (!agent) { forward(server, cmd); return; }
+    let tv = appOnTv(me.uid, dev!.host);
+    if (!tv) {
+      app.log.info(`session: ${me.name} -> ${dev!.name}: opening the Slopify TV app via ${agent.host}`);
+      try {
+        const res = await fetch(`http://${agent.host}:${agent.port}/open`, { method: 'POST', signal: AbortSignal.timeout(4000) });
+        if (!res.ok) throw new Error(`agent ${res.status}`);
+        const until = Date.now() + 20000;
+        while (!tv && Date.now() < until) { await new Promise((r) => setTimeout(r, 500)); tv = appOnTv(me.uid, dev!.host); }
+        if (tv) await new Promise((r) => setTimeout(r, 1200)); // the page is up; let its player settle
+      } catch (e: any) { app.log.info(`session: tv agent ${agent.host}: ${e?.message || e}`); }
+    }
+    if (tv) { app.log.info(`session: ${me.name} -> ${tv.name} (TV app) : transfer`); forward(tv, { ...cmd, deviceId: 'local' }); broadcastRoster(me.uid); }
+    else { app.log.info(`session: ${dev!.name}: TV app did not connect, casting`); forward(server, cmd); }
+  };
   // The remembered session, with the position as it is now.
   const sessionMsg = (s: Session) => (s.nowPlaying ? { type: 'session', nowPlaying: { ...s.nowPlaying, playing: s.playing, position: positionNow(s) / 1000 }, queue: s.queueItems || [], at: s.updatedAt } : null);
   const logPlay = (uid: string, trackId: string, client: string) => {
@@ -405,6 +439,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         if (target && target.uid === me.uid) {
           const a = typeof msg.command?.action === 'string' ? msg.command.action : '?';
           if (a !== 'setVolume' && a !== 'seek') app.log.info(`session: ${me.name} -> ${target.name}: ${a}`);
+          if (target.kind === 'server' && a === 'transfer') { void transferViaTv(me, target, msg.command); break; }
           send(target, { type: 'command', from: me.id, command: msg.command });
         }
         break;
@@ -508,8 +543,8 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         const base = String(msg.name || 'Web Player').trim().slice(0, 56) || 'Web Player';
         const used = new Set(ofUser(who.id).filter((c) => c.id !== id).map((c) => c.name));
         let name = base; for (let n = 2; used.has(name); n += 1) name = `${base} (${n})`;
-        const form = ['desktop', 'laptop', 'phone', 'tablet'].includes(msg.form) ? msg.form : null;
-        self = { id, uid: who.id, net, name, kind, form, instance, token: msg.token, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced'), kick: (code, reason) => ws.close(code, reason) };
+        const form = ['desktop', 'laptop', 'phone', 'tablet', 'tv'].includes(msg.form) ? msg.form : null;
+        self = { id, uid: who.id, net, name, kind, form, instance, ip: ipOf(req), token: msg.token, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced'), kick: (code, reason) => ws.close(code, reason) };
         clients.set(id, self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);

@@ -16,6 +16,7 @@ import { isOffline } from '../offline/net.js';
 // among possibly several (the relay numbers those for the OTHER clients).
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
+const IN_TV_APP = IN_PHONE_APP && window.slopifyShell.deviceForm === 'tv';
 // The web app opened from the home screen (iOS: navigator.standalone): its own
 // process like the phone app, suspended the same way once nothing plays.
 const IN_STANDALONE = typeof window !== 'undefined' && (window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
@@ -97,8 +98,8 @@ const BRIDGE_MAX_MS = 2 * 60 * 1000;
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
-  name: IS_DESKTOP ? 'This Computer' : IN_PHONE_APP ? 'This Phone' : 'This Web Player',
-  model: IS_DESKTOP ? 'Local playback' : IN_PHONE_APP ? 'Phone playback' : 'Browser playback',
+  name: IS_DESKTOP ? 'This Computer' : IN_TV_APP ? 'This TV' : IN_PHONE_APP ? 'This Phone' : 'This Web Player',
+  model: IS_DESKTOP ? 'Local playback' : IN_TV_APP ? 'TV playback' : IN_PHONE_APP ? 'Phone playback' : 'Browser playback',
 };
 
 const MIME_BY_CONTAINER = {

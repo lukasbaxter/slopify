@@ -19,6 +19,10 @@ export type Speaker = { id: string; kind: 'cast' | 'bluos' | 'bridge'; name: str
 const CAST_PORT = 8009;
 export const BLUOS_PORT = 11000;
 export const BRIDGE_PORT = 7780;
+// A TV whose home screen runs the Slopify TV agent: it can open the Slopify TV
+// app on request, so a Cast target that is such a TV is played through the app.
+export const TV_AGENT_PORT = 7781;
+export type TvAgent = { host: string; port: number; name: string; app: boolean };
 const SWEEP_EVERY = 60 * 1000;
 
 // The LAN's own IPv4 (not a VPN's, not link-local); mDNS sockets are pinned
@@ -36,6 +40,8 @@ export function lanAddress(): string | undefined {
 
 export class Discovery {
   devices = new Map<string, Speaker>();
+  agents = new Map<string, TvAgent>(); // by host
+  private missedAgents = new Map<string, number>();
   private bonjour: Bonjour | null = null;
   private browsers: Browser[] = [];
   private sweepTimer: NodeJS.Timeout | null = null;
@@ -64,6 +70,12 @@ export class Discovery {
   }
   list(): Speaker[] { return [...this.devices.values()].sort((a, b) => a.name.localeCompare(b.name)); }
   get(id: string) { return this.devices.get(id) ?? null; }
+  agentAt(host: string): TvAgent | null { return this.agents.get(host) ?? null; }
+  async identifyTvAgent(host: string, port = TV_AGENT_PORT): Promise<TvAgent | null> {
+    const info = JSON.parse(await this.getText(`http://${host}:${port}/info`));
+    if (!info || info.kind !== 'slopify-tv') return null;
+    return { host, port, name: String(info.name || 'TV').slice(0, 56), app: !!info.app };
+  }
 
   // Only an address on a home network: an announcement is unauthenticated,
   // and the stream URL (with the account's speaker token) goes to this host.
@@ -148,11 +160,16 @@ export class Discovery {
       const known = new Map([...this.devices.values()].map((d) => [`${d.host}:${d.port}`, d]));
       const seen = new Set<string>();
       let changed = false;
-      const queue = hosts.flatMap((h) => [[h, CAST_PORT], [h, BLUOS_PORT], [h, BRIDGE_PORT]] as [string, number][]);
+      const queue = hosts.flatMap((h) => [[h, CAST_PORT], [h, BLUOS_PORT], [h, BRIDGE_PORT], [h, TV_AGENT_PORT]] as [string, number][]);
+      const agentsSeen = new Set<string>();
       const worker = async () => {
         while (queue.length) {
           const [host, port] = queue.shift()!;
           if (!(await this.open(host, port))) continue;
+          if (port === TV_AGENT_PORT) {
+            try { const a = await this.identifyTvAgent(host, port); if (a) { agentsSeen.add(host); if (!this.agents.has(host)) this.log(`tv agent: ${a.name} at ${host}`); this.agents.set(host, a); } } catch { /* not ours */ }
+            continue;
+          }
           seen.add(`${host}:${port}`);
           if (known.has(`${host}:${port}`)) continue;
           try {
@@ -162,6 +179,12 @@ export class Discovery {
         }
       };
       await Promise.all(Array.from({ length: 64 }, worker));
+      for (const host of [...this.agents.keys()]) {
+        if (agentsSeen.has(host)) { this.missedAgents.delete(host); continue; }
+        const n = (this.missedAgents.get(host) || 0) + 1;
+        this.missedAgents.set(host, n);
+        if (n >= 2) { this.agents.delete(host); this.missedAgents.delete(host); }
+      }
       for (const [id, d] of this.devices) {
         if (!d.swept) continue;
         const key = `${d.host}:${d.port}`;

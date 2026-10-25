@@ -97,7 +97,7 @@ class MainActivity : Activity() {
             "try { if (!localStorage.getItem('slopify.session')) localStorage.setItem('slopify.session', ${JSONObject.quote(session)}); } catch (e) {}\n"
         }
         val script = """
-            window.slopifyShell = { deviceName: ${JSONObject.quote(name)}, deviceForm: 'tablet', platform: 'androidtv', version: '1.0' };
+            window.slopifyShell = { deviceName: ${JSONObject.quote(name)}, deviceForm: 'tv', platform: 'androidtv', version: '1.0' };
             // The visualizer sizes its canvas by devicePixelRatio: at the TV's real 2x (3072x1120) this SoC managed ~5 fps,
             // at 1x it holds ~58 fps. Only the artist banner size reads this value otherwise.
             try { Object.defineProperty(window, 'devicePixelRatio', { get: () => 1, configurable: true }); } catch (e) {}

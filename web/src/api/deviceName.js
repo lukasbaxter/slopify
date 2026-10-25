@@ -32,7 +32,7 @@ export function clientIdentity() {
   if (typeof window === 'undefined') return { name: 'Slopify', kind: 'web', form: 'laptop' };
   if (window.conduit) return { name: window.conduit.deviceName || 'Slopify Desktop', kind: 'desktop', form: window.conduit.deviceForm === 'laptop' ? 'laptop' : 'desktop' };
   const shell = window.slopifyShell;
-  if (shell?.deviceName) return { name: String(shell.deviceName), kind: 'phone', form: shell.deviceForm === 'tablet' ? 'tablet' : 'phone' };
+  if (shell?.deviceName) return { name: String(shell.deviceName), kind: 'phone', form: shell.deviceForm === 'tablet' ? 'tablet' : shell.deviceForm === 'tv' ? 'tv' : 'phone' };
   const ua = navigator.userAgent || '';
   return { name: describeBrowser(ua), kind: 'web', form: browserForm(ua) };
 }

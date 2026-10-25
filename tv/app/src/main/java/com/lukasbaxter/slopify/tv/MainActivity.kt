@@ -152,7 +152,7 @@ class MainActivity : Activity() {
               let frames = 0, last = performance.now();
               const fpsLoop = () => { frames++; const now = performance.now(); if (now - last >= 10000) { console.log('slopify-tv fps ' + (frames * 1000 / (now - last)).toFixed(1) + ' tab=' + (document.querySelector('.fs-tabs button[aria-pressed="true"]')?.getAttribute('aria-label') || '-')); frames = 0; last = now; } requestAnimationFrame(fpsLoop); };
               requestAnimationFrame(fpsLoop);
-              if (!document.getElementById('tvcss-base')) { const st = document.createElement('style'); st.id = 'tvcss-base'; st.textContent = '.fs-close{display:none!important}'; document.head.appendChild(st); }
+              if (!document.getElementById('tvcss-base')) { const st = document.createElement('style'); st.id = 'tvcss-base'; st.textContent = '.fs-close{display:none!important} .fs-lyrics{width:min(1200px,100%)!important} .fs-lyrics .lyric-line,.fs-lyrics p{font-size:40px!important} .fs-art{max-width:min(66vh,90vw)!important}'; document.head.appendChild(st); }
               const q = (s) => document.querySelector(s);
               const click = (s) => { const b = q(s); if (b && !b.disabled) { b.click(); return true; } return false; };
               const TABS = ['Album', 'Lyrics', 'Visualizer'];

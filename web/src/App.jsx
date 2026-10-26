@@ -591,7 +591,7 @@ export default function App() {
       ...clientIdentity(),
       canPlay: true,
       onRoster: (r) => playerRef.current.applyRoster(r),
-      onCommand: (cmd) => playerRef.current.executeCommand(cmd),
+      onCommand: (cmd, from) => playerRef.current.executeCommand(cmd, from),
       onQueue: (from, q) => playerRef.current.applyRemoteQueue(from, q),
       onSession: (s) => playerRef.current.applySession(s),
       onPrefs: (p) => {

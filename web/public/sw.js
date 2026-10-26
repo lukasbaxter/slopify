@@ -140,8 +140,29 @@ async function api(req) {
   }
 }
 
-// A cover: the server's, else the copy saved with downloaded music
-// (/offline/cover/<albumId> or /offline/cover/col-<playlistId>).
+// The copy saved with downloaded music: /offline/cover/<albumId> or
+// /offline/cover/col-<playlistId>, or for a song's own id (track rows and
+// the lock screen ask by track id) the cover its library entry names.
+const LIB_KEY = /\/offline\/(?:[^/]+\/)?library\.json$/;
+let songCovers = null; // { at, map: track id -> cover key }, re-read after 30 s (5 s for an id not in it)
+async function keptCover(id) {
+  const c = await caches.open(SONGS);
+  const hit = (await c.match(`/offline/cover/${encodeURIComponent(id)}`)) || (await c.match(`/offline/cover/${encodeURIComponent(`col-${id}`)}`));
+  if (hit) return hit;
+  if (!songCovers || Date.now() - songCovers.at > (songCovers.map.has(id) ? 30000 : 5000)) {
+    const map = new Map();
+    for (const k of await c.keys()) {
+      if (!LIB_KEY.test(new URL(k.url).pathname)) continue;
+      const lib = await (await c.match(k)).json().catch(() => null);
+      for (const [tid, t] of Object.entries(lib?.tracks || {})) if (t?.cover) map.set(tid, t.cover);
+    }
+    songCovers = { at: Date.now(), map };
+  }
+  const key = songCovers.map.get(id);
+  return key ? (await c.match(key)) || null : null;
+}
+
+// A cover: the server's, else the copy saved with downloaded music.
 async function cover(req, id) {
   try {
     // What the server says goes (a 404 is "no cover", not "offline"); only
@@ -153,15 +174,12 @@ async function cover(req, id) {
       // "No cover" from the server: still the copy saved with downloaded
       // music, if there is one (a downloaded album keeps its old id after the
       // library retagged it; the server no longer knows that id).
-      const c = await caches.open(SONGS);
-      const kept = (await c.match(`/offline/cover/${encodeURIComponent(id)}`)) || (await c.match(`/offline/cover/${encodeURIComponent(`col-${id}`)}`));
-      return kept || res;
+      return (await keptCover(id)) || res;
     }
     if (res.status < 500 && !portalPage(res)) return res;
     throw new Error(String(res.status));
   } catch (err) {
-    const c = await caches.open(SONGS);
-    const hit = (await c.match(`/offline/cover/${encodeURIComponent(id)}`)) || (await c.match(`/offline/cover/${encodeURIComponent(`col-${id}`)}`));
+    const hit = await keptCover(id);
     // None kept: a plain dark square with a note (Spotify's empty cover), the
     // same box as any cover, instead of the browser's broken-image glyph.
     // Not cached anywhere; back online the app asks again with new URLs.

@@ -207,13 +207,14 @@ export class Slopify {
     const variant = gain && start !== 'alac' ? `${start}g${Number(gain).toFixed(1).replace(/\.0$/, '')}` : start;
     // pre=1: a warm, not a press of play; the server runs it at low priority.
     const url = this._url(`/api/stream/${itemId}/hls/${variant}/index.m3u8`, { pre: '1' });
-    const base = url.slice(0, url.lastIndexOf('/') + 1);
-    const tok = url.includes('?') ? url.slice(url.indexOf('?')).replace(/[?&]pre=1/, '') : '';
     const pull = (tries) => fetch(url).then((r) => r.text()).then((txt) => {
       if (!/#EXT-X-ENDLIST/.test(txt)) { if (tries > 0) setTimeout(() => pull(tries - 1), 2500); return; }
+      // The URIs as the playlist writes them (the server puts the token on
+      // each), so the cached copy is the very URL the player asks for.
       // Lossless (fMP4): its init segment too, ~1 KB, needed before any segment.
-      const segs = [...(/#EXT-X-MAP/.test(txt) ? ['init.mp4'] : []), ...(txt.match(/^s\d+\.(?:ts|m4s)$/gm) || []).slice(0, segments)];
-      for (const sg of segs) fetch(`${base}${sg}${tok}`).then((r) => r.arrayBuffer()).catch(() => {});
+      const init = /^#EXT-X-MAP:URI="([^"]+)"/m.exec(txt)?.[1];
+      const segs = [...(init ? [init] : []), ...(txt.match(/^s\d+\.(?:ts|m4s)(?:\?\S*)?$/gm) || []).slice(0, segments)];
+      for (const sg of segs) fetch(new URL(sg, url).href).then((r) => r.arrayBuffer()).catch(() => {});
     }).catch(() => {});
     pull(3);
   }

@@ -100,6 +100,9 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await expect(page.locator('.trackrow.unavailable')).toHaveCount(0);
       await page.locator('.trackrow').nth(1).dblclick();
       await expect.poll(async () => (await page.locator('.player').textContent()) || '', { timeout: 20000 }).toMatch(/0:0[2-9]|0:[1-5]\d/);
+      // The lock screen's cover (asked for by the song's own id) is the one
+      // kept with the download, not the empty placeholder.
+      expect(await page.evaluate(async () => { const src = navigator.mediaSession?.metadata?.artwork?.[0]?.src; if (!src) return 'none'; const r = await fetch(src); return `${r.status} ${r.headers.get('content-type')}`; })).toMatch(/^200 image\/(jpeg|webp)/);
       // A play is kept for later. (The player reports one 8 s in; these
       // fixture songs are 5-8 s long, so the report is made directly.)
       await page.evaluate(() => (window as any).__jf.reportStart((window as any).__player.current.Id));

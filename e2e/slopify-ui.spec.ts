@@ -53,3 +53,34 @@ test('search, lyrics in now playing, phone tab bar', async ({ page, isMobile }) 
   await page.locator('.fs button[aria-label="Lyrics"]').locator('visible=true').first().click();
   await expect(page.locator('.fs-lyrics .lyric-line').first()).toBeVisible({ timeout: 15000 });
 });
+
+// An ask for lyrics that fails (on the TV, 2026-10-26: the answer held up
+// past the 8 s timeout) is asked again; it used to stay "we don't have the
+// lyrics" until the song changed (a skip away and back).
+test.describe('lyrics', () => {
+  test.use({ serviceWorkers: 'block' }); // so the route below sees the ask
+  test('a lyrics ask that times out is asked again', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'the same component on both');
+    const asks: string[] = [];
+    await page.route((u) => /\/api\/lyrics\/[0-9a-f]{32}$/.test(u.pathname), async (route) => {
+      asks.push(route.request().url().split('/').pop()!);
+      if (asks.length === 1) { await new Promise((r) => setTimeout(r, 9000)); return route.abort('timedout').catch(() => {}); }
+      return route.continue();
+    });
+    await login(page); await waitForLibrary(page);
+    // River Harbour on First Light: a song with lyrics (an .lrc beside it).
+    await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
+    await expect(page.locator('.trackrow').first()).toContainText('River Harbour', { timeout: 15000 });
+    await page.locator('.trackrow').first().dblclick();
+    // Paused at once: the fixture songs are 8 s, the next song would bring its own lyrics.
+    const pause = page.locator('.player button[title="Pause"], .player button[aria-label="Pause"]').first();
+    await expect(pause).toBeVisible({ timeout: 20000 });
+    await pause.click();
+    await page.locator('.player button[title*="Now playing" i], .player button[aria-label*="Now playing" i], .player .expand').first().click().catch(() => {});
+    await expect(page.locator('.fs')).toBeVisible({ timeout: 10000 });
+    await page.locator('.fs button[aria-label="Lyrics"]').locator('visible=true').first().click();
+    await expect(page.locator('.fs-lyrics .lyric-line').first()).toBeVisible({ timeout: 25000 });
+    expect(asks.length).toBeGreaterThan(1);
+    expect(new Set(asks).size).toBe(1); // the same song, asked again
+  });
+});

@@ -313,16 +313,20 @@ export function Lyrics({ player, jf }) {
   }, [trackId]);
   useEffect(() => {
     if (!trackId) { setLines(null); setState('idle'); return; }
-    let cancelled = false;
+    let cancelled = false, timer = null;
     setState('loading');
-    jf.lyrics(trackId)
+    // A failed ask (timeout, no connection) is not "no lyrics": asked again,
+    // 2 s, 4 s, 8 s later. It used to stick as "we don't have the lyrics"
+    // until the song changed (a skip away and back).
+    const ask = (tries) => jf.lyrics(trackId)
       .then((l) => {
         if (cancelled) return;
         setLines(phone ? phoneLines(l) : l);
         setState(l && l.length ? 'ok' : 'none');
       })
-      .catch(() => { if (!cancelled) setState('none'); });
-    return () => { cancelled = true; };
+      .catch(() => { if (cancelled) return; if (tries < 3) timer = setTimeout(() => ask(tries + 1), 2000 * 2 ** tries); else setState('none'); });
+    ask(0);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [trackId, jf, rev]);
 
   // Nudge the playhead forward slightly when choosing the active line. Human

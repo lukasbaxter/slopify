@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepAlive, bridgeKeepAlive, quietKeepAlive, standInPausedBySystem, state as keepAliveState } from './keepalive.js';
+import { keepAlive, bridgeKeepAlive, quietKeepAlive, standInPausedBySystem, standInElement, onStandInResumed, state as keepAliveState } from './keepalive.js';
 
 // What a roster looks like with the reported playheads taken out: two rosters
 // with the same shape differ only in where the songs are (see applyRoster).
@@ -182,6 +182,24 @@ function shuffled(arr) {
  * outgoing device, playback is stopped there, and the incoming device resumes
  * from the same offset. That is the "playing on this device" behaviour.
  */
+// Tell the Media Session whether the session plays. Declaring 'playing'
+// makes the page's Media Session itself WebKit's current media session, and
+// that one supports no seeking (MediaSession::supportsSeeking() is false):
+// iOS failed every lock-screen seek ("PlayerCommandFailed (The app itself
+// reported failure)", the seekto handler never ran; tools/ios-sim, 10-26).
+// The declaration is still made (WebKit counts the clock on from it), and the
+// element that plays is then asked to play again: a play() on a playing
+// element makes it the current session once more.
+function declarePlayback(ms, playing, songEl) {
+  try {
+    if (!playing) { ms.playbackState = 'paused'; return; }
+    if (ms.playbackState === 'playing') return;
+    ms.playbackState = 'playing';
+    const playingEl = [songEl, standInElement()].find((e) => e && !e.paused && e.getAttribute('src'));
+    if (playingEl) playingEl.play().catch(() => {});
+  } catch { /* unsupported */ }
+}
+
 // Empty a music element: stopped, no source, and muted. WebKit gives Now
 // Playing to the most recently interacted-with candidate, not to the element
 // that plays, and an emptied element still counts while it is unmuted: after
@@ -262,6 +280,7 @@ export function usePlayer(jf) {
   const audioRef = useRef(null);
   // Re-tells the lock screen the position once the music is heard (below).
   const reanchorRef = useRef(null);
+  useEffect(() => { onStandInResumed(() => reanchorRef.current?.('(stand-in back after an interruption)')); return () => onStandInResumed(null); }, []);
   const spareRef = useRef(null);
   // When the silent bridge across a locked song change went on (0 = off).
   const bridgeSinceRef = useRef(0);
@@ -2564,15 +2583,15 @@ export function usePlayer(jf) {
   reanchorRef.current = (waited) => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     const el = audioRef.current;
-    if (!IS_IOS || !ms || !msLocal || !el || !ms.metadata || typeof ms.setPositionState !== 'function' || !(shownDuration > 0)) return;
-    const pos = Math.min(Math.max(0, localBaseRef.current + el.currentTime), shownDuration);
+    if (!IS_IOS || !ms || !(msLocal || msRemote) || (msLocal && !el) || !ms.metadata || typeof ms.setPositionState !== 'function' || !(shownDuration > 0)) return;
+    const pos = Math.min(Math.max(0, msLocal ? localBaseRef.current + el.currentTime : positionNow()), shownDuration);
     try {
       ms.setPositionState({ duration: shownDuration, playbackRate: 1, position: pos });
-      toldPosRef.current = { pos, at: Date.now(), playing: true, duration: shownDuration };
+      toldPosRef.current = { pos, at: Date.now(), playing: shownPlaying, duration: shownDuration };
       const m = ms.metadata;
       const album = m.album || '';
       ms.metadata = new window.MediaMetadata({ title: m.title, artist: m.artist, album: album.endsWith('\u200b') ? album.slice(0, -1) : `${album}\u200b`, artwork: [...m.artwork] });
-      mediaLog(`lock screen clock re-anchored at ${pos.toFixed(1)} after ${waited} ms waiting`);
+      mediaLog(`lock screen clock re-anchored at ${pos.toFixed(1)} ${typeof waited === 'number' ? `after ${waited} ms waiting` : waited}`);
     } catch { /* unsupported */ }
   };
   // Phone app and home-screen web app: the lock-screen player stays for 2
@@ -2610,8 +2629,8 @@ export function usePlayer(jf) {
   // for the state we are already in re-syncs the sound and the icon instead.
   const msResync = () => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
-    try { if (ms) ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
     keepAlive(standIn, shownPosition, holding);
+    if (ms) declarePlayback(ms, shownPlaying, audioRef.current);
     const el = audioRef.current;
     if (msLocal && el && el.getAttribute('src')) {
       if (shownPlaying && el.paused) el.play().catch(() => {});
@@ -2720,7 +2739,7 @@ export function usePlayer(jf) {
     // carries the session by itself.
     keepAlive(standIn, shownPosition, holding);
     if (!ms || (!msLocal && !msRemote)) return;
-    try { ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
+    declarePlayback(ms, shownPlaying, audioRef.current);
     // What the lock screen is told, each time it changes (not every second).
     const told = `${shownPlaying ? 'playing' : 'paused'} ${msLocal ? 'local' : 'remote'} ${nowPlaying?.itemId?.slice(0, 6) || '-'}`;
     if (told !== lastToldRef.current) {

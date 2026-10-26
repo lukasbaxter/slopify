@@ -30,7 +30,9 @@ let el = null, unlocked = false, wanted = false, bridged = false, armed = false,
 let faceEl = null, holdFace = false;
 const log = [];
 // The stand-in's own pauses (below), to tell them from the system's.
-let ownPausePending = false, systemPausedAt = 0;
+let ownPausePending = false, systemPausedAt = 0, resumingAfterSystemPause = false, onSystemResume = null;
+/** Called when the stand-in plays again after a pause that was not ours. */
+export function onStandInResumed(fn) { onSystemResume = fn; }
 const ownPause = (a) => { if (!a.paused) ownPausePending = true; a.pause(); };
 /** The stand-in was paused by the system (an interruption) within `ms`. */
 export function standInPausedBySystem(ms) { return Date.now() - systemPausedAt < ms; }
@@ -52,7 +54,14 @@ function element() {
   el.addEventListener('loadedmetadata', () => note(`meta dur=${Math.round(el.duration)}`));
   el.addEventListener('ended', () => { if (wanted || bridged) { el.currentTime = 0; el.play().catch(() => {}); touchFace(); } });
   el.addEventListener('error', () => note(`error ${el.error?.code}`));
-  el.addEventListener('playing', () => { note(`playing t=${el.currentTime.toFixed(1)}`); if (holdFace) holdPaused(); });
+  el.addEventListener('playing', () => {
+    note(`playing t=${el.currentTime.toFixed(1)}`);
+    if (holdFace) holdPaused();
+    // Back after a pause that was not ours: its pause and start each moved
+    // WebKit's idea of the session's position, and the lock screen came back
+    // off (seconds, after a hold). usePlayer tells it the position again.
+    if (resumingAfterSystemPause) { resumingAfterSystemPause = false; try { onSystemResume?.(); } catch { /* listener */ } }
+  });
   // A pause that is not ours: an interruption (another app's sound, a call)
   // or iOS stopping it. WebKit then also hands the page a Media Session
   // 'pause' action (MediaSession::suspendPlayback); for a session playing on
@@ -67,7 +76,8 @@ function element() {
     setTimeout(() => {
       if (!(wanted || bridged) || (quiet && !bridged) || !el.paused) return;
       note('playing again after a pause not ours');
-      el.play().catch((e) => note(`play again ${e?.name}`));
+      resumingAfterSystemPause = true;
+      el.play().catch((e) => { resumingAfterSystemPause = false; note(`play again ${e?.name}`); });
     }, 300);
   });
   if (typeof window !== 'undefined') { window.__conduitKeepAlive = el; window.__conduitKeepAliveState = state; } // diagnostics
@@ -98,7 +108,9 @@ function primeFace() {
       facePlayed = true; facePriming = false; note('face played once'); f.pause(); touchFace();
       // Its play and pause set the page's MediaSession state inside WebKit;
       // give the page's own declaration back.
-      try { if (ms && declared && declared !== 'none') ms.playbackState = declared; } catch { /* unsupported */ }
+      // Only 'paused': declaring 'playing' makes the Media Session WebKit's
+      // current session, which supports no seeking (usePlayer declarePlayback).
+      try { if (ms && declared === 'paused') ms.playbackState = declared; } catch { /* unsupported */ }
     }).catch((e) => { facePriming = false; note(`face play ${e?.name}`); });
   }
 }
@@ -264,7 +276,7 @@ function applyStandIn(position) {
     pauseTimer = setTimeout(() => {
       pauseTimer = null;
       if (wanted || bridged || a.paused) return;
-      a.muted = true; ownPause(a); a.removeAttribute('src'); a.load(); note('stopped, unloaded'); touchFace();
+      a.muted = true; ownPause(a); a.removeAttribute('src'); a.load(); ownPausePending = false; note('stopped, unloaded'); touchFace(); // load() drops the queued pause event
     }, 2000);
   }
 }
@@ -282,6 +294,9 @@ export function primeKeepAlive() {
   a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) { a.muted = true; ownPause(a); } touchFace(); }).catch((e) => note(`prime ${e?.name}`));
   primeFace(); touchFace();
 }
+
+/** The stand-in element, if made (usePlayer: which element plays). */
+export function standInElement() { return el; }
 
 export function state() {
   const a = el;

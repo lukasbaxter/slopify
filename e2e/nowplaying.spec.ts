@@ -26,6 +26,13 @@ async function device(browser: Browser, phone: boolean, homeScreenApp = false) {
     w.__ps = [];
     const ms = navigator.mediaSession as any;
     if (ms?.setPositionState) { const orig = ms.setPositionState.bind(ms); ms.setPositionState = (s?: any) => { w.__ps.push({ ...(s || {}), at: Date.now() }); return orig(s); }; }
+    // Every playbackState declaration and every play() call, in order.
+    w.__decl = [];
+    const MS = (window as any).MediaSession?.prototype;
+    const desc = MS && Object.getOwnPropertyDescriptor(MS, 'playbackState');
+    if (desc?.set) Object.defineProperty(MS, 'playbackState', { configurable: true, get: desc.get, set(v: string) { w.__decl.push({ k: 'state', v, playing: w.__els.some((e: any) => !e.paused && e.getAttribute('src')) }); desc.set!.call(this, v); } });
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) { w.__decl.push({ k: 'play', wasPlaying: !this.paused }); return play.call(this); };
     // The Media Session action handlers, to call them as iOS would.
     w.__msHandlers = {};
     if (ms?.setActionHandler) { const orig = ms.setActionHandler.bind(ms); ms.setActionHandler = (a: string, f: any) => { w.__msHandlers[a] = f; return orig(a, f); }; }
@@ -172,6 +179,29 @@ test('iOS: the lock-screen clock is told again once a waited-for song is heard',
   const told = await phone.evaluate(() => { const w = window as any; const el = w.__els.find((e: any) => e !== w.__conduitKeepAlive && e !== w.__conduitFace && !e.paused); const last = w.__ps[w.__ps.length - 1]; return { album: navigator.mediaSession.metadata?.album || '', pos: last.position + (Date.now() - last.at) / 1000, el: el?.currentTime }; });
   expect(told.album.endsWith('​')).toBe(true);
   expect(Math.abs(told.pos - told.el)).toBeLessThan(0.5);
+  await phone.evaluate(() => (window as any).__player.toggle());
+  await phone.context().close();
+});
+
+test('declaring "playing" hands WebKit\'s current session back to the element that plays', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'its own phone');
+  // Declaring playbackState 'playing' makes the page's Media Session itself
+  // WebKit's current media session, which supports no seeking: every
+  // lock-screen seek failed ("PlayerCommandFailed"). Each 'playing'
+  // declared while an element plays is followed at once by a play() on that
+  // already-playing element, which makes it the current session again.
+  const phone = await device(browser, true);
+  const ids = await albumIds(phone, 'First Light');
+  await play(phone, ids);
+  await expect.poll(() => phone.evaluate(() => (window as any).__player.playing), { timeout: 10000 }).toBe(true);
+  for (let i = 0; i < 2; i++) {
+    await phone.evaluate(() => (window as any).__player.toggle()); await phone.waitForTimeout(800);
+    await phone.evaluate(() => (window as any).__player.toggle()); await phone.waitForTimeout(800);
+  }
+  const decl = await phone.evaluate(() => (window as any).__decl);
+  const declaredWhilePlaying = decl.map((d: any, i: number) => ({ d, next: decl[i + 1] })).filter(({ d }: any) => d.k === 'state' && d.v === 'playing' && d.playing);
+  expect(declaredWhilePlaying.length).toBeGreaterThan(0);
+  for (const { next } of declaredWhilePlaying) expect(next).toEqual({ k: 'play', wasPlaying: true });
   await phone.evaluate(() => (window as any).__player.toggle());
   await phone.context().close();
 });

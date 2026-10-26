@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<title>iOS media harness</title>
+<style>body{font:16px -apple-system,sans-serif;margin:16px;background:#fff}button{font-size:22px;padding:14px 22px;margin:4px}pre{font-size:11px;white-space:pre-wrap}</style>
+</head><body>
+<h3>iOS media harness test page</h3>
+<button id="play">Play</button><button id="pause">Pause</button>
+<audio id="a" src="tone.mp3" preload="metadata"></audio>
+<pre id="log"></pre>
+<script>
+// Everything that happens is appended to window.__events so the harness can
+// read it back (safaridriver executeScript) and also shown on screen.
+window.__events = [];
+const a = document.getElementById('a'), out = document.getElementById('log');
+const ev = (s) => { const l = `${(performance.now()/1000).toFixed(2)} ${s}`; __events.push(l); out.textContent = __events.slice(-25).join('\n'); };
+const tracks = [{ title: 'Harness Tone A', artist: 'Slopify Harness', album: 'Test Album' }, { title: 'Harness Tone B', artist: 'Slopify Harness', album: 'Test Album' }];
+let i = 0;
+function meta() {
+  navigator.mediaSession.metadata = new MediaMetadata({ title: tracks[i].title, artist: tracks[i].artist, album: tracks[i].album,
+    artwork: [{ src: new URL('art.png', location).href, sizes: '512x512', type: 'image/png' }] });
+  ev('metadata ' + tracks[i].title);
+}
+for (const t of ['play', 'pause', 'playing', 'ended', 'waiting', 'stalled', 'error', 'loadedmetadata', 'emptied']) a.addEventListener(t, () => ev('audio:' + t + ' t=' + a.currentTime.toFixed(1)));
+const H = {
+  play: () => a.play(), pause: () => a.pause(), stop: () => a.pause(),
+  nexttrack: () => { i = (i + 1) % tracks.length; meta(); a.currentTime = 0; a.play(); },
+  previoustrack: () => { i = (i + tracks.length - 1) % tracks.length; meta(); a.currentTime = 0; a.play(); },
+  seekto: (d) => { a.currentTime = d.seekTime; }, seekforward: () => { a.currentTime += 10; }, seekbackward: () => { a.currentTime -= 10; },
+};
+for (const [k, fn] of Object.entries(H)) { try { navigator.mediaSession.setActionHandler(k, (d) => { ev('ACTION ' + k + (d && d.seekTime != null ? ' ' + d.seekTime : '')); fn(d); }); } catch (e) { ev('no handler ' + k + ': ' + e.message); } }
+a.addEventListener('timeupdate', () => { try { navigator.mediaSession.setPositionState({ duration: a.duration || 30, position: a.currentTime, playbackRate: 1 }); } catch {} });
+document.getElementById('play').onclick = () => { meta(); a.play().then(() => ev('play() resolved'), (e) => ev('play() rejected ' + e.name)); };
+document.getElementById('pause').onclick = () => a.pause();
+window.__state = () => ({ paused: a.paused, t: a.currentTime, readyState: a.readyState, ps: navigator.mediaSession.playbackState, title: navigator.mediaSession.metadata && navigator.mediaSession.metadata.title, standalone: navigator.standalone === true || matchMedia('(display-mode: standalone)').matches });
+ev('loaded ua=' + navigator.userAgent);
+</script></body></html>

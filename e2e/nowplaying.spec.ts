@@ -10,10 +10,12 @@ test.describe.configure({ mode: 'serial' });
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
 
 // Every audio element the page makes, and every setPositionState call.
-async function device(browser: Browser, phone: boolean) {
+async function device(browser: Browser, phone: boolean, homeScreenApp = false) {
   const ctx = await browser.newContext(phone
     ? { viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: IPHONE }
     : { viewport: { width: 1400, height: 900 } });
+  // The home-screen web app (navigator.standalone): the 2-hour hold applies.
+  if (homeScreenApp) await ctx.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true, configurable: true }); });
   await ctx.addInitScript(() => {
     const w = window as any;
     w.__els = [];
@@ -99,6 +101,53 @@ test('the stand-in stops muted and comes back unmuted', async ({ browser }, info
   await play(desk, ids.slice(1));
   await expect.poll(() => standIn(phone), { timeout: 15000 }).toEqual({ paused: false, muted: false, src: true });
   await desk.evaluate(() => (window as any).__player.toggle());
+  await phone.context().close(); await desk.context().close();
+});
+
+test('held paused, the face shows and the stand-in plays muted', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  // Locked and untouched, the face (keepalive.js) cannot be made a newer
+  // candidate than the playing stand-in, so while a session is held paused
+  // the stand-in plays muted (no candidate) and the face, unmuted, is Now
+  // Playing with paused (tools/ios-sim, 10-26: the laptop pausing left the
+  // phone's lock screen on pause and a running clock).
+  const els = (page: Page) => page.evaluate(() => { const w = window as any; const k = w.__conduitKeepAlive, f = w.__conduitFace; return { standIn: k ? { playing: !k.paused, muted: k.muted } : null, face: f ? { loaded: !!f.getAttribute('src'), muted: f.muted, paused: f.paused } : null }; });
+  const desk = await device(browser, false);
+  const phone = await device(browser, true, true);
+  await phone.mouse.click(2, 2); // the first tap: unlocks the stand-in, loads the face
+  const ids = await albumIds(desk, 'First Light');
+  await play(desk, ids);
+  await expect.poll(() => els(phone), { timeout: 15000 }).toEqual({ standIn: { playing: true, muted: false }, face: { loaded: true, muted: true, paused: true } });
+  await desk.evaluate(() => (window as any).__player.toggle());
+  await expect.poll(() => els(phone), { timeout: 15000 }).toEqual({ standIn: { playing: true, muted: true }, face: { loaded: true, muted: false, paused: true } });
+  await desk.evaluate(() => (window as any).__player.toggle());
+  await expect.poll(() => els(phone), { timeout: 15000 }).toEqual({ standIn: { playing: true, muted: false }, face: { loaded: true, muted: true, paused: true } });
+  await desk.evaluate(() => (window as any).__player.toggle());
+  await phone.context().close(); await desk.context().close();
+});
+
+test('an emptied song element is muted, and unmuted with its next song', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  // An emptied element still counts for WebKit's Now Playing while it is
+  // unmuted: after a hand-off the phone's emptied element (last touched by a
+  // lock-screen tap) stayed Now Playing with isPlaying = false while the
+  // laptop played (tools/ios-sim, 10-26). Muted, it is never a candidate.
+  const songEls = (page: Page) => page.evaluate(() => { const w = window as any; return w.__els.filter((e: any) => e !== w.__conduitKeepAlive && e !== w.__conduitFace).map((e: any) => ({ src: !!e.getAttribute('src'), muted: e.muted, paused: e.paused })); });
+  const phone = await device(browser, true);
+  const desk = await device(browser, false);
+  const ids = await albumIds(phone, 'First Light');
+  await play(phone, ids);
+  await expect.poll(() => phone.evaluate(() => (window as any).__player.playing), { timeout: 10000 }).toBe(true);
+  // Playing here: the playing element is unmuted.
+  expect((await songEls(phone)).some((e) => e.src && !e.paused && !e.muted)).toBe(true);
+  // The laptop takes it: every emptied element on the phone is muted.
+  await play(desk, ids.slice(2));
+  await expect.poll(() => phone.evaluate(() => (window as any).__player.mirroring), { timeout: 15000 }).toBe(true);
+  await expect.poll(async () => (await songEls(phone)).every((e) => !e.src && e.muted), { timeout: 5000 }).toBe(true);
+  // Back to the phone: its new song plays unmuted.
+  await phone.evaluate(() => (window as any).__player.setDevice({ id: 'local', kind: 'local', name: 'This Web Player' }));
+  await expect.poll(async () => (await songEls(phone)).some((e) => e.src && !e.paused && !e.muted), { timeout: 15000 }).toBe(true);
+  await phone.evaluate(() => (window as any).__player.toggle());
   await phone.context().close(); await desk.context().close();
 });
 

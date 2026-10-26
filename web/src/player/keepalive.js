@@ -47,7 +47,7 @@ function element() {
   el.addEventListener('loadedmetadata', () => note(`meta dur=${Math.round(el.duration)}`));
   el.addEventListener('ended', () => { if (wanted || bridged) { el.currentTime = 0; el.play().catch(() => {}); touchFace(); } });
   el.addEventListener('error', () => note(`error ${el.error?.code}`));
-  el.addEventListener('playing', () => note(`playing t=${el.currentTime.toFixed(1)}`));
+  el.addEventListener('playing', () => { note(`playing t=${el.currentTime.toFixed(1)}`); if (holdFace) holdPaused(); });
   el.addEventListener('pause', () => note('pause'));
   if (typeof window !== 'undefined') { window.__conduitKeepAlive = el; window.__conduitKeepAliveState = state; } // diagnostics
   return el;
@@ -63,7 +63,25 @@ function primeFace() {
     if (typeof window !== 'undefined') window.__conduitFace = faceEl; // diagnostics
   }
   if (!faceEl.getAttribute('src')) { faceEl.src = SRC(); faceEl.load(); note('face loaded'); }
+  // Played once, muted, and paused again at once. Locked, an element that
+  // has never played is no Now Playing candidate outside a user gesture
+  // (MediaElementSession::canShowControlsManager: "hasn't fired playing
+  // notification"), and that is when a session paused on another device has
+  // to show paused: WebKit cleared Now Playing instead (tools/ios-sim, 10-26).
+  if (!facePlayed && !facePriming) {
+    const f = faceEl;
+    const ms = typeof navigator !== 'undefined' ? navigator.mediaSession : null;
+    const declared = ms?.playbackState;
+    facePriming = true; f.muted = true;
+    f.play().then(() => {
+      facePlayed = true; facePriming = false; note('face played once'); f.pause(); touchFace();
+      // Its play and pause set the page's MediaSession state inside WebKit;
+      // give the page's own declaration back.
+      try { if (ms && declared && declared !== 'none') ms.playbackState = declared; } catch { /* unsupported */ }
+    }).catch((e) => { facePriming = false; note(`face play ${e?.name}`); });
+  }
 }
+let facePlayed = false, facePriming = false;
 let faceArmed = false;
 function armFace() {
   if (faceArmed || typeof document === 'undefined') return;
@@ -71,10 +89,35 @@ function armFace() {
   const tap = () => { primeFace(); touchFace(); for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, tap, true); };
   for (const t of ['pointerdown', 'touchend', 'keydown']) document.addEventListener(t, tap, true);
 }
+// Held paused, the session's clock must stand still. Any element that starts
+// playing sets the page's MediaSession to "playing" inside WebKit
+// (MediaSession::willBeginPlayback), whatever the page declared, and from
+// then on WebKit counts the position on from setPositionState: the
+// stand-in's start after a pause did that, and each Now Playing refresh
+// (every 5 s) moved the lock screen's paused clock on by 5 s (tools/ios-sim,
+// 10-26: 3 of 5 lock-screen pauses). Declaring paused again once the
+// stand-in plays stops the count where it is.
+function holdPaused() {
+  const ms = typeof navigator !== 'undefined' ? navigator.mediaSession : null;
+  if (!ms) return;
+  try { ms.playbackState = 'paused'; note('held: told paused'); } catch { /* unsupported */ }
+}
 function touchFace() {
   const f = faceEl;
-  if (!f || !f.getAttribute('src')) return;
+  // Not while its one play is under way: a pause now would abort it.
+  if (!f || !f.getAttribute('src') || facePriming) return;
   f.muted = !holdFace;
+  // Held, the stand-in plays muted. WebKit's Now Playing is the newest
+  // candidate by user interaction, and outside a user gesture (the session
+  // paused on another device, the phone locked and untouched) the face cannot
+  // be made newer than the stand-in: the playing stand-in stayed Now Playing,
+  // pause button and a clock running past the song's end; muted for one pick
+  // only, the face won and lost again the moment the stand-in was unmuted
+  // (tools/ios-sim, 10-26). A muted element is never a candidate. The
+  // stand-in keeps playing (silence either way), and WebKit kept the audio
+  // session at MediaPlayback / LongFormAudio while it was muted.
+  const a = el;
+  if (holdFace && a && !a.paused && !a.muted) a.muted = true;
   try { f.pause(); } catch { /* not ready */ }
 }
 
@@ -84,7 +127,7 @@ function arm() {
   const unlock = () => {
     const a = element();
     a.muted = false;
-    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) a.pause(); touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
+    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) { a.muted = true; a.pause(); } touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
     primeFace(); touchFace();
   };
   const off = () => { for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, unlock, true); armed = false; };
@@ -111,6 +154,13 @@ export function keepAlive(on, position = 0, held = false) {
   if (holdFace !== (!!on && !!held)) note(`face ${on && held ? 'on' : 'off'}`);
   holdFace = !!on && !!held;
   armFace();
+  // Unlocked by the first tap, not only after a start has failed: a session
+  // handed to another device while the phone is locked, with no tap since
+  // the app opened, otherwise found the stand-in locked (NotAllowedError) and
+  // the lock screen empty (tools/ios-sim, 10-26). Left muted after the
+  // unlock when it is not wanted: a paused, unmuted, just-touched stand-in
+  // would be WebKit's Now Playing over the music the same tap starts.
+  if (!unlocked) arm();
   wanted = !!on;
   lastPosition = position;
   apply(position);
@@ -144,9 +194,9 @@ function applyStandIn(position) {
   const a = element();
   if (wanted || bridged) {
     clearTimeout(pauseTimer); pauseTimer = null;
-    // Muted when it last stopped (below): a muted element is no Now Playing
-    // candidate, and iOS would not count the app as playing.
-    if (a.muted) a.muted = false;
+    // Muted when it last stopped (below), or while a held session shows the
+    // face (touchFace): unmuted for anything else.
+    if (a.muted && !holdFace) a.muted = false;
     if (quiet && !bridged) { if (!a.paused) { a.pause(); note('held quiet'); } return; }
     const p = Math.max(0, (position || 0) % KEEPALIVE_SECONDS);
     // Seek only a clock that is seen moving (two different readings while
@@ -208,11 +258,11 @@ export function primeKeepAlive() {
   const a = element();
   if (!a.getAttribute('src')) a.src = SRC();
   a.muted = false;
-  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) a.pause(); touchFace(); }).catch((e) => note(`prime ${e?.name}`));
+  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) { a.muted = true; a.pause(); } touchFace(); }).catch((e) => note(`prime ${e?.name}`));
   primeFace(); touchFace();
 }
 
 export function state() {
   const a = el;
-  return { wanted, bridged, quiet, unlocked, armed, frozen, face: faceEl ? (!faceEl.getAttribute('src') ? 'empty' : faceEl.muted ? 'muted' : 'held') : 'none', paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
+  return { wanted, bridged, quiet, unlocked, armed, frozen, face: faceEl ? (!faceEl.getAttribute('src') ? 'empty' : faceEl.muted ? 'muted' : 'held') : 'none', facePlayed, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
 }

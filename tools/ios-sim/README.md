@@ -63,6 +63,10 @@ tools/ios-sim/ios-sim.sh logfile            path of the raw media log
 tools/ios-sim/np-audit.py LOG --music ID,ID --standin ID [--since T --until T --app com.apple.webapp]
                                             every stretch where Now Playing said Paused while the music played,
                                             with the call that started it; exit 1 if any (>= 0.25 s)
+node tools/ios-sim/desk.mjs URL USER PASSWORD DIR
+                                            a second client (headless Chromium, muted, nothing on screen),
+                                            driven by DIR/cmd ("play <album>", "toggle", "quit"); DIR/state
+                                            holds its { playing, mirroring, title }: a session playing elsewhere
 tools/ios-sim/artwork-gaps.py LOG [--since T --until T]
                                             how long Now Playing's artwork was empty after each track change
 tools/ios-sim/ios-sim.sh down               stop logging, shut down and delete the simulator

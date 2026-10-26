@@ -182,6 +182,17 @@ function shuffled(arr) {
  * outgoing device, playback is stopped there, and the incoming device resumes
  * from the same offset. That is the "playing on this device" behaviour.
  */
+// Empty a music element: stopped, no source, and muted. WebKit gives Now
+// Playing to the most recently interacted-with candidate, not to the element
+// that plays, and an emptied element still counts while it is unmuted: after
+// a hand-off to another device the phone's emptied element (last touched by
+// a lock-screen tap) stayed Now Playing, isPlaying = false, while the other
+// device played (tools/ios-sim, 10-26). A muted element is never a
+// candidate. Every new src unmutes it again.
+function emptyEl(el) {
+  el.muted = true; el.pause(); el.removeAttribute('src'); el.load();
+}
+
 export function usePlayer(jf) {
   const [device, setDeviceState] = useState(LOCAL_DEVICE);
   const [queue, setQueue] = useState([]);
@@ -285,7 +296,7 @@ export function usePlayer(jf) {
     onReady: (id, url) => {
       const spare = spareRef.current;
       if (spare && spare.dataset.track === id && spare.paused && !document.hidden && spare.src !== url) {
-        spare.src = url;
+        spare.muted = false; spare.src = url;
         try { spare.load(); } catch { /* not unlocked yet */ }
       }
     },
@@ -607,7 +618,7 @@ export function usePlayer(jf) {
           // emptied first, so nothing (iOS resuming its "now playing" element
           // included) can ever start it again next to the spare.
           const old = audioRef.current;
-          old.pause(); old.removeAttribute('src'); old.load(); delete old.dataset.track;
+          emptyEl(old); delete old.dataset.track;
           audioRef.current = spare; spareRef.current = old; setActiveEl(spare);
           webAudioRef.current?.setActive?.(spare);
           localBaseRef.current = 0;
@@ -624,7 +635,7 @@ export function usePlayer(jf) {
             // Not unlocked, a bad buffered stream, or a play() iOS is holding:
             // silence the spare for good (a held play() must not fire later),
             // swap back and load normally.
-            spare.pause(); spare.removeAttribute('src'); spare.load(); delete spare.dataset.track;
+            emptyEl(spare); delete spare.dataset.track;
             audioRef.current = old; spareRef.current = spare; setActiveEl(old);
             webAudioRef.current?.setActive?.(old);
           }
@@ -638,7 +649,7 @@ export function usePlayer(jf) {
         const el = audioRef.current;
         // Nothing but the active element may hold media now: a loaded spare is
         // one more thing iOS could start when the app comes back.
-        if (spare && spare !== el && spare.getAttribute('src')) { spare.pause(); spare.removeAttribute('src'); spare.load(); delete spare.dataset.track; }
+        if (spare && spare !== el && spare.getAttribute('src')) { emptyEl(spare); delete spare.dataset.track; }
         // iOS: a new src set on an element still playing let the last second
         // of the OLD song out once the new one started (10-17: "stops, plays
         // a 1 s clip of the previous track, then switches"; the 2-3 s FLAC
@@ -646,11 +657,12 @@ export function usePlayer(jf) {
         // in the foreground: locked, iOS holds a play() on an element that
         // was not already playing (see above), so there the playing element
         // takes the next src as before.
-        if (IS_IOS && visible && el.getAttribute('src') && !el.paused) { mediaLog(`stop ${(el.dataset.track || '-').slice(0, 6)} before the next load`); ownPause(el); el.removeAttribute('src'); el.load(); }
+        if (IS_IOS && visible && el.getAttribute('src') && !el.paused) { mediaLog(`stop ${(el.dataset.track || '-').slice(0, 6)} before the next load`); ownPause(el); emptyEl(el); }
         // A transcode starts at the wanted moment on the server; the element's
         // clock then runs from 0 and localBaseRef holds the offset.
         localBaseRef.current = transcoded ? Math.max(0, seekSeconds) : 0;
         el.dataset.track = track.Id;
+        el.muted = false;
         el.src = local || (!transcoded && wholeFor(track.Id)) || jf.playbackUrl(track.Id, { startAt: transcoded ? seekSeconds : 0, norm: bakeNorm(track) });
         applyNorm(el, track); fadeReset(el);
         mediaLog(`load ${track.Id.slice(0, 6)} at ${Math.round(seekSeconds)} from ${local ? 'download' : el.src.startsWith('blob:') ? 'memory' : 'network'}`);
@@ -710,9 +722,7 @@ export function usePlayer(jf) {
         endFadeRef.current();
         for (const el of [audioRef.current, spareRef.current]) {
           if (!el) continue;
-          el.pause();
-          el.removeAttribute('src');
-          el.load();
+          emptyEl(el);
           delete el.dataset.track;
         }
         return;
@@ -1609,7 +1619,7 @@ export function usePlayer(jf) {
       if (document.hidden && !bridgeSinceRef.current) { bridgeKeepAlive(true, 'stalled'); bridgeSinceRef.current = Date.now(); }
       const url = wholeFor(id) || jf.playbackUrl(id, { norm: bakeNormRef.current(id) });
       ownUntilRef.current = Date.now() + 10000;
-      el.src = url;
+      el.muted = false; el.src = url;
       // The wait below can outlive the song: a skip, a pause, an element swap
       // or this effect's cleanup in those 8 s. Only the same element, still the
       // active one, on the same song and still meant to be playing, is seeked
@@ -1881,7 +1891,7 @@ export function usePlayer(jf) {
     const hiddenOk = !document.hidden || (!IS_IOS && !IS_ANDROID);
     if (spare && !IS_IOS && hiddenOk && !jf.transcoded?.() && spare.dataset.track !== ahead[0] && fadeRef.current?.el !== spare) {
       spare.dataset.track = ahead[0];
-      spare.src = wholeFor(ahead[0]) || jf.playbackUrl(ahead[0]);
+      spare.muted = false; spare.src = wholeFor(ahead[0]) || jf.playbackUrl(ahead[0]);
       try { spare.load(); } catch { /* not unlocked yet */ }
     }
   };
@@ -1953,7 +1963,7 @@ export function usePlayer(jf) {
     const spare = spareRef.current;
     if (!spare || spare.dataset.track === next.Id || fadeRef.current?.el === spare) return;
     spare.dataset.track = next.Id;
-    spare.src = wholeFor(next.Id) || jf.playbackUrl(next.Id);
+    spare.muted = false; spare.src = wholeFor(next.Id) || jf.playbackUrl(next.Id);
     try { spare.load(); } catch { /* not unlocked yet */ }
     mediaLog(`spare: ${next.Id.slice(0, 6)} loaded for the transition`);
   };
@@ -1962,7 +1972,7 @@ export function usePlayer(jf) {
     fadeRef.current = null;
     clearTimeout(f.timer);
     const el = f.el;
-    try { el.pause(); el.removeAttribute('src'); el.load(); } catch { /* gone */ }
+    try { emptyEl(el); } catch { /* gone */ }
     delete el.dataset.track;
     fadeReset(el);
     // The spare is free again: the song after the next one can go in.

@@ -135,9 +135,12 @@ case "$cmd" in
   swipe)  "$BUILD/simhid" "$(udid)" swipe "$1" "$2" "$3" "$4" ;;
   webapp)
     # Bring the home-screen web app to the front: `simctl launch
-    # com.apple.webapp` opens the (last used) web clip. Fallback: home screen,
-    # page 2 (where Add to Home Screen puts it on a fresh device), tap the icon.
-    if simctl launch "$(udid)" com.apple.webapp >/dev/null 2>&1; then sleep 3; else
+    # com.apple.webapp` reopens a web clip that has been opened before (on a
+    # fresh one it shows a blank page). Otherwise: home screen, page 2 (where
+    # Add to Home Screen puts it on a fresh device), tap the icon.
+    simctl launch "$(udid)" com.apple.webapp >/dev/null 2>&1; sleep 3
+    if ! wir pages 2>/dev/null | grep -q SafariViewService; then
+      simctl terminate "$(udid)" com.apple.webapp >/dev/null 2>&1
       "$BUILD/simhid" "$(udid)" home >/dev/null; sleep 1.5
       "$BUILD/simhid" "$(udid)" swipe 360 500 60 500 >/dev/null; sleep 1.5
       "$BUILD/simhid" "$(udid)" tap "${1:-339}" "${2:-230}" >/dev/null; sleep 4
@@ -170,22 +173,24 @@ for l in sys.stdin:
     # Add the page open in Safari to the home screen as a web app, by taps
     # (iPhone 17 coordinates; Safari's share sheet sometimes needs a retry,
     # so check the screenshot this leaves). Then tap the icon it lands on.
+    # A focused field (a login form) has the keyboard over the toolbar: blur it.
+    wir js 'document.activeElement && document.activeElement.blur && document.activeElement.blur(), 1' >/dev/null 2>&1; sleep 1
     "$BUILD/simhid" "$(udid)" tap 116 816 >/dev/null; sleep 2     # page menu
     "$BUILD/simhid" "$(udid)" tap 168 351 >/dev/null; sleep 3     # Share
     "$BUILD/simhid" "$(udid)" tap 328 780 >/dev/null; sleep 2     # View More
-    "$BUILD/simhid" "$(udid)" tap 150 637 >/dev/null; sleep 4     # Add to Home Screen
+    "$BUILD/simhid" "$(udid)" tap 150 637 >/dev/null; sleep 7     # Add to Home Screen (the sheet is slow to fill)
     "$BUILD/simhid" "$(udid)" tap 352 100 >/dev/null; sleep 3     # Add
     simctl io "$(udid)" screenshot "$STATE/webapp-install.png" >/dev/null 2>&1
     echo "screenshot: $STATE/webapp-install.png (the new icon should be on it)"
     ;;
   ids)
-    # WebKit's log id of Slopify's three elements (active, spare, stand-in;
-    # window.__slopifyAudio), for np-audit.py: each element's volume is set to
+    # WebKit's log id of Slopify's elements (active, spare, stand-in:
+    # window.__slopifyAudio; the stand-in's face: window.__conduitFace), for np-audit.py: each element's volume is set to
     # (nearly) its own value and the setVolume line it logs is read back.
     # Ids last for the page's lifetime. Pass --app-substr ... to pick the page.
-    for role in active spare standIn; do
+    for role in active spare standIn face; do
       n=$(( $(wc -l < "$STATE/media.log") ))
-      wir js "$@" "(() => { const e = __slopifyAudio().$role; if (!e) return 'none'; e.volume = e.volume === 1 ? 0.999 : 1; return 'ok'; })()" >/dev/null
+      wir js "$@" "(() => { const e = '$role' === 'face' ? window.__conduitFace : __slopifyAudio().$role; if (!e) return 'none'; e.volume = e.volume === 1 ? 0.999 : 1; return 'ok'; })()" >/dev/null
       sleep 2.5
       id=$(tail -n +"$n" "$STATE/media.log" | grep -o -E 'HTMLMediaElement::setVolume\([0-9A-F]+\)' | head -1 | grep -o -E '[0-9A-F]{8,}')
       echo "$role ${id:-?}"

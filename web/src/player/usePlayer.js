@@ -2557,7 +2557,7 @@ export function usePlayer(jf) {
   const msResync = () => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     try { if (ms) ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
-    keepAlive(standIn, shownPosition);
+    keepAlive(standIn, shownPosition, holding);
     const el = audioRef.current;
     if (msLocal && el && el.getAttribute('src')) {
       if (shownPlaying && el.paused) el.play().catch(() => {});
@@ -2601,7 +2601,8 @@ export function usePlayer(jf) {
         // (loaded, paused: the button becomes play, the next tap is a real
         // play) instead of re-playing it. Not the pauses iOS sends by itself
         // right after the music paused elsewhere or the app was switched.
-        if (!wantPlaying && r.holding && Date.now() - r.pausedAt > 3000 && Date.now() - lastVisibilityChange > 1500) { msNote('pause while held: stand-in quieted'); quietKeepAlive(true); return; }
+        // Only without the face (keepalive.js), which shows paused itself.
+        if (!wantPlaying && r.holding && keepAliveState().face !== 'held' && Date.now() - r.pausedAt > 3000 && Date.now() - lastVisibilityChange > 1500) { msNote('pause while held: stand-in quieted'); quietKeepAlive(true); return; }
         r.resync(); return;
       }
       // Our own music, or a play for it while the stand-in holds the lock
@@ -2653,7 +2654,7 @@ export function usePlayer(jf) {
     // The keep-alive stands in while the sound is elsewhere, and in the phone
     // app while nothing plays (the 2-hour hold); this device's own playback
     // carries the session by itself.
-    keepAlive(standIn, shownPosition);
+    keepAlive(standIn, shownPosition, holding);
     if (!ms || (!msLocal && !msRemote)) return;
     try { ms.playbackState = shownPlaying ? 'playing' : 'paused'; } catch { /* unsupported */ }
     // What the lock screen is told, each time it changes (not every second).
@@ -2661,7 +2662,7 @@ export function usePlayer(jf) {
     if (told !== lastToldRef.current) {
       lastToldRef.current = told;
       const ka = keepAliveState(); const el = audioRef.current;
-      mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState}; stand-in ${ka.paused == null ? 'none' : ka.paused ? 'paused' : 'playing'}${ka.quiet ? ' quiet' : ''} ready=${ka.ready}; element ${el ? (!el.getAttribute('src') ? 'empty' : el.paused ? 'paused' : 'playing') : 'none'})`);
+      mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState}; stand-in ${ka.paused == null ? 'none' : ka.paused ? 'paused' : 'playing'}${ka.quiet ? ' quiet' : ''} ready=${ka.ready}; face ${ka.face}; element ${el ? (!el.getAttribute('src') ? 'empty' : el.paused ? 'paused' : 'playing') : 'none'})`);
     }
     // iOS reads the action handlers when the media starts or stops: set
     // before the keep-alive element played, they were sometimes ignored and

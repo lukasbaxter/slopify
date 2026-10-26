@@ -16,6 +16,18 @@
 // each re-sync was another snap to 0. Should the clock ever freeze again the
 // element is left alone after that and setPositionState carries the time.
 let el = null, unlocked = false, wanted = false, bridged = false, armed = false, frozen = false, lastT = -1, lastAt = 0;
+// The face: a second silent element, loaded and always paused, that the lock
+// screen shows while a session is held paused. WebKit's Now Playing is the
+// most recently interacted-with unmuted candidate (HTMLMediaElement::
+// selectBestMediaSession: play/pause/load during a user gesture count), not
+// the one that plays, and its play/pause button and clock follow that
+// element. Held paused, the stand-in has to keep playing (silence is what
+// keeps iOS from suspending the app), so it was the newest candidate after
+// the tap that paused: the lock screen showed a pause button and a running
+// clock over a paused song. The face is touched right after every stand-in
+// call, so it is never older than the stand-in; unmuted only while holding
+// (a muted element is never a candidate), it then wins with paused.
+let faceEl = null, holdFace = false;
 const log = [];
 const note = (m) => { log.push(`${Math.round(performance.now() / 1000)}s${typeof document !== 'undefined' && document.hidden ? ' bg' : ''} ${m}`); if (log.length > 12) log.shift(); };
 
@@ -33,12 +45,37 @@ function element() {
   // seek applied at loadedmetadata left the clock frozen for good. The
   // element starts at 0, and is moved only once it is seen advancing.
   el.addEventListener('loadedmetadata', () => note(`meta dur=${Math.round(el.duration)}`));
-  el.addEventListener('ended', () => { if (wanted || bridged) { el.currentTime = 0; el.play().catch(() => {}); } });
+  el.addEventListener('ended', () => { if (wanted || bridged) { el.currentTime = 0; el.play().catch(() => {}); touchFace(); } });
   el.addEventListener('error', () => note(`error ${el.error?.code}`));
   el.addEventListener('playing', () => note(`playing t=${el.currentTime.toFixed(1)}`));
   el.addEventListener('pause', () => note('pause'));
   if (typeof window !== 'undefined') { window.__conduitKeepAlive = el; window.__conduitKeepAliveState = state; } // diagnostics
   return el;
+}
+
+// Loaded inside a tap (the load is the interaction that makes it a
+// candidate at all), metadata only, muted until a hold.
+function primeFace() {
+  if (typeof document === 'undefined') return;
+  if (!faceEl) {
+    faceEl = new Audio();
+    faceEl.preload = 'metadata'; faceEl.muted = true; faceEl.setAttribute('playsinline', '');
+    if (typeof window !== 'undefined') window.__conduitFace = faceEl; // diagnostics
+  }
+  if (!faceEl.getAttribute('src')) { faceEl.src = SRC(); faceEl.load(); note('face loaded'); }
+}
+let faceArmed = false;
+function armFace() {
+  if (faceArmed || typeof document === 'undefined') return;
+  faceArmed = true;
+  const tap = () => { primeFace(); touchFace(); for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, tap, true); };
+  for (const t of ['pointerdown', 'touchend', 'keydown']) document.addEventListener(t, tap, true);
+}
+function touchFace() {
+  const f = faceEl;
+  if (!f || !f.getAttribute('src')) return;
+  f.muted = !holdFace;
+  try { f.pause(); } catch { /* not ready */ }
 }
 
 function arm() {
@@ -47,7 +84,8 @@ function arm() {
   const unlock = () => {
     const a = element();
     a.muted = false;
-    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) a.pause(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
+    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) a.pause(); touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
+    primeFace(); touchFace();
   };
   const off = () => { for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, unlock, true); armed = false; };
   for (const t of ['pointerdown', 'touchend', 'keydown']) document.addEventListener(t, unlock, true);
@@ -67,9 +105,12 @@ let lastPosition = 0;
 // nothing. A pause tap there quiets the stand-in instead: the button becomes
 // play, and the next tap is a real play. Ends with the next want-off or play.
 let quiet = false;
-export function keepAlive(on, position = 0) {
+export function keepAlive(on, position = 0, held = false) {
   if (wanted !== !!on) note(`want ${on ? 'on' : 'off'} @${Math.round(position || 0)}`);
   if (!on && quiet) quiet = false;
+  if (holdFace !== (!!on && !!held)) note(`face ${on && held ? 'on' : 'off'}`);
+  holdFace = !!on && !!held;
+  armFace();
   wanted = !!on;
   lastPosition = position;
   apply(position);
@@ -96,6 +137,10 @@ export function bridgeKeepAlive(on, why = '') {
 }
 
 function apply(position) {
+  applyStandIn(position);
+  touchFace();
+}
+function applyStandIn(position) {
   const a = element();
   if (wanted || bridged) {
     clearTimeout(pauseTimer); pauseTimer = null;
@@ -148,7 +193,7 @@ function apply(position) {
     pauseTimer = setTimeout(() => {
       pauseTimer = null;
       if (wanted || bridged || a.paused) return;
-      a.muted = true; a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded');
+      a.muted = true; a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded'); touchFace();
     }, 2000);
   }
 }
@@ -163,10 +208,11 @@ export function primeKeepAlive() {
   const a = element();
   if (!a.getAttribute('src')) a.src = SRC();
   a.muted = false;
-  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) a.pause(); }).catch((e) => note(`prime ${e?.name}`));
+  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) a.pause(); touchFace(); }).catch((e) => note(`prime ${e?.name}`));
+  primeFace(); touchFace();
 }
 
 export function state() {
   const a = el;
-  return { wanted, bridged, quiet, unlocked, armed, frozen, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
+  return { wanted, bridged, quiet, unlocked, armed, frozen, face: faceEl ? (!faceEl.getAttribute('src') ? 'empty' : faceEl.muted ? 'muted' : 'held') : 'none', paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
 }

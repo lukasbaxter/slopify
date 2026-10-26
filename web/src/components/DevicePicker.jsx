@@ -34,14 +34,17 @@ const FORM_ICONS = {
   desktop: 'M3 3h18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-6.5v2H17v1.5H7V20h2.5v-2H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h18a.5.5 0 0 0 .5-.5V5a.5.5 0 0 0-.5-.5H3zM11 18v2h2v-2h-2z',
   laptop: PHONE_ICONS.relay,
   phone: PHONE_ICONS.local,
-  tv: PHONE_ICONS.cast,
+  // A TV: a closed screen outline on a short stand. (The Cast glyph's frame is
+  // open along the bottom, which read as a broken TV.)
+  tv: 'M3 3h18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h18a.5.5 0 0 0 .5-.5V5a.5.5 0 0 0-.5-.5H3zM7 20.5h10V22H7v-1.5zm4.25-2.5h1.5v2.5h-1.5V18z',
   tablet: 'M5 2h14a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v16a.5.5 0 0 0 .5.5h14a.5.5 0 0 0 .5-.5V4a.5.5 0 0 0-.5-.5H5zm7 14.25a1 1 0 1 1 0 2 1 1 0 0 1 0-2z',
 };
 const LOCAL_FORM = clientIdentity().form;
 
 export function DeviceIcon({ kind, form = null, phone = false, size = 18 }) {
   const set = phone ? PHONE_ICONS : ICONS;
-  const shape = form || (kind === 'local' ? LOCAL_FORM : null);
+  // A TV the server opens the app on (kind 'tv', no client yet) is drawn like the open app.
+  const shape = form || (kind === 'local' ? LOCAL_FORM : kind === 'tv' ? 'tv' : null);
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
       <path d={(shape && FORM_ICONS[shape]) || set[kind] || (kind === 'bridge' ? set.bluos : set.cast)} />

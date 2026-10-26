@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepAlive, bridgeKeepAlive, quietKeepAlive, state as keepAliveState } from './keepalive.js';
+import { keepAlive, bridgeKeepAlive, quietKeepAlive, standInPausedBySystem, state as keepAliveState } from './keepalive.js';
 
 // What a roster looks like with the reported playheads taken out: two rosters
 // with the same shape differ only in where the songs are (see applyRoster).
@@ -260,6 +260,8 @@ export function usePlayer(jf) {
   // src teardown, so no gap and no "Not Playing" flash on the lock screen.
   // Both get unlocked by the first tap (iOS unlocks per element).
   const audioRef = useRef(null);
+  // Re-tells the lock screen the position once the music is heard (below).
+  const reanchorRef = useRef(null);
   const spareRef = useRef(null);
   // When the silent bridge across a locked song change went on (0 = off).
   const bridgeSinceRef = useRef(0);
@@ -1557,7 +1559,23 @@ export function usePlayer(jf) {
     };
     sessionListeners.add(onSession);
     // The music is sounding again: the bridge (a locked song change) can go.
-    const onPlaying = () => { if (el === audioRef.current && bridgeSinceRef.current) { bridgeSinceRef.current = 0; bridgeKeepAlive(false, 'playing'); } };
+    // The lock screen's clock starts when the element is asked to play, not
+    // when it is heard: a song still loading (or a stall) put it ahead by the
+    // wait, for the rest of the song (reanchorRef, below).
+    let waitingSince = 0;
+    const onWaiting = () => { if (el === audioRef.current && !waitingSince) waitingSince = Date.now(); };
+    el.addEventListener('waiting', onWaiting);
+    const onPlaying = () => {
+      if (el === audioRef.current && bridgeSinceRef.current) { bridgeSinceRef.current = 0; bridgeKeepAlive(false, 'playing'); }
+      const waited = waitingSince ? Date.now() - waitingSince : 0;
+      waitingSince = 0;
+      // A second later, with the element's clock running (it still reads 0
+      // for a moment after 'playing' while the decoder starts).
+      if (el === audioRef.current && waited > 150) {
+        const src = el.src;
+        setTimeout(() => { if (el === audioRef.current && el.src === src && !el.paused) reanchorRef.current?.(waited); }, 1000);
+      }
+    };
     el.addEventListener('playing', onPlaying);
     // Breadcrumb for a debugger on the phone: every seek the element sees,
     // ours or the system's (window.__slopifyMediaLog).
@@ -1641,6 +1659,7 @@ export function usePlayer(jf) {
       clearInterval(watchdog);
       sessionListeners.delete(onSession);
       el.removeEventListener('playing', onPlaying);
+      el.removeEventListener('waiting', onWaiting);
       recoveryCancel?.();
       clearInterval(reconcile);
       for (const t of trail) el.removeEventListener(t, onTrail);
@@ -2531,6 +2550,31 @@ export function usePlayer(jf) {
   const msRefs = useRef({});
   const lastToldRef = useRef('');
   const toldPosRef = useRef(null); // the last setPositionState: { pos, at, playing, duration }
+  // iOS takes the lock screen's clock from the moment the element was asked
+  // to play, and MediaRemote then drops every later position that is within
+  // about a second of where it thinks the song is ("Setting identical
+  // nowPlayingInfo, skipping update"). A song that waited for its first
+  // segments (a locked track change, a slow connection) or stalled was shown
+  // that much ahead for the rest of the song: the lock screen running about a
+  // second early (tools/ios-sim, 10-26: +0.1 to +0.2 s locally, the start
+  // wait; a told correction of +0.5 s or +1 s was dropped, +2 s was taken).
+  // Once it is heard, the position is told again with the metadata changed
+  // invisibly (a zero-width mark on the album, toggled), which MediaRemote
+  // always takes as a new anchor.
+  reanchorRef.current = (waited) => {
+    const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
+    const el = audioRef.current;
+    if (!IS_IOS || !ms || !msLocal || !el || !ms.metadata || typeof ms.setPositionState !== 'function' || !(shownDuration > 0)) return;
+    const pos = Math.min(Math.max(0, localBaseRef.current + el.currentTime), shownDuration);
+    try {
+      ms.setPositionState({ duration: shownDuration, playbackRate: 1, position: pos });
+      toldPosRef.current = { pos, at: Date.now(), playing: true, duration: shownDuration };
+      const m = ms.metadata;
+      const album = m.album || '';
+      ms.metadata = new window.MediaMetadata({ title: m.title, artist: m.artist, album: album.endsWith('\u200b') ? album.slice(0, -1) : `${album}\u200b`, artwork: [...m.artwork] });
+      mediaLog(`lock screen clock re-anchored at ${pos.toFixed(1)} after ${waited} ms waiting`);
+    } catch { /* unsupported */ }
+  };
   // Phone app and home-screen web app: the lock-screen player stays for 2
   // hours after the last music anywhere on the account. Without sound iOS
   // suspends the app within a minute, the player leaves the lock screen and
@@ -2621,8 +2665,18 @@ export function usePlayer(jf) {
       // For another device (or a pause during the 2-hour hold): wait a
       // second, dropped if the app is going away, then ask for the state,
       // never a flip.
+      // Another app taking the sound (Snapchat, a video, a call) interrupts
+      // the stand-in, and WebKit hands the page a 'pause' action for it
+      // (MediaSession::suspendPlayback) as if from the lock screen: it paused
+      // the speaker or TV this phone only controls. A pause that comes with
+      // the stand-in paused by the system is that, and is not sent.
+      const interrupted = () => !wantPlaying && standInPausedBySystem(3000);
+      if (interrupted()) { msNote('pause from an interruption (stand-in paused by iOS): not sent'); return; }
       msNote(`${wantPlaying ? 'play' : 'pause'} (remote, held)`);
-      remotePauseHold.start(() => { msNote('sent'); msRefs.current.setPlaying(wantPlaying); });
+      remotePauseHold.start(() => {
+        if (interrupted()) { msNote('pause from an interruption (stand-in paused by iOS): dropped'); return; }
+        msNote('sent'); msRefs.current.setPlaying(wantPlaying);
+      });
     };
     on('play', playPause(true));
     on('pause', playPause(false));

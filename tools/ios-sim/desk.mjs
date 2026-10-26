@@ -6,7 +6,7 @@
 //   echo 'play First Light' > <dir>/cmd     play an album here (the "laptop")
 //   echo 'toggle' > <dir>/cmd               play/pause here
 //   echo 'quit' > <dir>/cmd
-// <dir>/state holds { playing, title, mirroring } once a second.
+// <dir>/state holds { playing, title, mirroring, position, at } twice a second.
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
@@ -44,7 +44,7 @@ for (;;) {
       } else if (cmd === 'toggle') await page.evaluate(() => window.__player.toggle());
     } catch (e) { say(`error ${e.message}`); }
   }
-  const st = await page.evaluate(() => { const p = window.__player; return { playing: p.playing, mirroring: p.mirroring, title: p.current?.Name || null }; }).catch(() => null);
+  const st = await page.evaluate(() => { const p = window.__player; const el = [...document.querySelectorAll('audio')].concat(window.__els || []).find((e) => !e.paused && e.getAttribute('src')); return { playing: p.playing, mirroring: p.mirroring, title: p.current?.Name || null, position: typeof p.positionNow === 'function' ? p.positionNow() : null, element: el ? el.currentTime : null, at: Date.now() / 1000 }; }).catch(() => null);
   fs.writeFileSync(path.join(dir, 'state'), JSON.stringify(st));
   await new Promise((res) => setTimeout(res, 500));
 }

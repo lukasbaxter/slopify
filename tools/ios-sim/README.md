@@ -51,6 +51,11 @@ tools/ios-sim/ios-sim.sh unlock             two home presses (the sim has no pas
 tools/ios-sim/ios-sim.sh np [art.out]       system Now Playing as JSON (title, artist, album, duration,
                                             elapsed, rate, isPlaying, client app)
 tools/ios-sim/ios-sim.sh remote <cmd>       play | pause | toggle | stop | next | prev | skipfwd | skipback | seek <s>
+tools/ios-sim/ios-sim.sh interrupt [secs] [--no-notify]
+                                            another process takes the audio (non-mixable playback session,
+                                            silence), then releases it notifying others (see the limits below)
+tools/ios-sim/ios-sim.sh syslog <min> '<predicate>'
+                                            the simulator's whole log, filtered
 tools/ios-sim/ios-sim.sh shot [file.png]    screenshot
 tools/ios-sim/ios-sim.sh lockshot [file]    lock, wake to the lock screen, screenshot
 tools/ios-sim/ios-sim.sh nowplaying [HH:MM:SS]
@@ -149,6 +154,20 @@ The icon survives until `down` deletes the device.
 - WebKit writes `title = "title"` in its own `updateNowPlayingInfo` lines
   (redacted). The real title, artist and album are in the MediaRemote lines
   and in `np`.
+- No audio interruptions: another app's audio (Safari, or `interrupt`, a
+  process holding a non-mixable playback session) does not interrupt the
+  web app in the simulator; WebKit logs no interruption and the elements
+  keep playing. What WebKit does on a real interruption is in its source
+  (`PlatformMediaSession::beginInterruption` pauses every element and calls
+  the page's Media Session 'pause' handler through
+  `MediaSession::suspendPlayback`; `endInterruption` with may-resume calls
+  'play'), so tests emulate it: pause the element from JS (not through the
+  app) and send `remote pause` / `remote play`.
+- MediaRemote keeps the lock screen's clock anchor unless told a position
+  more than about a second away ("Setting identical nowPlayingInfo,
+  skipping update" in the WebKit.GPU log); `np` shows the anchor
+  (`ElapsedTime` at `Timestamp`), so lock-screen time = ElapsedTime +
+  rate x (now - Timestamp).
 - No real audio route: the simulator plays to the Mac's default output if
   one exists. Interruptions, AirPods and CarPlay are not simulated.
 - Slopify's elements: `window.__slopifyAudio()` returns the active, spare

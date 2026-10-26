@@ -26,6 +26,9 @@ async function device(browser: Browser, phone: boolean, homeScreenApp = false) {
     w.__ps = [];
     const ms = navigator.mediaSession as any;
     if (ms?.setPositionState) { const orig = ms.setPositionState.bind(ms); ms.setPositionState = (s?: any) => { w.__ps.push({ ...(s || {}), at: Date.now() }); return orig(s); }; }
+    // The Media Session action handlers, to call them as iOS would.
+    w.__msHandlers = {};
+    if (ms?.setActionHandler) { const orig = ms.setActionHandler.bind(ms); ms.setActionHandler = (a: string, f: any) => { w.__msHandlers[a] = f; return orig(a, f); }; }
   });
   const page = await ctx.newPage();
   await login(page);
@@ -124,6 +127,53 @@ test('held paused, the face shows and the stand-in plays muted', async ({ browse
   await expect.poll(() => els(phone), { timeout: 15000 }).toEqual({ standIn: { playing: true, muted: false }, face: { loaded: true, muted: true, paused: true } });
   await desk.evaluate(() => (window as any).__player.toggle());
   await phone.context().close(); await desk.context().close();
+});
+
+test('another app interrupting a phone that only controls the session pauses nothing', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  // Another app taking the sound interrupts the phone's silent stand-in, and
+  // WebKit then calls the page's Media Session 'pause' handler
+  // (MediaSession::suspendPlayback), as if from the lock screen: it paused
+  // the speaker or TV the phone only controls. A pause that comes with the
+  // stand-in paused by the system is dropped; a real lock-screen pause still
+  // goes through.
+  const desk = await device(browser, false);
+  const phone = await device(browser, true, true);
+  await phone.mouse.click(2, 2); // the first tap unlocks the stand-in
+  const ids = await albumIds(desk, 'First Light');
+  await play(desk, ids);
+  await expect.poll(() => phone.evaluate(() => { const k = (window as any).__conduitKeepAlive; return !!k && !k.paused; }), { timeout: 15000 }).toBe(true);
+  // The interruption: iOS pauses the stand-in, then WebKit hands the page 'pause'.
+  await phone.evaluate(() => { const w = window as any; w.__conduitKeepAlive.pause(); w.__msHandlers.pause?.({ action: 'pause' }); });
+  await phone.waitForTimeout(2500);
+  expect(await desk.evaluate(() => (window as any).__player.playing)).toBe(true);
+  // The stand-in asked to play again (iOS resumes it when the interruption ends).
+  await expect.poll(() => phone.evaluate(() => !(window as any).__conduitKeepAlive.paused), { timeout: 5000 }).toBe(true);
+  // A lock-screen pause (the stand-in still playing) is sent.
+  await phone.waitForTimeout(3500); // past the 3 s an interruption's pause is recognised for
+  await phone.evaluate(() => (window as any).__msHandlers.pause?.({ action: 'pause' }));
+  await expect.poll(() => desk.evaluate(() => (window as any).__player.playing), { timeout: 5000 }).toBe(false);
+  await phone.context().close(); await desk.context().close();
+});
+
+test('iOS: the lock-screen clock is told again once a waited-for song is heard', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'its own phone');
+  // iOS starts the lock screen's clock when the element is asked to play and
+  // MediaRemote keeps that anchor unless told a position over about a second
+  // off: a song that waited for its first data showed the wait as a lead for
+  // its whole length. Once heard, the position is told again with an
+  // invisible metadata change (a zero-width mark on the album) that
+  // MediaRemote always takes.
+  const phone = await device(browser, true);
+  await phone.context().route('**/api/stream/**', async (route) => { await new Promise((r) => setTimeout(r, 600)); await route.continue(); });
+  const ids = await albumIds(phone, 'First Light');
+  await play(phone, ids);
+  await expect.poll(() => phone.evaluate(() => ((window as any).__slopifyMediaLog || []).some((l: string) => /lock screen clock re-anchored/.test(l))), { timeout: 15000 }).toBe(true);
+  const told = await phone.evaluate(() => { const w = window as any; const el = w.__els.find((e: any) => e !== w.__conduitKeepAlive && e !== w.__conduitFace && !e.paused); const last = w.__ps[w.__ps.length - 1]; return { album: navigator.mediaSession.metadata?.album || '', pos: last.position + (Date.now() - last.at) / 1000, el: el?.currentTime }; });
+  expect(told.album.endsWith('​')).toBe(true);
+  expect(Math.abs(told.pos - told.el)).toBeLessThan(0.5);
+  await phone.evaluate(() => (window as any).__player.toggle());
+  await phone.context().close();
 });
 
 test('an emptied song element is muted, and unmuted with its next song', async ({ browser }, info) => {

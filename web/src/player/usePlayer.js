@@ -274,6 +274,9 @@ export function usePlayer(jf) {
     }
   }
   useEffect(() => { setActiveEl(audioRef.current); }, []);
+  // Diagnostics (tools/ios-sim, a debugger on the phone): which element is
+  // which, to match WebKit's per-element log lines to the player's roles.
+  if (typeof window !== 'undefined') window.__slopifyAudio = () => ({ active: audioRef.current, spare: spareRef.current, standIn: window.__conduitKeepAlive || null });
   // Whole songs in memory (HLS mode, i.e. phones and Safari): the playing
   // track and the next, so a dead zone on the road does not stop the music.
   // A track that starts, or restarts after a stall, plays from here when it

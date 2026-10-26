@@ -21,6 +21,11 @@ import { isOffline } from '../offline/net.js';
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
 const IN_TV_APP = IN_PHONE_APP && window.slopifyShell.deviceForm === 'tv';
+// The line under another client's name in the speaker list. The form (what
+// the device is) says more than the kind (which app it runs): the TV and
+// tablet apps are the phone app's shell, kind 'phone'.
+const FORM_MODEL = { tv: 'Slopify TV', tablet: 'Tablet', phone: 'Phone', laptop: 'Laptop', desktop: 'Desktop' };
+const modelOfClient = (p) => FORM_MODEL[p.form] || (p.kind === 'desktop' ? 'Desktop' : p.kind === 'phone' ? 'Phone' : 'Slopify');
 // The web app opened from the home screen (iOS: navigator.standalone): its own
 // process like the phone app, suspended the same way once nothing plays.
 const IN_STANDALONE = typeof window !== 'undefined' && (window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
@@ -546,7 +551,7 @@ export function usePlayer(jf) {
   // Remote players from the relay, presented as selectable devices.
   const relayDevices = roster.players
     .filter((p) => p.canPlay)
-    .map((p) => ({ id: `relay:${p.id}`, kind: 'relay', name: p.name, model: p.kind === 'desktop' ? 'Desktop' : p.kind === 'phone' ? 'Phone' : 'Slopify', form: p.form || null, relayClientId: p.id }));
+    .map((p) => ({ id: `relay:${p.id}`, kind: 'relay', name: p.name, model: modelOfClient(p), form: p.form || null, relayClientId: p.id }));
 
   const metaFor = useCallback(
     (track) => {

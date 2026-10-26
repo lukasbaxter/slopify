@@ -29,14 +29,54 @@ const DEFAULT_SERVER = IS_DESKTOP
   ? 'https://music.baxtergroup.io'
   : window.location.origin;
 
+// The first password: the server refuses every request but this one (and
+// /me, /logout) while the account still carries the default password.
+function ChangePassword({ jf, onDone }) {
+  const [pw, setPw] = useState('');
+  const [again, setAgain] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pw.length < 8) { setErr('Use 8 characters or more.'); return; }
+    if (pw !== again) { setErr('The two passwords differ.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await jf.changePassword(undefined, pw);
+      if (jf.user) jf.user.mustChangePassword = false;
+      onDone();
+    } catch (e2) { setErr(e2.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="login">
+      <form onSubmit={submit}>
+        <h1>Choose a new password</h1>
+        <p className="login-sub">The default password only opens this page. Pick a new one for <b>{jf.user?.name || 'this account'}</b>.</p>
+        <label>
+          New password
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus autoComplete="new-password" />
+        </label>
+        <label>
+          Again
+          <input type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" />
+        </label>
+        {err && <div className="banner error" style={{ margin: 0 }}>{err}</div>}
+        <button className="primary" disabled={busy || !pw}>{busy ? 'Saving…' : 'Save and continue'}</button>
+      </form>
+    </div>
+  );
+}
+
 function Login({ onConnected }) {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_SERVER);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [needPw, setNeedPw] = useState(null); // the client whose first password must still be chosen
   // An invite link (/?invite=code) makes this the sign-up form.
   const invite = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('invite') : null;
+  if (needPw) return <ChangePassword jf={needPw} onDone={() => onConnected(needPw)} />;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -50,6 +90,9 @@ function Login({ onConnected }) {
       }
       const jf = await Slopify.login(baseUrl.trim(), username.trim(), password);
       persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId });
+      // The first admin login (admin / admin) may do nothing else until a new
+      // password is chosen: the server refuses every other request. Ask here.
+      if (jf.user?.mustChangePassword) { setNeedPw(jf); return; }
       onConnected(jf);
     } catch (e2) {
       setErr(e2.message);
@@ -1248,6 +1291,9 @@ export default function App() {
 
   if (booting) return <div className="boot">Starting Slopify...</div>;
   if (!jf) return <Login onConnected={setJf} />;
+  // A restored session whose first password was never chosen (the page was
+  // reloaded on the way): the server answers 403 to everything else.
+  if (me?.mustChangePassword) return <ChangePassword jf={jf} onDone={() => jf.me().then(setMe).catch(() => {})} />;
 
   // Phone chrome: root tabs show avatar + page title (Spotify's Home/Search/
   // Library headers); detail pages hide the bar and float a back chevron.

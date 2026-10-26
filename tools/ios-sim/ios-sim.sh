@@ -30,11 +30,16 @@ build_tools() {
   if [ ! -x "$BUILD/simhid" ] || [ "$HERE/simhid.m" -nt "$BUILD/simhid" ]; then
     xcrun clang -fobjc-arc -framework Foundation -framework AppKit "$HERE/simhid.m" -o "$BUILD/simhid"
   fi
+  if [ ! -x "$BUILD/interrupt" ] || [ "$HERE/interrupt.m" -nt "$BUILD/interrupt" ]; then
+    xcrun --sdk iphonesimulator clang -fobjc-arc -arch arm64 -mios-simulator-version-min=17.0 \
+      -framework Foundation -framework AVFAudio "$HERE/interrupt.m" -o "$BUILD/interrupt"
+    codesign -s - -f "$BUILD/interrupt" 2>/dev/null
+  fi
 }
 
 testpage_assets() {
   local d="$HERE/testpage"
-  # Volume 0: the simulator plays through the Mac's speakers. Still a real
+  # -75 dB: the simulator plays through the Mac's speakers. Still a real
   # audio track, so WebKit treats it as audible media for Now Playing.
   [ -f "$d/tone.mp3" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=440:duration=30" -af volume=-75dB -ac 2 -ar 44100 -b:a 128k "$d/tone.mp3"
   [ -f "$d/art.png" ] || ffmpeg -v error -y -f lavfi -i "color=c=0xcc3366:s=512x512" -frames:v 1 "$d/art.png"
@@ -129,7 +134,8 @@ case "$cmd" in
   js)     wir js "$@" ;;
   console) wir console "$@" ;;
   np)     simctl spawn "$(udid)" "$BUILD/mrctl" info "$@" ;;      # system Now Playing as JSON
-  remote) simctl spawn "$(udid)" "$BUILD/mrctl" "$@" ;;           # play|pause|toggle|next|prev|seek N|...
+  remote) simctl spawn "$(udid)" "$BUILD/mrctl" "$@" ;;
+  interrupt) build_tools; simctl spawn "$(udid)" "$BUILD/interrupt" "$@" ;;  # another app takes the audio: [secs] [--no-notify]           # play|pause|toggle|next|prev|seek N|...
   lock|home|side) "$BUILD/simhid" "$(udid)" "$cmd" ;;
   tap)    "$BUILD/simhid" "$(udid)" tap "$1" "$2" ;;
   swipe)  "$BUILD/simhid" "$(udid)" swipe "$1" "$2" "$3" "$4" ;;
@@ -196,6 +202,8 @@ for l in sys.stdin:
       echo "$role ${id:-?}"
     done ;;
   logfile) echo "$STATE/media.log" ;;
+  syslog)  # the simulator's whole log: syslog <minutes> '<predicate>'
+    simctl spawn "$(udid)" log show --last "${1:-2}m" --style compact --predicate "${2:-TRUEPREDICATE}" 2>/dev/null ;;
   udid)   udid ;;
   *)
     sed -n '/^## Commands/,/^## /p' "$HERE/README.md" 2>/dev/null || echo "see README.md"

@@ -69,7 +69,11 @@ int main(int argc, char **argv) {
     NSDictionary *opts = nil;
     if ([cmd isEqualToString:@"seek"]) {
       if (argc < 3) { fprintf(stderr, "seek needs seconds\n"); return 2; }
-      opts = @{ @"kMRMediaRemoteOptionPlaybackPosition": @(atof(argv[2])) };
+      // The framework's own key (its value is not its name on every release:
+      // with the name as a literal the option was dropped, "options = <not
+      // included>", and the app reported the seek as failed).
+      CFStringRef *key = (CFStringRef *)dlsym(MR, "kMRMediaRemoteOptionPlaybackPosition");
+      opts = @{ (key ? (__bridge NSString *)*key : @"kMRMediaRemoteOptionPlaybackPosition"): @(atof(argv[2])) };
     }
     Boolean ok = ((SendCmdFn)sym("MRMediaRemoteSendCommand"))(c.intValue, (__bridge CFDictionaryRef)opts);
     printf("sent %s (%d): %s\n", argv[1], c.intValue, ok ? "ok" : "FAILED");

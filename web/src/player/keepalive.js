@@ -29,6 +29,11 @@ let el = null, unlocked = false, wanted = false, bridged = false, armed = false,
 // (a muted element is never a candidate), it then wins with paused.
 let faceEl = null, holdFace = false;
 const log = [];
+// The stand-in's own pauses (below), to tell them from the system's.
+let ownPausePending = false, systemPausedAt = 0;
+const ownPause = (a) => { if (!a.paused) ownPausePending = true; a.pause(); };
+/** The stand-in was paused by the system (an interruption) within `ms`. */
+export function standInPausedBySystem(ms) { return Date.now() - systemPausedAt < ms; }
 const note = (m) => { log.push(`${Math.round(performance.now() / 1000)}s${typeof document !== 'undefined' && document.hidden ? ' bg' : ''} ${m}`); if (log.length > 12) log.shift(); };
 
 export const KEEPALIVE_SECONDS = 20 * 60;
@@ -48,7 +53,23 @@ function element() {
   el.addEventListener('ended', () => { if (wanted || bridged) { el.currentTime = 0; el.play().catch(() => {}); touchFace(); } });
   el.addEventListener('error', () => note(`error ${el.error?.code}`));
   el.addEventListener('playing', () => { note(`playing t=${el.currentTime.toFixed(1)}`); if (holdFace) holdPaused(); });
-  el.addEventListener('pause', () => note('pause'));
+  // A pause that is not ours: an interruption (another app's sound, a call)
+  // or iOS stopping it. WebKit then also hands the page a Media Session
+  // 'pause' action (MediaSession::suspendPlayback); for a session playing on
+  // another device that action is no user's (standInPausedBySystem, used by
+  // usePlayer to drop it). Asked to play again at once: during the
+  // interruption WebKit keeps that as the state to restore when it ends.
+  el.addEventListener('pause', () => {
+    const own = ownPausePending; ownPausePending = false;
+    note(own ? 'pause' : 'pause (not ours)');
+    if (own || el.ended || !(wanted || bridged) || (quiet && !bridged)) return;
+    systemPausedAt = Date.now();
+    setTimeout(() => {
+      if (!(wanted || bridged) || (quiet && !bridged) || !el.paused) return;
+      note('playing again after a pause not ours');
+      el.play().catch((e) => note(`play again ${e?.name}`));
+    }, 300);
+  });
   if (typeof window !== 'undefined') { window.__conduitKeepAlive = el; window.__conduitKeepAliveState = state; } // diagnostics
   return el;
 }
@@ -127,7 +148,7 @@ function arm() {
   const unlock = () => {
     const a = element();
     a.muted = false;
-    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) { a.muted = true; a.pause(); } touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
+    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) { a.muted = true; ownPause(a); } touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
     primeFace(); touchFace();
   };
   const off = () => { for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, unlock, true); armed = false; };
@@ -197,7 +218,7 @@ function applyStandIn(position) {
     // Muted when it last stopped (below), or while a held session shows the
     // face (touchFace): unmuted for anything else.
     if (a.muted && !holdFace) a.muted = false;
-    if (quiet && !bridged) { if (!a.paused) { a.pause(); note('held quiet'); } return; }
+    if (quiet && !bridged) { if (!a.paused) { ownPause(a); note('held quiet'); } return; }
     const p = Math.max(0, (position || 0) % KEEPALIVE_SECONDS);
     // Seek only a clock that is seen moving (two different readings while
     // playing); one that has not moved in 3 s of "playing" is frozen and is
@@ -243,7 +264,7 @@ function applyStandIn(position) {
     pauseTimer = setTimeout(() => {
       pauseTimer = null;
       if (wanted || bridged || a.paused) return;
-      a.muted = true; a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded'); touchFace();
+      a.muted = true; ownPause(a); a.removeAttribute('src'); a.load(); note('stopped, unloaded'); touchFace();
     }, 2000);
   }
 }
@@ -258,7 +279,7 @@ export function primeKeepAlive() {
   const a = element();
   if (!a.getAttribute('src')) a.src = SRC();
   a.muted = false;
-  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) { a.muted = true; a.pause(); } touchFace(); }).catch((e) => note(`prime ${e?.name}`));
+  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) { a.muted = true; ownPause(a); } touchFace(); }).catch((e) => note(`prime ${e?.name}`));
   primeFace(); touchFace();
 }
 

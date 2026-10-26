@@ -46,6 +46,7 @@ function arm() {
   armed = true;
   const unlock = () => {
     const a = element();
+    a.muted = false;
     a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) a.pause(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
   };
   const off = () => { for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, unlock, true); armed = false; };
@@ -98,6 +99,9 @@ function apply(position) {
   const a = element();
   if (wanted || bridged) {
     clearTimeout(pauseTimer); pauseTimer = null;
+    // Muted when it last stopped (below): a muted element is no Now Playing
+    // candidate, and iOS would not count the app as playing.
+    if (a.muted) a.muted = false;
     if (quiet && !bridged) { if (!a.paused) { a.pause(); note('held quiet'); } return; }
     const p = Math.max(0, (position || 0) % KEEPALIVE_SECONDS);
     // Seek only a clock that is seen moving (two different readings while
@@ -127,10 +131,24 @@ function apply(position) {
     // the last state change, and WebKit told iOS "paused" (isPlaying = false)
     // while the real player played: the lock screen's random pause icon.
     // Without media it can produce no audio and WebKit leaves it out.
+    //
+    // Muted first, though. WebKit's Now Playing pick is not "the element that
+    // plays": it is the most recently *interacted-with* candidate, and a
+    // pause() or load() that runs while WebKit still counts the moment as a
+    // user gesture counts as an interaction. After a lock-screen command
+    // (next while paused, on the locked phone) this timer fires 2 s later
+    // still inside that gesture (WebKit logs prepareForLoad "gesture = 1"),
+    // so the stand-in's own stop made it the newest candidate: Now Playing
+    // went to the stopped stand-in, isPlaying = false, and stayed there while
+    // the music played (the lock screen showed paused for the rest of the
+    // song; tools/ios-sim, 10-26: 4 of 4 locked "next while paused"). An
+    // emptied element still counted. A muted element is never a candidate
+    // (MediaElementSession::canShowControlsManager), so muting it first hands
+    // Now Playing straight to the playing music, with no paused blip.
     pauseTimer = setTimeout(() => {
       pauseTimer = null;
       if (wanted || bridged || a.paused) return;
-      a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded');
+      a.muted = true; a.pause(); a.removeAttribute('src'); a.load(); note('stopped, unloaded');
     }, 2000);
   }
 }
@@ -144,6 +162,7 @@ export function primeKeepAlive() {
   if (unlocked || typeof document === 'undefined') return;
   const a = element();
   if (!a.getAttribute('src')) a.src = SRC();
+  a.muted = false;
   a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) a.pause(); }).catch((e) => note(`prime ${e?.name}`));
 }
 

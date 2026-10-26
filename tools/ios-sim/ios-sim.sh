@@ -34,7 +34,9 @@ build_tools() {
 
 testpage_assets() {
   local d="$HERE/testpage"
-  [ -f "$d/tone.mp3" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=440:duration=30" -ac 2 -ar 44100 -b:a 128k "$d/tone.mp3"
+  # Volume 0: the simulator plays through the Mac's speakers. Still a real
+  # audio track, so WebKit treats it as audible media for Now Playing.
+  [ -f "$d/tone.mp3" ] || ffmpeg -v error -y -f lavfi -i "sine=frequency=440:duration=30" -af volume=-75dB -ac 2 -ar 44100 -b:a 128k "$d/tone.mp3"
   [ -f "$d/art.png" ] || ffmpeg -v error -y -f lavfi -i "color=c=0xcc3366:s=512x512" -frames:v 1 "$d/art.png"
 }
 
@@ -91,9 +93,26 @@ case "$cmd" in
     cd "$REPO"
     [ -d node_modules ] || npm ci --no-audit --no-fund
     [ -d fixtures/music ] || node fixtures/generate.mjs
+    # The simulator plays through the Mac's speakers: serve an inaudible copy
+    # of the fixtures unless MUSIC_DIR names another library. Each track is
+    # re-encoded at -75 dB (not volume 0: identical silent files are merged
+    # by the server as duplicates) and padded to PAD_SECONDS (default 40), so
+    # a wrong lock-screen state is not cut short by a 4-8 s track end.
+    if [ -z "${MUSIC_DIR:-}" ]; then
+      MUSIC_DIR="$STATE/music-quiet-${PAD_SECONDS:-40}"
+      if [ ! -d "$MUSIC_DIR" ]; then
+        cp -R fixtures/music "$MUSIC_DIR.tmp"
+        find "$MUSIC_DIR.tmp" -name '*.mp3' -print0 | while IFS= read -r -d '' f; do
+          ffmpeg -v error -y -i "$f" -map_metadata 0 -af "volume=-75dB,apad=whole_dur=${PAD_SECONDS:-40}" -c:a libmp3lame -b:a 128k "$f.0.mp3" < /dev/null && mv "$f.0.mp3" "$f"
+        done
+        mv "$MUSIC_DIR.tmp" "$MUSIC_DIR"
+      fi
+    fi
     [ "${SKIP_BUILD:-0}" = 1 ] || npm run build
-    data="${DATA_DIR:-$STATE/slopify-data}"; rm -rf "$data"
-    exec env NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR=fixtures/music DATA_DIR="$data" HOST=127.0.0.1 PORT="$port" \
+    # The server lists web/dist once at start: restart it after a web build
+    # (KEEP_DATA=1 keeps the accounts and logins of the last run).
+    data="${DATA_DIR:-$STATE/slopify-data}"; [ "${KEEP_DATA:-0}" = 1 ] || rm -rf "$data"
+    exec env NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR="${MUSIC_DIR:-fixtures/music}" DATA_DIR="$data" HOST=127.0.0.1 PORT="$port" \
       LOG_LEVEL=warn LOGIN_RATE_MAX=1000 RATE_MAX=100000 node server/dist/index.js
     ;;
   open)
@@ -113,6 +132,17 @@ case "$cmd" in
   remote) simctl spawn "$(udid)" "$BUILD/mrctl" "$@" ;;           # play|pause|toggle|next|prev|seek N|...
   lock|home|side) "$BUILD/simhid" "$(udid)" "$cmd" ;;
   tap)    "$BUILD/simhid" "$(udid)" tap "$1" "$2" ;;
+  swipe)  "$BUILD/simhid" "$(udid)" swipe "$1" "$2" "$3" "$4" ;;
+  webapp)
+    # Bring the home-screen web app to the front: `simctl launch
+    # com.apple.webapp` opens the (last used) web clip. Fallback: home screen,
+    # page 2 (where Add to Home Screen puts it on a fresh device), tap the icon.
+    if simctl launch "$(udid)" com.apple.webapp >/dev/null 2>&1; then sleep 3; else
+      "$BUILD/simhid" "$(udid)" home >/dev/null; sleep 1.5
+      "$BUILD/simhid" "$(udid)" swipe 360 500 60 500 >/dev/null; sleep 1.5
+      "$BUILD/simhid" "$(udid)" tap "${1:-339}" "${2:-230}" >/dev/null; sleep 4
+    fi
+    wir pages | grep -q SafariViewService && echo "web app running" || echo "web app not found: check '$0 shot'" ;;
   shot)   simctl io "$(udid)" screenshot "${1:-$STATE/shot-$(date +%H%M%S).png}" 2>&1 | grep -v '^Detected\|^Note' ;;
   lockshot)
     # Side button (locks, screen off), then home (wakes to the lock screen,
@@ -136,6 +166,30 @@ for l in sys.stdin:
         l = l.split("MRUMPCMetadataDataSource")[0] + "lock-screen buttons: " + "  ".join(f"{k}={v.strip()}" for k, v in ids) + "\n"
     sys.stdout.write(l[:400].rstrip() + "\n")' | uniq
     ;;
+  webapp-install)
+    # Add the page open in Safari to the home screen as a web app, by taps
+    # (iPhone 17 coordinates; Safari's share sheet sometimes needs a retry,
+    # so check the screenshot this leaves). Then tap the icon it lands on.
+    "$BUILD/simhid" "$(udid)" tap 116 816 >/dev/null; sleep 2     # page menu
+    "$BUILD/simhid" "$(udid)" tap 168 351 >/dev/null; sleep 3     # Share
+    "$BUILD/simhid" "$(udid)" tap 328 780 >/dev/null; sleep 2     # View More
+    "$BUILD/simhid" "$(udid)" tap 150 637 >/dev/null; sleep 4     # Add to Home Screen
+    "$BUILD/simhid" "$(udid)" tap 352 100 >/dev/null; sleep 3     # Add
+    simctl io "$(udid)" screenshot "$STATE/webapp-install.png" >/dev/null 2>&1
+    echo "screenshot: $STATE/webapp-install.png (the new icon should be on it)"
+    ;;
+  ids)
+    # WebKit's log id of Slopify's three elements (active, spare, stand-in;
+    # window.__slopifyAudio), for np-audit.py: each element's volume is set to
+    # (nearly) its own value and the setVolume line it logs is read back.
+    # Ids last for the page's lifetime. Pass --app-substr ... to pick the page.
+    for role in active spare standIn; do
+      n=$(( $(wc -l < "$STATE/media.log") ))
+      wir js "$@" "(() => { const e = __slopifyAudio().$role; if (!e) return 'none'; e.volume = e.volume === 1 ? 0.999 : 1; return 'ok'; })()" >/dev/null
+      sleep 2.5
+      id=$(tail -n +"$n" "$STATE/media.log" | grep -o -E 'HTMLMediaElement::setVolume\([0-9A-F]+\)' | head -1 | grep -o -E '[0-9A-F]{8,}')
+      echo "$role ${id:-?}"
+    done ;;
   logfile) echo "$STATE/media.log" ;;
   udid)   udid ;;
   *)

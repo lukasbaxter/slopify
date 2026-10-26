@@ -33,13 +33,19 @@ not work: launchd refuses to spawn the binary ("Security policy issue").
 ```
 tools/ios-sim/ios-sim.sh up                 create + boot a throwaway "iPhone 17", build helpers, start log capture
 tools/ios-sim/ios-sim.sh testpage [port]    serve the minimal MediaSession test page (default 127.0.0.1:8091)
-tools/ios-sim/ios-sim.sh serve [port]       build Slopify, run it on the fixture library at 127.0.0.1:8090 (foreground)
+tools/ios-sim/ios-sim.sh serve [port]       build Slopify, run it at 127.0.0.1:8090 (foreground) on an inaudible
+                                            copy of the fixture library (see "Sound" below). Env: SKIP_BUILD=1,
+                                            KEEP_DATA=1 (keep accounts/logins), MUSIC_DIR=, PAD_SECONDS= (40).
+                                            The server lists web/dist once at start: restart it after a web build.
 tools/ios-sim/ios-sim.sh open <url>         open in Mobile Safari
 tools/ios-sim/ios-sim.sh pages              list inspectable pages (Safari tabs, web apps, service workers)
 tools/ios-sim/ios-sim.sh js '<expr>'        evaluate in the newest page; flags: --await, --gesture,
                                             --url-substr S, --title-substr S, --app-substr S, --sw
 tools/ios-sim/ios-sim.sh console [secs]     stream console messages
 tools/ios-sim/ios-sim.sh tap <x> <y>        real touch at screen points (iPhone 17 is 402x874)
+tools/ios-sim/ios-sim.sh swipe x1 y1 x2 y2  real drag
+tools/ios-sim/ios-sim.sh webapp-install     add the page open in Safari to the home screen, by taps
+tools/ios-sim/ios-sim.sh webapp             bring the home-screen web app to the front (simctl launch com.apple.webapp)
 tools/ios-sim/ios-sim.sh lock | home | side hardware buttons
 tools/ios-sim/ios-sim.sh unlock             two home presses (the sim has no passcode)
 tools/ios-sim/ios-sim.sh np [art.out]       system Now Playing as JSON (title, artist, album, duration,
@@ -51,7 +57,14 @@ tools/ios-sim/ios-sim.sh nowplaying [HH:MM:SS]
                                             the media log distilled: PlaybackState flips, HTMLMediaElement
                                             play/pause/prepareForLoad/selectMediaResource, updateNowPlayingInfo,
                                             received remote commands, lock-screen button layout
+tools/ios-sim/ios-sim.sh ids [--app-substr S]
+                                            WebKit's log ids of Slopify's active, spare and stand-in elements
 tools/ios-sim/ios-sim.sh logfile            path of the raw media log
+tools/ios-sim/np-audit.py LOG --music ID,ID --standin ID [--since T --until T --app com.apple.webapp]
+                                            every stretch where Now Playing said Paused while the music played,
+                                            with the call that started it; exit 1 if any (>= 0.25 s)
+tools/ios-sim/artwork-gaps.py LOG [--since T --until T]
+                                            how long Now Playing's artwork was empty after each track change
 tools/ios-sim/ios-sim.sh down               stop logging, shut down and delete the simulator
 ```
 
@@ -84,9 +97,19 @@ $T down
 Find tap coordinates from a screenshot: screenshots are 1206x2622 pixels,
 so divide by 3 for points.
 
+## Sound
+
+The simulator plays through the Mac's speakers. `serve` therefore serves a
+copy of the fixtures with every track at -75 dB (inaudible; not volume 0,
+since the server merges identical silent files as duplicates) and padded to
+40 s, so a wrong lock-screen state is not cut short by a 4-8 s track end.
+The test page's tone is at -75 dB too.
+
 ## Home-screen web app (standalone)
 
-Works, driven by taps (there is no API for it):
+`webapp-install` does the steps below (check the screenshot it leaves); after
+that `webapp` brings the app to the front. By hand, with taps (there is no
+API for adding it):
 
 1. In Safari: tap the page menu button left of the address field
    (`tap 116 816` on iPhone 17), wait 2 s, tap Share (`tap 168 351`).
@@ -124,5 +147,22 @@ The icon survives until `down` deletes the device.
   and in `np`.
 - No real audio route: the simulator plays to the Mac's default output if
   one exists. Interruptions, AirPods and CarPlay are not simulated.
-- One harness simulator at a time: `wir.py` picks the newest
-  `webinspectord_sim.socket`; set `WIR_SOCKET` when several sims are booted.
+- Slopify's elements: `window.__slopifyAudio()` returns the active, spare
+  and stand-in `<audio>` elements; `ids` maps them to WebKit's log ids.
+- `ios-sim.sh` points `wir.py` at the booted device's own inspector socket
+  (`simctl getenv RWI_LISTEN_SOCKET`) and keeps one inspector client
+  connected (`wir.py hold`): webinspectord_sim quits when its last client
+  leaves, and the next call would race its restart and see no pages.
+
+## Example: the lock screen said paused while the music played (10-26)
+
+Locked web app, music paused, lock-screen "next": the music started, and 2 s
+later Now Playing went to Paused for the rest of the song. The harness
+showed why: WebKit picks the Now Playing element by most recent user
+interaction, not by playback (`HTMLMediaElement::selectBestMediaSession`), and
+the stand-in's stop ran inside the lock-screen command's gesture
+(`prepareForLoad(...) gesture = 1`, 2 s later), so the stopped stand-in
+became the newest candidate. `np-audit.py` counted 4 of 4 rounds before the
+fix (keepalive.js mutes the stand-in as it stops: a muted element is no
+candidate) and 0 of 6 after.
+

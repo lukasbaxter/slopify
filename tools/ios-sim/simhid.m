@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
       sendMsg(button(src, Down, TargetHardware));
       usleep(80 * 1000);
       sendMsg(button(src, Up, TargetHardware));
-    } else if ([cmd isEqualToString:@"tap"] && argc >= 5) {
+    } else if (([cmd isEqualToString:@"tap"] && argc >= 5) || ([cmd isEqualToString:@"swipe"] && argc >= 7)) {
       // Indigo digitizer points are 0..1 ratios of the screen.
       id screen = nil;
       CGSize sz = CGSizeMake(402, 874);
@@ -66,7 +66,15 @@ int main(int argc, char **argv) {
       CGPoint p = CGPointMake(atof(argv[3]) / sz.width, atof(argv[4]) / sz.height);
       MouseFn mouse = (MouseFn)dlsym(sk, "IndigoHIDMessageForMouseNSEvent");
       sendMsg(mouse(&p, NULL, TargetDigitizer, NSEventTypeLeftMouseDown, CGSizeMake(1, 1), 0));
-      usleep(60 * 1000);
+      if ([cmd isEqualToString:@"swipe"]) {
+        // swipe x1 y1 x2 y2: drag in 12 steps over ~240 ms
+        CGPoint q = CGPointMake(atof(argv[5]) / sz.width, atof(argv[6]) / sz.height);
+        for (int i = 1; i <= 12; i++) {
+          usleep(20 * 1000);
+          p = CGPointMake(p.x + (q.x - p.x) / (13 - i), p.y + (q.y - p.y) / (13 - i));
+          sendMsg(mouse(&p, NULL, TargetDigitizer, NSEventTypeLeftMouseDragged, CGSizeMake(1, 1), 0));
+        }
+      } else usleep(60 * 1000);
       sendMsg(mouse(&p, NULL, TargetDigitizer, NSEventTypeLeftMouseUp, CGSizeMake(1, 1), 0));
     } else { fprintf(stderr, "unknown command\n"); return 2; }
     printf("ok %s\n", argv[2]);

@@ -74,6 +74,34 @@ test('another device takes the music: the phone lets go of its song', async ({ b
   await phone.context().close(); await desk.context().close();
 });
 
+test('the stand-in stops muted and comes back unmuted', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  // WebKit gives Now Playing to the most recently interacted-with candidate,
+  // not to the element that plays. The stand-in's stop (pause + unload, 2 s
+  // after it is let go) can run inside a lock-screen command's user gesture,
+  // which made the stopped stand-in that candidate: the lock screen said
+  // paused for the rest of the song (tools/ios-sim, locked "next while
+  // paused": 4 of 4 before, 0 of 6 after). A muted element is never a
+  // candidate, so the stand-in is muted as it stops, and unmuted to play.
+  const standIn = (page: Page) => page.evaluate(() => { const a = (window as any).__conduitKeepAlive; return a ? { paused: a.paused, muted: a.muted, src: !!a.getAttribute('src') } : null; });
+  const desk = await device(browser, false);
+  const phone = await device(browser, true);
+  const ids = await albumIds(desk, 'First Light');
+  // The laptop plays: the phone shows it, its stand-in playing (unmuted).
+  await play(desk, ids);
+  await expect.poll(() => standIn(phone), { timeout: 15000 }).toEqual({ paused: false, muted: false, src: true });
+  // The phone takes the music: 2 s later the stand-in is stopped, unloaded
+  // and muted, while the phone's own element plays, unmuted.
+  await phone.evaluate(() => (window as any).__player.setDevice({ id: 'local', kind: 'local', name: 'This Web Player' }));
+  await expect.poll(() => standIn(phone), { timeout: 15000 }).toEqual({ paused: true, muted: true, src: false });
+  expect(await phone.evaluate(() => { const w = window as any; return w.__els.some((e: any) => e !== w.__conduitKeepAlive && !e.paused && !e.muted && e.getAttribute('src')); })).toBe(true);
+  // The laptop takes it back: the stand-in plays again, with its sound.
+  await play(desk, ids.slice(1));
+  await expect.poll(() => standIn(phone), { timeout: 15000 }).toEqual({ paused: false, muted: false, src: true });
+  await desk.evaluate(() => (window as any).__player.toggle());
+  await phone.context().close(); await desk.context().close();
+});
+
 test('a seek on the device playing moves the lock screen of a phone showing it', async ({ browser }, info) => {
   test.skip(info.project.name !== 'chromium', 'two devices of its own');
   // A roster update that only moves the playhead does not re-render the

@@ -18,7 +18,7 @@ import { likesLoad, likesSet, likesSnapshot, likedIds, likesReady, isLiked, useL
 import { offsetsMerge } from './api/offsets.js';
 import { canSaveOffline, subscribeOffline, flushOfflinePlays, resumeOffline } from './api/offline.js';
 import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
-import { readLib } from './offline/store.js';
+import { readLib, getActive as downloading } from './offline/store.js';
 
 // Everything goes through music.baxtergroup.io (Let's Encrypt on the origin,
 // Cloudflare proxy deliberately off -- it throttles the audio). The browser
@@ -117,11 +117,11 @@ function Login({ onConnected }) {
         )}
         <label>
           Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus spellCheck="false" />
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus spellCheck="false" autoCapitalize="none" autoCorrect="off" autoComplete="username" />
         </label>
         <label>
           Password
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={invite ? 'new-password' : 'current-password'} />
         </label>
         {err && <div className="banner error" style={{ margin: 0 }}>{err}</div>}
         {invite && <p className="login-hint">You have been invited. Pick a username and a password (8 characters or more).</p>}
@@ -1047,6 +1047,33 @@ export default function App() {
   // while the sound is elsewhere (the phone's own buttons already control its
   // own output natively). volumeStep routes to the active device.
   const remoteSession = !!player.mirroring || (player.device?.kind && player.device.kind !== 'local');
+
+  // A deploy while the installed app sat in the background: iOS resumes the
+  // old page, old code and all, for as long as it keeps it in memory (days).
+  // Back after a while with nothing playing here or elsewhere and no download
+  // running, it asks the server which build is current and reloads onto a
+  // newer one (the queue and playhead come back from storage). No answer, or
+  // a captive portal's page, changes nothing.
+  const busyRef = useRef(false);
+  busyRef.current = !!player.playing || !!remoteSession;
+  const busy = () => busyRef.current || !!downloading();
+  useEffect(() => {
+    const standalone = window.navigator.standalone ?? window.matchMedia('(display-mode: standalone)').matches;
+    const running = document.querySelector('script[type="module"][src*="assets/index-"]')?.getAttribute('src');
+    if (IS_DESKTOP || !standalone || !running) return undefined;
+    const name = running.slice(running.lastIndexOf('assets/'));
+    let hiddenAt = 0;
+    const vis = async () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      if (away < 10 * 60000 || busy()) return;
+      const html = await fetch('./', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+      if (/assets\/index-[\w-]+\.js/.test(html) && !html.includes(name) && !busy()) window.location.reload();
+    };
+    document.addEventListener('visibilitychange', vis);
+    return () => document.removeEventListener('visibilitychange', vis);
+  }, []);
   useEffect(() => {
     const rn = window.ReactNativeWebView;
     if (!rn) return undefined;

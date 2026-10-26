@@ -68,7 +68,9 @@ input, textarea, select { font-family: inherit; }
   height: 100%;
   background: var(--black);
   gap: var(--gap);
-  padding: 0 var(--gap) var(--gap);
+  /* Installed on an iPad, or an iPhone turned sideways: clear the status
+     bar, the notch and the home indicator (all 0 elsewhere). */
+  padding: env(safe-area-inset-top) max(var(--gap), env(safe-area-inset-right)) max(var(--gap), env(safe-area-inset-bottom)) max(var(--gap), env(safe-area-inset-left));
 }
 
 .navbar {
@@ -921,7 +923,7 @@ button:not(:disabled), [role=button], a, .card, .tile, .shortcut, .libitem, .tra
 button:disabled { cursor: default; }
 
 /* ---------- full-screen player ---------- */
-.fs { position: fixed; inset: 0; z-index: 200; background: #000; color: #fff; display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+.fs { position: fixed; inset: 0; z-index: 200; background: #000; color: #fff; display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .fs-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(60px) brightness(.35) saturate(1.2); transform: scale(1.1); }
 /* Behind the spectrum: same blur, a touch darker so the bars and their floor reflection stay crisp. */
 .fs-bg.dim { filter: blur(60px) brightness(.22) saturate(1.2); }
@@ -1730,3 +1732,11 @@ button:disabled { cursor: default; }
 .offline-empty h2 { color: var(--text, #fff); margin: 0 0 8px; font-size: 20px; }
 .offline-empty p { margin: 0; max-width: 320px; line-height: 1.4; }
 .offline-banner { position: fixed; left: 50%; transform: translateX(-50%); z-index: 60; background: #3a3a3a; color: #fff; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 500px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+
+/* Touch screens at any width (an iPad, a phone turned sideways, as well as
+   the phone layout): no grey tap flash and no double-tap zoom. Zero
+   specificity, so the sliders' and drag handles' own touch-action wins. */
+@media (pointer: coarse) {
+  * { -webkit-tap-highlight-color: transparent; }
+  :where(html, body, body *) { touch-action: manipulation; }
+}

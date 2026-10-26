@@ -8,7 +8,7 @@
      with a 12pt thumb and 11pt times underneath, shuffle 32 / prev 32 /
      play 64 / next 32 / repeat 32 spread across the width, then the bottom
      row: devices left, lyrics / visualizer / share / queue right. */
-  .fs { display: flex; flex-direction: column; background: linear-gradient(180deg, var(--np, #535353) 0%, color-mix(in srgb, var(--np, #535353) 55%, #121212) 45%, #121212 100%); }
+  .fs { display: flex; flex-direction: column; padding: 0; background: linear-gradient(180deg, var(--np, #535353) 0%, color-mix(in srgb, var(--np, #535353) 55%, #121212) 45%, #121212 100%); }
   .fs-bg { display: none; }
   .fs-top { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 0; padding: calc(4px + env(safe-area-inset-top)) 16px 0; height: auto; min-height: 56px; box-sizing: border-box; flex: none; }
   .fs-chevron { grid-column: 1; grid-row: 1; display: grid; place-items: center; width: 44px; height: 44px; margin: 0; color: #fff; border-radius: 50%; }

@@ -271,9 +271,22 @@ function pumpWarm(dataDir: string, srcOf: (id: string) => Src | undefined, log: 
   }
 }
 
+// An open-ended range (bytes=N-) answered in pieces of this size when the
+// player asks (?chunk=1: the web player in Chrome, WebView, Electron). Over
+// HTTP/2 all answers share the connection's receive window (15 MiB in
+// Chrome), and bytes a media element has not read yet hold it. On the TV
+// the playing original and the next one preloading held it, and every other
+// answer (lyrics, the song a phone just picked) waited until a skip
+// cancelled them (nginx, 2026-10-26: the TV's /api/tracks?ids= and
+// /api/lyrics done 4-12 s late, each the moment a ~15.7 MB /api/stream
+// ended). A 206 shorter than asked is valid; the element asks for the next
+// piece when it wants it, so no more than a piece per element sits unread.
+export const RANGE_CHUNK = 2 << 20;
+const chunkOf = (q: any) => { const n = Number(q?.chunk) || 0; return n <= 0 ? 0 : n === 1 ? RANGE_CHUNK : Math.min(8 << 20, Math.max(16 << 10, n)); };
+
 // A file with byte ranges: speakers seek in originals, and a phone resumes a
 // whole-song download where a dead zone cut it off.
-function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type: string, cache = 'private, max-age=3600', src?: Src) {
+function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type: string, cache = 'private, max-age=3600', src?: Src, chunk = 0) {
   const st = src ? { size: src.size } : fs.statSync(file);
   const open = (start: number, end: number) => (src ? openBytes(src.file, src.head, start, end, src.alt) : fs.createReadStream(file, { start, end }));
   reply.header('Accept-Ranges', 'bytes').header('Cache-Control', cache).type(type);
@@ -286,6 +299,7 @@ function sendRanged(req: FastifyRequest, reply: FastifyReply, file: string, type
     // BluOS asks for bytes=N-SIZE (one past the end) when it seeks; RFC 9110
     // says to clamp, and a 416 here killed every seek on the Node.
     end = Math.min(end, st.size - 1);
+    if (chunk && !range[2] && range[1]) end = Math.min(end, start + chunk - 1);
     if (start >= st.size || start > end) return reply.code(416).header('Content-Range', `bytes */${st.size}`).send();
     reply.code(206).header('Content-Range', `bytes ${start}-${end}/${st.size}`).header('Content-Length', end - start + 1);
     return reply.send(open(start, end));
@@ -424,7 +438,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const id = (req.params as any).id as string;
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
-    return sendRanged(req, reply, src.file, MIME[path.extname(src.name).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src);
+    return sendRanged(req, reply, src.file, MIME[path.extname(src.name).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src, chunkOf(req.query));
   });
 
   // One progressive transcode, started at `startAt` seconds: what a browser

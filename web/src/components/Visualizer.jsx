@@ -37,6 +37,14 @@ export function unlockShadowAudio() {
   return sharedCtx;
 }
 
+// The TV app (Google TV Streamer: four slow cores) spent 10.7 ms of every frame
+// in the analyser's draw at an 8192-point FFT, most of a 16.7 ms frame, and
+// played at 45-54 fps. At 4096 points the draw is 7 ms, at 2048 5 ms (measured
+// on the Streamer, 10-26). A TV starts at 4096 and halves again while the
+// engine's own frame rate stays under 50.
+const IS_TV = typeof window !== 'undefined' && window.slopifyShell?.deviceForm === 'tv';
+const TV_FFT = 4096, TV_FFT_MIN = 2048, TV_MIN_FPS = 50;
+
 // A context whose clock advances in big blocks (a TV's HDMI output: 100 ms) cannot
 // feed a smooth visualizer; above this the shadow copy is analysed even for local playback.
 const COARSE_LATENCY = 0.04;
@@ -145,7 +153,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   // Graphic EQ engine.
   useEffect(() => {
     if (!active) return undefined;
-    let alive = true, offSource = null;
+    let alive = true, offSource = null, slow = null;
     setState('loading');
     (async () => {
       try {
@@ -163,15 +171,17 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
           overlay: true, bgAlpha: 0, showBgColor: false, showScaleX: false, showScaleY: false,
           minFreq: 30, maxFreq: 16000, weightingFilter: 'D', maxFPS: 0,
           ...style.opts, gradient: cfg.gradient === 'album' ? 'classic' : cfg.gradient, smoothing: cfg.smoothing ?? style.opts.smoothing ?? .6,
+          ...(IS_TV ? { fftSize: Math.min(style.opts.fftSize || 8192, TV_FFT) } : {}),
         });
         amRef.current = am;
+        if (IS_TV) slow = setInterval(() => { if (!document.hidden && am.isOn && am.fps > 0 && am.fps < TV_MIN_FPS && am.fftSize > TV_FFT_MIN) am.fftSize /= 2; }, 3000);
         // Local playback re-captures the element on every new track: follow it.
         if (wa.onSource) offSource = wa.onSource((next, prev) => { try { if (prev) am.disconnectInput(prev); } catch { /* not connected */ } try { am.connectInput(next); } catch { /* ignore */ } });
         if (window.location.search.includes('debug')) window.__vizAm = am;
         setState('ready');
       } catch (e) { if (alive) { console.error('visualizer', e); setState('error'); } }
     })();
-    return () => { alive = false; offSource?.(); try { amRef.current?.destroy(); } catch {} amRef.current = null; };
+    return () => { alive = false; clearInterval(slow); offSource?.(); try { amRef.current?.destroy(); } catch {} amRef.current = null; };
   }, [active, tap, style.id, cfg.gradient]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Match album art": three colours from the cover, re-registered on every track.
   const artUrl = player.nowPlaying?.artId ? jf.imageUrl(player.nowPlaying.artId, { maxHeight: 200 }) : player.nowPlaying?.artUrl || null;

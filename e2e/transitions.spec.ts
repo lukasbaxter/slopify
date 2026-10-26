@@ -266,25 +266,3 @@ test('iPhone home-screen app: paused, the stand-in keeps the app alive and a hea
   await expect.poll(() => wav.some((r) => r.sw && r.status === 206), { timeout: 10000 }).toBe(true);
   await ctx.close();
 });
-
-// A stop that is meant (the sleep timer) on the home-screen app: the stand-in
-// still holds the lock screen, but paused, so iOS shows a play button and a
-// still clock instead of a pause button over silence.
-test('iPhone home-screen app: the sleep timer stop leaves the lock screen paused', async ({ browser }) => {
-  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148' });
-  const page = await ctx.newPage();
-  await page.addInitScript(() => { Object.defineProperty(navigator, 'standalone', { get: () => true, configurable: true }); });
-  await open(page);
-  const { ids } = await albumIds(page, 'Analytical');
-  await play(page, [ids[0], ids[1]], null);
-  await expect.poll(() => events(page).then((ev) => ev.some((e) => e.t === 'playing'))).toBe(true);
-  await page.mouse.click(5, 5);
-  await page.evaluate(() => (window as any).__player.setSleepTimer({ endOfTrack: true }));
-  await expect.poll(async () => firstAt(await events(page), 'ended', ids[0]), { timeout: 20000 }).toBeTruthy();
-  const ka = () => page.evaluate(() => (window as any).__conduitKeepAliveState?.());
-  await expect.poll(async () => { const s = await ka(); return s?.wanted && s.quiet; }, { timeout: 5000 }).toBe(true);
-  await page.waitForTimeout(1500);
-  const s = await ka();
-  expect(s.paused === null || s.paused === true).toBe(true);
-  await ctx.close();
-});

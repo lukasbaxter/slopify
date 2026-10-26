@@ -216,9 +216,6 @@ export function usePlayer(jf) {
   // of the track is for the player that is playing it (advance, below).
   const [sleep, setSleepState] = useState(null);
   const sleepRef = useRef(null);
-  // A stop that is meant (sleep timer, end of the offline queue): the held
-  // stand-in starts quiet, so the lock screen shows paused, not a running clock.
-  const quietOnStopRef = useRef(false);
   const applySleep = useCallback((z) => { sleepRef.current = z || null; setSleepState(z || null); }, []);
   const setSleepTimer = useCallback((opt) => {
     const r = relayRef.current; if (!r) return;
@@ -977,7 +974,6 @@ export function usePlayer(jf) {
     // paused at its start (Spotify's way). Play starts it from there.
     if (auto && sleepRef.current?.endOfTrack) {
       mediaLog('sleep timer: end of track, stopping');
-      quietOnStopRef.current = true;
       await stopOn(deviceRef.current).catch(() => {});
       const n = i + 1 < q.length ? i + 1 : repeatRef.current === 'all' ? 0 : i;
       setIndex(n); indexRef.current = n;
@@ -996,7 +992,6 @@ export function usePlayer(jf) {
       if (j >= 0) return skipTo(j);
       const first = q.findIndex((t) => isKept(t.Id));
       if (repeatRef.current === 'all' && first >= 0) return skipTo(first);
-      quietOnStopRef.current = true;
       await stopOn(deviceRef.current).catch(() => {});
       anchorAt(0, false); setPlaying(false);
       return undefined;
@@ -1364,7 +1359,7 @@ export function usePlayer(jf) {
         // bar.
         if (!act) {
           const dev = deviceRef.current;
-          if (dev.kind === 'local') stopOn(dev).catch(() => {}); // unloaded, as in a yield
+          if (dev.kind === 'local') { endFadeRef.current(); const el = audioRef.current; if (el) ownPause(el); }
           else if (dev.kind !== 'relay' && remote) remote.stop(dev).catch(() => {});
           setPlaying(false);
           anchorRef.current = { pos: livePos(), at: Date.now(), playing: false };
@@ -2290,7 +2285,7 @@ export function usePlayer(jf) {
   useEffect(() => { startHereRef.current = startHere; }, [startHere]);
 
   // Run a command another client routed to us.
-  const executeCommand = useCallback(async (cmd, from) => {
+  const executeCommand = useCallback(async (cmd) => {
     if (!cmd) return;
     // Breadcrumb in the device trace: what another client asked of us.
     window.conduit?.debug?.(`command ${cmd.action} tracks=${cmd.trackIds?.length ?? '-'} index=${cmd.index ?? '-'} pos=${cmd.position != null ? Math.round(cmd.position) : '-'} playing=${cmd.playing ?? '-'} device=${cmd.deviceId || '-'} current=${deviceRef.current?.name || '-'}`);
@@ -2367,10 +2362,7 @@ export function usePlayer(jf) {
     else if (cmd.action === 'queueClear') { clearQueuedRef.current(); }
     else if (cmd.action === 'skipTo') { skipToRef.current(cmd.index | 0); }
     else if (cmd.action === 'toggle') { toggleRef.current(); }
-    else if (cmd.action === 'setPlaying') {
-      if (from === 'server' && !cmd.playing) quietOnStopRef.current = true; // the sleep timer's stop
-      if (playingRef.current !== !!cmd.playing) toggleRef.current();
-    }
+    else if (cmd.action === 'setPlaying') { if (playingRef.current !== !!cmd.playing) toggleRef.current(); }
     else if (cmd.action === 'volumeStep') { volumeStepRef.current(Number(cmd.step) || 0); }
     else if (cmd.action === 'seek') { seekRef.current(cmd.pos || 0); }
     else if (cmd.action === 'setVolume') { setVolumeRef.current(cmd.level ?? 100); }
@@ -2402,13 +2394,10 @@ export function usePlayer(jf) {
   }, []);
 
   // Stop local audio and remote-device playback because another client took over.
-  // The song is unloaded, not just paused: a paused element still holding
-  // media can be the page's Now Playing in WebKit and show paused on the lock
-  // screen while the other device plays. Playing here again loads it afresh.
   yieldRef.current = () => {
     mediaLog('yield: another device took over');
     const dev = deviceRef.current;
-    if (dev.kind === 'local') stopOn(dev).catch(() => {});
+    if (dev.kind === 'local') { endFadeRef.current(); const el = audioRef.current; if (el) ownPause(el); }
     else if (dev.kind !== 'relay' && remote) remote.pause(dev).catch(() => {});
     setPlaying(false);
     anchorRef.current = { pos: livePos(), at: Date.now(), playing: false };
@@ -2517,7 +2506,6 @@ export function usePlayer(jf) {
   const msRemote = !msLocal && !!nowPlaying;
   const msRefs = useRef({});
   const lastToldRef = useRef('');
-  const toldPosRef = useRef(null); // the last setPositionState: { pos, at, playing, duration }
   // Phone app and home-screen web app: the lock-screen player stays for 2
   // hours after the last music anywhere on the account. Without sound iOS
   // suspends the app within a minute, the player leaves the lock screen and
@@ -2562,11 +2550,7 @@ export function usePlayer(jf) {
     }
   };
   const pausedAtRef = useRef(0);
-  useEffect(() => {
-    if (shownPlaying) { quietOnStopRef.current = false; quietKeepAlive(false); return; }
-    pausedAtRef.current = Date.now();
-    if (quietOnStopRef.current) { quietOnStopRef.current = false; quietKeepAlive(true); }
-  }, [shownPlaying]);
+  useEffect(() => { if (!shownPlaying) pausedAtRef.current = Date.now(); else quietKeepAlive(false); }, [shownPlaying]);
   msRefs.current = { toggle, setPlaying: setPlayingTo, next, previous, seek, playing: shownPlaying, resync: msResync, remote: msRemote, holding, holdBridge, pausedAt: pausedAtRef.current };
   // The last lock-screen actions and where they went, for a debugger attached
   // to the phone (window.__slopifyMediaLog).
@@ -2658,35 +2642,17 @@ export function usePlayer(jf) {
     if (told !== lastToldRef.current) {
       lastToldRef.current = told;
       const ka = keepAliveState(); const el = audioRef.current;
-      mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState}; stand-in ${ka.paused == null ? 'none' : ka.paused ? 'paused' : 'playing'}${ka.quiet ? ' quiet' : ''} ready=${ka.ready}; element ${el ? (!el.getAttribute('src') ? 'empty' : el.paused ? 'paused' : 'playing') : 'none'})`);
+      mediaLog(`lock screen told: ${told} (reads back ${ms.playbackState}; stand-in ${ka.paused == null ? 'none' : ka.paused ? 'paused' : 'playing'}${ka.quiet ? ' quiet' : ''} ready=${ka.ready}; element ${el ? (el.paused ? 'paused' : 'playing') : 'none'})`);
     }
     // iOS reads the action handlers when the media starts or stops: set
     // before the keep-alive element played, they were sometimes ignored and
     // the lock screen showed 10-second skips instead of previous / next.
     msActions();
     if (shownDuration > 0 && typeof ms.setPositionState === 'function') {
-      const pos = Math.min(Math.max(0, shownPosition || 0), shownDuration);
-      try { ms.setPositionState({ duration: shownDuration, playbackRate: 1, position: pos }); toldPosRef.current = { pos, at: Date.now(), playing: shownPlaying, duration: shownDuration }; } catch { /* invalid state */ }
+      try { ms.setPositionState({ duration: shownDuration, playbackRate: 1, position: Math.min(Math.max(0, shownPosition || 0), shownDuration) }); } catch { /* invalid state */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownPlaying, Math.floor(shownPosition || 0), shownDuration, nowPlaying?.itemId, msLocal, msRemote, standIn]);
-  // Mirroring: a report that only moves the playhead (a seek on the other
-  // device, a stall there) re-renders nothing (applyRoster), and the lock
-  // screen went on counting from what it was told last. Checked once a
-  // second against the live playhead; told again when 2 s apart.
-  useEffect(() => {
-    const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
-    if (!msRemote || !ms || typeof ms.setPositionState !== 'function') return undefined;
-    const t = setInterval(() => {
-      const told = toldPosRef.current;
-      if (!told || !relayNowRef.current?.()) return;
-      const now = positionNow();
-      if (Math.abs(now - (told.pos + (told.playing ? (Date.now() - told.at) / 1000 : 0))) < 2) return;
-      const pos = Math.min(Math.max(0, now), told.duration);
-      try { ms.setPositionState({ duration: told.duration, playbackRate: 1, position: pos }); toldPosRef.current = { ...told, pos, at: Date.now() }; } catch { /* invalid state */ }
-    }, 1000);
-    return () => clearInterval(t);
-  }, [msRemote, positionNow]);
   // The session's queue: the active player's published one while mirroring.
   // Its index only counts when it points at the track that is actually
   // playing (the queue and now-playing arrive as separate messages).

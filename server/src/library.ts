@@ -66,14 +66,32 @@ export function ftsQuery(q: string) {
 // end-of-queue continuation.
 export function mixFor(db: DB, id: string, limit: number): TrackRow[] | null {
   const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id) as TrackRow | undefined;
-  if (!t) return null;
-  const artistIds = JSON.parse(t.artist_ids) as string[], genres = JSON.parse(t.genres) as string[];
+  return t ? mixFrom(db, [t], limit) : null;
+}
+
+// An album's or a playlist's radio: one of its songs leads, then songs that go
+// with all of them (their artists and genres), the seeds themselves left out.
+export function mixForSet(db: DB, id: string, limit: number): TrackRow[] | null {
+  const album = db.prepare('SELECT 1 FROM albums WHERE id = ?').get(id);
+  const seeds = (album
+    ? db.prepare(`${TRACK_SELECT} WHERE t.album_id = ?`).all(id)
+    : db.prepare(`${TRACK_SELECT} JOIN playlist_tracks p ON p.track_id = t.id WHERE p.playlist_id = ? ORDER BY p.pos`).all(id)) as TrackRow[];
+  if (!seeds.length) return null;
+  const lead = seeds[Math.floor(Math.random() * seeds.length)];
+  return mixFrom(db, [lead, ...seeds.filter((s) => s.id !== lead.id).sort(() => Math.random() - 0.5).slice(0, 9)], limit, new Set(seeds.map((s) => s.id)));
+}
+
+function mixFrom(db: DB, seeds: TrackRow[], limit: number, skip = new Set(seeds.map((s) => s.id))): TrackRow[] {
+  const artistIds = new Set<string>(), genres = new Set<string>();
+  for (const s of seeds) { for (const a of JSON.parse(s.artist_ids) as string[]) artistIds.add(a); for (const g of JSON.parse(s.genres) as string[]) genres.add(g); }
   const pick = new Map<string, TrackRow>();
-  for (const a of artistIds) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 40`).all(`%"${a}"%`, t.id) as TrackRow[]) pick.set(r.id, r);
-  for (const g of genres) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 60`).all(`%${JSON.stringify(g)}%`, t.id) as TrackRow[]) pick.set(r.id, r);
-  if (pick.size < 20) for (const r of db.prepare(`${TRACK_SELECT} WHERE t.id != ? ORDER BY RANDOM() LIMIT 60`).all(t.id) as TrackRow[]) pick.set(r.id, r);
+  const add = (rows: TrackRow[]) => { for (const r of rows) if (!skip.has(r.id)) pick.set(r.id, r); };
+  const lead = seeds[0].id;
+  for (const a of artistIds) add(db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 40`).all(`%"${a}"%`, lead) as TrackRow[]);
+  for (const g of genres) add(db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.id != ? ORDER BY RANDOM() LIMIT 60`).all(`%${JSON.stringify(g)}%`, lead) as TrackRow[]);
+  if (pick.size < 20) add(db.prepare(`${TRACK_SELECT} WHERE t.id != ? ORDER BY RANDOM() LIMIT 60`).all(lead) as TrackRow[]);
   const rows = [...pick.values()]; for (let i = rows.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rows[i], rows[j]] = [rows[j], rows[i]]; }
-  return [t, ...rows.slice(0, limit - 1)];
+  return [seeds[0], ...rows.slice(0, limit - 1)];
 }
 
 // Home's Daily Mix for an artist, Spotify-style: the artist (what this
@@ -198,7 +216,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     // An artist seeds Home's Daily Mixes.
     const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
     if (artist) return { items: (await artistMix(db, artist, limit, (req as any).user?.id)).map(trackOut) };
-    const items = mixFor(db, id, limit);
+    // A track, or an album's / playlist's page ("Go to radio").
+    const items = mixFor(db, id, limit) || mixForSet(db, id, limit);
     if (!items) return reply.code(404).send({ error: 'no such track' });
     return { items: items.map(trackOut) };
   });

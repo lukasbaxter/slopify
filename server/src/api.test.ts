@@ -47,6 +47,17 @@ describe('library API', () => {
     expect(img.statusCode).toBe(200); expect(img.headers['content-type']).toBe('image/webp'); expect(img.headers['cache-control']).toContain('immutable');
     expect((await app.inject({ method: 'GET', url: `/api/art/${cover}/999.jpg` })).statusCode).toBe(200); // nearest size
   });
+  it("an album's and a playlist's radio: one of their songs leads, the rest go with them", async () => {
+    const a = (await get('/api/albums?limit=100')).json().items.find((x: any) => x.name === 'First Light');
+    const songs = (await get(`/api/albums/${a.id}`)).json().tracks.map((t: any) => t.id);
+    const r = await get(`/api/tracks/${a.id}/mix?limit=10`); expect(r.statusCode).toBe(200);
+    const items = r.json().items; expect(items.length).toBeGreaterThan(1); expect(songs).toContain(items[0].id);
+    expect(items.slice(1).filter((t: any) => songs.includes(t.id))).toEqual([]);
+    const pid = (await send('POST', '/api/playlists', { name: 'radio seed' })).json().id;
+    expect((await send('POST', `/api/playlists/${pid}/tracks`, { trackIds: songs.slice(0, 2) })).statusCode).toBe(200);
+    const p = (await get(`/api/tracks/${pid}/mix?limit=10`)).json().items; expect(songs.slice(0, 2)).toContain(p[0].id);
+    expect((await get('/api/tracks/nope/mix')).statusCode).toBe(404);
+  });
   it('requires a login', async () => { expect((await app.inject({ method: 'GET', url: '/api/albums' })).statusCode).toBe(401); });
   it('browse tiles and a genre hub keep their shapes (and the tracks answer is cached)', async () => {
     const b = (await get('/api/browse')).json();

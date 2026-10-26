@@ -13,6 +13,8 @@ import { addPlay } from '../offline/store.js';
 
 const CACHE_PREFIX = 'slopify.cache.';
 const SESSION_KEY = 'slopify.session';
+// Chrome's network stack (Chrome, Android WebView, Electron); not iOS (CriOS is WebKit).
+const CHROMIUM = typeof navigator !== 'undefined' && /Chrome\//.test(navigator.userAgent || '');
 
 function deviceId() {
   const KEY = 'slopify.deviceId';
@@ -232,7 +234,10 @@ export class Slopify {
   // the transcode (HLS only: a player that cannot scale the audio itself).
   playbackUrl(itemId, { startAt = 0, norm = null } = {}) {
     const mode = this.streamMode();
-    if (mode === 'file') return this.streamUrl(itemId);
+    // Chrome (WebView, Electron): the original in 2 MiB pieces (server: RANGE_CHUNK).
+    // Unread bytes of a whole-file response held the HTTP/2 window and stalled
+    // every other answer (the TV's lyrics, a song picked from the phone).
+    if (mode === 'file') return CHROMIUM ? this._url(`/api/stream/${itemId}`, { chunk: '1' }) : this.streamUrl(itemId);
     // Adaptive: every start is on 96k (the first variant listed, the one
     // prewarm() puts in the cache) and iOS climbs to the chosen quality as
     // the link allows, back down on a weak signal instead of stopping.

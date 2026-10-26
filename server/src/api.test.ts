@@ -80,6 +80,27 @@ describe('streaming', () => {
     const suf = await app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}`, headers: { range: 'bytes=-999999999' } });
     expect(suf.statusCode).toBe(206); expect(suf.headers['content-range']).toBe(`bytes 0-${size - 1}/${size}`); expect(suf.headers['content-length']).toBe(String(size));
   });
+  it('answers an open-ended range in pieces when the player asks (chunk), bounded ranges as asked', async () => {
+    const t = (await get('/api/albums?limit=1')).json().items[0];
+    const id = (await get(`/api/albums/${t.id}`)).json().tracks[0].id;
+    const size = Number((await get(`/api/stream/${id}`)).headers['content-length']);
+    const at = (range: string, q = '') => app.inject({ method: 'GET', url: `/api/stream/${id}?token=${tok}${q}`, headers: { range } });
+    expect(size).toBeGreaterThan(40000);
+    // Not asked: the whole rest, as before (speakers, HA, Safari).
+    expect((await at('bytes=100-')).headers['content-range']).toBe(`bytes 100-${size - 1}/${size}`);
+    // Asked: one piece (16 KiB is the smallest a client can ask for), then the next from where it ended.
+    const a = await at('bytes=0-', '&chunk=16384');
+    expect(a.statusCode).toBe(206); expect(a.headers['content-range']).toBe(`bytes 0-16383/${size}`); expect(a.headers['content-length']).toBe('16384');
+    const b = await at('bytes=16384-', '&chunk=16384');
+    expect(b.headers['content-range']).toBe(`bytes 16384-32767/${size}`);
+    expect(Buffer.concat([a.rawPayload, b.rawPayload]).equals((await at('bytes=0-32767')).rawPayload)).toBe(true);
+    // The last piece ends at the file's end; a bounded range and a suffix are answered as asked.
+    expect((await at(`bytes=${size - 100}-`, '&chunk=16384')).headers['content-range']).toBe(`bytes ${size - 100}-${size - 1}/${size}`);
+    expect((await at('bytes=0-29999', '&chunk=16384')).headers['content-length']).toBe('30000');
+    expect((await at('bytes=-30000', '&chunk=16384')).headers['content-length']).toBe('30000');
+    // chunk=1: the default piece, 2 MiB (the fixture is smaller: all of it).
+    expect((await at('bytes=0-', '&chunk=1')).headers['content-range']).toBe(`bytes 0-${Math.min(size, 2 << 20) - 1}/${size}`);
+  });
   it('streams lossless as ALAC in fragmented MP4: one rung, init segment, no whole file', async () => {
     const id = (await get('/api/albums?limit=1')).json().items[0];
     const tid = (await get(`/api/albums/${id.id}`)).json().tracks[0].id;

@@ -199,9 +199,13 @@ export async function artistImagesPass(db: DB, opts: EnrichOptions = {}): Promis
           // a failure too, never a cacheable "unknown artist". Throwing here
           // keeps `cached` from storing a 30-day miss.
           if (!j || j.error) throw new Error(`deezer ${j?.error ? JSON.stringify(j.error).slice(0, 80) : r.status}`);
-          return (j.data || []).map((d: any) => ({ name: d.name, picture: d.picture_xl || d.picture_big || null }));
-        }) as { name: string; picture: string | null }[];
-        const hit = list.find((d) => normName(d.name) === normName(a.name) && d.picture && !/artist\/\/?\d*x\d*/.test(d.picture) && !/\/artist\/(1000x1000|500x500)-/.test(d.picture));
+          return (j.data || []).map((d: any) => ({ name: d.name, picture: d.picture_xl || d.picture_big || null, fans: Number(d.nb_fan) || 0 }));
+        }) as { name: string; picture: string | null; fans?: number }[];
+        // Several artists can share the exact name (a search for "Drake" put a
+        // small metal band of that name first): the one with the most fans is
+        // the one a library full of their songs means.
+        const named = list.filter((d) => normName(d.name) === normName(a.name) && d.picture && !/artist\/\/?\d*x\d*/.test(d.picture) && !/\/artist\/(1000x1000|500x500)-/.test(d.picture));
+        const hit = named.reduce<typeof named[number] | undefined>((best, d) => (!best || (d.fans ?? 0) > (best.fans ?? 0) ? d : best), undefined);
         url = hit?.picture ?? null;
       } catch (e: any) { failed = true; log(`deezer ${a.name}: ${e.message}`); }
     }

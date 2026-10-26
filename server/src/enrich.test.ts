@@ -98,6 +98,23 @@ describe('fetched extras land in the library (saveToLibrary)', () => {
     expect((db.prepare('SELECT src FROM artwork WHERE hash = ?').get(row.image_hash) as any).src).toBe(path.join(dir, 'artist.jpg'));
   });
 
+  it('of several Deezer artists with the exact name, the one with the most fans is taken', async () => {
+    const sharp = (await import('sharp')).default;
+    const jpg = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 10, g: 20, b: 30 } } }).jpeg().toBuffer();
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-samename-'));
+    const db2 = openDb(d2);
+    db2.exec("INSERT INTO artists (id, name, sort_name, track_count) VALUES ('dr','Drake','drake',369)");
+    const deezer: Fetcher = async () => ({ status: 200, json: async () => ({ data: [
+      { name: 'Drake', picture_xl: 'https://cdn.example/images/artist/metalband/1000x1000-000000-80-0-0.jpg', nb_fan: 312 },
+      { name: 'Drake', picture_xl: 'https://cdn.example/images/artist/therapper/1000x1000-000000-80-0-0.jpg', nb_fan: 29000000 },
+      { name: 'Drake Bell', picture_xl: 'https://cdn.example/images/artist/bell/1000x1000-000000-80-0-0.jpg', nb_fan: 900000 },
+    ] }) });
+    const asked: string[] = [];
+    const r = await artistImagesPass(db2, { fetcher: deezer, bytes: async (u) => { asked.push(u); return Buffer.concat([jpg, Buffer.alloc(Math.max(0, 2001 - jpg.length))]); }, dataDir: d2, max: 5 });
+    expect(r.found).toBe(1);
+    expect(asked).toEqual(['https://cdn.example/images/artist/therapper/1000x1000-000000-80-0-0.jpg']);
+  });
+
   it('a Deezer album cover is saved as cover.jpg in the album folder and recorded', async () => {
     const sharp = (await import('sharp')).default;
     const jpg = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 200, g: 0, b: 0 } } }).jpeg().toBuffer();

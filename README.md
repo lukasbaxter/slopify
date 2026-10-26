@@ -1,5 +1,7 @@
 # Slopify
 
+![Slopify playing the same song on a TV, a MacBook Pro, an iPad and an iPhone, with the music library on two hard drives beside them](docs/images/cover.jpg)
+
 Self-hosted music: one container and your music folder give your household
 Spotify-style apps (web, Android, iPhone, Mac, Windows) with a shared session across
 them, Chromecast and BluOS speakers driven by the server, and a Home Assistant
@@ -126,3 +128,5 @@ Third-party software and its licenses: [NOTICE](NOTICE) and
 
 Slopify is not affiliated with, endorsed by or connected to Spotify AB.
 "Spotify" is a trademark of Spotify AB.
+
+Cover image: rendered in Blender on free assets, credits in [docs/images/CREDITS.md](docs/images/CREDITS.md).

@@ -218,4 +218,20 @@ describe('Spotify import', () => {
     expect((db.prepare("SELECT at FROM likes WHERE user_id = 'u1' AND track_id = ?").get(d.id) as any).at).toBe(7);
     expect(db.prepare('SELECT title FROM spotify_pending').all()).toEqual([{ title: 'Coming' }]);
   });
+
+  it('after a scan, only checks songs a touched track could match', async () => {
+    db.prepare('DELETE FROM spotify_pending').run();
+    const [, , , , e] = tracks;
+    db.prepare("DELETE FROM likes WHERE user_id = 'u1' AND track_id = ?").run(e.id);
+    db.prepare("INSERT INTO spotify_pending (user_id, kind, playlist_id, pos, at, artist, title, created, state) VALUES ('u1', 'like', '', NULL, 9, ?, ?, ?, 'requested')").run(e.artist, e.title, Date.now());
+    const later = Date.now() + 60000;
+    // Nothing touched since: the row is not looked at, even though it would match.
+    db.prepare('UPDATE tracks SET added_at = 1, mtime = 1').run();
+    expect(fillPending(db, () => {}, { since: later })).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) n FROM spotify_pending').get() as any).n).toBe(1);
+    // Its track arrives (added after `since`): matched.
+    db.prepare('UPDATE tracks SET added_at = ? WHERE id = ?').run(later + 1, e.id);
+    expect(fillPending(db, () => {}, { since: later })).toBe(1);
+    expect((db.prepare("SELECT at FROM likes WHERE user_id = 'u1' AND track_id = ?").get(e.id) as any).at).toBe(9);
+  });
 });

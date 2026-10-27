@@ -237,10 +237,28 @@ export async function requestPending(db: DB, lidarr: Lidarr, log: (m: string) =>
 // Spotify order), a playlist song back at its position (or the end, if the
 // playlist was edited since), a saved album in saved albums. Rows older than
 // 60 days are dropped: whatever has not come by then is not coming.
-export function fillPending(db: DB, log: (m: string) => void = () => {}) {
+// `since`: only songs that could match a track added or changed from then on.
+// Every pending row through matchTrack is ~16 s of blocked event loop with
+// 5,800 rows (2026-10-27: each FLAC upgrade's folder scan froze every
+// stream and socket for 16 s, so songs did not load). A song that did not
+// match before can only match now through a touched track, and matchTrack
+// needs the artist to match loosely, so rows whose artist matches no touched
+// track are skipped; the rest still go through the whole library.
+export function fillPending(db: DB, log: (m: string) => void = () => {}, opts: { since?: number } = {}) {
   db.prepare('DELETE FROM spotify_pending WHERE created < ?').run(Date.now() - 60 * 86400000);
-  const rows = db.prepare('SELECT * FROM spotify_pending').all() as any[];
+  let rows = db.prepare('SELECT * FROM spotify_pending').all() as any[];
   if (!rows.length) return 0;
+  if (opts.since != null) {
+    const touched = (db.prepare('SELECT artist, artists FROM tracks WHERE added_at >= ? OR mtime >= ?').all(opts.since, opts.since) as { artist: string; artists: string }[])
+      .map((t) => [t.artist, ...JSON.parse(t.artists || '[]')].map(norm));
+    const albumsTouched = (db.prepare('SELECT COUNT(*) n FROM albums WHERE added_at >= ?').get(opts.since) as any).n > 0;
+    rows = rows.filter((r) => {
+      if (r.kind === 'album') return albumsTouched;
+      const na = norm(r.artist);
+      return touched.some((as) => as.some((a) => a === na || a.includes(na) || na.includes(a)));
+    });
+    if (!rows.length) return 0;
+  }
   const albumRows = db.prepare('SELECT id, name, artist FROM albums').all() as { id: string; name: string; artist: string }[];
   const albumBy = new Map(albumRows.map((a) => [`${norm(a.artist)}|${norm(a.name)}`, a.id]));
   let n = 0;
@@ -274,7 +292,16 @@ export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: str
     if (!lidarr || draining) return;
     draining = requestPending(db, lidarr, log).catch((e: any) => app.log.warn(`spotify import requests: ${e.message}`)).finally(() => { draining = null; });
   };
-  (app as any).afterScan?.(() => fillPending(db, log));
+  // After a scan only what it touched: from the last check (kept across
+  // restarts; before the first one every scan checked everything), with a
+  // margin for a scan that stamped a track just before the last check and
+  // wrote it just after.
+  (app as any).afterScan?.(() => {
+    const at = Date.now();
+    const last = Number((db.prepare("SELECT v FROM kv WHERE k = 'spotify_pending_checked'").get() as any)?.v) || at;
+    fillPending(db, log, { since: last - 10 * 60000 });
+    db.prepare("INSERT INTO kv (k, v) VALUES ('spotify_pending_checked', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(String(at));
+  });
   // Pick up where a restart left off, and retry what failed, now and then.
   if (process.env.NODE_ENV !== 'test' && lidarr) {
     const t = setTimeout(drain, 60000); const iv = setInterval(drain, 6 * 3600000);

@@ -205,7 +205,6 @@ export class SessionLink {
   }
   sendPrefs(prefs) { this._send({ type: 'prefs', prefs }); }
   // A like / unlike; the server stores the timestamp and tells the other clients.
-  sendLike(itemId, liked) { this._send({ type: 'like', itemId, liked }); }
   // The account's sleep timer: { minutes }, { endOfTrack: true } or { off: true }.
   sendSleep(opt) { this._send({ type: 'sleep', ...opt }); }
   // A speaker's measured visualizer offset in seconds (null = forget it).

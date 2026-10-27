@@ -84,3 +84,22 @@ test.describe('lyrics', () => {
     expect(new Set(asks).size).toBe(1); // the same song, asked again
   });
 });
+
+// A socket iOS let die in the background still reads OPEN until it times out;
+// a like sent on it was lost and the heart flipped back on the next reconnect.
+test('a like is saved even when the session socket is silently dead', async ({ page }, info) => {
+  test.skip(info.project.name !== 'chromium', 'one project: the two share the server');
+  await page.addInitScript(() => {
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (d: any) { if ((window as any).__deadSocket) return; return send.call(this, d); };
+  });
+  await login(page); await waitForLibrary(page);
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
+  const row = page.locator('.trackrow').nth(5);
+  await expect(row).toBeVisible({ timeout: 15000 });
+  const auth = { Authorization: `Bearer ${await page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token || '')}` };
+  const before = Object.keys((await (await page.request.get('/api/likes', { headers: auth })).json()).at || {});
+  await page.evaluate(() => { (window as any).__deadSocket = true; });
+  await row.locator('.trackrow-like').click();
+  await expect.poll(async () => Object.keys((await (await page.request.get('/api/likes', { headers: auth })).json()).at || {}).length, { timeout: 8000 }).toBe(before.length + 1);
+});

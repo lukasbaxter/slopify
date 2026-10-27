@@ -881,10 +881,11 @@ export default function App() {
 
   const onLike = async (track, liked) => {
     likesSet(track.Id, liked);
-    // The relay stores it, writes the Jellyfin favourite through, and echoes it
-    // to every client (this one included, with the server's timestamp).
-    if (player.relay?.connected) player.relay.sendLike(track.Id, liked);
-    else { try { await jf.setFavorite(track.Id, liked); } catch (e) { likesSet(track.Id, !liked); notify(`Not saved: ${e.message.slice(0, 60)}`); return; } }
+    // Over HTTP, never the session socket: iOS leaves a backgrounded socket
+    // reading OPEN while dead, and a like sent on it was lost with no error
+    // (the heart flipped back on the next reconnect). The server echoes it to
+    // every client (this one included, with its timestamp) either way.
+    try { await jf.setFavorite(track.Id, liked); } catch (e) { likesSet(track.Id, !liked); notify(`Not saved: ${e.message.slice(0, 60)}`); return; }
     notify(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs');
     // Keep the row so Liked Songs can show it without a fetch.
     if (liked) {

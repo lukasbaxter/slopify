@@ -51,12 +51,26 @@ async function keepWav(c) {
 }
 // The stand-in's media, from the kept copy: the player asks for byte ranges
 // (the OS seeks it), answered as a server would (206 + Content-Range).
-async function wav(req) {
+// Read from Cache Storage once and then kept in memory: every range used to
+// read the whole 9.6 MB again. And Cache Storage does not answer at all while
+// the app is in the background (the phone locked: caches.keys() and match()
+// never settle; tools/ios-sim, 10-26), so a stand-in that had to load again
+// there (a locked hand-off to another device) got no data, never played, and
+// the lock screen lost the session. A read that has not answered in 1.5 s
+// gives way to the server.
+let wavBlob = null;
+async function keptWav() {
+  if (wavBlob) return wavBlob;
   const c = await caches.open(SHELL);
   let hit = await c.match(WAV);
   if (!hit) { await keepWav(c).catch(() => {}); hit = await c.match(WAV); }
-  if (!hit) return fetch(req);
-  const blob = await hit.blob();
+  if (!hit) return null;
+  wavBlob = await hit.blob();
+  return wavBlob;
+}
+async function wav(req) {
+  const blob = await Promise.race([keptWav().catch(() => null), new Promise((r) => setTimeout(() => r(null), 1500))]);
+  if (!blob) return fetch(req);
   const size = blob.size;
   const common = { 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
   const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('Range') || '');

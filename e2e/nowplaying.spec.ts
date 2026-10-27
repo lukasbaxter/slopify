@@ -206,6 +206,29 @@ test('declaring "playing" hands WebKit\'s current session back to the element th
   await phone.context().close();
 });
 
+test('the stand-in\'s media still comes when Cache Storage does not answer (the app in the background)', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'its own context');
+  // Locked, Cache Storage does not answer, and the service worker served
+  // keepalive.wav only from there: a stand-in that loaded again (a locked
+  // hand-off to another device) got no data, and the lock screen lost the
+  // session. Here Cache Storage is made to hang in the worker: the media
+  // must still come (from the worker's copy in memory, or the server).
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+  await page.reload(); // controlled by the worker from here
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), { timeout: 10000 }).toBe(true);
+  const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker');
+  await sw.evaluate(() => { const never = () => new Promise(() => {}); (self as any).caches.open = never; (self as any).caches.match = never; (self as any).caches.keys = never; });
+  const got = await page.evaluate(() => Promise.race([
+    fetch('keepalive.wav', { headers: { Range: 'bytes=1000-1099' } }).then((r) => `${r.status} ${r.headers.get('content-range')}`),
+    new Promise((r) => setTimeout(() => r('no answer in 5 s'), 5000)),
+  ]));
+  expect(got).toMatch(/^206 bytes 1000-1099\//);
+  await ctx.close();
+});
+
 test('an emptied song element is muted, and unmuted with its next song', async ({ browser }, info) => {
   test.skip(info.project.name !== 'chromium', 'two devices of its own');
   // An emptied element still counts for WebKit's Now Playing while it is

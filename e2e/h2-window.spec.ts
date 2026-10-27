@@ -19,7 +19,7 @@ import { login } from './helpers';
 
 let server: ChildProcess | null = null, front: http2.Http2SecureServer | null = null, dir = '', base = '';
 
-test.beforeAll(async ({}, info) => {
+test.beforeAll(async ({}, info) => { // eslint-disable-line no-empty-pattern -- Playwright wants the fixtures destructured
   if (info.project.name !== 'chromium') return;
   test.setTimeout(120000);
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-h2-'));

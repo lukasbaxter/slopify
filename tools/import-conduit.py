@@ -7,9 +7,9 @@ likes table; Jellyfin favourites as the fallback), and listening history
 Tracks are matched through Slopify's Jellyfin alias id (tracks.jf_id, the
 Jellyfin id of the same path), so nothing depends on tags.
 
-  import-conduit.py --slopify https://music.baxtergroup.io --slopify-db slopify.db \
-      --relay-db relay.db --jellyfin http://192.168.1.85:2101 --jf-admin USER:PASS \
-      --user lukasbaxter:PASS --jf-user lukasbaxter [--jf-user henryb]
+  import-conduit.py --slopify https://music.example.com --slopify-db slopify.db \
+      --relay-db relay.db --jellyfin http://jellyfin.local:8096 --jf-admin USER:PASS \
+      --user alice:PASS --jf-user alice [--jf-user bob]
 """
 import argparse, json, sqlite3, sys, time, urllib.parse, urllib.request
 

@@ -62,7 +62,7 @@ export function usePlayingFrom(player, jf) {
  * (the phone CSS animates translateY(100%) over 250ms), then runs `done`.
  * Off the phone it just runs `done`.
  */
-// The lyrics glyph, traced from the icon Lukas picked (icons8 "mic", measured
+// The lyrics glyph, traced from the chosen icon (icons8 "mic", measured
 // along its axis): ball head cut flat at the neck, a short gap, a tapered
 // handle with a flat end and a pill slot near the neck, at 45 degrees. Filled
 // like the original. One drawing everywhere.

@@ -19,8 +19,8 @@ def hid(n: int) -> str:
 
 
 USER_ID = "a" * 32
-HENRY_ID = "b" * 32
-VICTORIA_ID = "c" * 32
+BOB_ID = "b" * 32
+CAROL_ID = "c" * 32
 SERVER_ID = "5" * 32
 SERVER_CLIENT = f"server:{USER_ID}"
 
@@ -178,7 +178,7 @@ class FakeSlopify:
         self.requests: list[str] = []
         # Household: other accounts and their sessions (the main account's live on self).
         self.admin = False
-        self.users: dict[str, str] = {USER_ID: "lukas", HENRY_ID: "henrybaxter", VICTORIA_ID: "victoria"}
+        self.users: dict[str, str] = {USER_ID: "alice", BOB_ID: "bob", CAROL_ID: "carol"}
         self.others: dict[str, SimpleNamespace] = {}
         self.socket_user: dict[int, str] = {}
         self.commands_by_user: list[tuple[str, dict[str, Any]]] = []
@@ -321,7 +321,7 @@ class FakeSlopify:
     async def _login(self, request: web.Request) -> web.StreamResponse:
         body = await request.json()
         self.requests.append(f"login {body.get('username')} {body.get('device')} {body.get('kind')}")
-        if body.get("username") != "lukas" or body.get("password") != self.password:
+        if body.get("username") != "alice" or body.get("password") != self.password:
             return web.json_response({"error": "wrong username or password"}, status=401)
         token = f"tok-{secrets.token_hex(4)}"
         self.tokens[token] = USER_ID
@@ -330,7 +330,7 @@ class FakeSlopify:
                 "token": token,
                 "user": {
                     "id": USER_ID,
-                    "name": "lukas",
+                    "name": "alice",
                     "role": self._role(USER_ID),
                     "mustChangePassword": self.must_change,
                 },

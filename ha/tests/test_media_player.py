@@ -54,7 +54,7 @@ from .fake_slopify import (
     row,
 )
 
-E = "media_player.slopify_lukas"
+E = "media_player.slopify_alice"
 WEB = {"id": "web-1", "name": "Web Player (1)", "kind": "web", "canPlay": True, "nowPlaying": None, "sameNetwork": True}
 SPEAKERS = [{**SPEAKER_KITCHEN, "viaClient": SERVER_CLIENT}, {**SPEAKER_DEN, "viaClient": SERVER_CLIENT}]
 
@@ -639,5 +639,5 @@ async def test_diagnostics_never_include_the_token(
     diag = await get_diagnostics_for_config_entry(hass, hass_client, loaded)
     text = str(diag)
     assert "tok-valid" not in text and "SECRET" not in text
-    assert diag["accounts"]["lukas"]["connected"] is True
-    assert [s["name"] for s in diag["accounts"]["lukas"]["sources"]] == ["Den", "Kitchen", "Web Player (1)"]
+    assert diag["accounts"]["alice"]["connected"] is True
+    assert [s["name"] for s in diag["accounts"]["alice"]["sources"]] == ["Den", "Kitchen", "Web Player (1)"]

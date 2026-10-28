@@ -163,10 +163,10 @@ to that track swaps the elements and calls `play()`.
   once a minute per token.
 - **nginx.** `upstream slopify { keepalive 32 }` plus `proxy_set_header
   Connection ""` (every segment was opening a new connection to node), and a
-  TLS session cache. Note `music.baxtergroup.io` is DNS-only on purpose:
-  Cloudflare throttles the audio streams.
+  TLS session cache. Behind Cloudflare, make the record DNS-only: its proxy
+  throttles the audio streams.
 - **Container timezone.** It ran UTC, so the nightly job fired at the wrong
-  hour. `TZ: America/Vancouver` is in the compose file.
+  hour. Set `TZ` (e.g. `TZ: Europe/Berlin`) in the compose file.
 
 ## What the transport buttons do
 

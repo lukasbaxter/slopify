@@ -18,13 +18,13 @@ from custom_components.slopify.const import CONF_HOUSEHOLD, DOMAIN
 
 from .fake_slopify import (
     ALBUM_KID,
-    HENRY_ID,
+    BOB_ID,
+    CAROL_ID,
     SPEAKER_DEN,
     SPEAKER_KITCHEN,
     T4,
     T5,
     USER_ID,
-    VICTORIA_ID,
     FakeSlopify,
     now_playing,
     row,
@@ -32,7 +32,7 @@ from .fake_slopify import (
 
 KITCHEN = "media_player.kitchen_slopify"
 DEN = "media_player.den_slopify"
-EVERYONE = ["Slopify - lukas", "Slopify - henrybaxter", "Slopify - victoria"]
+EVERYONE = ["Slopify - alice", "Slopify - bob", "Slopify - carol"]
 
 
 @pytest.fixture
@@ -59,9 +59,9 @@ async def call(hass: HomeAssistant, entity: str, service: str, **data: Any) -> N
 
 
 async def test_every_account_gets_a_player(hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify) -> None:
-    for entity in ("media_player.slopify_lukas", "media_player.slopify_henrybaxter", "media_player.slopify_victoria"):
+    for entity in ("media_player.slopify_alice", "media_player.slopify_bob", "media_player.slopify_carol"):
         assert hass.states.get(entity) is not None, hass.states.async_entity_ids("media_player")
-    assert {h["token"] for h in fake.hellos} >= {"tok-valid", f"hh-{HENRY_ID[:6]}", f"hh-{VICTORIA_ID[:6]}"}
+    assert {h["token"] for h in fake.hellos} >= {"tok-valid", f"hh-{BOB_ID[:6]}", f"hh-{CAROL_ID[:6]}"}
 
 
 async def test_speakers_offer_every_account_by_profile_name(hass: HomeAssistant, household: MockConfigEntry) -> None:
@@ -75,23 +75,21 @@ async def test_a_speaker_shows_whose_music_is_on_it(
     hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify
 ) -> None:
     np = now_playing(T4, device={"id": "cast:kitchen", "kind": "cast", "name": "Kitchen"})
-    await fake.set_roster(
-        players=[{"id": f"server:{HENRY_ID}", "nowPlaying": np}], active=f"server:{HENRY_ID}", uid=HENRY_ID
-    )
+    await fake.set_roster(players=[{"id": f"server:{BOB_ID}", "nowPlaying": np}], active=f"server:{BOB_ID}", uid=BOB_ID)
     await settle(hass, fake)
     kitchen = hass.states.get(KITCHEN)
     assert kitchen.state == "playing"
-    assert kitchen.attributes[ATTR_INPUT_SOURCE] == "Slopify - henrybaxter"
+    assert kitchen.attributes[ATTR_INPUT_SOURCE] == "Slopify - bob"
     assert kitchen.attributes[ATTR_MEDIA_TITLE] == "Everything In Its Right Place"
     assert hass.states.get(DEN).state == "idle"
-    assert hass.states.get("media_player.slopify_henrybaxter").attributes[ATTR_INPUT_SOURCE] == "Kitchen"
+    assert hass.states.get("media_player.slopify_bob").attributes[ATTR_INPUT_SOURCE] == "Kitchen"
 
-    # Its controls reach Henry's session, through Henry's sign-in.
+    # Its controls reach Bob's session, through Bob's sign-in.
     await call(hass, KITCHEN, "media_pause")
-    await fake.wait_for(lambda: fake.commands_of(HENRY_ID))
-    assert fake.commands_of(HENRY_ID)[-1] == {
+    await fake.wait_for(lambda: fake.commands_of(BOB_ID))
+    assert fake.commands_of(BOB_ID)[-1] == {
         "type": "command",
-        "to": f"server:{HENRY_ID}",
+        "to": f"server:{BOB_ID}",
         "command": {"action": "toggle"},
     }
     assert fake.commands_of(USER_ID) == []
@@ -101,14 +99,14 @@ async def test_picking_an_account_brings_their_music_to_the_speaker(
     hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify
 ) -> None:
     await fake.send_session(
-        now_playing(T5, playing=False, position=12.0, queue_index=1), [row(T4), row(T5)], uid=VICTORIA_ID
+        now_playing(T5, playing=False, position=12.0, queue_index=1), [row(T4), row(T5)], uid=CAROL_ID
     )
     await settle(hass, fake)
-    await call(hass, DEN, "select_source", source="Slopify - victoria")
-    await fake.wait_for(lambda: fake.commands_of(VICTORIA_ID))
-    assert fake.commands_of(VICTORIA_ID)[-1] == {
+    await call(hass, DEN, "select_source", source="Slopify - carol")
+    await fake.wait_for(lambda: fake.commands_of(CAROL_ID))
+    assert fake.commands_of(CAROL_ID)[-1] == {
         "type": "command",
-        "to": f"server:{VICTORIA_ID}",
+        "to": f"server:{CAROL_ID}",
         "command": {
             "action": "transfer",
             "deviceId": "bluos:10.0.0.6",
@@ -123,8 +121,8 @@ async def test_picking_an_account_brings_their_music_to_the_speaker(
 async def test_picking_an_account_with_nothing_to_resume_says_so(
     hass: HomeAssistant, household: MockConfigEntry
 ) -> None:
-    with pytest.raises(ServiceValidationError, match="henrybaxter has nothing to resume"):
-        await call(hass, KITCHEN, "select_source", source="Slopify - henrybaxter")
+    with pytest.raises(ServiceValidationError, match="bob has nothing to resume"):
+        await call(hass, KITCHEN, "select_source", source="Slopify - bob")
 
 
 async def test_play_media_on_a_speaker(hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify) -> None:
@@ -144,18 +142,18 @@ async def test_accounts_added_and_removed_in_slopify_follow(
     hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify
 ) -> None:
     newcomer = "d" * 32
-    fake.users[newcomer] = "ava"
-    del fake.users[VICTORIA_ID]
+    fake.users[newcomer] = "dave"
+    del fake.users[CAROL_ID]
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
     await fake.wait_for(lambda: any(h["token"] == f"hh-{newcomer[:6]}" for h in fake.hellos))
     await settle(hass, fake)
-    assert hass.states.get("media_player.slopify_ava") is not None
-    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, VICTORIA_ID) is None
-    assert hass.states.get("media_player.slopify_victoria") is None
+    assert hass.states.get("media_player.slopify_dave") is not None
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, CAROL_ID) is None
+    assert hass.states.get("media_player.slopify_carol") is None
     assert hass.states.get(KITCHEN).attributes[ATTR_INPUT_SOURCE_LIST] == [
-        "Slopify - lukas",
-        "Slopify - ava",
-        "Slopify - henrybaxter",
+        "Slopify - alice",
+        "Slopify - bob",
+        "Slopify - dave",
     ]
 
 
@@ -163,28 +161,28 @@ async def test_a_revoked_household_sign_in_is_renewed(
     hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("custom_components.slopify.api.RECONNECT_MIN", 0.05)
-    token = f"hh-{HENRY_ID[:6]}"
+    token = f"hh-{BOB_ID[:6]}"
     fake.tokens.pop(token)
     hellos = sum(1 for h in fake.hellos if h["token"] == token)
     for ws in list(fake.sockets):
-        if fake.socket_user.get(id(ws)) == HENRY_ID:
+        if fake.socket_user.get(id(ws)) == BOB_ID:
             await ws.close()
-    await fake.wait_for(lambda: er.async_get(hass).async_get_entity_id("media_player", DOMAIN, HENRY_ID) is None)
+    await fake.wait_for(lambda: er.async_get(hass).async_get_entity_id("media_player", DOMAIN, BOB_ID) is None)
     assert not hass.config_entries.flow.async_progress(), "no sign-in prompt for a household account"
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
     await fake.wait_for(lambda: sum(1 for h in fake.hellos if h["token"] == token) > hellos)
     await settle(hass, fake)
-    assert hass.states.get("media_player.slopify_henrybaxter") is not None
+    assert hass.states.get("media_player.slopify_bob") is not None
 
 
 async def test_turning_the_household_off(hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify) -> None:
     hass.config_entries.async_update_entry(household, options={CONF_HOUSEHOLD: False})
     await hass.async_block_till_done()
     await settle(hass, fake)
-    assert hass.states.get("media_player.slopify_lukas") is not None
-    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, HENRY_ID) is None
-    assert hass.states.get("media_player.slopify_henrybaxter") is None
-    assert hass.states.get(KITCHEN).attributes[ATTR_INPUT_SOURCE_LIST] == ["Slopify - lukas"]
+    assert hass.states.get("media_player.slopify_alice") is not None
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, BOB_ID) is None
+    assert hass.states.get("media_player.slopify_bob") is None
+    assert hass.states.get(KITCHEN).attributes[ATTR_INPUT_SOURCE_LIST] == ["Slopify - alice"]
 
 
 async def test_a_non_admin_follows_only_itself(hass: HomeAssistant, entry: MockConfigEntry, fake: FakeSlopify) -> None:
@@ -195,7 +193,7 @@ async def test_a_non_admin_follows_only_itself(hass: HomeAssistant, entry: MockC
     await fake.wait_for(lambda: fake.hellos)
     await settle(hass, fake)
     assert [h["token"] for h in fake.hellos] == ["tok-valid"]
-    assert hass.states.get(KITCHEN).attributes[ATTR_INPUT_SOURCE_LIST] == ["Slopify - lukas"]
+    assert hass.states.get(KITCHEN).attributes[ATTR_INPUT_SOURCE_LIST] == ["Slopify - alice"]
 
 
 async def test_removing_signs_the_household_out(
@@ -203,4 +201,4 @@ async def test_removing_signs_the_household_out(
 ) -> None:
     assert await hass.config_entries.async_unload(household.entry_id)
     await hass.config_entries.async_remove(household.entry_id)
-    assert set(fake.logged_out) >= {"tok-valid", f"hh-{HENRY_ID[:6]}", f"hh-{VICTORIA_ID[:6]}"}
+    assert set(fake.logged_out) >= {"tok-valid", f"hh-{BOB_ID[:6]}", f"hh-{CAROL_ID[:6]}"}

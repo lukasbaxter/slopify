@@ -52,10 +52,10 @@ async def test_login_me_and_errors(fake: FakeSlopify) -> None:
         api = SlopifyApi(http, fake.url)
         await api.health()
         with pytest.raises(InvalidAuth):
-            await api.login("lukas", "nope", "Home Assistant")
-        body = await api.login("lukas", fake.password, "Home Assistant")
+            await api.login("alice", "nope", "Home Assistant")
+        body = await api.login("alice", fake.password, "Home Assistant")
         assert api.token == body["token"]
-        assert fake.requests[-1] == "login lukas Home Assistant service"
+        assert fake.requests[-1] == "login alice Home Assistant service"
         assert (await api.me())["id"] == body["user"]["id"]
         fake.must_change = True
         with pytest.raises(PasswordChangeRequired):

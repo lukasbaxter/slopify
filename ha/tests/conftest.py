@@ -34,12 +34,12 @@ def entry(fake: FakeSlopify) -> MockConfigEntry:
     """A config entry signed in to the fake server."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title="lukas on 127.0.0.1",
+        title="alice on 127.0.0.1",
         unique_id=USER_ID,
         data={
             CONF_URL: fake.url,
             CONF_VERIFY_SSL: True,
-            CONF_USERNAME: "lukas",
+            CONF_USERNAME: "alice",
             CONF_USER_ID: USER_ID,
             CONF_TOKEN: "tok-valid",
             "server_id": SERVER_ID,

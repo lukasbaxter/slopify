@@ -11,4 +11,4 @@ Rendered in Blender 4.5 (Cycles). Scene built on:
 - **Poly Haven** (CC0): wood_table_001 texture, ceramic_vase_01, ceramic_vase_02, potted_plant_01, potted_plant_02.
 - Screens show Slopify itself playing Drake, "Jorja Interlude" (More Life). Album artwork © its rights holders, shown as app content.
 
-The exact author names and model URLs are in each model folder's license.txt on the render machine (~/render/assets/devices, ~/render/assets/hdd).
+The exact author names and model URLs are in each model folder's license.txt.

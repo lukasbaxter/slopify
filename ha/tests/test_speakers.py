@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from .fake_slopify import HENRY_ID, SPEAKER_DEN, SPEAKER_KITCHEN, T4, FakeSlopify, now_playing
+from .fake_slopify import BOB_ID, SPEAKER_DEN, SPEAKER_KITCHEN, T4, FakeSlopify, now_playing
 from .test_household import settle
 
 DEN = "media_player.den_slopify"
@@ -56,9 +56,9 @@ async def test_a_speaker_shows_what_it_plays_on_its_own(hass: HomeAssistant, spe
     assert state.attributes[ATTR_INPUT_SOURCE] == "HDMI ARC"
     assert state.attributes[ATTR_MEDIA_VOLUME_LEVEL] == 0.4
     assert state.attributes[ATTR_INPUT_SOURCE_LIST] == [
-        "Slopify - lukas",
-        "Slopify - henrybaxter",
-        "Slopify - victoria",
+        "Slopify - alice",
+        "Slopify - bob",
+        "Slopify - carol",
         "HDMI ARC",
         "Spotify",
     ]
@@ -80,16 +80,14 @@ async def test_slopify_music_on_it_still_uses_its_own_volume(
     hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify
 ) -> None:
     np = now_playing(T4, volume=90, device={"id": "bluos:10.0.0.6", "kind": "bluos", "name": "Den"})
-    await fake.set_roster(
-        players=[{"id": f"server:{HENRY_ID}", "nowPlaying": np}], active=f"server:{HENRY_ID}", uid=HENRY_ID
-    )
+    await fake.set_roster(players=[{"id": f"server:{BOB_ID}", "nowPlaying": np}], active=f"server:{BOB_ID}", uid=BOB_ID)
     await settle(hass, fake)
     state = hass.states.get(DEN)
-    assert state.attributes[ATTR_INPUT_SOURCE] == "Slopify - henrybaxter"
+    assert state.attributes[ATTR_INPUT_SOURCE] == "Slopify - bob"
     assert state.attributes[ATTR_MEDIA_VOLUME_LEVEL] == 0.4
     await call(hass, "media_pause")
-    await fake.wait_for(lambda: fake.commands_of(HENRY_ID))
-    assert fake.commands_of(HENRY_ID)[-1]["command"] == {"action": "toggle"}
+    await fake.wait_for(lambda: fake.commands_of(BOB_ID))
+    assert fake.commands_of(BOB_ID)[-1]["command"] == {"action": "toggle"}
     assert all(c[1] != "control" for c in fake.speaker_calls)
 
 

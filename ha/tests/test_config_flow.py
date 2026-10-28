@@ -17,7 +17,7 @@ from .fake_slopify import SERVER_CLIENT, SERVER_ID, SPEAKER_KITCHEN, USER_ID, Fa
 
 
 def _form(fake: FakeSlopify, **over: object) -> dict[str, object]:
-    return {CONF_URL: fake.url, CONF_USERNAME: "lukas", CONF_PASSWORD: fake.password, CONF_VERIFY_SSL: True, **over}
+    return {CONF_URL: fake.url, CONF_USERNAME: "alice", CONF_PASSWORD: fake.password, CONF_VERIFY_SSL: True, **over}
 
 
 async def test_sign_in_keeps_a_token_never_the_password(hass: HomeAssistant, fake: FakeSlopify) -> None:
@@ -27,7 +27,7 @@ async def test_sign_in_keeps_a_token_never_the_password(hass: HomeAssistant, fak
         result["flow_id"], _form(fake, **{CONF_URL: fake.url + "/"})
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "lukas on 127.0.0.1"
+    assert result["title"] == "alice on 127.0.0.1"
     data = result["data"]
     assert CONF_PASSWORD not in data and fake.password not in str(data)
     assert data[CONF_URL] == fake.url
@@ -102,7 +102,7 @@ async def test_discovered_server_prefills_the_address(hass: HomeAssistant, fake:
     flows = hass.config_entries.flow.async_progress()
     assert flows[0]["context"]["title_placeholders"] == {"name": "Slopify on box"}
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_URL: fake.url, CONF_USERNAME: "lukas", CONF_PASSWORD: fake.password}
+        result["flow_id"], {CONF_URL: fake.url, CONF_USERNAME: "alice", CONF_PASSWORD: fake.password}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == USER_ID
@@ -137,11 +137,11 @@ async def test_reauth(hass: HomeAssistant, loaded: MockConfigEntry, fake: FakeSl
     result = await loaded.start_reauth_flow(hass)
     assert result["step_id"] == "reauth_confirm"
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_USERNAME: "lukas", CONF_PASSWORD: "wrong"}
+        result["flow_id"], {CONF_USERNAME: "alice", CONF_PASSWORD: "wrong"}
     )
     assert result["errors"] == {"base": "invalid_auth"}
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_USERNAME: "lukas", CONF_PASSWORD: fake.password}
+        result["flow_id"], {CONF_USERNAME: "alice", CONF_PASSWORD: fake.password}
     )
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reauth_successful"
     assert loaded.data[CONF_TOKEN] != "tok-valid" and loaded.data[CONF_TOKEN] in fake.tokens
@@ -152,13 +152,13 @@ async def test_reauth_as_another_account_is_refused(hass: HomeAssistant, fake: F
     other = MockConfigEntry(
         domain=DOMAIN,
         unique_id="someone-else",
-        data={CONF_URL: fake.url, CONF_USERNAME: "lukas", CONF_TOKEN: "x", CONF_VERIFY_SSL: True},
+        data={CONF_URL: fake.url, CONF_USERNAME: "alice", CONF_TOKEN: "x", CONF_VERIFY_SSL: True},
     )
     other.add_to_hass(hass)
     before = set(fake.tokens)
     result = await other.start_reauth_flow(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_USERNAME: "lukas", CONF_PASSWORD: fake.password}
+        result["flow_id"], {CONF_USERNAME: "alice", CONF_PASSWORD: fake.password}
     )
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "wrong_account"
     assert set(fake.tokens) == before

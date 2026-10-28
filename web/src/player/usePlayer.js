@@ -300,7 +300,7 @@ export function usePlayer(jf) {
       ref.current = new Audio();
       // The visualizer taps the elements through MediaElementSources, which
       // are silent for cross-origin media unless the element is CORS-enabled.
-      // The stream origin (music.baxtergroup.io) answers with ACAO: *.
+      // The server answers stream requests with ACAO: *.
       ref.current.crossOrigin = 'anonymous';
       ref.current.preload = 'auto';
     }

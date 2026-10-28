@@ -30,7 +30,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      # The server the app's sign-in form starts at: the repository variable
+      # SLOPIFY_URL (Settings > Secrets and variables > Actions), not the code.
       - run: npm run build -w web
+        env:
+          VITE_SLOPIFY_SERVER: ${{ vars.SLOPIFY_URL }}
       - run: npm ci
         working-directory: desktop
       # The app version is the tag (v0.1.1 -> 0.1.1).
@@ -109,6 +113,7 @@ jobs:
         working-directory: mobile/android
         env:
           CONDUIT_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          EXPO_PUBLIC_SLOPIFY_URL: ${{ vars.SLOPIFY_URL }}
       - run: cp mobile/android/app/build/outputs/apk/release/app-release.apk Slopify-${GITHUB_REF_NAME#v}.apk
         if: env.HAS_KEYSTORE == 'true'
       - uses: actions/upload-artifact@v4
@@ -128,6 +133,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: mobile/build-ipa.sh "${GITHUB_REF_NAME#v}"
+        env:
+          EXPO_PUBLIC_SLOPIFY_URL: ${{ vars.SLOPIFY_URL }}
       - uses: actions/upload-artifact@v4
         with:
           name: ios

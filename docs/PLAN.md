@@ -106,7 +106,7 @@ Decisions, with the reason each way:
    Subsonic API compatibility so third-party apps work too.
 8. **The session model stays** (single active player, mirroring, transfer,
    speakers through the desktop). It is the relay code, moved in.
-9. **Explo and Soulseek live in the same image.** Lukas's rule: one
+9. **Explo and Soulseek live in the same image.** The rule: one
    container, set env vars, done. The image ships the `slskd` binary
    (self-contained .NET build) and the server supervises it as a child
    process when `SLSK_USER`/`SLSK_PASS` are set; its web UI is proxied at
@@ -123,7 +123,7 @@ Decisions, with the reason each way:
 
 ## Identity, metadata, lyrics: the enrichment pipeline
 
-Rule from Lukas: **every song has lyrics, and we know how sure we are that
+The rule: **every song has lyrics, and we know how sure we are that
 a file is the song we think it is.** Tags lie (the wrong edit, a mislabeled
 rip, a live version filed as the studio one; 2,393 mistimed lyric files
 came from exactly that). So identity comes from the audio, not the tags.
@@ -221,8 +221,8 @@ Things that cost real days, and the shape that avoids them:
    *server* time, playing, device, queue) and clients send intents
    (play/seek/transfer) and render the state; time is synced to the
    server's clock once per connection.
-4. **The server owns the session; any client can be the hands.** (Lukas's
-   call, 2026-09-17.) At home the server itself discovers and drives the
+4. **The server owns the session; any client can be the hands.** (Decided
+   2026-09-17.) At home the server itself discovers and drives the
    LAN speakers, so a phone can send music to the Node with no desktop
    running. Away from home (a friend's BluOS speaker), the client that is
    on that LAN (desktop app or phone shell) discovers and drives it, and
@@ -261,7 +261,7 @@ Things that cost real days, and the shape that avoids them:
    The server keeps a per-request timing log and a client diag endpoint;
    the admin page shows slow endpoints.
 10. **A fixture library and CI from the start.** Probes were one-offs run
-    against production (one of them, run as Lukas, took over his session).
+    against production (one of them, run as a real user, took over their session).
     "Fixture library" = a tiny fake music folder checked into the repo
     (30 short generated/royalty-free tracks with real tags, a couple of
     folder covers, `.lrc` sidecars, one deliberately mistagged file, one
@@ -276,7 +276,7 @@ Things that cost real days, and the shape that avoids them:
 12. **Ship the visualizer's speaker-sync last.** Calibration, shadow
     streams and Milkdrop consumed days before the basics were fast.
 
-## Migration for us (no big bang)
+## Migration from Jellyfin (no big bang)
 
 The client already goes through `src/api/jellyfin.js` + `src/api/search.js`.
 The server implements the same routes the client uses today under `/jf`
@@ -284,8 +284,8 @@ The server implements the same routes the client uses today under `/jf`
 the `/relay/*` ones, so the client switches by base URL, then the Jellyfin
 shapes are trimmed to what we actually use.
 
-1. Server reads `/mnt/wd_nvme1/music`, ids match; import users (names, the
-   `henryb`/`henrybaxter` cases), favourites + play counts once from
+1. Server reads the same music folder, ids match; import users (names, the
+   same person under two usernames), favourites + play counts once from
    Jellyfin's API; playlists from `playlist.xml`. The relay's SQLite comes
    along as-is.
 2. Point the web build at the server; keep Jellyfin running for video.
@@ -320,7 +320,7 @@ possible, what is a client task.
 | Unused dependencies | castv2/bonjour only in Electron; audit the web bundle |
 | DB connection pooling | n/a (SQLite, single process, WAL) |
 
-## Decisions taken (2026-09-17, Lukas)
+## Decisions taken (2026-09-17)
 - Server-owned session with offline autonomy and timestamped-event
   reconciliation (item 4 above): yes.
 - Own ids + Jellyfin aliases (3), one backend/one token/IndexedDB caches
@@ -352,6 +352,6 @@ possible, what is a client task.
 7. Perf pass from the table (pagination/virtualisation, Lighthouse,
    re-render profile, bundle audit).
 
-Open questions for Lukas: ship Subsonic compatibility (other apps, more
+Open questions: ship Subsonic compatibility (other apps, more
 users)? WebP vs JPEG-only for art (Safari fine either way)? Name of the
 image: `slopify` vs just `conduit`?

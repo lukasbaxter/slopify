@@ -6,7 +6,7 @@ from .fake_slopify import FakeSlopify
 
 
 async def test_loads(hass: HomeAssistant, loaded, fake: FakeSlopify) -> None:
-    state = hass.states.get("media_player.slopify_lukas")
+    state = hass.states.get("media_player.slopify_alice")
     assert state is not None, hass.states.async_entity_ids()
     assert state.state == "idle"
     hello = fake.hellos[0]

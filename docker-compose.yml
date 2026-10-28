@@ -14,7 +14,7 @@ services:
       - ./data:/data               # database and caches (the one thing to back up)
     environment:
       PORT: "8080"
-      TZ: America/Vancouver        # your time zone, for scheduled tasks
+      TZ: Europe/London        # your time zone, for scheduled tasks
       # PUID: "1000"               # the user it runs as; /data is set up for it
       # PGID: "1000"
       # SAVE_TO_LIBRARY: "1"       # write found lyrics/artwork next to your files

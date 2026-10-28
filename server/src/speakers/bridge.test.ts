@@ -24,7 +24,7 @@ const lastPlay = () => new URL(`http://x${unit.calls.filter((c) => c.startsWith(
 describe('slopify-speaker transport', () => {
   it('hands the device the mp3 transcode at the bitrate it asked for', async () => {
     const t = speaker();
-    await t.play('http://192.168.1.85:8090/api/stream/abc?token=T', {}, 12.5);
+    await t.play('http://192.168.1.10:8090/api/stream/abc?token=T', {}, 12.5);
     const q = lastPlay();
     expect(q.get('startAt')).toBe('12.5');
     const u = new URL(q.get('url')!);
@@ -34,7 +34,7 @@ describe('slopify-speaker transport', () => {
   });
   it('seeks by playing the same stream from the new point', async () => {
     const t = speaker();
-    await t.play('http://192.168.1.85:8090/api/stream/abc?token=T');
+    await t.play('http://192.168.1.10:8090/api/stream/abc?token=T');
     await t.seek(61);
     expect(lastPlay().get('startAt')).toBe('61');
     expect(new URL(lastPlay().get('url')!).pathname).toBe('/api/stream/abc/mp3');
@@ -43,7 +43,7 @@ describe('slopify-speaker transport', () => {
     await expect(speaker().play('https://music.example/api/stream/abc?token=T')).rejects.toThrow(/http:\/\//);
   });
   it('our own stream reads as ours, a pushed one as another app', async () => {
-    unit.status = { state: 'playing', position: 30.2, volume: 55, ended: false, source: 'url', url: 'http://192.168.1.85:8090/api/stream/abc/mp3?token=T' };
+    unit.status = { state: 'playing', position: 30.2, volume: 55, ended: false, source: 'url', url: 'http://192.168.1.10:8090/api/stream/abc/mp3?token=T' };
     let s = await speaker().status();
     expect(s).toMatchObject({ playing: true, state: 'PLAYING', position: 30.2, volume: 55, service: 'url' });
     unit.status = { state: 'stream', position: 0, volume: 55, source: 'Spotify', url: 'tcp:Spotify' };

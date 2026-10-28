@@ -45,9 +45,9 @@ describe('auth', () => {
   it('invites a user by link; users are not admins', async () => {
     const inv = await app.inject({ method: 'POST', url: '/api/invites', headers: { authorization: `Bearer ${admin}` } });
     expect(inv.statusCode).toBe(200);
-    const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { invite: inv.json().code, username: 'henry', password: 'henrys password' } });
+    const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { invite: inv.json().code, username: 'bob', password: 'bobs password' } });
     expect(reg.statusCode).toBe(200); user = reg.json().token; userIdv = reg.json().user.id;
-    expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload: { invite: inv.json().code, username: 'again', password: 'henrys password' } })).statusCode).toBe(400); // single use
+    expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload: { invite: inv.json().code, username: 'again', password: 'bobs password' } })).statusCode).toBe(400); // single use
     expect((await app.inject({ method: 'GET', url: '/api/users', headers: { authorization: `Bearer ${user}` } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/invites', headers: { authorization: `Bearer ${user}` } })).statusCode).toBe(403);
   });
@@ -59,7 +59,7 @@ describe('auth', () => {
     expect((await app.inject({ method: 'POST', url: `/api/users/${userIdv}/role`, headers: { authorization: `Bearer ${admin}` }, payload: { role: 'user' } })).statusCode).toBe(200);
   });
   it('lists and revokes devices; a token also works as a query param (media URLs)', async () => {
-    await login('henry', 'henrys password');
+    await login('bob', 'bobs password');
     const d = (await app.inject({ method: 'GET', url: `/api/auth/devices?token=${user}` })).json();
     expect(d.devices.length).toBe(2);
     const other = d.devices.find((x: any) => !x.current);

@@ -81,24 +81,24 @@ describe('playing on speaker groups', () => {
   it('two people play on two groups at once, each linked by BluOS sync', async () => {
     groups.join(sp(towers).id, [sp(node).id]);
     groups.join(sp(garage).id, [sp(pulse).id]);
-    const lukas = player('lukas'), henry = player('henry');
-    await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1', 't2'], index: 0, position: 0, playing: true });
-    await henry.execute({ action: 'transfer', deviceId: sp(garage).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
+    const alice = player('alice'), bob = player('bob');
+    await alice.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1', 't2'], index: 0, position: 0, playing: true });
+    await bob.execute({ action: 'transfer', deviceId: sp(garage).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
     // Picking the Node played its whole group, led by the Node.
     expect([...node.slaves]).toEqual([towers.port]);
     expect(towers.master).toBe(node.port);
     expect([...garage.slaves]).toEqual([pulse.port]);
-    expect(reports.lukas.device).toMatchObject({ id: sp(node).id, members: [sp(towers).id], name: 'Node + Towers' });
-    expect(reports.henry.device).toMatchObject({ id: sp(garage).id, members: [sp(pulse).id] });
+    expect(reports.alice.device).toMatchObject({ id: sp(node).id, members: [sp(towers).id], name: 'Node + Towers' });
+    expect(reports.bob.device).toMatchObject({ id: sp(garage).id, members: [sp(pulse).id] });
     expect(linkedGroups.get(sp(node).id)).toEqual([sp(towers).id]);
-    await lukas.stopAll(); await henry.stopAll();
+    await alice.stopAll(); await bob.stopAll();
   });
 
   it('a regroup or a re-pick of the same speaker keeps the members linked', async () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);
     groups.join(sp(node).id, [sp(towers).id]);
-    const p = player('lukas-regroup');
+    const p = player('alice-regroup');
     try {
       await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       expect(towers.master).toBe(node.port);
@@ -118,24 +118,24 @@ describe('playing on speaker groups', () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);
     groups.join(sp(node).id, [sp(towers).id]);
-    const lukas = player('lukas-shutdown');
+    const alice = player('alice-shutdown');
     try {
-      await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      await alice.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       node.foreign = true; node.state = 'stream'; // Spotify, before Slopify noticed
       node.calls.length = 0; towers.calls.length = 0;
-      await lukas.shutdown();
+      await alice.shutdown();
       expect(node.calls.filter((c) => /^\/(Play|Stop|Pause|RemoveSlave)/.test(c))).toEqual([]);
       expect(towers.calls.filter((c) => /^\/(Play|Stop|Pause)/.test(c))).toEqual([]);
       expect(towers.master).toBe(node.port);
       // Our own stream is still stopped at shutdown.
       node.foreign = false;
-      await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      await alice.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       node.calls.length = 0;
-      await lukas.shutdown();
+      await alice.shutdown();
       expect(node.calls.some((c) => c.startsWith('/Stop') || c.startsWith('/Pause'))).toBe(true);
     } finally {
       node.foreign = false; node.state = 'stop';
-      await lukas.stopAll();
+      await alice.stopAll();
       groups.unjoin(sp(node).id); groups.unjoin(sp(towers).id);
       for (const g of saved) groups.join(g[0], g.slice(1));
     }
@@ -145,21 +145,21 @@ describe('playing on speaker groups', () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);
     groups.join(sp(node).id, [sp(towers).id]);
-    const lukas = player('lukas-lose');
+    const alice = player('alice-lose');
     try {
-      await lukas.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1', 't2'], index: 0, position: 0, playing: true });
+      await alice.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1', 't2'], index: 0, position: 0, playing: true });
       expect([...node.slaves]).toEqual([towers.port]);
       node.calls.length = 0; towers.calls.length = 0;
-      // Henry casts Spotify to the Node (and with it the group).
+      // Bob casts Spotify to the Node (and with it the group).
       node.foreign = true; node.state = 'stream';
       await new Promise((r) => setTimeout(r, 1500));
-      expect(reports['lukas-lose']).toBeNull(); // the session lets go, paused where it was
+      expect(reports['alice-lose']).toBeNull(); // the session lets go, paused where it was
       expect(node.calls.filter((c) => /^\/(Play|Stop|Pause|RemoveSlave)/.test(c))).toEqual([]);
       expect(towers.calls.filter((c) => /^\/(Play|Stop|Pause)/.test(c))).toEqual([]);
       expect(towers.master).toBe(node.port); // the group keeps playing Spotify
     } finally {
       node.foreign = false; node.state = 'stop';
-      await lukas.stopAll();
+      await alice.stopAll();
       groups.unjoin(sp(node).id); groups.unjoin(sp(towers).id);
       for (const g of saved) groups.join(g[0], g.slice(1));
     }
@@ -171,30 +171,30 @@ describe('playing on speaker groups', () => {
     groups.join(sp(pulse).id, [sp(node).id]);
     node.state = 'stream'; // Spotify, from someone's phone
     node.calls.length = 0;
-    const lukas = player('lukas5');
+    const alice = player('alice5');
     try {
-      await lukas.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      await alice.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       expect(pulse.slaves.size).toBe(0);
       expect(node.master).toBeNull();
       expect(node.calls.filter((c) => /^\/(Play|Stop|Pause)/.test(c))).toEqual([]);
-      expect(reports.lukas5.device.members).toEqual([]);
+      expect(reports.alice5.device.members).toEqual([]);
       // Added on purpose while the music plays, it joins.
       groups.join(sp(pulse).id, [sp(node).id]);
-      await lukas.regroup(new Set([sp(node).id]));
+      await alice.regroup(new Set([sp(node).id]));
       expect([...pulse.slaves]).toEqual([node.port]);
       // A speaker skipped for being busy is not taken when another joins.
-      await lukas.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
-      groups.unjoin(sp(node).id); await lukas.regroup();
+      await alice.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      groups.unjoin(sp(node).id); await alice.regroup();
       groups.join(sp(pulse).id, [sp(node).id]);
       node.state = 'stream';
-      await lukas.stopAll();
-      await lukas.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+      await alice.stopAll();
+      await alice.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       expect(pulse.slaves.size).toBe(0); // node busy: left out
       groups.join(sp(pulse).id, [sp(garage).id]);
-      await lukas.regroup(new Set([sp(garage).id]));
+      await alice.regroup(new Set([sp(garage).id]));
       expect([...pulse.slaves]).toEqual([garage.port]); // garage joined, node still left alone
     } finally {
-      await lukas.stopAll();
+      await alice.stopAll();
       node.state = 'stop';
       groups.unjoin(sp(node).id); groups.unjoin(sp(pulse).id);
       for (const g of saved) groups.join(g[0], g.slice(1));
@@ -202,69 +202,69 @@ describe('playing on speaker groups', () => {
   });
 
   it('volume reaches every speaker of the group', async () => {
-    const lukas = player('lukas2');
-    await lukas.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+    const alice = player('alice2');
+    await alice.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
     towers.calls.length = 0; node.calls.length = 0;
-    await lukas.execute({ action: 'setVolume', level: 25 });
+    await alice.execute({ action: 'setVolume', level: 25 });
     // Equal levels (30 each): both land on 25; the leader does not pass it on.
     expect(towers.calls).toContain('/Volume?level=25&tell_slaves=0');
     expect(node.calls).toContain('/Volume?level=25&tell_slaves=0');
-    await lukas.stopAll();
+    await alice.stopAll();
   });
 
   it("taking a member of someone's group takes only that speaker", async () => {
-    const lukas = player('lukas3'), henry = player('henry3');
-    await lukas.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+    const alice = player('alice3'), bob = player('bob3');
+    await alice.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
     expect([...towers.slaves]).toEqual([node.port]);
-    await henry.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
-    // Lukas plays on, on the Towers alone; Henry has the Node, without the busy Towers.
-    expect(lukas.transport).not.toBeNull();
-    expect(lukas.device?.id).toBe(sp(towers).id);
-    expect(lukas.members).toEqual([]);
+    await bob.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
+    // Alice plays on, on the Towers alone; Bob has the Node, without the busy Towers.
+    expect(alice.transport).not.toBeNull();
+    expect(alice.device?.id).toBe(sp(towers).id);
+    expect(alice.members).toEqual([]);
     expect(towers.slaves.size).toBe(0);
-    expect(henry.device?.id).toBe(sp(node).id);
-    expect(henry.members).toEqual([]);
-    await henry.stopAll(); await lukas.stopAll();
+    expect(bob.device?.id).toBe(sp(node).id);
+    expect(bob.members).toEqual([]);
+    await bob.stopAll(); await alice.stopAll();
     expect(node.master).toBeNull();
   });
 
   it("taking the speaker someone's music started on moves their music to the rest of their group", async () => {
-    const lukas = player('lukas6'), henry = player('henry6');
-    await lukas.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1', 't2'], index: 1, position: 0, playing: true });
+    const alice = player('alice6'), bob = player('bob6');
+    await alice.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t1', 't2'], index: 1, position: 0, playing: true });
     expect([...towers.slaves]).toEqual([node.port]);
-    await henry.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
-    await lukas.execute({ action: 'noop' }); // let the hand-off finish
-    expect(lukas.device?.id).toBe(sp(node).id);
-    expect(lukas.current?.Id).toBe('t2');
-    expect(lukas.playing).toBe(true);
+    await bob.execute({ action: 'transfer', deviceId: sp(towers).id, trackIds: ['t3'], index: 0, position: 0, playing: true });
+    await alice.execute({ action: 'noop' }); // let the hand-off finish
+    expect(alice.device?.id).toBe(sp(node).id);
+    expect(alice.current?.Id).toBe('t2');
+    expect(alice.playing).toBe(true);
     expect(node.master).toBeNull();
-    expect(henry.device?.id).toBe(sp(towers).id);
-    expect(henry.members).toEqual([]); // the Node is Lukas's now: left out
+    expect(bob.device?.id).toBe(sp(towers).id);
+    expect(bob.members).toEqual([]); // the Node is Alice's now: left out
     expect(towers.slaves.size).toBe(0);
-    await henry.stopAll(); await lukas.stopAll();
+    await bob.stopAll(); await alice.stopAll();
   });
 
   it('ungrouping while music plays takes the speaker out of the music', async () => {
-    const lukas = player('lukas4');
-    await lukas.execute({ action: 'transfer', deviceId: sp(garage).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
+    const alice = player('alice4');
+    await alice.execute({ action: 'transfer', deviceId: sp(garage).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
     expect([...garage.slaves]).toEqual([pulse.port]);
     groups.unjoin(sp(pulse).id);
-    await lukas.regroup();
+    await alice.regroup();
     expect([...garage.slaves]).toEqual([]);
-    expect(lukas.members).toEqual([]);
-    await lukas.stopAll();
+    expect(alice.members).toEqual([]);
+    await alice.stopAll();
   });
   it('the group slider keeps the balance: a speaker muted at 0 stays muted, a drag down and back up comes back', async () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);
     groups.join(sp(pulse).id, [sp(towers).id, sp(node).id]);
-    const p = player('lukas-vol');
+    const p = player('alice-vol');
     try {
       await p.execute({ action: 'transfer', deviceId: sp(pulse).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       // The household's balance: Pulse 13, Towers muted, Node 25. The group reads as its loudest.
       pulse.vol = 13; towers.vol = 0; node.vol = 25;
       (p as any).volumeHeldUntil = 0; (p as any).groupReadAt = 0; await (p as any).tick();
-      expect(reports['lukas-vol'].volume).toBe(25);
+      expect(reports['alice-vol'].volume).toBe(25);
       // One drag: down to 5, then back up to 25.
       await p.execute({ action: 'setVolume', level: 5 });
       expect([pulse.vol, towers.vol, node.vol]).toEqual([3, 0, 5]);
@@ -274,7 +274,7 @@ describe('playing on speaker groups', () => {
       await p.execute({ action: 'setVolume', level: 50 });
       expect([pulse.vol, towers.vol, node.vol]).toEqual([26, 0, 50]);
       expect(pulse.calls.filter((c) => c.startsWith('/Volume?level')).every((c) => c.includes('tell_slaves=0'))).toBe(true);
-      expect(reports['lukas-vol'].volume).toBe(50);
+      expect(reports['alice-vol'].volume).toBe(50);
     } finally { await p.stopAll(); for (const id of [sp(pulse).id, sp(towers).id, sp(node).id]) groups.unjoin(id); for (const g of saved) groups.join(g[0], g.slice(1)); }
   });
 
@@ -288,7 +288,7 @@ describe('playing on speaker groups', () => {
     const kitchen = await unit('Kitchen');
     speakers.set(`bluos:${kitchen.port}`, { id: `bluos:${kitchen.port}`, kind: 'bluos', name: 'Kitchen', model: 'BluOS', host: '127.0.0.1', port: kitchen.port });
     groups.join(sp(node).id, [sp(towers).id, sp(kitchen).id]);
-    const p = player('lukas-dead');
+    const p = player('alice-dead');
     try {
       await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });
       expect([...node.slaves].sort()).toEqual([towers.port, kitchen.port].sort());
@@ -302,7 +302,7 @@ describe('playing on speaker groups', () => {
       await p.execute({ action: 'noop' });
       expect(p.members.map((m: Speaker) => m.id)).toEqual([sp(towers).id]);
       await vi.waitFor(() => expect(node.calls).toContain(`/RemoveSlave?slave=127.0.0.1&port=${kitchen.port}`));
-      expect(reports['lukas-dead'].device).toMatchObject({ name: 'Node + Towers', members: [sp(towers).id] });
+      expect(reports['alice-dead'].device).toMatchObject({ name: 'Node + Towers', members: [sp(towers).id] });
       expect(linkedGroups.get(sp(node).id)).toEqual([sp(towers).id]);
       // Volume and play/pause only talk to the speakers that are there.
       node.calls.length = 0;
@@ -328,7 +328,7 @@ describe('playing on speaker groups', () => {
     const saved = groups.list();
     for (const g of saved) for (const id of g) groups.unjoin(id);
     groups.join(sp(node).id, [sp(towers).id]);
-    const p = player('lukas-flap');
+    const p = player('alice-flap');
     const towersSp = sp(towers);
     try {
       await p.execute({ action: 'transfer', deviceId: sp(node).id, trackIds: ['t1'], index: 0, position: 0, playing: true });

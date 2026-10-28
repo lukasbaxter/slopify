@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from .fake_slopify import HENRY_ID, SPEAKER_DEN, SPEAKER_KITCHEN, SPEAKER_LOFT, T4, FakeSlopify, now_playing
+from .fake_slopify import BOB_ID, SPEAKER_DEN, SPEAKER_KITCHEN, SPEAKER_LOFT, T4, FakeSlopify, now_playing
 from .test_household import settle
 
 DEN, LOFT, KITCHEN = "media_player.den_slopify", "media_player.loft_slopify", "media_player.kitchen_slopify"
@@ -52,7 +52,7 @@ async def test_join_and_unjoin(hass: HomeAssistant, speakers: MockConfigEntry, f
 
 async def test_only_slopify_speakers_join(hass: HomeAssistant, speakers: MockConfigEntry) -> None:
     with pytest.raises(ServiceValidationError, match="not a Slopify speaker"):
-        await call(hass, DEN, "join", group_members=["media_player.slopify_lukas"])
+        await call(hass, DEN, "join", group_members=["media_player.slopify_alice"])
 
 
 async def test_the_server_refusing_a_group_is_explained(
@@ -70,14 +70,12 @@ async def test_a_grouped_speaker_shows_the_music_its_group_plays(
     np = now_playing(
         T4, device={"id": "bluos:10.0.0.6", "kind": "bluos", "name": "Den + Loft", "members": ["bluos:10.0.0.7"]}
     )
-    await fake.set_roster(
-        players=[{"id": f"server:{HENRY_ID}", "nowPlaying": np}], active=f"server:{HENRY_ID}", uid=HENRY_ID
-    )
+    await fake.set_roster(players=[{"id": f"server:{BOB_ID}", "nowPlaying": np}], active=f"server:{BOB_ID}", uid=BOB_ID)
     await settle(hass, fake)
     for entity in (DEN, LOFT):
         state = hass.states.get(entity)
         assert state.state == "playing"
-        assert state.attributes[ATTR_INPUT_SOURCE] == "Slopify - henrybaxter"
+        assert state.attributes[ATTR_INPUT_SOURCE] == "Slopify - bob"
     assert hass.states.get(KITCHEN).state == "idle"
 
 
@@ -87,13 +85,11 @@ async def test_picking_an_account_already_on_the_group_does_not_restart_it(
     np = now_playing(
         T4, device={"id": "bluos:10.0.0.6", "kind": "bluos", "name": "Den + Loft", "members": ["bluos:10.0.0.7"]}
     )
-    await fake.set_roster(
-        players=[{"id": f"server:{HENRY_ID}", "nowPlaying": np}], active=f"server:{HENRY_ID}", uid=HENRY_ID
-    )
+    await fake.set_roster(players=[{"id": f"server:{BOB_ID}", "nowPlaying": np}], active=f"server:{BOB_ID}", uid=BOB_ID)
     await settle(hass, fake)
-    await call(hass, LOFT, "select_source", source="Slopify - henrybaxter")
+    await call(hass, LOFT, "select_source", source="Slopify - bob")
     await settle(hass, fake)
-    assert fake.commands_of(HENRY_ID) == []
+    assert fake.commands_of(BOB_ID) == []
 
 
 async def test_a_server_without_groups_says_to_update(
@@ -121,13 +117,11 @@ async def test_picking_the_same_name_on_another_speaker_groups_them(
     hass: HomeAssistant, speakers: MockConfigEntry, fake: FakeSlopify
 ) -> None:
     np = now_playing(T4, device={"id": "bluos:10.0.0.6", "kind": "bluos", "name": "Den"})
-    await fake.set_roster(
-        players=[{"id": f"server:{HENRY_ID}", "nowPlaying": np}], active=f"server:{HENRY_ID}", uid=HENRY_ID
-    )
+    await fake.set_roster(players=[{"id": f"server:{BOB_ID}", "nowPlaying": np}], active=f"server:{BOB_ID}", uid=BOB_ID)
     await settle(hass, fake)
-    await call(hass, LOFT, "select_source", source="Slopify - henrybaxter")
+    await call(hass, LOFT, "select_source", source="Slopify - bob")
     assert fake.group_calls[-1] == ("join", {"leader": "bluos:10.0.0.6", "members": ["bluos:10.0.0.7"]})
-    assert fake.commands_of(HENRY_ID) == [], "the music is not moved, the speaker joins it"
+    assert fake.commands_of(BOB_ID) == [], "the music is not moved, the speaker joins it"
 
 
 async def test_picking_a_name_whose_music_is_in_an_app_moves_it(
@@ -141,10 +135,10 @@ async def test_picking_a_name_whose_music_is_in_an_app_moves_it(
         "nowPlaying": now_playing(T4),
         "sameNetwork": True,
     }
-    await fake.send_queue("web-h", [], uid=HENRY_ID)
-    await fake.set_roster(players=[web], active="web-h", uid=HENRY_ID)
+    await fake.send_queue("web-h", [], uid=BOB_ID)
+    await fake.set_roster(players=[web], active="web-h", uid=BOB_ID)
     await settle(hass, fake)
-    await call(hass, LOFT, "select_source", source="Slopify - henrybaxter")
-    await fake.wait_for(lambda: fake.commands_of(HENRY_ID))
-    assert fake.commands_of(HENRY_ID)[-1]["command"]["action"] == "transfer"
+    await call(hass, LOFT, "select_source", source="Slopify - bob")
+    await fake.wait_for(lambda: fake.commands_of(BOB_ID))
+    assert fake.commands_of(BOB_ID)[-1]["command"]["action"] == "transfer"
     assert not [c for c in fake.group_calls if c[0] == "join"]

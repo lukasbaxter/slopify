@@ -7,11 +7,11 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 
 | License | Packages |
 | --- | --- |
-| MIT | 133 |
+| MIT | 130 |
 | BSD-3-Clause | 16 |
-| ISC | 13 |
-| BlueOak-1.0.0 | 8 |
+| ISC | 9 |
 | Apache-2.0 | 5 |
+| BlueOak-1.0.0 | 5 |
 | Apache-2.0 AND LGPL-3.0-or-later AND MIT | 1 |
 | AGPL-3.0-or-later | 1 |
 | (MIT OR WTFPL) | 1 |
@@ -33,12 +33,11 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | @fastify/forwarded | 3.0.2 | MIT | https://github.com/fastify/forwarded |
 | @fastify/proxy-addr | 5.1.1 | MIT | https://github.com/fastify/proxy-addr |
 | @fastify/rate-limit | 10.3.0 | MIT | https://github.com/fastify/fastify-rate-limit |
-| @fastify/send | 4.1.1 | MIT | https://github.com/fastify/send |
-| @fastify/static | 8.3.0 | MIT | https://github.com/fastify/fastify-static |
+| @fastify/send | 4.2.0 | MIT | https://github.com/fastify/send |
+| @fastify/static | 10.1.8 | MIT | https://github.com/fastify/fastify-static |
 | @fastify/websocket | 11.3.0 | MIT | https://github.com/fastify/fastify-websocket |
 | @img/colour | 1.1.0 | MIT | https://github.com/lovell/colour |
 | @img/sharp-wasm32 | 0.35.5 | Apache-2.0 AND LGPL-3.0-or-later AND MIT | https://github.com/lovell/sharp |
-| @isaacs/cliui | 9.0.0 | BlueOak-1.0.0 | ssh://git@github.com:isaacs/cliui |
 | @lukeed/ms | 2.0.2 | MIT | lukeed/ms |
 | @phc/format | 1.0.0 | MIT | github:simonepri/phc-format |
 | @pinojs/redact | 0.4.0 | MIT | https://github.com/pinojs/redact |
@@ -75,10 +74,9 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | castv2 | 0.1.10 | MIT | git://github.com/thibauts/node-castv2 |
 | castv2-client | 1.2.0 | MIT | git://github.com/thibauts/node-castv2-client |
 | chownr | 1.1.4 | ISC | git://github.com/isaacs/chownr |
-| content-disposition | 0.5.4 | MIT | jshttp/content-disposition |
+| content-disposition | 3.0.0 | MIT | jshttp/content-disposition |
 | content-type | 2.1.0 | MIT | jshttp/content-type |
 | cookie | 1.1.1 | MIT | jshttp/cookie |
-| cross-spawn | 7.0.6 | MIT | git@github.com:moxystudio/node-cross-spawn |
 | debug | 4.4.3 | MIT | git://github.com/debug-js/debug |
 | debug | 2.6.9 | MIT | git://github.com/visionmedia/debug |
 | decompress-response | 6.0.0 | MIT | sindresorhus/decompress-response |
@@ -98,31 +96,29 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | fast-uri | 4.1.5 | BSD-3-Clause | https://github.com/fastify/fast-uri |
 | fastify | 5.12.5 | MIT | https://github.com/fastify/fastify |
 | fastify-plugin | 5.1.0 | MIT | https://github.com/fastify/fastify-plugin |
+| fastify-plugin | 6.0.1 | MIT | https://github.com/fastify/fastify-plugin |
 | fastify-plugin | 6.0.0 | MIT | https://github.com/fastify/fastify-plugin |
 | fastq | 1.20.3 | ISC | https://github.com/mcollina/fastq |
 | fflate | 0.8.3 | MIT | https://github.com/101arrowz/fflate |
 | file-type | 21.3.4 | MIT | sindresorhus/file-type |
 | file-uri-to-path | 1.0.0 | MIT | git://github.com/TooTallNate/file-uri-to-path |
 | find-my-way | 9.9.0 | MIT | https://github.com/delvedor/find-my-way |
-| foreground-child | 3.3.1 | ISC | https://github.com/tapjs/foreground-child |
 | fs-constants | 1.0.0 | MIT | https://github.com/mafintosh/fs-constants |
 | github-from-package | 0.0.0 | MIT | git://github.com/substack/github-from-package |
-| glob | 11.1.0 | BlueOak-1.0.0 | git@github.com:isaacs/node-glob |
+| glob | 13.0.6 | BlueOak-1.0.0 | git@github.com:isaacs/node-glob |
 | hls.js | 1.7.3 | Apache-2.0 | https://github.com/video-dev/hls.js |
 | http-errors | 2.0.1 | MIT | jshttp/http-errors |
 | ieee754 | 1.2.1 | BSD-3-Clause | git://github.com/feross/ieee754 |
 | inherits | 2.0.4 | ISC | git://github.com/isaacs/inherits |
 | ini | 1.3.8 | ISC | git://github.com/isaacs/ini |
 | ipaddr.js | 2.5.0 | MIT | https://github.com/whitequark/ipaddr.js |
-| isexe | 2.0.0 | ISC | https://github.com/isaacs/isexe |
-| jackspeak | 4.2.3 | BlueOak-1.0.0 | https://github.com/isaacs/jackspeak |
 | js-tokens | 4.0.0 | MIT | lydell/js-tokens |
 | json-schema-to-ts | 3.1.1 | MIT | https://github.com/ThomasAribart/json-schema-to-ts |
 | json-schema-traverse | 1.0.0 | MIT | https://github.com/epoberezkin/json-schema-traverse |
 | light-my-request | 6.6.0 | BSD-3-Clause | https://github.com/fastify/light-my-request |
 | long | 4.0.0 | Apache-2.0 | https://github.com/dcodeIO/long.js |
 | loose-envify | 1.4.0 | MIT | git://github.com/zertosh/loose-envify |
-| lru-cache | 11.5.2 | BlueOak-1.0.0 | ssh://git@github.com/isaacs/node-lru-cache |
+| lru-cache | 11.5.3 | BlueOak-1.0.0 | ssh://git@github.com/isaacs/node-lru-cache |
 | media-typer | 2.0.0 | MIT | jshttp/media-typer |
 | mime | 3.0.0 | MIT | https://github.com/broofa/mime |
 | mimic-response | 3.1.0 | MIT | sindresorhus/mimic-response |
@@ -141,8 +137,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | obliterator | 2.0.5 | MIT | https://github.com/yomguithereal/obliterator |
 | on-exit-leak-free | 2.1.2 | MIT | https://github.com/mcollina/on-exit-or-gc |
 | once | 1.4.0 | ISC | git://github.com/isaacs/once |
-| package-json-from-dist | 1.0.1 | BlueOak-1.0.0 | https://github.com/isaacs/package-json-from-dist |
-| path-key | 3.1.1 | MIT | sindresorhus/path-key |
 | path-scurry | 2.0.2 | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry |
 | pino | 10.3.1 | MIT | https://github.com/pinojs/pino |
 | pino-abstract-transport | 3.0.0 | MIT | https://github.com/pinojs/pino-abstract-transport |
@@ -172,9 +166,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | set-cookie-parser | 2.7.2 | MIT | nfriedly/set-cookie-parser |
 | setprototypeof | 1.2.0 | ISC | https://github.com/wesleytodd/setprototypeof |
 | sharp | 0.35.5 | Apache-2.0 | https://github.com/lovell/sharp |
-| shebang-command | 2.0.0 | MIT | kevva/shebang-command |
-| shebang-regex | 3.0.0 | MIT | sindresorhus/shebang-regex |
-| signal-exit | 4.1.0 | ISC | https://github.com/tapjs/signal-exit |
 | simple-concat | 1.0.1 | MIT | git://github.com/feross/simple-concat |
 | simple-get | 4.0.1 | MIT | git://github.com/feross/simple-get |
 | sonic-boom | 4.2.1 | MIT | https://github.com/pinojs/sonic-boom |
@@ -197,7 +188,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | uint8array-extras | 1.6.0 | MIT | sindresorhus/uint8array-extras |
 | undici-types | 6.21.0 | MIT | https://github.com/nodejs/undici |
 | util-deprecate | 1.0.2 | MIT | git://github.com/TooTallNate/util-deprecate |
-| which | 2.0.2 | ISC | git://github.com/isaacs/node-which |
 | win-guid | 0.2.1 | MIT | https://github.com/Borewit/win-guid |
 | wrappy | 1.0.2 | ISC | https://github.com/npm/wrappy |
 | ws | 8.21.3 | MIT | https://github.com/websockets/ws |

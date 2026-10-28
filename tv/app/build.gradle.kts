@@ -12,7 +12,8 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1"
-        buildConfigField("String", "SERVER_URL", "\"${project.findProperty("slopifyUrl") ?: "https://music.baxtergroup.io"}\"")
+        // The server to open (-PslopifyUrl=https://your.server); empty asks on the TV.
+        buildConfigField("String", "SERVER_URL", "\"${project.findProperty("slopifyUrl") ?: ""}\"")
     }
     buildFeatures { buildConfig = true }
     buildTypes {

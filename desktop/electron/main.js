@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { Discovery } = require('./discovery');
 const { CastTransport } = require('./transports/cast');
@@ -90,8 +91,10 @@ function createWindow() {
   win.on('app-command', (e, cmd) => {
     if (cmd === 'browser-backward' || cmd === 'browser-forward') { e.preventDefault(); win.webContents.send('navigate', cmd === 'browser-backward' ? 'back' : 'forward'); }
   });
-  // Never let those buttons navigate the BrowserWindow itself.
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('http://localhost:5180') && !url.includes('/index.html')) e.preventDefault(); });
+  // Never let those buttons navigate the BrowserWindow itself, and never
+  // anywhere but the app's own page: a page elsewhere would get window.conduit.
+  const own = isDev ? 'http://localhost:5180' : pathToFileURL(path.join(__dirname, '..', 'dist')).href + '/';
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(own)) e.preventDefault(); });
 }
 
 /**
@@ -212,7 +215,7 @@ handle('download', (url) => { if (win) win.webContents.downloadURL(url); return 
 // In-app updates (updater.js): the page shows them in the profile menu.
 handle('update:state', () => updater.state());
 handle('update:check', () => updater.check());
-handle('update:install', () => updater.install());
+handle('update:install', (opts) => updater.install({ quiet: !!opts?.quiet }));
 app.whenReady().then(() => {
   session.defaultSession.on('will-download', (_e, item) => {
     let name = item.getFilename();

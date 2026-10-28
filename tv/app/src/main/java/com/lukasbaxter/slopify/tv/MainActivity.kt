@@ -3,6 +3,8 @@ package com.lukasbaxter.slopify.tv
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.net.Uri
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
@@ -31,6 +33,8 @@ import org.json.JSONObject
  *
  * First run: `adb shell am start -n com.lukasbaxter.slopify.tv/.MainActivity --es token <token> --es userId <id>`
  * seeds the account; after that the page's own login form works too.
+ * The server is the one it was built with, or `--es server <url>`, or, with
+ * neither, typed in on the TV the first time.
  */
 class MainActivity : Activity() {
 
@@ -45,10 +49,17 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        intent?.getStringExtra("tvcss")?.let { prefs.edit().putString("tvcss", it).apply() }
-        debugJs = intent?.getStringExtra("tvjs") ?: intent?.getStringExtra("tvjs64")?.let { String(android.util.Base64.decode(it, android.util.Base64.DEFAULT)) }
+        // Any app on the TV can start this activity with extras. Injected
+        // JS/CSS (debugging probes) only in a debuggable build; the server and
+        // the seeded sign-in only on a TV that has none yet (`pm clear` to redo).
+        val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (debuggable) {
+            intent?.getStringExtra("tvcss")?.let { prefs.edit().putString("tvcss", it).apply() }
+            debugJs = intent?.getStringExtra("tvjs") ?: intent?.getStringExtra("tvjs64")?.let { String(android.util.Base64.decode(it, android.util.Base64.DEFAULT)) }
+        }
+        intent?.getStringExtra("server")?.let { if (server().isEmpty()) prefs.edit().putString("server", it.trim().trimEnd('/')).apply() }
         intent?.getStringExtra("token")?.let { t ->
-            prefs.edit().putString("token", t).putString("userId", intent.getStringExtra("userId") ?: "").apply()
+            if (prefs.getString("token", null).isNullOrEmpty()) prefs.edit().putString("token", t).putString("userId", intent.getStringExtra("userId") ?: "").apply()
         }
 
         web = WebView(this)
@@ -78,17 +89,34 @@ class MainActivity : Activity() {
                 debugJs?.let { d -> handler.postDelayed({ view.evaluateJavascript(d, null) }, 3000) }
                 if (css.isNotEmpty()) view.evaluateJavascript("(function(){var s=document.getElementById('tvcss')||document.createElement('style');s.id='tvcss';s.textContent=${JSONObject.quote(css)};document.head.appendChild(s);})()", null)
             }
+            // Only the server opens here: the start script hands pages the
+            // sign-in, so another site (a link on the page) is not followed.
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                request.isForMainFrame && originOf(request.url.toString()) != originOf(server())
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) handler.postDelayed({ view.loadUrl(BuildConfig.SERVER_URL) }, 4000)
+                if (request.isForMainFrame) handler.postDelayed({ open() }, 4000)
             }
         }
-        installStartScript()
         setContentView(web)
-        web.loadUrl(BuildConfig.SERVER_URL)
+        open()
     }
 
-    /** Runs before the page's own scripts: identity + a seeded session, if we were given one. */
+    private fun originOf(url: String): String = Uri.parse(url).let { "${it.scheme}://${it.authority}" }
+
+    private fun server(): String = prefs.getString("server", null)?.takeIf { it.isNotEmpty() } ?: BuildConfig.SERVER_URL
+
+    /** The server, or the one-field form that asks for it. */
+    private fun open() {
+        val url = server()
+        if (url.startsWith("https://") || url.startsWith("http://")) { installStartScript(); web.loadUrl(url) }
+        else web.loadDataWithBaseURL(null, SETUP, "text/html", "utf-8", null)
+    }
+
+    /** Runs before the page's own scripts, on the server's pages only: identity + a seeded session, if we were given one. */
+    private var startScript = false
     private fun installStartScript() {
+        if (startScript) return
+        startScript = true
         val name = Settings.Global.getString(contentResolver, "device_name") ?: "TV"
         val token = prefs.getString("token", null)
         val userId = prefs.getString("userId", "") ?: ""
@@ -104,7 +132,7 @@ class MainActivity : Activity() {
             $seed
         """.trimIndent()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            WebViewCompat.addDocumentStartJavaScript(web, script, setOf("*"))
+            WebViewCompat.addDocumentStartJavaScript(web, script, setOf(originOf(server())))
         } else {
             // older WebView: at least seed before the first navigation completes
             web.evaluateJavascript(script, null)
@@ -113,6 +141,12 @@ class MainActivity : Activity() {
 
     inner class Bridge {
         @JavascriptInterface fun state(nowPlaying: Boolean) { nowPlayingOpen = nowPlaying }
+        /** The setup form's answer; only taken while that form is up (no server yet). */
+        @JavascriptInterface fun setServer(url: String) {
+            val u = url.trim().trimEnd('/')
+            if (!(u.startsWith("https://") || u.startsWith("http://"))) return
+            runOnUiThread { if (server().isEmpty()) { prefs.edit().putString("server", u).apply(); open() } }
+        }
     }
 
     private fun js(code: String) = runOnUiThread { web.evaluateJavascript("window.__tv && window.__tv.$code", null) }
@@ -140,6 +174,14 @@ class MainActivity : Activity() {
     override fun onDestroy() { web.destroy(); super.onDestroy() }
 
     companion object {
+        val SETUP = """
+            <!doctype html><html><body style="background:#000;color:#fff;font:28px sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;gap:24px">
+            <div>Your Slopify server's address</div>
+            <input id="u" type="url" value="https://" style="font-size:28px;width:60%;padding:12px" autofocus>
+            <button style="font-size:28px;padding:10px 32px" onclick="SlopifyTV.setServer(document.getElementById('u').value)">Open</button>
+            </body></html>
+        """
+
         /** Page-side helper. Uses the app's own controls so behaviour matches a click. */
         val HELPER = """
             (function () {

@@ -1,4 +1,4 @@
-// Slopify on the phone: the web build (music.baxtergroup.io) inside a native
+// Slopify on the phone: the web build (EXPO_PUBLIC_SLOPIFY_URL) inside a native
 // WebView. The web app's mobile layout (bottom tabs, compact player) does the
 // rest; this shell supplies media playback permissions, a retry screen, and
 // the one thing a web page cannot have: the hardware volume buttons. While
@@ -9,12 +9,26 @@
 // home indicator (viewport-fit=cover).
 import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Device from 'expo-device';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
 
-const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || 'https://music.baxtergroup.io/';
+// The server this build opens, set when it is built (the release build
+// takes it from the repository's SLOPIFY_URL variable).
+const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || '';
+const ORIGIN = (() => { try { return new globalThis.URL(URL).origin; } catch { return ''; } })();
+// The shell shows the server and nothing else: any other page (a link to the
+// source code, a song's page elsewhere) opens in the phone's browser, so no
+// other site ever runs where the bridge and the sign-in are.
+const stayIn = (req) => {
+  const u = req.url || '';
+  if (u.startsWith('about:') || u.startsWith('blob:') || u.startsWith('data:')) return true;
+  let o = ''; try { o = new globalThis.URL(u).origin; } catch { /* not a URL */ }
+  if (o === ORIGIN) return true;
+  if (/^https?:/i.test(u) && req.isTopFrame !== false) Linking.openURL(u).catch(() => {});
+  return false;
+};
 
 // What the page shows other devices this phone as: its model ("iPhone 16",
 // "Pixel 8"). Android also knows the name the owner gave it; iOS keeps that
@@ -117,6 +131,14 @@ export default function App() {
     }
   };
 
+  if (!URL) {
+    return (
+      <View style={[styles.root, styles.err]}>
+        <Text style={styles.errText}>This build has no server address.{'\n'}Build it with EXPO_PUBLIC_SLOPIFY_URL set to your Slopify server.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" translucent backgroundColor="transparent" />
@@ -129,6 +151,8 @@ export default function App() {
       <WebView
         ref={web}
         source={{ uri: URL }}
+        originWhitelist={['*']}
+        onShouldStartLoadWithRequest={stayIn}
         style={styles.web}
         // Tell the page it is the phone app, and which phone, before its scripts run.
         injectedJavaScriptBeforeContentLoaded={SHELL}

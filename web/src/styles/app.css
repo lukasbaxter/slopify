@@ -927,7 +927,17 @@ button:disabled { cursor: default; }
 .fs-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(60px) brightness(.35) saturate(1.2); transform: scale(1.1); }
 /* Behind the spectrum: same blur, a touch darker so the bars and their floor reflection stay crisp. */
 .fs-bg.dim { filter: blur(60px) brightness(.22) saturate(1.2); }
+/* The TV's Album tab: the cover itself, sharp, filling the screen, dimmed a little so the controls read. */
+.fs-bg.full { inset: 0; filter: brightness(.6); transform: none; }
 .fs > *:not(.fs-bg) { position: relative; }
+/* Song change: the new blurred cover fades in over the old one, the cover
+   itself settles in. Opacity and transform only (the TV's GPU composites
+   them; nothing re-rasterizes). */
+.fs-bg.fade-in { animation: fs-bg-in .9s ease both; will-change: opacity; }
+.fs-art.fade-in { animation: fs-art-in .45s ease-out both; }
+@keyframes fs-bg-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fs-art-in { from { opacity: .4; transform: scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fs-bg.fade-in, .fs-art.fade-in { animation: none; } }
 .fs-top { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px; padding: 0 32px; height: 76px; box-sizing: border-box; }
 .fs-from { grid-column: 1; }
 /* Right side: three flat icon tabs, a vertical rule, then the minimize button. */

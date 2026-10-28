@@ -79,6 +79,41 @@ function useProgressiveSrc(lo, hi) {
   }, [lo, hi]);
   return src;
 }
+// The now-playing art across a song change: the old song's art stays up
+// until the new one has loaded and decoded (on the TV the 320 px copy was not
+// in the cache, so the cover and the blurred background went blank for a
+// moment, then stepped again from `lo` to `hi`). `key` changes once per song,
+// not at the lo->hi swap, so the fade-in runs once.
+function useSteadyArt(lo, hi) {
+  // Opening the player: nothing to hold, so the cover paints at once (as before).
+  const [art, setArt] = useState(() => (hi ? { src: lo || hi, bg: lo || hi, key: hi } : { src: null, bg: null, key: null }));
+  useEffect(() => {
+    if (!hi) { setArt({ src: null, bg: null, key: null }); return undefined; }
+    let alive = true;
+    const load = (url) => { const img = new Image(); img.src = url; return (img.decode ? img.decode() : new Promise((r, j) => { img.onload = r; img.onerror = j; })).then(() => url); };
+    const first = lo || hi;
+    load(first).catch(() => (first === hi ? null : load(hi).catch(() => null))).then((url) => {
+      if (!alive) return;
+      setArt({ src: url || hi, bg: url || hi, key: hi });
+      if (url && url !== hi) load(hi).then(() => { if (alive) setArt((a) => (a.key === hi ? { ...a, src: hi } : a)); }).catch(() => {});
+    });
+    return () => { alive = false; };
+  }, [lo, hi]);
+  return art;
+}
+
+// The blurred cover behind the player: a new song's fades in over the old
+// one, which is dropped once the fade has run. `full`: the cover itself,
+// sharp and filling the screen, a little dimmed (the TV's Album tab).
+function CrossfadeBg({ src, dim, full }) {
+  const [layers, setLayers] = useState(() => (src ? [src] : []));
+  useEffect(() => { setLayers((l) => (!src ? [] : l[l.length - 1] === src ? l : [...l.slice(-1), src])); }, [src]);
+  return layers.map((s, i) => (
+    <div key={s} className={`fs-bg ${dim ? 'dim' : ''} ${full ? 'full' : ''} ${i ? 'fade-in' : ''}`} style={{ backgroundImage: `url("${s}")` }}
+      onAnimationEnd={() => setLayers((l) => l.slice(l.indexOf(s)))} />
+  ));
+}
+
 // An <img> that shows `lo` at once and swaps to `hi` when it has loaded.
 export function ProgressiveImg({ lo, hi, ...rest }) {
   return <img src={useProgressiveSrc(lo, hi)} {...rest} />;
@@ -170,7 +205,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   // downloads behind it and swaps in.
   const artHi = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: phone ? 640 : 1000, full: true }) : nowPlaying?.artUrl || null;
   const artLo = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: 320 }) : null;
-  const art = useProgressiveSrc(artLo, artHi);
+  const { src: art, bg: artBg, key: artKey } = useSteadyArt(artLo, artHi);
   // The row-menu shape of the playing track (onLike / onAddTo want a track
   // object with an Id).
   const asTrack = nowPlaying?.itemId ? { Id: nowPlaying.itemId, Name: nowPlaying.title, Artists: [nowPlaying.artist], AlbumId: nowPlaying.albumId, _partial: true } : null;
@@ -209,6 +244,8 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   const [np, setNp] = useState(null);
   useEffect(() => { let alive = true; if (!art) { setNp(null); return undefined; } vibrantColor(art).then((rgb) => { if (alive) setNp(rgb ? `rgb(${rgb.join(',')})` : null); }); return () => { alive = false; }; }, [art]);
   const from = usePlayingFrom(player, jf); // { kind, name }, always both lines
+  // The TV's Album tab: the cover is the whole screen, not a square in the middle.
+  const tvFull = tab === 'album' && window.slopifyShell?.deviceForm === 'tv';
   const vizEl = (
     <Visualizer player={player} jf={jf} active={tab === 'viz'} settings={viz} offset={offset || 0}
       calibrate={calibrating} onCalibrated={saveOffset} onCalibrateClose={() => setCalibrating(null)} />
@@ -221,7 +258,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
 
   return (
     <div ref={rootRef} className={`fs fs-tab-${tab} ${more || vizMenu ? 'sheet' : ''}`} style={np ? { '--np': np } : undefined}>
-      {art && <div className={`fs-bg ${tab === 'viz' ? 'dim' : ''}`} style={{ backgroundImage: `url("${art}")` }} />}
+      <CrossfadeBg src={tvFull ? art : artBg} dim={tab === 'viz'} full={tvFull} />
       <div className="fs-top">
         {/* Phone: on the lyrics page the chevron goes back to the cover, like Spotify's. */}
         <button className="fs-chevron" onClick={phone && tab === 'lyrics' ? () => setTab('album') : close} title="Close" aria-label="Close">
@@ -265,7 +302,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
       </div>
 
       <div className="fs-stage">
-        {tab === 'album' && (art ? <img className="fs-art" src={art} alt="" /> : <div className="fs-art ph" />)}
+        {tab === 'album' && !tvFull && (art ? <img key={artKey} className="fs-art fade-in" src={art} alt="" /> : <div className="fs-art ph" />)}
         {tab === 'viz' && vizEl}
         {/* Phone, visualizer: a cue while paused, and the cover behind any sheet (the CSS shows it). */}
         {phone && tab === 'viz' && !playing && <div className="fs-viz-hint">Play to start the visualizer</div>}

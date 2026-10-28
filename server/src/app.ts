@@ -76,6 +76,9 @@ export async function buildServer(opts: BuildOptions = {}) {
   app.addHook('onSend', async (_req, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
+    // Never inside another site's frame (clickjacking the controls).
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Content-Security-Policy', "frame-ancestors 'none'");
   });
 
   const musicDir = opts.musicDir ?? config.musicDir;
@@ -91,7 +94,11 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));
   registerServerInfo(app, db, { name: config.serverName || defaultServerName(), version: VERSION, source: config.sourceUrl });
-  registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl, bluosGroups: config.bluosGroups });
+  // The web build this server hands out (its entry script, assets/index-<hash>.js), told to every
+  // app as it connects: a page running an older one reloads onto it once nobody is using it.
+  let webBuild = '';
+  try { webBuild = /assets\/index-[\w-]+\.js/.exec(fs.readFileSync(path.join(repoRoot, 'web', 'dist', 'index.html'), 'utf8'))?.[0] || ''; } catch { /* no web build (tests, API only) */ }
+  registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl, bluosGroups: config.bluosGroups, webBuild });
   registerExplore(app, db, {
     slskdUrl: config.slskdUrl, slskdKey: config.slskdKey,
     slskdDownloadsDir: config.slskdDownloadsDir || undefined, musicDir,

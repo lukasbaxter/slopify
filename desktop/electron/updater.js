@@ -1,9 +1,11 @@
 'use strict';
 // In-app updates without a code-signing certificate (Electron's built-in
 // updater needs one on the Mac). Checks GitHub's latest release a minute
-// after launch and every 6 hours, downloads the build for this machine in
-// the background, and once it is ready the page shows "Restart to update"
-// in the profile menu. Restarting swaps the new app in and opens it:
+// after launch, every 15 minutes and on waking from sleep, downloads the
+// build for this machine in the background, and once it is ready the page
+// shows "Restart to update" in the profile menu, and installs it by itself
+// once nothing plays here and no one has used the app for 2 minutes
+// (web/src/App.jsx). Restarting swaps the new app in and opens it:
 //   Mac:     the .zip of the .app, unpacked with ditto, swapped in place of
 //            the running bundle by a small script once this process exits
 //            (files written by the app carry no quarantine flag, and the
@@ -13,7 +15,7 @@
 //   Linux:   the AppImage file is replaced.
 // Nothing happens in development (unpackaged) builds.
 
-const { app } = require('electron');
+const { app, powerMonitor } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -21,7 +23,7 @@ const https = require('https');
 const { execFile, spawn } = require('child_process');
 
 const REPO = 'lukasbaxter/slopify';
-const EVERY = 6 * 60 * 60 * 1000;
+const EVERY = 15 * 60 * 1000;
 
 let state = { status: 'idle', version: null, error: null }; // idle | checking | downloading | ready | current | error
 let ready = null; // { version, kind, file }
@@ -99,7 +101,8 @@ async function check() {
 // The running Mac bundle: /Applications/Slopify.app (from .../Contents/MacOS/Slopify).
 const macBundle = () => path.resolve(path.dirname(process.execPath), '..', '..');
 
-function install() {
+// quiet: reopen in the background (an unattended install), not in front.
+function install({ quiet = false } = {}) {
   if (!ready) return false;
   if (ready.kind === 'mac') {
     const target = macBundle();
@@ -107,7 +110,7 @@ function install() {
     const script = `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.2; done
 old="${target}.old-$$"
 mv "${target}" "$old" && mv "${ready.file}" "${target}" && rm -rf "$old" || { [ -d "$old" ] && [ ! -d "${target}" ] && mv "$old" "${target}"; }
-open "${target}"`;
+open ${quiet ? '-g ' : ''}"${target}"`;
     spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore' }).unref();
   } else if (ready.kind === 'win32') {
     const portable = process.env.PORTABLE_EXECUTABLE_FILE;
@@ -131,6 +134,7 @@ function start(onState) {
   if (!app.isPackaged) return;
   setTimeout(check, 60 * 1000);
   setInterval(check, EVERY).unref?.();
+  powerMonitor.on('resume', () => setTimeout(check, 10 * 1000));
 }
 
 module.exports = { start, check, install, state: () => state, _newer: newer, _pickAsset: pickAsset };

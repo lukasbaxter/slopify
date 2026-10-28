@@ -94,6 +94,8 @@ export class SessionLink {
         if (typeof m.clientId === 'string' && m.clientId) this.id = m.clientId;
         if (m.offsets) this.onOffsets(m.offsets);
         this.onSleep(m.sleep || null);
+        // The web build the server hands out now (App.jsx reloads onto a newer one).
+        if (typeof m.web === 'string' && m.web) { try { window.dispatchEvent(new CustomEvent('slopify:webbuild', { detail: m.web })); } catch { /* none */ } }
         // Only now is the server listening to us. Anything sent while it was
         // still verifying the token was dropped -- which is how the desktop's
         // speaker list went missing from the web player after a restart.

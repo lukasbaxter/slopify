@@ -20,13 +20,13 @@ import { canSaveOffline, subscribeOffline, flushOfflinePlays, resumeOffline } fr
 import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
 import { readLib, getActive as downloading } from './offline/store.js';
 
-// Everything goes through music.baxtergroup.io (Let's Encrypt on the origin,
-// Cloudflare proxy deliberately off -- it throttles the audio). The browser
-// build is same-origin; the desktop uses the same host, so it works off the
-// LAN, and speakers stream from a URL with a real certificate.
+// The browser build is same-origin. The desktop app has no server of its
+// own: its sign-in form starts at the address it was built with
+// (VITE_SLOPIFY_SERVER, set by the release build) and remembers the one
+// signed in to.
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const DEFAULT_SERVER = IS_DESKTOP
-  ? 'https://music.baxtergroup.io'
+  ? (import.meta.env.VITE_SLOPIFY_SERVER || '')
   : window.location.origin;
 
 // The first password: the server refuses every request but this one (and
@@ -1049,32 +1049,59 @@ export default function App() {
   // own output natively). volumeStep routes to the active device.
   const remoteSession = !!player.mirroring || (player.device?.kind && player.device.kind !== 'local');
 
-  // A deploy while the installed app sat in the background: iOS resumes the
-  // old page, old code and all, for as long as it keeps it in memory (days).
-  // Back after a while with nothing playing here or elsewhere and no download
-  // running, it asks the server which build is current and reloads onto a
-  // newer one (the queue and playhead come back from storage). No answer, or
-  // a captive portal's page, changes nothing.
+  // Updates reach every device without anyone reloading. The server tells
+  // each app which web build it hands out as it connects (a deploy restarts
+  // it, so every app hears within seconds), and the page also asks every
+  // 10 minutes and when it comes back to the screen. A page running an older
+  // build reloads onto the new one once that interrupts nobody: no sound
+  // playing on THIS device, no download running, and no one touching it for
+  // 2 minutes (or it is out of sight). The queue and playhead come back from
+  // storage. While the sound is elsewhere a phone holds the lock screen for
+  // it, so it waits; the TV only shows it, so it may go. The desktop app
+  // carries its own copy of the page and installs its update (updater.js)
+  // under the same rule. No answer, or a captive portal's page, changes
+  // nothing; a reload that still lands on the old build (a cache in the
+  // way) is not tried again for that build.
   const busyRef = useRef(false);
-  busyRef.current = !!player.playing || !!remoteSession;
+  busyRef.current = (!!player.playing && !remoteSession) || (!!remoteSession && window.slopifyShell?.deviceForm !== 'tv');
   const busy = () => busyRef.current || !!downloading();
+  const lastInputRef = useRef(Date.now());
   useEffect(() => {
-    const standalone = window.navigator.standalone ?? window.matchMedia('(display-mode: standalone)').matches;
-    const running = document.querySelector('script[type="module"][src*="assets/index-"]')?.getAttribute('src');
-    if (IS_DESKTOP || !standalone || !running) return undefined;
-    const name = running.slice(running.lastIndexOf('assets/'));
-    let hiddenAt = 0;
-    const vis = async () => {
-      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
-      const away = hiddenAt ? Date.now() - hiddenAt : 0;
-      hiddenAt = 0;
-      if (away < 10 * 60000 || busy()) return;
-      const html = await fetch('./', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-      if (/assets\/index-[\w-]+\.js/.test(html) && !html.includes(name) && !busy()) window.location.reload();
-    };
-    document.addEventListener('visibilitychange', vis);
-    return () => document.removeEventListener('visibilitychange', vis);
+    const input = () => { lastInputRef.current = Date.now(); };
+    const evs = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'click'];
+    for (const e of evs) window.addEventListener(e, input, { capture: true, passive: true });
+    return () => { for (const e of evs) window.removeEventListener(e, input, { capture: true }); };
   }, []);
+  const quiet = () => document.visibilityState === 'hidden' || Date.now() - lastInputRef.current > 2 * 60000;
+  useEffect(() => {
+    const running = document.querySelector('script[type="module"][src*="assets/index-"]')?.getAttribute('src');
+    if (IS_DESKTOP || !running) return undefined;
+    const name = running.slice(running.lastIndexOf('assets/'));
+    let want = null;
+    const tried = (() => { try { return sessionStorage.getItem('slopify.reloadedFor'); } catch { return null; } })();
+    const apply = () => {
+      if (!want || busy() || !quiet()) return;
+      try { sessionStorage.setItem('slopify.reloadedFor', want); } catch { /* private mode */ }
+      window.location.reload();
+    };
+    const saw = (build) => { if (/^assets\/index-[\w-]+\.js$/.test(build || '') && build !== name && build !== tried) want = build; apply(); };
+    const ask = async () => {
+      const html = await fetch('./', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+      saw(/assets\/index-[\w-]+\.js/.exec(html)?.[0]);
+    };
+    const onBuild = (e) => saw(e.detail);
+    const vis = () => (document.visibilityState === 'visible' ? ask() : apply());
+    window.addEventListener('slopify:webbuild', onBuild);
+    document.addEventListener('visibilitychange', vis);
+    const check = setInterval(apply, 30000);
+    const poll = setInterval(ask, 10 * 60000);
+    return () => { window.removeEventListener('slopify:webbuild', onBuild); document.removeEventListener('visibilitychange', vis); clearInterval(check); clearInterval(poll); };
+  }, []);
+  useEffect(() => {
+    if (update?.status !== 'ready') return undefined;
+    const t = setInterval(() => { if (!busy() && quiet()) window.conduit?.updates?.install({ quiet: true }); }, 30000);
+    return () => clearInterval(t);
+  }, [update?.status]);
   useEffect(() => {
     const rn = window.ReactNativeWebView;
     if (!rn) return undefined;

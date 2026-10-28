@@ -136,7 +136,7 @@ const wsSend = (ws: WebSocket) => (obj: unknown) => { try { if (ws.readyState ==
 const send = (c: Client, obj: unknown) => c.send(obj);
 const ofUser = (uid: string) => [...clients.values()].filter((c) => c.uid === uid);
 
-export type SessionOptions = { speakers?: boolean; publicUrl?: string; bluosGroups?: 'keep' | 'slopify' };
+export type SessionOptions = { speakers?: boolean; publicUrl?: string; bluosGroups?: 'keep' | 'slopify'; webBuild?: string };
 
 const SpeakerJoin = z.object({ leader: z.string().min(1).max(128), members: z.array(z.string().min(1).max(128)).max(32) });
 const SpeakerUnjoin = z.object({ speaker: z.string().min(1).max(128) });
@@ -575,7 +575,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         clients.set(id, self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);
-        send(self, { type: 'hello-ok', clientId: id, userId: who.id, offsets: offsetsAll(), now: Date.now(), sleep: sleepOut(who.id) });
+        send(self, { type: 'hello-ok', clientId: id, userId: who.id, offsets: offsetsAll(), now: Date.now(), sleep: sleepOut(who.id), web: opts.webBuild || null });
         broadcastRoster(who.id);
         for (const c of ofUser(who.id)) if (c.id !== id && c.queue) send(self, { type: 'queue', from: c.id, queue: c.queue });
         if (!s.active) { const sm = sessionMsg(s); if (sm) send(self, sm); }

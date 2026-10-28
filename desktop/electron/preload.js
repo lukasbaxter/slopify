@@ -62,11 +62,13 @@ contextBridge.exposeInMainWorld('conduit', {
 
   // In-app updates: state() / check() resolve to { status, version, error }
   // (status idle | checking | downloading | ready | current | error);
-  // onState(cb) returns an unsubscribe; install() restarts into the update.
+  // onState(cb) returns an unsubscribe; install() restarts into the update
+  // (install({ quiet: true }), the page's own unattended install, reopens it
+  // without taking the screen).
   updates: {
     state: () => call('update:state'),
     check: () => call('update:check'),
-    install: () => call('update:install'),
+    install: (opts) => call('update:install', opts),
     onState: (cb) => {
       const handler = (_evt, st) => cb(st);
       ipcRenderer.on('update:state', handler);

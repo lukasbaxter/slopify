@@ -309,7 +309,10 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
             <button
               className={`trackrow-like ${liked ? 'on' : ''}`}
               style={{ opacity: 1 }}
-              onClick={() => onLike?.(current || { Id: nowPlaying.itemId, Name: nowPlaying.title, _partial: true }, !liked)}
+              // The song the heart shows: `current` is this client's own last
+              // track, which after a relaunch or a hand-off is not the session's
+              // (the desktop liked an old song while the heart stayed off).
+              onClick={() => onLike?.(current?.Id === nowPlaying.itemId ? current : { Id: nowPlaying.itemId, Name: nowPlaying.title, _partial: true }, !liked)}
               title={liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}
             >
               <Heart on={liked} />

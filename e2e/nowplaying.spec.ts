@@ -299,3 +299,24 @@ test('the next songs are warmed: playlist, init segment and first segments, all 
   await expect.poll(() => seg(ids[0], 'alac', /^init\.mp4/).length + seg(ids[0], 'alac', /^s\d{4}\.m4s/).length, { timeout: 30000 }).toBe(3);
   expect(got.filter((g) => g.status !== 200)).toEqual([]);
 });
+
+test('the player bar heart likes the song it shows, not this client\'s old one', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'chromium', 'two devices of its own');
+  // 10-28: the desktop, relaunched while the TV played, still had its own last
+  // song as `current`; the heart showed the TV's song and liked the old one.
+  const a = await device(browser, false);
+  const b = await device(browser, false);
+  const ids = await albumIds(a, 'Second Wind');
+  const h = { Authorization: `Bearer ${await token(a)}` };
+  for (const id of ids) await a.request.delete(`/api/likes/${id}`, { headers: h });
+  await play(a, ids);
+  await expect.poll(() => a.evaluate(() => (window as any).__player.playing), { timeout: 10000 }).toBe(true);
+  await play(b, ids.slice(3));
+  await expect.poll(() => a.evaluate(() => { const p = (window as any).__player; return p.mirroring && p.nowPlaying?.itemId; }), { timeout: 15000 }).toBe(ids[3]);
+  expect(await a.evaluate(() => (window as any).__player.current?.Id)).toBe(ids[0]);
+  await a.locator('.player .trackrow-like').first().click();
+  await expect.poll(async () => Object.keys((await (await a.request.get('/api/likes', { headers: h })).json()).at || {}).filter((id) => ids.includes(id)), { timeout: 8000 }).toEqual([ids[3]]);
+  await expect(a.locator('.player .trackrow-like.on').first()).toBeVisible();
+  await b.evaluate(() => (window as any).__player.toggle());
+  await a.context().close(); await b.context().close();
+});

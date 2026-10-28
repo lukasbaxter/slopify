@@ -14,8 +14,8 @@ import { dropGenreCache } from './genres.js';
 import { adoptGone, pruneGone, remapTrackId, retireTrack } from './remap.js';
 
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
-const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
-const COVER_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
+export const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
+export const COVER_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // only: folders under musicDir to scan instead of all of it (a just-finished
 // download). Files outside them are neither read nor treated as gone.

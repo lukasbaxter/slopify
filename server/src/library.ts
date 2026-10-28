@@ -1,14 +1,17 @@
 // Read side of the library: lists, details, search, lyrics, artwork.
 // Every list is one query over columns the scanner already maintains.
 import type { FastifyInstance } from 'fastify';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import { parseFile } from 'music-metadata';
 import path from 'node:path';
 import type { DB } from './db.js';
 import { libraryVersion } from './db.js';
-import { artPath, nearestSize, SIZES } from './artwork.js';
+import { artPath, nearestBig, nearestSize, renderBig, SIZES } from './artwork.js';
 import { similarInLibrary } from './discover.js';
 import { albumGenreMap } from './genres.js';
-import { splitArtists } from './scanner.js';
+import { AUDIO_EXT, COVER_EXT, COVER_NAMES, splitArtists } from './scanner.js';
 import { gainDb } from './loudness.js';
 
 export type TrackRow = {
@@ -359,6 +362,28 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     }
     return null;
   };
+  // The source bytes of a stored picture: from where the scan (or the
+  // download) found them, a cover file, a track's embedded picture or a URL;
+  // else, for a folder since renamed or moved in from the drop folder, the
+  // covers and first tracks of the albums now showing it. Only bytes that
+  // still hash to it count.
+  const noOriginal = new Set<string>();
+  const originalOf = async (hash: string): Promise<Buffer | null> => {
+    const read = async (f: string): Promise<Buffer | null> => {
+      if (/^https?:\/\//.test(f)) { const r = await fetch(f, { signal: AbortSignal.timeout(15000) }); return r.ok ? Buffer.from(await r.arrayBuffer()) : null; }
+      if (!AUDIO_EXT.has(path.extname(f).toLowerCase())) return await fsp.readFile(f);
+      const pic = (await parseFile(f, { skipPostHeaders: true })).common.picture?.[0];
+      return pic ? Buffer.from(pic.data) : null;
+    };
+    const src = (db.prepare('SELECT src FROM artwork WHERE hash = ?').get(hash) as any)?.src as string | undefined;
+    const tracks = (db.prepare('SELECT (SELECT t.path FROM tracks t WHERE t.album_id = a.id ORDER BY t.disc_no, t.track_no LIMIT 1) path FROM albums a WHERE a.cover_hash = ? LIMIT 3').all(hash) as any[]).map((r) => r.path).filter(Boolean) as string[];
+    const covers = tracks.flatMap((t) => COVER_NAMES.flatMap((n) => COVER_EXT.map((e) => path.join(path.dirname(t), n + e))));
+    for (const f of [...(src ? [src] : []), ...covers, ...tracks]) {
+      const b = await read(f).catch(() => null);
+      if (b && crypto.createHash('sha1').update(b).digest('hex') === hash) return b;
+    }
+    return null;
+  };
   // Own, larger bucket: one album grid is hundreds of covers, and every phone on
   // the LAN reaches the public hostname through the router's hairpin NAT, so the
   // whole house shares one client IP. The 600/min default 429'd covers.
@@ -373,7 +398,19 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const hash = coverOf(id, kind);
     if (!hash) return reply.code(404).send();
     const webp = /image\/webp/.test(String(req.headers.accept || ''));
-    const size = kind === 'banner' ? 'banner' : String(nearestSize(Number(q.size) || Number(q.maxHeight) || 320));
+    const want = Number(q.size) || Number(q.maxHeight) || 320;
+    // Bigger than the largest stored copy: the big one, made now if need be;
+    // the 640 copy when the original cannot be read.
+    if (kind === 'primary' && want > SIZES[SIZES.length - 1] && !hash.includes('/')) {
+      const big = nearestBig(want);
+      const p = path.join(dataDir, 'art', hash, `${big}.${webp ? 'webp' : 'jpg'}`);
+      if (fs.existsSync(p) || (!noOriginal.has(hash) && await renderBig(dataDir, hash, big, () => originalOf(hash)))) {
+        reply.header('Cache-Control', 'private, max-age=86400').header('Vary', 'Accept').type(webp ? 'image/webp' : 'image/jpeg');
+        return reply.send(fs.createReadStream(p));
+      }
+      noOriginal.add(hash);
+    }
+    const size = kind === 'banner' ? 'banner' : String(nearestSize(want));
     // Banner width: 640 for a small screen or a slow / metered connection, 1280 otherwise.
     const [h, sub] = hash.replace('{w}', Number(q.w) > 0 && Number(q.w) <= 800 ? '640' : '1280').split('/');
     const p = path.join(dataDir, 'art', h, sub ? `${sub}.${webp ? 'webp' : 'jpg'}` : `${size}.${webp ? 'webp' : 'jpg'}`);

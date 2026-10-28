@@ -71,6 +71,37 @@ export async function storeBanner(dataDir: string, bytes: Buffer): Promise<{ has
   return { hash, width, height };
 }
 
+// The big copies (the TV's full-screen cover, the desktop's now playing) are
+// made the first time one is asked for, from the original, never larger than
+// it, and kept beside the small ones: rendering 13k covers this big at scan
+// would be hours of work and gigabytes for pictures few are ever shown at.
+export const BIG_SIZES = [1280, 1920] as const;
+export type BigSize = (typeof BIG_SIZES)[number];
+export function nearestBig(n: number): BigSize { return BIG_SIZES.find((s) => s >= n) ?? 1920; }
+const rendering = new Map<string, Promise<boolean>>();
+// `original` returns the source bytes (or null); they must still hash to
+// `hash`, so a cover file replaced since the scan never shows under the old id.
+export function renderBig(dataDir: string, hash: string, size: BigSize, original: () => Promise<Buffer | null>): Promise<boolean> {
+  const key = `${hash}/${size}`;
+  let job = rendering.get(key);
+  if (!job) {
+    job = (async () => {
+      const bytes = await original().catch(() => null);
+      if (!bytes || crypto.createHash('sha1').update(bytes).digest('hex') !== hash) return false;
+      const dir = path.join(artDir(dataDir), hash);
+      await fs.mkdir(dir, { recursive: true });
+      const img = sharp(bytes, { failOn: 'none' }).rotate().resize(size, size, { fit: 'cover', withoutEnlargement: true });
+      await Promise.all([
+        toFileAtomic(img.clone().webp({ quality: 82 }), path.join(dir, `${size}.webp`)),
+        toFileAtomic(img.clone().jpeg({ quality: 85, mozjpeg: true }), path.join(dir, `${size}.jpg`)),
+      ]);
+      return true;
+    })().catch(() => false).finally(() => rendering.delete(key));
+    rendering.set(key, job);
+  }
+  return job;
+}
+
 export function artPath(dataDir: string, hash: string, size: ArtSize, format: 'webp' | 'jpg') {
   return path.join(artDir(dataDir), hash, `${size}.${format}`);
 }

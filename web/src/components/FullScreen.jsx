@@ -201,9 +201,11 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   const quality = useQuality(player, jf);
   // The big cover paints from the small copy the lists already fetched (it is
   // in the cache: 64 px on the phone, 320 on the desktop), while the full-size
-  // one (640 on the phone: 3x of the 24pt gutter width, 1000 on the desktop)
-  // downloads behind it and swaps in.
-  const artHi = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: phone ? 640 : 1000, full: true }) : nowPlaying?.artUrl || null;
+  // one (640 on the phone: 3x of the 24pt gutter width, 1280 on the desktop,
+  // 1920 on the TV, whose Album view is the cover across the whole 1080p
+  // screen) downloads behind it and swaps in.
+  const tv = window.slopifyShell?.deviceForm === 'tv';
+  const artHi = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: phone ? 640 : tv ? 1920 : 1280, full: true }) : nowPlaying?.artUrl || null;
   const artLo = nowPlaying?.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: 320 }) : null;
   const { src: art, bg: artBg, key: artKey } = useSteadyArt(artLo, artHi);
   // The row-menu shape of the playing track (onLike / onAddTo want a track

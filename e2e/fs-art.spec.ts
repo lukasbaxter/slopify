@@ -19,7 +19,7 @@ test('song change: the art never goes blank, the background crossfades', async (
   await expect(page.locator('.player button[title="Pause"]').first()).toBeVisible({ timeout: 20000 });
   await page.locator('.player button[title*="Now playing" i], .player button[aria-label*="Now playing" i], .player .expand').first().click();
   await expect(page.locator('.fs')).toBeVisible({ timeout: 10000 });
-  await expect.poll(() => page.evaluate(() => { const i = document.querySelector('.fs-art') as HTMLImageElement | null; return !!i?.complete && i.naturalWidth > 0 && i.src.includes('size=1000'); }), { timeout: 15000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => { const i = document.querySelector('.fs-art') as HTMLImageElement | null; return !!i?.complete && i.naturalWidth > 0 && i.src.includes('size=1280'); }), { timeout: 15000 }).toBe(true);
   const before = await page.evaluate(() => (document.querySelector('.fs-art') as HTMLImageElement).src);
 
   // Every frame from the skip on: is there a painted cover and a background?
@@ -57,7 +57,7 @@ test('TV: the album tab is the whole cover, sharp and dimmed', async ({ page }, 
   await page.evaluate(async (ids) => { const w = window as any; await w.__player.playQueue(await w.__jf.itemsByIds(ids), 0, null); }, [id]);
   await page.locator('.player button[title="Now playing view"]').first().click();
   await page.locator('.fs-tabs button[aria-label="Album"]').click();
-  await expect.poll(() => page.evaluate(() => { const b = [...document.querySelectorAll('.fs-bg')].pop() as HTMLElement | undefined; return b ? [b.classList.contains('full'), getComputedStyle(b).filter, b.style.backgroundImage.includes('size=1000')] : null; }), { timeout: 15000 }).toEqual([true, 'brightness(0.6)', true]);
+  await expect.poll(() => page.evaluate(() => { const b = [...document.querySelectorAll('.fs-bg')].pop() as HTMLElement | undefined; return b ? [b.classList.contains('full'), getComputedStyle(b).filter, b.style.backgroundImage.includes('size=1920')] : null; }), { timeout: 15000 }).toEqual([true, 'brightness(0.6)', true]);
   await expect(page.locator('.fs-art')).toHaveCount(0);
   const bg = await page.locator('.fs-bg').last().boundingBox();
   expect(bg).toEqual({ x: 0, y: 0, width: 1600, height: 900 });

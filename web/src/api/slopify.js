@@ -127,6 +127,16 @@ export class Slopify {
     return `${this.baseUrl}${path}?${q}`;
   }
 
+  // A demo server (DEMO=1) signs a visitor straight in as a guest of their own; any other server answers 404.
+  static async demo(baseUrl) {
+    const client = new Slopify({ baseUrl: baseUrl.trim() });
+    const data = await client._fetch('/api/auth/demo', { method: 'POST', body: JSON.stringify({ device: clientIdentity().name }) });
+    client.token = data.token;
+    client.userId = data.user.id;
+    client.user = data.user;
+    return client;
+  }
+
   static async login(baseUrl, username, password) {
     const client = new Slopify({ baseUrl: baseUrl.trim() });
     const data = await client._fetch('/api/auth/login', {

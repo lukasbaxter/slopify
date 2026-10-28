@@ -76,6 +76,8 @@ export const config = {
   // is unlinked within a minute. 'keep' leaves such groups alone.
   bluosGroups: env('BLUOS_GROUPS', 'slopify') === 'keep' ? 'keep' as const : 'slopify' as const,
   serverName: env('SERVER_NAME', ''),
+  // A public try-it-out server: no sign-in, a guest account per visitor cloned from the admin's (demo.ts).
+  demo: env('DEMO', '0') === '1',
   // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library
   // lacks are fetched through it. If slskd's finished-downloads folder is
   // also mounted into this container (SLSKD_DOWNLOADS_DIR), fetched tracks

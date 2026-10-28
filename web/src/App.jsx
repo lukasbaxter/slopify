@@ -76,6 +76,15 @@ function Login({ onConnected }) {
   const [needPw, setNeedPw] = useState(null); // the client whose first password must still be chosen
   // An invite link (/?invite=code) makes this the sign-up form.
   const invite = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('invite') : null;
+  // A demo server signs the visitor in as a guest; the form shows only when it is not one.
+  const [tryingDemo, setTryingDemo] = useState(!invite && !IS_DESKTOP);
+  useEffect(() => {
+    if (!tryingDemo) return;
+    Slopify.demo(DEFAULT_SERVER)
+      .then((jf) => { persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId }); onConnected(jf); })
+      .catch(() => setTryingDemo(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (tryingDemo) return <div className="boot">Starting Slopify...</div>;
   if (needPw) return <ChangePassword jf={needPw} onDone={() => onConnected(needPw)} />;
 
   const submit = async (e) => {

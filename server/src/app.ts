@@ -30,6 +30,7 @@ import { lyricSyncTask, registerLyricSync } from './lyricsync.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 import { defaultServerName, registerServerInfo } from './advertise.js';
+import { registerDemo } from './demo.js';
 
 // The release this server is (package.json, bumped with every tagged release).
 export const VERSION: string = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -37,7 +38,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // server/dist/app.js or server/src/app.ts -> repo root
 export const repoRoot = path.resolve(here, '..', '..');
 
-export type BuildOptions = { dataDir?: string; cacheDir?: string; musicDir?: string; db?: DB; speakers?: boolean };
+export type BuildOptions = { dataDir?: string; cacheDir?: string; musicDir?: string; db?: DB; speakers?: boolean; demo?: boolean };
 
 // Tokens ride in URLs (?token=, ?api_key=, ?key= — media elements cannot send
 // headers), so mask their values before a request line reaches the log.
@@ -83,6 +84,7 @@ export async function buildServer(opts: BuildOptions = {}) {
 
   const musicDir = opts.musicDir ?? config.musicDir;
   registerAuth(app, db);
+  if (opts.demo ?? config.demo) registerDemo(app, db, { template: config.adminUser });
   registerLibrary(app, db, cacheDir);
   const songCache = new SongCache(db, cacheDir, config.songCacheGb * 1e9, (m) => app.log.warn(m));
   // A song the library lists on the NAS but the ingest has not copied yet is read from the SSD drop folder.
@@ -126,7 +128,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   // Every /api route must carry a sign-in check unless it is one of the few
   // public ones by design: a route registered without its `auth` options
   // used to come up open and nobody would know.
-  const PUBLIC_API = new Set(['/api/healthz', '/api/auth/login', '/api/auth/register', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
+  const PUBLIC_API = new Set(['/api/healthz', '/api/auth/login', '/api/auth/register', '/api/auth/demo', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
   const open: string[] = [];
   app.addHook('onRoute', (r) => {
     if (!r.url.startsWith('/api/') || PUBLIC_API.has(r.url) || (r as any).websocket) return;

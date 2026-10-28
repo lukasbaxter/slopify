@@ -39,6 +39,7 @@ environment values for them only seed the defaults.
 | `BLUOS_GROUPS` | `slopify` | BluOS speakers are grouped only by Slopify's speaker groups; a group made elsewhere (the BluOS app) is unlinked within a minute. `keep` leaves those alone |
 | `SOURCE_URL` | this repository | The source code link every app shows in Settings › About; point it at your fork if you run a modified Slopify (the AGPL asks you to offer your users its source) |
 | `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under (`Slopify` on Docker's default network) |
+| `DEMO` | `0` | `1` makes a public try-it-out server: no sign-in form, every visitor gets a guest account of their own with a copy of the admin's playlists, likes and history. Guests can play, like and make playlists; settings, scans, accounts and uploads are refused. Idle guests are removed after a day |
 | `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
 | `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
 | `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |

@@ -31,6 +31,8 @@ Free software under the [GNU AGPL v3](LICENSE). No telemetry, no accounts with
 anyone: [what leaves your server](PRIVACY.md) lists every outside service and
 how to turn it off. Not affiliated with Spotify.
 
+**Try it:** [slopify.lukasbaxter.ca](https://slopify.lukasbaxter.ca), a demo with no sign-up (30-second clips; settings are look-only).
+
 ## Quick start
 
 You need Docker with Compose, and a folder of music (any layout; tags are

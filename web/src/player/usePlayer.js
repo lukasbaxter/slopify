@@ -418,6 +418,7 @@ export function usePlayer(jf) {
   // poll, a mirrored report), for code that acts between renders. The React
   // `position` state is only a coarse copy of it (see usePlayhead).
   const positionNowRef = useRef(null);
+  const outputLagRef = useRef(() => 0);
   const coarseRef = useRef(0);
   const relayNowRef = useRef(null);
   const livePos = () => (positionNowRef.current ? positionNowRef.current() : positionRef.current);
@@ -2514,7 +2515,7 @@ export function usePlayer(jf) {
       // on Node" when the session is on a speaker rather than on a client.
       device: { id: device.id, kind: device.kind, name: device.name },
       queueIndex: index,
-      playing, position: positionNowRef.current ? positionNowRef.current() : position, duration, volume, repeat, shuffle, at: Date.now(),
+      playing, position: Math.max(0, (positionNowRef.current ? positionNowRef.current() : position) - (playing ? outputLagRef.current() : 0)), duration, volume, repeat, shuffle, at: Date.now(),
     } : null;
   }
 
@@ -2546,6 +2547,19 @@ export function usePlayer(jf) {
     return a.playing ? a.pos + Math.max(0, Date.now() - a.at) / 1000 : positionRef.current;
   }, []);
   positionNowRef.current = positionNow;
+  // How long the sound takes from the element to the speaker when this device
+  // plays through its Web Audio graph: the TV's WebView reported 0.17 s base +
+  // 0.78 s output latency (10-28), so its lyrics, bars and every mirror ran a
+  // second ahead of what was heard. Displays and reports follow heard time;
+  // a mirrored report is already heard time.
+  const outputLag = useCallback(() => {
+    if (relayNow() || relayTargetRef.current || deviceRef.current?.kind !== 'local') return 0;
+    const c = webAudioRef.current?.ctx;
+    if (!c || c.state !== 'running') return 0;
+    const v = (c.baseLatency || 0) + (c.outputLatency || 0);
+    return Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 0;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  outputLagRef.current = outputLag;
   const shownDuration = relayTarget ? (relayTarget.duration || 0) : duration;
   const shownPlaying = relayTarget ? Boolean(relayTarget.playing) : playing;
   // While casting, the slider follows the mirrored session's volume -- except
@@ -2791,6 +2805,7 @@ export function usePlayer(jf) {
       relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relay: relayInstance,
       // The local element's own clock (the visualizer's timing report).
       debugElement: () => (activeEl ? localBaseRef.current + activeEl.currentTime : null),
+      outputLag,
       queue: shownQueue, index: shownIndex, current, applyRemoteQueue, applySession, mirroring: !!relayTarget,
       playing: shownPlaying, position: shownPosition, positionNow, duration: shownDuration, volume: shownVolume, error,
       repeat: shownRepeat, shuffle: shownShuffle, cycleRepeat, cycleShuffle, setShuffle: setShuffleRouted,

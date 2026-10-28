@@ -344,7 +344,7 @@ export function Lyrics({ player, jf }) {
   const pickRef = useRef(null);
   pickRef.current = () => {
     if (!lines) return -1;
-    const now = player.positionNow ? player.positionNow() : position;
+    const now = (player.positionNow ? player.positionNow() : position) - (player.playing && player.outputLag ? player.outputLag() : 0);
     const at = now - speakerDelay + LEAD_SECONDS;
     return lines.reduce((acc, l, i) => (l.start != null && at >= l.start ? i : acc), -1);
   };

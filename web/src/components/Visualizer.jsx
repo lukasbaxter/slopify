@@ -48,6 +48,8 @@ const TV_FFT = 4096, TV_FFT_MIN = 2048, TV_MIN_FPS = 50;
 // A context whose clock advances in big blocks (a TV's HDMI output: 100 ms) cannot
 // feed a smooth visualizer; above this the shadow copy is analysed even for local playback.
 const COARSE_LATENCY = 0.04;
+// Bars further than this from the sound read as late (or early): re-line the shadow.
+const DRIFT_MAX = 0.1;
 
 export const EQ_STYLES = [
   // "Line": Feishin's default preset (mode 10 line graph, 1.9px, prism, faint reflection).
@@ -79,7 +81,9 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   const local = !player.mirroring && player.device?.kind === 'local' && !!player.current;
   // Tapping the element needs it routed through Web Audio, which iOS never is:
   // there the shadow copy stands in for local playback too.
-  const tap = local && ROUTES_WEB_AUDIO && !((player.webAudio?.()?.ctx?.baseLatency || 0) > COARSE_LATENCY);
+  // A device whose sound trails its element (a TV's WebView: 0.9 s) uses the
+  // shadow too, timed to what is heard.
+  const tap = local && ROUTES_WEB_AUDIO && !((player.webAudio?.()?.ctx?.baseLatency || 0) > COARSE_LATENCY) && !((player.outputLag?.() || 0) > COARSE_LATENCY);
   const trackId = player.nowPlayingId;
   const cfg = settings || DEFAULT_VIZ;
   const style = EQ_STYLES.find((x) => x.id === cfg.style) || EQ_STYLES[0];
@@ -102,9 +106,11 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   // What the speaker REPORTS right now (no offset): the calibration measures
   // the delay against this.
   const posNowRef = useRef(null); posNowRef.current = player.positionNow || null;
+  const lagRef = useRef(null); lagRef.current = player.outputLag || null;
   const reported = (at = Date.now()) => {
-    if (posNowRef.current) return posNowRef.current() + (at - Date.now()) / 1000;
-    const c = clockRef.current; return c.pos + (c.playing ? (at - c.at) / 1000 : 0);
+    const lag = (c) => (c.playing && lagRef.current ? lagRef.current() : 0);
+    if (posNowRef.current) return posNowRef.current() - lag(clockRef.current) + (at - Date.now()) / 1000;
+    const c = clockRef.current; return c.pos - lag(c) + (c.playing ? (at - c.at) / 1000 : 0);
   };
   useEffect(() => {
     if (!active || tap) { shadowRef.current?.stop(); return undefined; }
@@ -119,6 +125,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
     const load = () => {
       const at = Math.max(0, want() + sh.lead);
       if (sh.id !== trackId) sh.retried = false;
+      sh.loadedAt = Date.now();
       sh.id = trackId;
       sh.load(jf.transcodeUrl(trackId, { codec: 'mp3', bitrate: 192000, startAt: at }), at);
     };
@@ -130,7 +137,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
       // second on the first try, under the 0.6 s the sync tick tolerates, so the
       // bars ran visibly late for the whole track. One retry with the lead it
       // just learned lands within a frame or two; never more than one per load.
-      if (Math.abs(drift) > 0.15 && !sh.retried) { sh.retried = true; load(); } else sh.retried = false;
+      if (Math.abs(drift) > DRIFT_MAX && !sh.retried) { sh.retried = true; load(); } else sh.retried = false;
     });
     const tick = () => {
       const c = clockRef.current;
@@ -138,8 +145,10 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
       if (sh.ctx.state !== 'running') { sh.ctx.resume?.().catch(() => {}); return; } // never started before the unlock
       if (sh.id !== trackId || sh.paused) { load(); return; }
       if (sh.loading) return;
+      // The shadow's clock and the player's part slowly (on the TV 0.14 s
+      // in 50 s): re-line it once it is visibly off, at most every 5 s.
       const drift = sh.position - want();
-      if (Math.abs(drift) > 0.6) load();
+      if (Math.abs(drift) > 0.6 || (Math.abs(drift) > DRIFT_MAX && Date.now() - (sh.loadedAt || 0) > 5000)) load();
     };
     // A new offset is a jump, not drift: restart the stream at the new spot.
     if (sh.offset !== offsetRef.current) { sh.offset = offsetRef.current; sh.id = null; }

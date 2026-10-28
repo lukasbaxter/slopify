@@ -140,6 +140,9 @@ jobs:
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.desktop.result == 'success'
     steps:
+      # The whole history and tags: the notes list the commits since the last tag.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
       - run: ls -la out
@@ -149,7 +152,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --notes "$(bash tools/release-notes.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY")"
           for f in out/*; do
             for i in 1 2 3 4 5; do gh release upload "$GITHUB_REF_NAME" "$f" -R "$GITHUB_REPOSITORY" --clobber && break || sleep 15; done
           done

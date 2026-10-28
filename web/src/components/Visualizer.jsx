@@ -148,6 +148,31 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
     return () => { clearInterval(t); sh.onPlaying(null); };
   }, [active, tap, trackId, player.playing, offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Timing report to the server log every 10 s while the bars show (devices
+  // whose console nobody can open: a TV). The playback context's output
+  // timestamp says how far the sound trails what the element reports.
+  useEffect(() => {
+    if (!active || !player.relay?._send) return undefined;
+    let last = null;
+    const t = setInterval(() => {
+      try {
+        const sh = shadowRef.current, pc = player.webAudio?.()?.ctx;
+        const ts = pc?.getOutputTimestamp?.();
+        const now = { wall: Date.now(), sh: sh && !sh.paused ? sh.ctx.currentTime : null };
+        const rate = last && now.sh != null && last.sh != null ? (now.sh - last.sh) / ((now.wall - last.wall) / 1000) : null;
+        last = now;
+        const r3 = (v) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null);
+        player.relay._send({ type: 'diag', data: { viz: {
+          mode: tap ? 'tap' : 'shadow', local, track: trackId?.slice(0, 8), reported: r3(reported()), offset: offsetRef.current,
+          shadow: sh ? { pos: r3(sh.position), drift: r3(sh.position - (reported() - offsetRef.current)), lead: r3(sh.lead), loading: sh.loading, paused: sh.paused, rate: r3(rate), base: r3(sh.ctx.baseLatency), out: r3(sh.ctx.outputLatency) } : null,
+          play: pc ? { base: r3(pc.baseLatency), out: r3(pc.outputLatency), state: pc.state, behind: ts && ts.performanceTime ? r3(pc.currentTime - ts.contextTime - (performance.now() - ts.performanceTime) / 1000) : null } : null,
+          fps: amRef.current ? Math.round(amRef.current.fps) : null, fft: amRef.current?.fftSize ?? null,
+        } } });
+      } catch { /* diagnostics only */ }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [active, tap, local, trackId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const graph = () => { const wa = tap ? player.webAudio() : shadow(); wa?.ctx?.resume?.(); return wa; };
 
   // Graphic EQ engine.

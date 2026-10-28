@@ -2789,6 +2789,8 @@ export function usePlayer(jf) {
     () => ({
       device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, clearQueued, webAudio,
       relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relay: relayInstance,
+      // The local element's own clock (the visualizer's timing report).
+      debugElement: () => (activeEl ? localBaseRef.current + activeEl.currentTime : null),
       queue: shownQueue, index: shownIndex, current, applyRemoteQueue, applySession, mirroring: !!relayTarget,
       playing: shownPlaying, position: shownPosition, positionNow, duration: shownDuration, volume: shownVolume, error,
       repeat: shownRepeat, shuffle: shownShuffle, cycleRepeat, cycleShuffle, setShuffle: setShuffleRouted,

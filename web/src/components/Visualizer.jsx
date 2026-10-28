@@ -154,7 +154,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   useEffect(() => {
     if (!active || !player.relay?._send) return undefined;
     let last = null;
-    const t = setInterval(() => {
+    const report = () => {
       try {
         const sh = shadowRef.current, pc = player.webAudio?.()?.ctx;
         const ts = pc?.getOutputTimestamp?.();
@@ -167,11 +167,14 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
           shadow: sh ? { pos: r3(sh.position), drift: r3(sh.position - (reported() - offsetRef.current)), lead: r3(sh.lead), loading: sh.loading, paused: sh.paused, rate: r3(rate), base: r3(sh.ctx.baseLatency), out: r3(sh.ctx.outputLatency) } : null,
           play: pc ? { base: r3(pc.baseLatency), out: r3(pc.outputLatency), state: pc.state, behind: ts && ts.performanceTime ? r3(pc.currentTime - ts.contextTime - (performance.now() - ts.performanceTime) / 1000) : null } : null,
           fps: amRef.current ? Math.round(amRef.current.fps) : null, fft: amRef.current?.fftSize ?? null,
+          el: player.debugElement ? r3(player.debugElement()) : null, now: r3(player.positionNow?.()),
         } } });
       } catch { /* diagnostics only */ }
-    }, 10000);
-    return () => clearInterval(t);
-  }, [active, tap, local, trackId]); // eslint-disable-line react-hooks/exhaustive-deps
+    };
+    const first = setTimeout(report, 3000);
+    const t = setInterval(report, 10500);
+    return () => { clearTimeout(first); clearInterval(t); };
+  }, [active, tap, local, trackId, player.relay]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const graph = () => { const wa = tap ? player.webAudio() : shadow(); wa?.ctx?.resume?.(); return wa; };
 

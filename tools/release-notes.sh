@@ -31,4 +31,4 @@ cat <<EOF
 | Speakers | Chromecast, BluOS, DIY \`slopify-speaker/1\` | No app: the server finds and plays to them |
 EOF
 echo
-[ -n "$prev" ] && echo "**Full Changelog**: https://github.com/$repo/compare/$prev...$tag"
+if [ -n "$prev" ]; then echo "**Full Changelog**: https://github.com/$repo/compare/$prev...$tag"; fi

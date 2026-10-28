@@ -2,6 +2,26 @@
 
 ![Slopify playing the same song on a TV, a MacBook Pro, an iPad and an iPhone, with the music library on two hard drives beside them](docs/images/cover.jpg)
 
+<p align="center">
+  <a href="https://github.com/lukasbaxter/slopify/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/lukasbaxter/slopify?style=for-the-badge"></a>
+  <a href="https://github.com/lukasbaxter/slopify/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/lukasbaxter/slopify/total?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/github/license/lukasbaxter/slopify?style=for-the-badge"></a>
+  <a href="https://github.com/lukasbaxter/slopify/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/lukasbaxter/slopify/ci.yml?style=for-the-badge&label=ci"></a>
+  <a href="https://github.com/lukasbaxter/slopify/actions/workflows/docker.yml"><img alt="Docker image" src="https://img.shields.io/github/actions/workflow/status/lukasbaxter/slopify/docker.yml?style=for-the-badge&label=docker&logo=docker&logoColor=white"></a>
+  <a href="https://github.com/lukasbaxter/slopify/actions/workflows/home-assistant.yml"><img alt="Home Assistant integration checks" src="https://img.shields.io/github/actions/workflow/status/lukasbaxter/slopify/home-assistant.yml?style=for-the-badge&label=home%20assistant&logo=homeassistant&logoColor=white"></a>
+  <br>
+  <a href="docs/home-assistant.md"><img alt="Built for Home Assistant" src="https://img.shields.io/badge/built_for-Home_Assistant-18BCF2?style=for-the-badge&logo=homeassistant&logoColor=white"></a>
+  <a href="https://hacs.xyz"><img alt="HACS custom repository" src="https://img.shields.io/badge/HACS-custom-41BDF5?style=for-the-badge"></a>
+  <a href="https://github.com/lukasbaxter/slopify/pkgs/container/slopify"><img alt="Container: ghcr.io" src="https://img.shields.io/badge/ghcr.io-amd64_%7C_arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/apps-web_%7C_mac_%7C_windows_%7C_android_%7C_ios_%7C_tv-1DB954?style=for-the-badge">
+  <br>
+  <img alt="Last commit" src="https://img.shields.io/github/last-commit/lukasbaxter/slopify?style=for-the-badge">
+  <img alt="Commit activity" src="https://img.shields.io/github/commit-activity/m/lukasbaxter/slopify?style=for-the-badge">
+  <a href="https://github.com/lukasbaxter/slopify/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/lukasbaxter/slopify?style=for-the-badge"></a>
+  <img alt="Repo size" src="https://img.shields.io/github/repo-size/lukasbaxter/slopify?style=for-the-badge">
+  <a href="https://github.com/lukasbaxter/slopify/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/lukasbaxter/slopify?style=for-the-badge"></a>
+</p>
+
 Self-hosted music: one container and your music folder give your household
 Spotify-style apps (web, Android, iPhone, Mac, Windows) with a shared session across
 them, Chromecast and BluOS speakers driven by the server, and a Home Assistant
@@ -31,7 +51,7 @@ ARM NAS boxes).
          - ./data:/data
        environment:
          PORT: "8080"
-         TZ: America/Vancouver   # your time zone, for scheduled tasks
+         TZ: Europe/London   # your time zone, for scheduled tasks
    ```
 
 2. `docker compose up -d`
@@ -68,6 +88,11 @@ spelled out there.
 - [Sync lyrics on a GPU](docs/lyric-sync.md): the GPU image.
 - [Home Assistant](docs/home-assistant.md): the integration, installed with HACS.
 - [iPhone](docs/iphone.md): the Home Screen web app, or the app through SideStore.
+
+Home Assistant, in two clicks:
+
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lukasbaxter&repository=slopify&category=integration)
+[![Open your Home Assistant instance and start setting up Slopify.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=slopify)
 
 ## What it does
 

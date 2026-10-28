@@ -423,7 +423,9 @@ class SlopifySession:
             self.user_id = hello.get("userId")
             offs = hello.get("offsets")
             if isinstance(offs, dict):
-                self.offsets = {k: float(v) for k, v in offs.items() if isinstance(k, str) and isinstance(v, (int, float))}
+                self.offsets = {
+                    k: float(v) for k, v in offs.items() if isinstance(k, str) and isinstance(v, (int, float))
+                }
             self.last_error = None
             self._set_connected(True, notify=False)
             self._connected_once.set()
@@ -530,7 +532,11 @@ class SlopifySession:
                 # Age the report by the server's stamp when the clock is known: the
                 # receipt-time anchor is shifted back by the time it spent in flight.
                 stamped = np.get("serverAt") if isinstance(np, dict) else None
-                age = max(0.0, (server_now - stamped) / 1000) if server_now is not None and isinstance(stamped, (int, float)) else 0.0
+                age = (
+                    max(0.0, (server_now - stamped) / 1000)
+                    if server_now is not None and isinstance(stamped, (int, float))
+                    else 0.0
+                )
                 self.np_received[pid] = now - age
         ids = {p["id"] for p in players}
         self.np_received = {k: v for k, v in self.np_received.items() if k in ids}

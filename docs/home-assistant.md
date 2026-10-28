@@ -36,6 +36,14 @@ Requires Home Assistant 2025.7 or newer.
 
 ### With HACS
 
+The quick way: open the repository in HACS, **Download**, restart Home
+Assistant, then start the setup.
+
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lukasbaxter&repository=slopify&category=integration)
+[![Open your Home Assistant instance and start setting up Slopify.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=slopify)
+
+Or by hand in HACS:
+
 1. In Home Assistant open **HACS**, the three-dot menu, **Custom
    repositories**.
 2. Add `https://github.com/lukasbaxter/slopify` with the type

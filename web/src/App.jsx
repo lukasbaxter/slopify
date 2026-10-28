@@ -81,7 +81,7 @@ function Login({ onConnected }) {
   useEffect(() => {
     if (!tryingDemo) return;
     Slopify.demo(DEFAULT_SERVER)
-      .then((jf) => { persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId }); onConnected(jf); })
+      .then((jf) => { if (!jf) return setTryingDemo(false); persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId }); onConnected(jf); })
       .catch(() => setTryingDemo(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (tryingDemo) return <div className="boot">Starting Slopify...</div>;

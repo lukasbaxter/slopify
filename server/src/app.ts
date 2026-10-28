@@ -84,7 +84,7 @@ export async function buildServer(opts: BuildOptions = {}) {
 
   const musicDir = opts.musicDir ?? config.musicDir;
   registerAuth(app, db);
-  if (opts.demo ?? config.demo) registerDemo(app, db, { template: config.adminUser });
+  registerDemo(app, db, { enabled: opts.demo ?? config.demo, template: config.adminUser });
   registerLibrary(app, db, cacheDir);
   const songCache = new SongCache(db, cacheDir, config.songCacheGb * 1e9, (m) => app.log.warn(m));
   // A song the library lists on the NAS but the ingest has not copied yet is read from the SSD drop folder.

@@ -74,9 +74,10 @@ describe('demo mode', () => {
 });
 
 describe('without demo mode', () => {
-  it('there is no guest sign-in', async () => {
+  it('there is no guest sign-in, and asking is not an error', async () => {
     const plain = await buildServer({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-nodemo-')), musicDir: DATA });
-    expect((await plain.inject({ method: 'POST', url: '/api/auth/demo' })).statusCode).toBe(404);
+    expect((await plain.inject({ method: 'POST', url: '/api/auth/demo' })).statusCode).toBe(204);
+    expect((plain as any).db.prepare('SELECT COUNT(*) n FROM users').get().n).toBe(1);
     await plain.close();
   });
 });

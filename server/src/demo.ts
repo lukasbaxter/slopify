@@ -72,14 +72,17 @@ export function removeStaleGuests(db: DB, now = Date.now()) {
   return stale.length;
 }
 
-export function registerDemo(app: FastifyInstance, db: DB, opts: { template: string; device?: string }) {
-  app.post('/api/auth/demo', { config: { rateLimit: { max: 20, timeWindow: '1 hour' } } }, async (req) => {
+export function registerDemo(app: FastifyInstance, db: DB, opts: { enabled: boolean; template: string }) {
+  // Every server answers, so the sign-in page can ask without a failed request: 204 = not a demo.
+  app.post('/api/auth/demo', opts.enabled ? { config: { rateLimit: { max: 20, timeWindow: '1 hour' } } } : {}, async (req, reply) => {
+    if (!opts.enabled) return reply.code(204).send();
     const u = createGuest(db, opts.template);
     const t = newToken();
     const device = String((req.body as any)?.device || 'Web').slice(0, 80);
     db.prepare('INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)').run(t, u.id, device, 'web', Date.now(), Date.now());
     return { token: t, user: publicUser(u), demo: true };
   });
+  if (!opts.enabled) return;
   // After registerAuth's hook has resolved who is asking.
   app.addHook('preHandler', async (req, reply) => {
     if (!isGuest(req.user)) return;

@@ -3,6 +3,12 @@
 ![Slopify playing the same song on a TV, a MacBook Pro, an iPad and an iPhone, with the music library on two hard drives beside them](docs/images/cover.jpg)
 
 <p align="center">
+  <a href="https://slopify.lukasbaxter.ca"><img alt="Try the live demo" src="docs/images/try-demo.svg" width="420"></a>
+  <br>
+  <sub>No sign-up. 30-second clips, settings are look-only.</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/lukasbaxter/slopify/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/lukasbaxter/slopify?style=for-the-badge"></a>
   <a href="https://github.com/lukasbaxter/slopify/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/lukasbaxter/slopify/total?style=for-the-badge"></a>
   <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/github/license/lukasbaxter/slopify?style=for-the-badge"></a>
@@ -30,8 +36,6 @@ integration.
 Free software under the [GNU AGPL v3](LICENSE). No telemetry, no accounts with
 anyone: [what leaves your server](PRIVACY.md) lists every outside service and
 how to turn it off. Not affiliated with Spotify.
-
-**Try it:** [slopify.lukasbaxter.ca](https://slopify.lukasbaxter.ca), a demo with no sign-up (30-second clips; settings are look-only).
 
 ## Quick start
 

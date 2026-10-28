@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="72" viewBox="0 0 420 72" role="img" aria-label="Try the live demo">
+  <rect width="420" height="72" rx="36" fill="#1ed760"/>
+  <circle cx="44" cy="36" r="20" fill="#000"/>
+  <path d="M38 26.5v19l15-9.5z" fill="#1ed760"/>
+  <text x="236" y="45" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#000">Try the live demo</text>
+</svg>

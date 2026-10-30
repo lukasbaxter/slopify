@@ -3,6 +3,7 @@ if (typeof window !== 'undefined' && window.conduit?.platform === 'darwin') docu
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import { clientLog } from './api/clientLog.js';
 import './styles/app.css';
 import './styles/mobile-nowplaying.css';
 import './styles/mobile-home-search.css';
@@ -26,9 +27,18 @@ class Boundary extends React.Component {
     );
   }
 }
-const crumb = (m) => { try { (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} ${m}`); } catch { /* ignore */ } };
+const crumb = (m) => { try { (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} ${m}`); } catch { /* ignore */ } clientLog(m); };
 window.addEventListener('error', (e) => crumb(`error: ${e.message || e.error?.message || 'script'} ${e.filename ? `@${e.filename.split('/').pop()}:${e.lineno}` : ''}`));
 window.addEventListener('unhandledrejection', (e) => crumb(`unhandled: ${e.reason?.message || e.reason}`));
+{
+  const standalone = window.navigator.standalone ?? window.matchMedia('(display-mode: standalone)').matches;
+  const link = navigator.connection?.effectiveType;
+  clientLog(`app opened${standalone ? ' (installed)' : ''}, ${navigator.onLine ? 'online' : 'offline'}${link ? `, ${link}` : ''}`);
+  window.addEventListener('load', () => {
+    const n = performance.getEntriesByType?.('navigation')?.[0];
+    if (n) clientLog(`page loaded in ${Math.round(n.loadEventStart)} ms (page ${Math.round(n.responseEnd)} ms${n.transferSize === 0 ? ', kept copy' : ''})`);
+  });
+}
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>

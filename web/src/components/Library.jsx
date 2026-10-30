@@ -14,6 +14,7 @@ import History from './History.jsx';
 import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
 import About from './About.jsx';
+import { LogsDialog } from './Logs.jsx';
 import SpotifyImport from './SpotifyImport.jsx';
 import FittedTitle from './FittedTitle.jsx';
 import VirtualList from './VirtualList.jsx';
@@ -436,6 +437,7 @@ export default function Library({
   // Scrobbling form is edited locally and saved with a button (a token typed
   // character by character should not be saved 36 times).
   const [lbDraft, setLbDraft] = useState(null); // { user, token } while editing
+  const [logsOpen, setLogsOpen] = useState(false); // Settings › Logs
   const [lbSaved, setLbSaved] = useState(false);
   useEffect(() => {
     const h = () => { const it = detail?.item; if (it && detail.kind === 'Playlist' && it.Id !== LIKED_ID) setEditPl({ name: it.Name, file: null, preview: null }); };
@@ -811,6 +813,13 @@ export default function Library({
             </button>
             <p className="settings-caption">Saved to your account and applied to every Slopify you have open.</p>
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} phone />}
+
+            <h2>Help</h2>
+            <button className="setrow" onClick={() => setLogsOpen(true)}>
+              <span className="setrow-text"><b>Logs</b><small>See what the app logged, report a problem</small></span>
+              <Chev />
+            </button>
+            {logsOpen && <LogsDialog jf={jf} onClose={() => setLogsOpen(false)} />}
             <About jf={jf} phone />
 
             {settingsMenu && (
@@ -945,6 +954,13 @@ export default function Library({
             </section>
 
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} />}
+
+            <section className="settings-section">
+              <h2>Help</h2>
+              <div className="settings-hint" style={{ marginBottom: 12 }}>What this device logged. Something wrong? Send a report with it.</div>
+              <button className="btn-secondary" onClick={() => setLogsOpen(true)}>Logs and problem reports</button>
+              {logsOpen && <LogsDialog jf={jf} onClose={() => setLogsOpen(false)} />}
+            </section>
             <About jf={jf} />
           </div>
         </div>

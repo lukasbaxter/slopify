@@ -1,3 +1,4 @@
+import { clientLog } from '../api/clientLog.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive, bridgeKeepAlive, quietKeepAlive, standInPausedBySystem, standInElement, onStandInResumed, state as keepAliveState } from './keepalive.js';
 
@@ -76,6 +77,7 @@ export function mediaLog(m) {
   const log = (window.__slopifyMediaLog ||= []);
   log.push(`${new Date().toISOString().slice(11, 19)}${typeof document !== 'undefined' && document.hidden ? ' bg' : ''} ${m}`);
   if (log.length > 60) log.shift();
+  clientLog(m);
 }
 
 // Coming back from the lock screen, iOS pauses the playing element as the

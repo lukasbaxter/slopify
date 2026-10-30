@@ -31,6 +31,7 @@ import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 import { defaultServerName, registerServerInfo } from './advertise.js';
 import { registerDemo } from './demo.js';
+import { registerReports } from './reports.js';
 
 // The release this server is (package.json, bumped with every tagged release).
 export const VERSION: string = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -110,6 +111,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerDiscover(app, db, { lidarr, log: (m) => app.log.info(m) });
   registerPlaylistReco(app, db, { log: (m) => app.log.info(m), warm: process.env.NODE_ENV !== 'test' });
   registerJobs(app);
+  registerReports(app, db, { version: VERSION });
   app.decorate('ai', registerAi(app, db, { ...config.ai, lidarr }));
   registerSpotifyImport(app, db, dataDir, { lidarr });
   registerDownloads(app, db, { lidarr, soularr: soularrClient(config.soularr) });

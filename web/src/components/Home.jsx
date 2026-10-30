@@ -114,6 +114,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
   const [topArtists, setTopArtists] = useState(() => jf?.persisted('home.topArtists') || []);
   const [recentArtists, setRecentArtists] = useState(() => jf?.persisted('home.recentArtists') || []);
   const [topYears, setTopYears] = useState(() => jf?.persisted('home.topYears') || []);
+  const [fresh, setFresh] = useState(0);
 
   // All of this is the account's real history (Jellyfin play counts and last
   // played dates), nothing sampled from the library.
@@ -136,6 +137,12 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
       setTopArtists(ta); jf._persist('home.topArtists', ta);
       setRecentArtists(ra); jf._persist('home.recentArtists', ra);
     }).catch(() => {});
+  }, [jf, fresh]);
+  // A newer answer than the kept one Home opened with (sw.js 'api-fresh'): load again.
+  useEffect(() => {
+    const on = (e) => { if (/^\/api\/(home|top-songs|tracks\/top)/.test(e.detail)) { jf?._evict('home'); setFresh((n) => n + 1); } };
+    window.addEventListener('slopify:fresh', on);
+    return () => window.removeEventListener('slopify:fresh', on);
   }, [jf]);
 
   const playAlbum = async (a) => {

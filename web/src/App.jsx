@@ -19,6 +19,7 @@ import { offsetsMerge } from './api/offsets.js';
 import { canSaveOffline, subscribeOffline, flushOfflinePlays, resumeOffline } from './api/offline.js';
 import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
 import { readLib, getActive as downloading } from './offline/store.js';
+import { clientLog } from './api/clientLog.js';
 
 // The browser build is same-origin. The desktop app has no server of its
 // own: its sign-in form starts at the address it was built with
@@ -387,6 +388,7 @@ export default function App() {
   };
   const pushEntry = (e) => {
     const h = histRef.current;
+    clientLog(`open ${e.detail?.kind || e.view || 'page'}${e.detail?.item?.Name && e.detail.item.Name !== e.detail.kind ? ` "${e.detail.item.Name}"` : ''}`);
     saveScroll(); // the page we are leaving keeps its place for Back
     h.stack = h.stack.slice(0, h.idx + 1); h.stack.push({ tab: mobileTabRef.current, ...e }); h.idx = h.stack.length - 1;
     restoreScroll(0); // the new page starts at the top even when the DOM node is reused
@@ -544,10 +546,20 @@ export default function App() {
       .catch((e) => { if (alive && String(e).includes('401')) { clearSession(); setJf(null); } })
       .finally(() => { if (alive) setLibLoading(false); });
     if (!fresh('artists')) jf.artists({ limit: 500 }).then(ok((r) => { setArtists(r.items); jf._persist('artists', r.items); jf._persist('artistsAt', Date.now()); })).catch(() => {});
-    jf.playlists().then(ok((p) => { setPlaylists(p.items); jf._persist('playlists', p.items); })).catch(() => {});
-    jf.favoriteAlbums().then(ok((a) => { setSavedAlbums(a.items); jf._persist('savedAlbums', a.items); })).catch(() => {});
-    jf.followedArtists().then(ok((a) => setFollowedArtists(a.items))).catch(() => {});
-    return () => { alive = false; };
+    const loadPlaylists = () => jf.playlists().then(ok((p) => { setPlaylists(p.items); jf._persist('playlists', p.items); })).catch(() => {});
+    const loadSaved = () => jf.favoriteAlbums().then(ok((a) => { setSavedAlbums(a.items); jf._persist('savedAlbums', a.items); })).catch(() => {});
+    const loadFollowed = () => jf.followedArtists().then(ok((a) => setFollowedArtists(a.items))).catch(() => {});
+    loadPlaylists(); loadSaved(); loadFollowed();
+    // The service worker answered from its kept copy and the server's answer
+    // turned out different (sw.js 'api-fresh'): show the new one.
+    const onFresh = (e) => {
+      const p = e.detail;
+      if (p === '/api/playlists') loadPlaylists();
+      else if (p === '/api/likes/albums') loadSaved();
+      else if (p === '/api/likes/artists') loadFollowed();
+    };
+    window.addEventListener('slopify:fresh', onFresh);
+    return () => { alive = false; window.removeEventListener('slopify:fresh', onFresh); };
   }, [jf]);
 
   const syncing = useLyricJobs();
@@ -1088,9 +1100,14 @@ export default function App() {
     const name = running.slice(running.lastIndexOf('assets/'));
     let want = null;
     const tried = (() => { try { return sessionStorage.getItem('slopify.reloadedFor'); } catch { return null; } })();
-    const apply = () => {
-      if (!want || busy() || !quiet()) return;
+    let reloading = false;
+    const apply = async () => {
+      if (!want || busy() || !quiet() || reloading) return;
+      reloading = true;
       try { sessionStorage.setItem('slopify.reloadedFor', want); } catch { /* private mode */ }
+      // The service worker opens its kept copy of the app: have it keep the new build first (sw.js), 20 s at most.
+      const sw = navigator.serviceWorker?.controller;
+      if (sw) await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; sw.postMessage('cache-app-shell', [ch.port2]); setTimeout(r, 20000); });
       window.location.reload();
     };
     const saw = (build) => { if (/^assets\/index-[\w-]+\.js$/.test(build || '') && build !== name && build !== tried) want = build; apply(); };
@@ -1182,7 +1199,7 @@ export default function App() {
     // Back from the lock screen / another app: what the keep-alive did meanwhile.
     // And again a few seconds on: what happened right after it came back.
     const vis = () => { if (document.visibilityState === 'visible') { report(); setTimeout(report, 4000); setTimeout(report, 12000); } };
-    const appstate = (e) => (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} app ${e.detail?.state}`);
+    const appstate = (e) => { (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)} app ${e.detail?.state}`); clientLog(`app ${e.detail?.state}`); };
     window.addEventListener('slopify:appstate', appstate);
     window.addEventListener('resize', report);
     document.addEventListener('visibilitychange', vis);

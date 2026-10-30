@@ -19,6 +19,7 @@ const GUEST_WRITES: [string, RegExp][] = [
   ['POST', /^\/api\/auth\/logout$/],
   ['POST', /^\/api\/plays$/],
   ['POST', /^\/api\/stream\/warm$/],
+  ['POST', /^\/api\/reports$/],
   ['PATCH', /^\/api\/prefs$/],
   ['PUT', /^\/api\/likes\/[^/]+$/],
   ['DELETE', /^\/api\/likes\/[^/]+$/],

@@ -800,6 +800,14 @@ input[type="range"]:disabled { opacity: .4; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .modal-actions .primary { background: var(--fg); color: #000; border-radius: 500px; padding: 10px 24px; font-weight: 700; }
 .modal-actions .primary:disabled { opacity: .4; }
+.logs-modal { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; gap: 12px; }
+.logs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.logs-view { margin: 0; max-height: 40vh; min-height: 120px; overflow: auto; background: #121212; border-radius: 4px; padding: 10px 12px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; color: var(--fg-dim, #b3b3b3); }
+.logs-modal textarea { width: 100%; padding: 12px 14px; border-radius: 4px; border: 1px solid #555; background: #1f1f1f; color: var(--fg); font: inherit; font-size: 15px; resize: vertical; }
+.logs-modal textarea:focus { outline: none; border-color: var(--fg); }
+.logs-modal .settings-hint { margin: 0; }
+.logs-sent { color: var(--accent) !important; }
+.logs-error { color: #f15e6c !important; }
 
 .trackhead.with-art > span:nth-child(2) { width: 40px; }
 

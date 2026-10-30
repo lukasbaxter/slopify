@@ -224,6 +224,14 @@ const MIGRATIONS: string[] = [
     INSERT INTO tracks_fts(rowid, title, artist, album) VALUES (new.rowid, new.title, new.artist, new.album);
   END;
   `,
+  // 26: problem reports sent from Settings › Logs (reports.ts).
+  `
+  CREATE TABLE reports (
+    id TEXT PRIMARY KEY, user_id TEXT, user_name TEXT NOT NULL, device TEXT NOT NULL,
+    message TEXT NOT NULL, logs TEXT NOT NULL, info TEXT NOT NULL, version TEXT NOT NULL, created INTEGER NOT NULL
+  );
+  CREATE INDEX reports_created ON reports(created);
+  `,
 ];
 
 export type DB = Database.Database;

@@ -2,6 +2,17 @@ import { linkTier } from './linkSpeed.js';
 import { clientIdentity } from './deviceName.js';
 import { noteResponse, setOffline, isOffline } from '../offline/net.js';
 import { addPlay } from '../offline/store.js';
+import { clientLog } from './clientLog.js';
+
+// The service worker refreshed a kept answer and it changed (sw.js): the
+// in-memory copies go and the pages that show it load again ('slopify:fresh').
+if (typeof navigator !== 'undefined') {
+  navigator.serviceWorker?.addEventListener('message', (e) => {
+    if (e.data?.type !== 'api-fresh') return;
+    clientLog(`newer answer for ${e.data.path}`);
+    try { window.dispatchEvent(new CustomEvent('slopify:fresh', { detail: e.data.path })); } catch { /* no window */ }
+  });
+}
 // The Slopify server client: everything the app reads and writes goes
 // through here, over /api. The components keep the row/card shape they were
 // written for (Id, Name, AlbumId, RunTimeTicks, ImageTags, UserData...), so
@@ -82,7 +93,10 @@ export class Slopify {
   async _fetch(path, options = {}) {
     const { retries = 0, timeoutMs = 45_000, raw = null, ...opts } = options;
     let attempt = 0;
+    // For the device's log (Settings › Logs): requests that failed, crawled or were answered from the kept copy.
+    const what = `${opts.method || 'GET'} ${path.split('?')[0]}`;
     for (;;) {
+      const t0 = Date.now();
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       // A caller's own signal (a superseded search) aborts too.
@@ -93,6 +107,11 @@ export class Slopify {
         if (!raw && opts.body) headers['Content-Type'] = 'application/json';
         const res = await fetch(`${this.baseUrl}${path}`, { ...opts, body: raw || opts.body, signal: ctrl.signal, headers });
         noteResponse(res); // live server, or the service worker's kept copy (offline)
+        const ms = Date.now() - t0;
+        if (res.headers.get('X-Slopify-Offline')) clientLog(`${what}: kept copy (offline) after ${ms} ms`);
+        else if (res.headers.get('X-Slopify-Stale')) clientLog(`${what}: kept copy (server slow) after ${ms} ms`);
+        else if (!res.ok) clientLog(`${what}: ${res.status} after ${ms} ms`);
+        else if (ms > 3000) clientLog(`${what}: slow, ${ms} ms`);
         if (res.status === 401 && !path.startsWith('/api/auth/login') && typeof window !== 'undefined') {
           // The token is gone (signed out elsewhere, removed by an admin): the
           // app returns to the sign-in form instead of failing every call.
@@ -115,6 +134,7 @@ export class Slopify {
       } catch (e) {
         const unreachable = e instanceof TypeError && !opts.signal?.aborted; // could not connect
         if (unreachable) setOffline(true);
+        if (!e.status && !opts.signal?.aborted) clientLog(`${what}: ${e.name === 'AbortError' ? 'timed out' : e.message} after ${Date.now() - t0} ms`);
         const transient = e.retry || e.name === 'AbortError' || e instanceof TypeError;
         if (!transient || attempt >= retries) throw unreachable ? Object.assign(new Error('You’re offline'), { offline: true }) : e;
         attempt += 1;

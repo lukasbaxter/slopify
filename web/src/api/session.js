@@ -4,6 +4,7 @@
 // keeps the account's session (what is playing, where, the queue, the clock).
 //
 // Audio never flows through here. This is presence + command routing only.
+import { clientLog } from './clientLog.js';
 
 // Same-origin in the browser; the desktop app points at the server it logged in to.
 // What a published queue may take on the wire (the server's frame limit is
@@ -133,6 +134,7 @@ export class SessionLink {
     };
     ws.onclose = (ev) => {
       if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed${ev && ev.code ? ` ${ev.code}` : ''}`);
+      clientLog(`socket closed${ev && ev.code ? ` ${ev.code}` : ''}`);
       this.connected = false; this.rosterSeen = false; clearInterval(this._ping);
       // 4003: the token is refused (signed out elsewhere, removed). Nothing to
       // reconnect with; the app goes back to the sign-in form.

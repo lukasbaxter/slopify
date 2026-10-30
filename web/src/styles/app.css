@@ -1587,7 +1587,7 @@ button:disabled { cursor: default; }
 
 /* Tasks: one slim line per chore - icon in a circle, name, what happened
    last, its schedule, Run now. The accent color says "running". */
-.task-list { gap: 6px; }
+.task-list { gap: 6px; grid-template-columns: minmax(0, 1fr); } /* a long last-run summary is cut, not a 14,000 px wide row */
 .admin-list li.task-row { flex-wrap: nowrap; padding: 6px 10px; gap: 10px; }
 .task-ico { flex: none; width: 30px; height: 30px; border-radius: 50%; background: rgba(255, 255, 255, .08); color: var(--fg-dim); display: flex; align-items: center; justify-content: center; }
 .task-ico svg { width: 15px; height: 15px; }
@@ -1647,7 +1647,7 @@ button:disabled { cursor: default; }
 .settings-phone .task-menu { grid-area: menu; }
 .settings-phone .task-sched { grid-area: sched; flex-wrap: wrap; min-width: 0; }
 .settings-phone .task-sched > * { min-width: 0; max-width: 100%; }
-.settings-phone .task-meta { grid-area: meta; white-space: normal; overflow-wrap: anywhere; overflow: visible; }
+.settings-phone .task-meta { grid-area: meta; white-space: normal; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .settings-phone .task-run { grid-area: run; justify-self: start; }
 .settings-phone .admin-list { min-width: 0; max-width: 100%; }
 .settings-phone .admin-stats { grid-template-columns: 1fr; gap: 2px; }

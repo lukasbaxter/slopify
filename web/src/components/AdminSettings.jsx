@@ -243,7 +243,7 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
               <li key={t.id} className={`task-row ${t.running ? 'running' : ''}`} title={t.description}>
                 <span className="task-ico" aria-hidden="true">{TASK_ICONS[t.id] || TASK_ICONS.scan}</span>
                 <b className="task-name">{t.name}</b>
-                <span className="task-meta">
+                <span className="task-meta" title={t.last?.summary || undefined}>
                   {t.running ? `${t.running.step}${t.running.progress != null ? ` · ${Math.round(t.running.progress * 100)}%` : ''}`
                     : t.last ? `${t.last.ok ? '' : 'failed · '}${ago(t.last.started)}${t.last.summary ? ` · ${t.last.summary}` : ''}${t.last.error ? ` · ${t.last.error}` : ''}`
                     : 'never run'}

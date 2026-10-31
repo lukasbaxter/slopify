@@ -28,9 +28,10 @@ living-room speakers.
   <img alt="Slopify on a computer: the Discovery album playing, with synced lyrics beside it" src="docs/images/screen-desktop.jpg" width="100%">
 </p>
 <p align="center">
-  <img alt="Home on a phone" src="docs/images/screen-phone-home.jpg" width="32%">
-  <img alt="An album on a phone" src="docs/images/screen-phone-album.jpg" width="32%">
-  <img alt="Now playing on a phone" src="docs/images/screen-phone-playing.jpg" width="32%">
+  <img alt="Your Library on an iPhone, with imported playlists" src="docs/images/screen-phone-library.png" width="24%">
+  <img alt="A playlist on an iPhone" src="docs/images/screen-phone-playlist.png" width="24%">
+  <img alt="Now playing on an iPhone" src="docs/images/screen-phone-playing.png" width="24%">
+  <img alt="Synced lyrics on an iPhone" src="docs/images/screen-phone-lyrics.png" width="24%">
 </p>
 
 ## What it does

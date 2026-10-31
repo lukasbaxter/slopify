@@ -1,7 +1,5 @@
 # Slopify
 
-![Slopify playing the same song on a TV, a MacBook Pro, an iPad and an iPhone, with the music library on two hard drives beside them](docs/images/cover.jpg)
-
 <p align="center">
   <a href="https://slopify.lukasbaxter.ca"><img alt="Try the live demo" src="docs/images/try-demo.svg" width="420"></a>
   <br>
@@ -25,7 +23,9 @@ living-room speakers.
 <sub>As seen in [Self-Host Weekly, 30 October 2026](https://selfh.st/weekly/2026-10-30/).</sub>
 
 <p align="center">
-  <img alt="Slopify on a computer: the Discovery album playing, with synced lyrics beside it" src="docs/images/screen-desktop.jpg" width="100%">
+  <img alt="A playlist on a computer, with the library in the sidebar" src="docs/images/screen-desktop-playlist.jpg" width="32%">
+  <img alt="Full-screen synced lyrics on a computer" src="docs/images/screen-desktop-lyrics.jpg" width="32%">
+  <img alt="The Mirror visualizer on a computer" src="docs/images/screen-desktop-viz.jpg" width="32%">
 </p>
 <p align="center">
   <img alt="Your Library on an iPhone, with imported playlists" src="docs/images/screen-phone-library.png" width="24%">
@@ -180,5 +180,3 @@ Third-party software and its licenses: [NOTICE](NOTICE) and
 
 Slopify is not affiliated with, endorsed by or connected to Spotify AB.
 "Spotify" is a trademark of Spotify AB.
-
-Cover image: rendered in Blender on free assets, credits in [docs/images/CREDITS.md](docs/images/CREDITS.md).

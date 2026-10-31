@@ -1,4 +1,4 @@
-// Writes THIRD_PARTY_LICENSES.md: every package the server and web app ship
+// Writes docs/THIRD_PARTY_LICENSES.md: every package the server and web app ship
 // with (production dependencies, all depths), its version and license.
 // Run after changing dependencies: npm run licenses
 // Exits non-zero on a dependency whose license is missing or one the AGPL
@@ -56,6 +56,6 @@ const md = [
   ...rows.map((r) => `| ${r.name} | ${r.version} | ${r.license} | ${r.repo} |`),
   '',
 ].join('\n');
-fs.writeFileSync(path.join(root, 'THIRD_PARTY_LICENSES.md'), md);
-console.log(`${rows.length} packages written to THIRD_PARTY_LICENSES.md`);
+fs.writeFileSync(path.join(root, 'docs', 'THIRD_PARTY_LICENSES.md'), md);
+console.log(`${rows.length} packages written to docs/THIRD_PARTY_LICENSES.md`);
 if (bad.length) { console.error('Licenses to review:', bad.map((r) => `${r.name}@${r.version} (${r.license})`).join(', ')); process.exit(1); }

@@ -95,7 +95,7 @@ what's playing on the others.
 | **LrcLib** | Lyrics, if you don't have your own `.lrc` files. Can also sync them on a GPU ([guide](docs/lyric-sync.md)) |
 | **Claude** | Optional: type a vibe, get a playlist from your library (`ANTHROPIC_API_KEY`) |
 
-Nothing phones home. [PRIVACY.md](PRIVACY.md) lists every outside service it
+Nothing phones home. [PRIVACY.md](docs/PRIVACY.md) lists every outside service it
 talks to and how to turn each one off.
 
 ## Docs
@@ -127,10 +127,10 @@ folder and a data dir under /tmp.
 
 AGPL v3 ([LICENSE](LICENSE)). The Home Assistant integration in
 `custom_components/slopify` is Apache 2.0. Third-party licenses are in
-[NOTICE](NOTICE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+[NOTICE](docs/NOTICE) and [THIRD_PARTY_LICENSES.md](docs/THIRD_PARTY_LICENSES.md).
 
 Bugs and ideas: [issues](https://github.com/lukasbaxter/slopify/issues).
-Security stuff: [SECURITY.md](SECURITY.md). Contributing:
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Security stuff: [SECURITY.md](.github/SECURITY.md). Contributing:
+[CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 Built by Lukas with a lot of help from Claude. Not affiliated with Spotify.

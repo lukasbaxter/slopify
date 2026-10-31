@@ -13,7 +13,7 @@ export default function About({ jf, phone = false }) {
         Slopify{info?.version ? ` ${info.version}` : ''} is free software under the{' '}
         <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noreferrer">GNU AGPL v3</a>.{' '}
         <a href={source} target="_blank" rel="noreferrer">Source code</a> ·{' '}
-        <a href={`${source.replace(/\/$/, '')}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">What leaves your server</a>
+        <a href={`${source.replace(/\/$/, '')}/blob/main/docs/PRIVACY.md`} target="_blank" rel="noreferrer">What leaves your server</a>
       </p>
       <p className="settings-hint">Not affiliated with Spotify.</p>
     </section>

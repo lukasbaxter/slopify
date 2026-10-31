@@ -34,7 +34,7 @@ cd ha && ../.venv/bin/pytest
 ```
 
 If you change dependencies, run `npm run licenses` and commit the updated
-`THIRD_PARTY_LICENSES.md`; it fails on a license the project cannot ship.
+`docs/THIRD_PARTY_LICENSES.md`; it fails on a license the project cannot ship.
 
 ## Pull requests
 
@@ -42,7 +42,7 @@ If you change dependencies, run `npm run licenses` and commit the updated
 - Describe what changed and why, as you would for someone who has not seen the code.
 - Anything a self-hoster would notice (a new setting, a changed default, a new
   outside service) goes in the README; a new outside service also goes in
-  [PRIVACY.md](PRIVACY.md).
+  [PRIVACY.md](../docs/PRIVACY.md).
 
 ## License of contributions
 

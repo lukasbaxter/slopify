@@ -336,4 +336,4 @@ cd ha && ../.venv/bin/pytest
 
 The integration is licensed under the [Apache License 2.0](../custom_components/slopify/LICENSE),
 like Home Assistant itself. It only talks to your own Slopify server (see
-[PRIVACY.md](../PRIVACY.md)).
+[PRIVACY.md](PRIVACY.md)).

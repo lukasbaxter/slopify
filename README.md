@@ -10,32 +10,75 @@
 
 <p align="center">
   <a href="https://github.com/lukasbaxter/slopify/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/lukasbaxter/slopify?style=for-the-badge"></a>
-  <a href="https://github.com/lukasbaxter/slopify/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/lukasbaxter/slopify/total?style=for-the-badge"></a>
+  <a href="https://github.com/lukasbaxter/slopify/pkgs/container/slopify"><img alt="Container: ghcr.io" src="https://img.shields.io/badge/ghcr.io-amd64_%7C_arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
+  <a href="docs/home-assistant.md"><img alt="Built for Home Assistant" src="https://img.shields.io/badge/built_for-Home_Assistant-18BCF2?style=for-the-badge&logo=homeassistant&logoColor=white"></a>
   <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/github/license/lukasbaxter/slopify?style=for-the-badge"></a>
   <a href="https://github.com/lukasbaxter/slopify/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/lukasbaxter/slopify/ci.yml?style=for-the-badge&label=ci"></a>
-  <a href="https://github.com/lukasbaxter/slopify/actions/workflows/docker.yml"><img alt="Docker image" src="https://img.shields.io/github/actions/workflow/status/lukasbaxter/slopify/docker.yml?style=for-the-badge&label=docker&logo=docker&logoColor=white"></a>
-  <a href="https://github.com/lukasbaxter/slopify/actions/workflows/home-assistant.yml"><img alt="Home Assistant integration checks" src="https://img.shields.io/github/actions/workflow/status/lukasbaxter/slopify/home-assistant.yml?style=for-the-badge&label=home%20assistant&logo=homeassistant&logoColor=white"></a>
-  <br>
-  <a href="docs/home-assistant.md"><img alt="Built for Home Assistant" src="https://img.shields.io/badge/built_for-Home_Assistant-18BCF2?style=for-the-badge&logo=homeassistant&logoColor=white"></a>
-  <a href="https://hacs.xyz"><img alt="HACS custom repository" src="https://img.shields.io/badge/HACS-custom-41BDF5?style=for-the-badge"></a>
-  <a href="https://github.com/lukasbaxter/slopify/pkgs/container/slopify"><img alt="Container: ghcr.io" src="https://img.shields.io/badge/ghcr.io-amd64_%7C_arm64-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
-  <img alt="Platforms" src="https://img.shields.io/badge/apps-web_%7C_mac_%7C_windows_%7C_android_%7C_ios_%7C_tv-1DB954?style=for-the-badge">
-  <br>
-  <img alt="Last commit" src="https://img.shields.io/github/last-commit/lukasbaxter/slopify?style=for-the-badge">
-  <img alt="Commit activity" src="https://img.shields.io/github/commit-activity/m/lukasbaxter/slopify?style=for-the-badge">
-  <a href="https://github.com/lukasbaxter/slopify/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/lukasbaxter/slopify?style=for-the-badge"></a>
-  <img alt="Repo size" src="https://img.shields.io/github/repo-size/lukasbaxter/slopify?style=for-the-badge">
-  <a href="https://github.com/lukasbaxter/slopify/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/lukasbaxter/slopify?style=for-the-badge"></a>
 </p>
 
-Self-hosted music: one container and your music folder give your household
-Spotify-style apps (web, Android, iPhone, Mac, Windows) with a shared session across
-them, Chromecast and BluOS speakers driven by the server, and a Home Assistant
-integration.
+**Your own Spotify, for your own music.** Point one Docker container at your
+music folder and everyone in your household gets Spotify-style apps on the web,
+Android, iPhone, Mac and Windows: their own likes, playlists and Home page,
+synced lyrics, and one session that follows them from phone to desk to the
+living-room speakers.
 
-Free software under the [GNU AGPL v3](LICENSE). No telemetry, no accounts with
-anyone: [what leaves your server](PRIVACY.md) lists every outside service and
-how to turn it off. Not affiliated with Spotify.
+<sub>As seen in [Self-Host Weekly, 30 October 2026](https://selfh.st/weekly/2026-10-30/).</sub>
+
+<p align="center">
+  <img alt="Slopify on a computer: the Discovery album playing, with synced lyrics beside it" src="docs/images/screen-desktop.jpg" width="100%">
+</p>
+<p align="center">
+  <img alt="Home on a phone" src="docs/images/screen-phone-home.jpg" width="32%">
+  <img alt="An album on a phone" src="docs/images/screen-phone-album.jpg" width="32%">
+  <img alt="Now playing on a phone" src="docs/images/screen-phone-playing.jpg" width="32%">
+</p>
+
+## What it does
+
+- **Feels like Spotify.** Home with daily mixes and your top songs, Liked
+  Songs, playlists, search, artist pages with banners and Popular (from
+  ListenBrainz), queue, history.
+- **Sounds right.** Plays your original files (FLAC, ALAC, MP3...) or a
+  quality you pick per device, adaptive on a weak signal. Volume
+  normalization (-14 LUFS, albums keep their balance), crossfade and gapless
+  on computers and Android, a sleep timer on everything.
+- **Lyrics.** Your `.lrc` files, else LrcLib; optional syncing on a GPU.
+- **One session per person.** Start on the phone, carry on at the desk,
+  control one device from another.
+- **Speakers.** Chromecast and BluOS speakers (and groups) are driven by the
+  server, so any phone or browser can play to them. DIY speakers work too:
+  anything answering the small `slopify-speaker/1` HTTP API on port 7780
+  (documented at `BridgeTransport` in `server/src/speakers/transports.ts`).
+- **Household accounts.** Invite links, admin roles, sign-ins revocable per
+  device.
+- **Home Assistant.** Every account and speaker becomes a media player.
+- **Works on a bad connection.** The apps keep what you have opened and play
+  downloaded music offline.
+- **Optional extras.** Lidarr and slskd for filling the library, ListenBrainz
+  scrobbling and weekly playlists, playlists generated by Claude, your
+  Spotify listening history imported.
+
+Free software ([AGPL v3](LICENSE)). No telemetry, no accounts with anyone:
+[what leaves your server](PRIVACY.md) lists every outside service and how to
+turn it off. Not affiliated with Spotify.
+
+### How it compares
+
+Navidrome and Jellyfin are great servers that work with many third-party
+apps. Slopify makes the other trade: it ships its own apps, so every device
+looks and behaves the same, and the server owns your session, so phones,
+computers and speakers stay in step. If you want to pick your own client
+app, they are the better fit. Slopify reads your music folder read-only, so it
+can sit beside either.
+
+### How it is built
+
+Slopify is written with a lot of help from AI (Claude), and is used every day
+by a real household on its own library. Server tests and Playwright browser
+tests run in CI on every change. It is young (0.1.x): expect frequent
+releases, and please [open an issue](https://github.com/lukasbaxter/slopify/issues)
+when something breaks. The apps also have Settings › Help › Logs and problem
+reports, which send a report to your own server.
 
 ## Quick start
 
@@ -99,29 +142,6 @@ Home Assistant, in two clicks:
 
 [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lukasbaxter&repository=slopify&category=integration)
 [![Open your Home Assistant instance and start setting up Slopify.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=slopify)
-
-## What it does
-
-- Browse and search your library; play the original files or a quality you
-  pick per device (adaptive on a weak signal); lyrics (your `.lrc` files, else LrcLib), artist pictures and
-  banners, album art.
-- Spotify's playback basics: volume normalization (every song measured once,
-  played at -14 LUFS; albums keep their own balance), crossfade and gapless
-  playback on computers and Android, and a sleep timer that works on any device.
-- Likes, playlists, history and a Home page built from your own listening;
-  Popular per artist from ListenBrainz.
-- One session per person across every device: start on the phone, carry on
-  at the desk, control one from another.
-- Chromecast and BluOS speakers driven by the server, so any phone or browser
-  can pick them, and speaker groups.
-- DIY speakers: anything answering the small `slopify-speaker/1` HTTP API on
-  port 7780 is found and played to like the others (the protocol is
-  documented at `BridgeTransport` in `server/src/speakers/transports.ts`).
-- Accounts with invites and admin roles; sign-ins revocable per device.
-- Optional: Lidarr and slskd for filling the library, ListenBrainz
-  scrobbling and weekly playlists, generated playlists (Claude), synced
-  lyrics on a GPU.
-- Imports your Spotify listening history.
 
 ## Develop
 

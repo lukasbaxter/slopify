@@ -80,6 +80,9 @@ an invite link.
 Every app shares one session per person, so any device can see and control
 what's playing on the others.
 
+In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
+`pt-BR`), or let each person pick in Settings. Default follows the device.
+
 ## Works with
 
 | | |

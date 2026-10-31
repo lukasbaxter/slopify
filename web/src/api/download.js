@@ -7,10 +7,12 @@
 // and replace the UI with Chromium's audio player); the web build is
 // same-origin through the /jf proxy, so a plain download link works.
 
+import { t, N_ } from '../i18n.js';
+
 export const FORMATS = [
-  { id: 'original', label: 'Original (highest quality)' },
+  { id: 'original', label: N_('Original (highest quality)') },
   { id: 'flac', label: 'FLAC' },
-  { id: 'wav', label: 'WAV (16-bit)' },
+  { id: 'wav', label: N_('WAV (16-bit)') },
   { id: 'mp3', label: 'MP3 320 kbps' },
   { id: 'aac', label: 'AAC 256 kbps' },
   { id: 'ogg', label: 'OGG Vorbis 320 kbps' },
@@ -21,7 +23,7 @@ function safeName(s) {
 }
 
 function baseName(track) {
-  const artist = (track.Artists || []).join(', ') || track.AlbumArtist || 'Unknown Artist';
+  const artist = (track.Artists || []).join(', ') || track.AlbumArtist || t('Unknown Artist');
   return safeName(`${artist} - ${track.Name}`);
 }
 
@@ -85,13 +87,13 @@ export async function downloadTrack(jf, track, fmt = 'original') {
 export async function downloadPlaylistZip(jf, playlist, notify) {
   const url = jf.playlistZipUrl(playlist.Id);
   if (window.ReactNativeWebView) {
-    try { await navigator.clipboard.writeText(url); notify?.('Link copied: paste it into Safari to download'); }
-    catch { window.prompt('Open this in Safari to download:', url); }
+    try { await navigator.clipboard.writeText(url); notify?.(t('Link copied: paste it into Safari to download')); }
+    catch { window.prompt(t('Open this in Safari to download:'), url); }
     return;
   }
   if (window.conduit?.download) { await window.conduit.download(url); return; }
   const a = document.createElement('a');
   a.href = url; a.download = `${playlist.Name}.zip`; a.style.display = 'none';
   document.body.appendChild(a); a.click(); a.remove();
-  notify?.('Preparing the zip: it downloads as the songs are converted');
+  notify?.(t('Preparing the zip: it downloads as the songs are converted'));
 }

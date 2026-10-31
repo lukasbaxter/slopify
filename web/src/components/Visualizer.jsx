@@ -3,6 +3,7 @@ import { paletteColors } from '../api/colors.js';
 import Calibrate from './Calibrate.jsx';
 import { createShadow } from '../api/shadowStream.js';
 import { ROUTES_WEB_AUDIO } from '../player/usePlayer.js';
+import { t, N_ } from '../i18n.js';
 
 // The visualizer is a graphic-EQ family (audioMotion-analyzer, the spectrum
 // engine Feishin ships). Settings come from the full-screen tab's ⋯ menu and
@@ -53,15 +54,17 @@ const DRIFT_MAX = 0.1;
 
 export const EQ_STYLES = [
   // "Line": Feishin's default preset (mode 10 line graph, 1.9px, prism, faint reflection).
-  { id: 'line', name: 'Line', opts: { mode: 10, lineWidth: 1.9, fillAlpha: 0, barSpace: .7, reflexRatio: .5, reflexAlpha: .1, reflexBright: 1, showPeaks: false, ledBars: false, lumiBars: false, radial: false, mirror: 0, smoothing: .6, fftSize: 8192, maxFreq: 22050, minFreq: 20, gravity: 11, linearBoost: 4, maxDecibels: -25, minDecibels: -85 } },
-  { id: 'area', name: 'Area', opts: { mode: 10, lineWidth: 1.5, fillAlpha: .35, reflexRatio: .4, reflexAlpha: .15, showPeaks: false, ledBars: false, radial: false, mirror: 0, smoothing: .65, fftSize: 8192 } },
-  { id: 'led', name: 'LED bars', opts: { mode: 6, ledBars: true, barSpace: .25, reflexRatio: 0, showPeaks: true, radial: false, mirror: 0, lumiBars: false, fillAlpha: 1, lineWidth: 0 } },
-  { id: 'bars', name: 'Bars', opts: { mode: 5, ledBars: false, barSpace: .3, reflexRatio: 0, showPeaks: true, radial: false, mirror: 0, roundBars: true, fillAlpha: 1, lineWidth: 0 } },
-  { id: 'mirror', name: 'Mirror', opts: { mode: 4, ledBars: false, barSpace: .2, reflexRatio: .5, reflexAlpha: .25, showPeaks: false, radial: false, mirror: -1, fillAlpha: 1, lineWidth: 0 } },
-  { id: 'radial', name: 'Radial', opts: { mode: 5, radial: true, spinSpeed: 1, showPeaks: true, barSpace: .2, mirror: 0, reflexRatio: 0, ledBars: false, fillAlpha: 1, lineWidth: 0 } },
+  { id: 'line', name: N_('Line'), opts: { mode: 10, lineWidth: 1.9, fillAlpha: 0, barSpace: .7, reflexRatio: .5, reflexAlpha: .1, reflexBright: 1, showPeaks: false, ledBars: false, lumiBars: false, radial: false, mirror: 0, smoothing: .6, fftSize: 8192, maxFreq: 22050, minFreq: 20, gravity: 11, linearBoost: 4, maxDecibels: -25, minDecibels: -85 } },
+  { id: 'area', name: N_('Area'), opts: { mode: 10, lineWidth: 1.5, fillAlpha: .35, reflexRatio: .4, reflexAlpha: .15, showPeaks: false, ledBars: false, radial: false, mirror: 0, smoothing: .65, fftSize: 8192 } },
+  { id: 'led', name: N_('LED bars'), opts: { mode: 6, ledBars: true, barSpace: .25, reflexRatio: 0, showPeaks: true, radial: false, mirror: 0, lumiBars: false, fillAlpha: 1, lineWidth: 0 } },
+  { id: 'bars', name: N_('Bars'), opts: { mode: 5, ledBars: false, barSpace: .3, reflexRatio: 0, showPeaks: true, radial: false, mirror: 0, roundBars: true, fillAlpha: 1, lineWidth: 0 } },
+  { id: 'mirror', name: N_('Mirror'), opts: { mode: 4, ledBars: false, barSpace: .2, reflexRatio: .5, reflexAlpha: .25, showPeaks: false, radial: false, mirror: -1, fillAlpha: 1, lineWidth: 0 } },
+  { id: 'radial', name: N_('Radial'), opts: { mode: 5, radial: true, spinSpeed: 1, showPeaks: true, barSpace: .2, mirror: 0, reflexRatio: 0, ledBars: false, fillAlpha: 1, lineWidth: 0 } },
 ];
 // 'album' = three colours pulled from the current cover (registered per track).
 export const GRADIENTS = ['album', 'prism', 'classic', 'rainbow', 'orangered', 'steelblue'];
+// Shown names of the gradients ('album' is labelled where the menu is built).
+export const GRADIENT_NAMES = { prism: N_('Prism'), classic: N_('Classic'), rainbow: N_('Rainbow'), orangered: N_('Orangered'), steelblue: N_('Steelblue') };
 // `smoothing` 0..0.95: 0 = every frame raw (real time), higher = calmer bars.
 export const DEFAULT_VIZ = { style: 'line', gradient: 'prism', smoothing: 0.6 };
 export function loadVizSettings() {
@@ -240,7 +243,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   return (
     <div className="viz" ref={boxRef}>
       <div ref={stageRef} className="viz-stage" />
-      {state === 'error' && <div className="viz-msg">The visualizer could not start here.</div>}
+      {state === 'error' && <div className="viz-msg">{t('The visualizer could not start here.')}</div>}
       {calibrate && !local && (
         <Calibrate player={player} device={calibrate} shadow={shadow} reported={reported}
           onDone={(v) => onCalibrated?.(v)} onClose={() => onCalibrateClose?.()} />

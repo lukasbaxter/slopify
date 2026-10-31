@@ -8,6 +8,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import * as store from '../offline/store.js';
 import { isOffline } from '../offline/net.js';
+import { t } from '../i18n.js';
 
 // The desktop app loads the build from disk (no service worker); the old
 // phone app's WebView has none either.
@@ -85,8 +86,8 @@ export async function saveOffline(jf, item, kind, tracks) {
   try {
     const est = await navigator.storage?.estimate?.();
     const need = estimateBytes(tracks, lossless);
-    if (est?.quota && est.quota - (est.usage || 0) < need) throw new Error(`Not enough room: needs about ${(need / 1e9).toFixed(1)} GB, ${((est.quota - (est.usage || 0)) / 1e9).toFixed(1)} GB free`);
-  } catch (e) { if (/Not enough room/.test(e.message)) throw e; }
+    if (est?.quota && est.quota - (est.usage || 0) < need) throw Object.assign(new Error(t('Not enough room: needs about {need} GB, {free} GB free', { need: (need / 1e9).toFixed(1), free: ((est.quota - (est.usage || 0)) / 1e9).toFixed(1) })), { noRoom: true });
+  } catch (e) { if (e.noRoom) throw e; }
   // Offline: remembered now, downloaded once the server answers (resumeOffline).
   const defer = isOffline();
   await store.save(collection, list, { defer });

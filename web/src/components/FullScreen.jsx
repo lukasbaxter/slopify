@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { usePlayhead } from '../player/playhead.js';
 import Marquee from './Marquee.jsx';
 import { Lyrics } from './RightPanel.jsx';
-import Visualizer, { EQ_STYLES, GRADIENTS, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
+import Visualizer, { EQ_STYLES, GRADIENTS, GRADIENT_NAMES, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
 import DevicePicker, { useThrottledVolume } from './DevicePicker.jsx';
@@ -13,6 +13,7 @@ import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph, I, shareItem } from '
 import { syncLyrics, useLyricJob } from '../api/lyricsync.js';
 import { usePhone, usePlayingFrom, slideOut, LyricsGlyph } from './Player.jsx';
 import { vibrantColor } from '../api/colors.js';
+import { t } from '../i18n.js';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -44,13 +45,16 @@ const SLEEP_MINUTES = [5, 10, 15, 30, 45, 60];
 function sleepItem(player) {
   const z = player.sleep;
   const left = z?.at ? Math.max(1, Math.ceil((z.at - Date.now()) / 60000)) : 0;
-  const label = z?.endOfTrack ? 'Sleep timer: end of track' : z?.at ? `Sleep timer: ${left >= 60 ? `${Math.floor(left / 60)} h ${left % 60 ? `${left % 60} min ` : ''}` : `${left} min `}left` : 'Sleep timer';
+  const h = Math.floor(left / 60), m = left % 60;
+  const label = z?.endOfTrack ? t('Sleep timer: end of track') : z?.at
+    ? (left >= 60 ? (m ? t('Sleep timer: {h} h {m} min left', { h, m }) : t('Sleep timer: {h} h left', { h })) : t('Sleep timer: {m} min left', { m: left }))
+    : t('Sleep timer');
   return {
     label, icon: G16.moon, sub: [
-      ...SLEEP_MINUTES.map((m) => ({ key: `m${m}`, label: m === 60 ? '1 hour' : `${m} minutes`, onClick: () => player.setSleepTimer({ minutes: m }) })),
-      { key: 'eot', label: 'End of track', onClick: () => player.setSleepTimer({ endOfTrack: true }) },
+      ...SLEEP_MINUTES.map((m) => ({ key: `m${m}`, label: m === 60 ? t('1 hour') : t('{n} minutes', { n: m }), onClick: () => player.setSleepTimer({ minutes: m }) })),
+      { key: 'eot', label: t('End of track'), onClick: () => player.setSleepTimer({ endOfTrack: true }) },
       z ? { sep: true } : null,
-      z ? { key: 'off', label: 'Turn off timer', onClick: () => player.setSleepTimer({ off: true }) } : null,
+      z ? { key: 'off', label: t('Turn off timer'), onClick: () => player.setSleepTimer({ off: true }) } : null,
     ].filter(Boolean),
   };
 }
@@ -174,16 +178,16 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   const saveOffset = (v) => { if (speaker) player.relay?.sendOffset(speaker.id, v); };
   const vizItems = [
     // Phone sheets get a right-aligned check glyph; the desktop menu keeps its text tick.
-    { label: 'Style', sub: EQ_STYLES.map((s2) => ({ key: s2.id, label: `${s2.name}${!phone && viz.style === s2.id ? '  ✓' : ''}`, checked: phone && viz.style === s2.id, onClick: () => setV({ style: s2.id }) })) },
-    { label: 'Colours', sub: GRADIENTS.map((g) => ({ key: g, label: `${g === 'album' ? 'Match album art' : g[0].toUpperCase() + g.slice(1)}${!phone && viz.gradient === g ? '  ✓' : ''}`, checked: phone && viz.gradient === g, onClick: () => setV({ gradient: g }) })) },
+    { label: t('Style'), sub: EQ_STYLES.map((s2) => ({ key: s2.id, label: `${t(s2.name)}${!phone && viz.style === s2.id ? '  ✓' : ''}`, checked: phone && viz.style === s2.id, onClick: () => setV({ style: s2.id }) })) },
+    { label: t('Colours'), sub: GRADIENTS.map((g) => ({ key: g, label: `${g === 'album' ? t('Match album art') : t(GRADIENT_NAMES[g] || g)}${!phone && viz.gradient === g ? '  ✓' : ''}`, checked: phone && viz.gradient === g, onClick: () => setV({ gradient: g }) })) },
     { sep: true },
     // 0 = raw every frame (real time); 0.95 = very calm.
-    { slider: true, key: 'smoothing', label: 'Smoothing', min: 0, max: 0.95, step: 0.05, value: viz.smoothing ?? 0.6, format: (v) => (v === 0 ? 'Real time' : `${Math.round(v * 100)}%`), onChange: (v) => setV({ smoothing: v }) },
+    { slider: true, key: 'smoothing', label: t('Smoothing'), min: 0, max: 0.95, step: 0.05, value: viz.smoothing ?? 0.6, format: (v) => (v === 0 ? t('Real time') : `${Math.round(v * 100)}%`), onChange: (v) => setV({ smoothing: v }) },
     ...(speaker ? [
       { sep: true },
-      { label: `Timing on ${speaker.name}${offset != null ? ` (${offset > 0 ? '+' : ''}${Math.round(offset * 1000)} ms)` : ''}` },
-      { key: 'cal', label: driving ? 'Calibrate by tapping…' : 'Calibrate from the client that is playing', disabled: !driving, onClick: () => { setTab('viz'); setCalibrating(speaker); } },
-      ...(offset != null ? [{ key: 'cal-reset', label: 'Forget calibration', onClick: () => saveOffset(null) }] : []),
+      { label: offset != null ? t('Timing on {name} ({ms} ms)', { name: speaker.name, ms: `${offset > 0 ? '+' : ''}${Math.round(offset * 1000)}` }) : t('Timing on {name}', { name: speaker.name }) },
+      { key: 'cal', label: driving ? t('Calibrate by tapping…') : t('Calibrate from the client that is playing'), disabled: !driving, onClick: () => { setTab('viz'); setCalibrating(speaker); } },
+      ...(offset != null ? [{ key: 'cal-reset', label: t('Forget calibration'), onClick: () => saveOffset(null) }] : []),
     ] : []),
   ];
   const { nowPlaying, playing, duration, shuffle, repeat, volume } = player;
@@ -215,22 +219,22 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   const share = () => { if (nowPlaying?.itemId) shareItem({ kind: 'track', id: nowPlaying.itemId, title: nowPlaying.title, by: nowPlaying.artist }); };
   const goArtist = (id) => { close(); onOpenArtist(id); };
   const moreItems = asTrack ? [
-    player.addToQueue ? { label: 'Add to queue', icon: G16.queue, onClick: () => player.addToQueue([fullTrack]) } : null,
-    onAddTo ? { label: 'Add to playlist', icon: G.plus, sub: [
-      onNewPlaylist ? { label: 'New playlist', icon: G.plus, onClick: () => { close(); onNewPlaylist(fullTrack); } } : null,
+    player.addToQueue ? { label: t('Add to queue'), icon: G16.queue, onClick: () => player.addToQueue([fullTrack]) } : null,
+    onAddTo ? { label: t('Add to playlist'), icon: G.plus, sub: [
+      onNewPlaylist ? { label: t('New playlist'), icon: G.plus, onClick: () => { close(); onNewPlaylist(fullTrack); } } : null,
       onNewPlaylist && playlists.length ? { sep: true } : null,
       ...playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo(p, fullTrack) })),
     ] } : null,
-    { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.heartOn : I.heart, onClick: toggleLike },
+    { label: liked ? t('Remove from Liked Songs') : t('Add to Liked Songs'), icon: liked ? I.heartOn : I.heart, onClick: toggleLike },
     { sep: true },
-    { label: 'Go to song radio', icon: G16.radio, onClick: () => { jf.instantMix(nowPlaying.itemId).then((items) => { if (items?.length) player.playQueue(items, 0); }).catch(() => {}); } },
+    { label: t('Go to song radio'), icon: G16.radio, onClick: () => { jf.instantMix(nowPlaying.itemId).then((items) => { if (items?.length) player.playQueue(items, 0); }).catch(() => {}); } },
     artistsOf.length > 1
-      ? { label: 'Go to artist', icon: G.artist, sub: artistsOf.map((a) => ({ key: a.Id, label: a.Name, onClick: () => goArtist(a.Id) })) }
-      : (artistsOf[0] || nowPlaying?.artistId) ? { label: 'Go to artist', icon: G.artist, onClick: () => goArtist(artistsOf[0]?.Id || nowPlaying.artistId) } : null,
-    nowPlaying?.albumId && onOpenAlbum ? { label: 'Go to album', icon: G.album, onClick: () => { close(); onOpenAlbum(nowPlaying.albumId); } } : null,
+      ? { label: t('Go to artist'), icon: G.artist, sub: artistsOf.map((a) => ({ key: a.Id, label: a.Name, onClick: () => goArtist(a.Id) })) }
+      : (artistsOf[0] || nowPlaying?.artistId) ? { label: t('Go to artist'), icon: G.artist, onClick: () => goArtist(artistsOf[0]?.Id || nowPlaying.artistId) } : null,
+    nowPlaying?.albumId && onOpenAlbum ? { label: t('Go to album'), icon: G.album, onClick: () => { close(); onOpenAlbum(nowPlaying.albumId); } } : null,
     { sep: true },
-    nowPlaying?.itemId ? { label: npLyricJob ? 'Syncing Lyrics…' : 'Sync Lyrics', icon: I.lyrics, disabled: Boolean(npLyricJob), onClick: () => syncLyrics(jf, { Id: nowPlaying.itemId, Name: nowPlaying.title }) } : null,
-    { label: 'Share', icon: G16.share, onClick: share },
+    nowPlaying?.itemId ? { label: npLyricJob ? t('Syncing Lyrics…') : t('Sync Lyrics'), icon: I.lyrics, disabled: Boolean(npLyricJob), onClick: () => syncLyrics(jf, { Id: nowPlaying.itemId, Name: nowPlaying.title }) } : null,
+    { label: t('Share'), icon: G16.share, onClick: share },
     player.setSleepTimer ? sleepItem(player) : null,
   ] : [];
   const moreHeader = nowPlaying ? { image: nowPlaying.artId ? jf.imageUrl(nowPlaying.artId, { maxHeight: 120 }) : nowPlaying.artUrl || null, title: nowPlaying.title, sub: nowPlaying.artist || '' } : null;
@@ -258,7 +262,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
       <CrossfadeBg src={tvFull ? art : artBg} dim={tab === 'viz'} full={tvFull} />
       <div className="fs-top">
         {/* Phone: on the lyrics page the chevron goes back to the cover, like Spotify's. */}
-        <button className="fs-chevron" onClick={phone && tab === 'lyrics' ? () => setTab('album') : close} title="Close" aria-label="Close">
+        <button className="fs-chevron" onClick={phone && tab === 'lyrics' ? () => setTab('album') : close} title={t('Close')} aria-label={t('Close')}>
           <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M2.793 8.043a1 1 0 0 1 1.414 0L12 15.836l7.793-7.793a1 1 0 1 1 1.414 1.414L12 18.664 2.793 9.457a1 1 0 0 1 0-1.414z" /></svg>
         </button>
         <div className="fs-from">
@@ -269,27 +273,27 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         <div className="fs-tabs">
           {/* Flat icon tabs: vinyl = album, note = lyrics, wave = visualizer. */}
           {[
-            ['album', 'Album', <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.25" /><circle cx="12" cy="12" r="5.75" strokeOpacity=".55" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>],
-            ['lyrics', 'Lyrics', <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M20 2.5a1 1 0 0 0-1.2-1L9.3 3.6A1 1 0 0 0 8.5 4.6v10.2A3.7 3.7 0 0 0 6.5 14a3.5 3.5 0 1 0 3.5 3.5V8.3l8-1.7v6.2a3.7 3.7 0 0 0-2-.8 3.5 3.5 0 1 0 3.5 3.5V2.5z" /></svg>],
-            ['viz', 'Visualizer', <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M3 12h1.5M6.5 8v8M10 4.5v15M13.5 8v8M17 6v12M20.5 10v4" /></svg>],
+            ['album', t('Album'), <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.25" /><circle cx="12" cy="12" r="5.75" strokeOpacity=".55" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>],
+            ['lyrics', t('Lyrics'), <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M20 2.5a1 1 0 0 0-1.2-1L9.3 3.6A1 1 0 0 0 8.5 4.6v10.2A3.7 3.7 0 0 0 6.5 14a3.5 3.5 0 1 0 3.5 3.5V8.3l8-1.7v6.2a3.7 3.7 0 0 0-2-.8 3.5 3.5 0 1 0 3.5 3.5V2.5z" /></svg>],
+            ['viz', t('Visualizer'), <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M3 12h1.5M6.5 8v8M10 4.5v15M13.5 8v8M17 6v12M20.5 10v4" /></svg>],
           ].map(([k, label, icon]) => (
             <span key={k} className={`fs-tab ${tab === k ? 'on' : ''}`}>
               {/* Visualizer: a second click on the active icon (or right-click) opens its settings. */}
               <button
                 onClick={(e) => { if (k === 'viz' && tab === 'viz') { const r = e.currentTarget.getBoundingClientRect(); setVizMenu({ x: r.left - 8, y: r.bottom + 8 }); } else { if (k === 'viz') unlockShadowAudio(); setTab(k); } }}
                 onContextMenu={k === 'viz' ? (e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setVizMenu({ x: r.left - 8, y: r.bottom + 8 }); } : undefined}
-                title={k === 'viz' && tab === 'viz' ? 'Visualizer settings' : label} aria-label={label} aria-pressed={tab === k}
+                title={k === 'viz' && tab === 'viz' ? t('Visualizer settings') : label} aria-label={label} aria-pressed={tab === k}
               >{icon}</button>
             </span>
           ))}
-          {vizMenu && <ContextMenu x={vizMenu.x} y={vizMenu.y} items={vizItems} onClose={closeVizMenu} header={phone ? { icon: G.viz, title: 'Visualizer', sub: 'Style, colours and smoothing' } : null} />}
+          {vizMenu && <ContextMenu x={vizMenu.x} y={vizMenu.y} items={vizItems} onClose={closeVizMenu} header={phone ? { icon: G.viz, title: t('Visualizer'), sub: t('Style, colours and smoothing') } : null} />}
           <span className="fs-divider" aria-hidden="true" />
         </div>
         {phone ? (
-          <button className="fs-more" onClick={() => setMore(true)} title="More options" aria-label="More options" disabled={!moreItems.length}>{G.dots}</button>
+          <button className="fs-more" onClick={() => setMore(true)} title={t('More options')} aria-label={t('More options')} disabled={!moreItems.length}>{G.dots}</button>
         ) : (
           /* Arrows pointing IN (collapse), the mirror of the footer's expand glyph. */
-          <button className="fs-close" onClick={onClose} title="Exit now playing view">
+          <button className="fs-close" onClick={onClose} title={t('Exit now playing view')}>
             <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M14.5 1.5 9.5 6.5M9.5 2.75V6.5h3.75M1.5 14.5l5-5M6.5 13.25V9.5H2.75" />
             </svg>
@@ -302,7 +306,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         {tab === 'album' && !tvFull && (art ? <img key={artKey} className="fs-art fade-in" src={art} alt="" /> : <div className="fs-art ph" />)}
         {tab === 'viz' && vizEl}
         {/* Phone, visualizer: a cue while paused, and the cover behind any sheet (the CSS shows it). */}
-        {phone && tab === 'viz' && !playing && <div className="fs-viz-hint">Play to start the visualizer</div>}
+        {phone && tab === 'viz' && !playing && <div className="fs-viz-hint">{t('Play to start the visualizer')}</div>}
         {phone && tab === 'viz' && art && <img className="fs-art fs-art-behind" src={art} alt="" />}
         {tab === 'lyrics' && <div className="fs-lyrics"><Lyrics player={player} jf={jf} /></div>}
       </div>
@@ -321,29 +325,29 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
           {art && <img className="fs-thumb" src={art} alt="" />}
           <div style={{ minWidth: 0 }}>
             {phone
-              ? <Marquee className="fs-title" text={nowPlaying?.title || 'Nothing playing'} />
-              : <div className="fs-title">{nowPlaying?.title || 'Nothing playing'}</div>}
+              ? <Marquee className="fs-title" text={nowPlaying?.title || t('Nothing playing')} />
+              : <div className="fs-title">{nowPlaying?.title || t('Nothing playing')}</div>}
             <div className="fs-artist"><ArtistLinks artists={nowPlaying?.artists} fallback={nowPlaying?.artist || ''} onOpen={goArtist} className="linkish" /></div>
             <QualityBadge quality={quality} />
           </div>
           {nowPlaying?.itemId && (
-            <button className={`fs-like ${liked ? 'on' : ''}`} onClick={toggleLike} title={liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}>
+            <button className={`fs-like ${liked ? 'on' : ''}`} onClick={toggleLike} title={liked ? t('Remove from Liked Songs') : t('Save to Liked Songs')}>
               <svg viewBox="0 0 16 16" width="20" height="20" fill={liked ? 'var(--seek-accent)' : 'currentColor'}><HeartPath on={liked} /></svg>
             </button>
           )}
         </div>
         <div className="fs-controls">
-          <button className={`ctl-mode ${shuffle && shuffle !== 'off' ? 'on' : ''}`} onClick={player.cycleShuffle} title="Shuffle"><ShuffleGlyph size={18} /></button>
-          <button onClick={player.previous} title="Previous"><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M3.3 1a.7.7 0 0 1 .7.7v5.15l9.95-5.744a.7.7 0 0 1 1.05.606v12.575a.7.7 0 0 1-1.05.607L4 9.149V14.3a.7.7 0 0 1-.7.7H1.7a.7.7 0 0 1-.7-.7V1.7a.7.7 0 0 1 .7-.7h1.6z" /></svg></button>
-          <button className="fs-play" onClick={player.toggle} title={playing ? 'Pause' : 'Play'}>{playing ? <PauseGlyph size={26} /> : <PlayGlyph size={26} />}</button>
-          <button onClick={player.next} title="Next"><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M12.7 1a.7.7 0 0 0-.7.7v5.15L2.05 1.107A.7.7 0 0 0 1 1.712v12.575a.7.7 0 0 0 1.05.607L12 9.149V14.3a.7.7 0 0 0 .7.7h1.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-1.6z" /></svg></button>
-          <button className={`ctl-mode ${repeat && repeat !== 'off' ? 'on' : ''}`} onClick={player.cycleRepeat} title="Repeat"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M0 4.75A3.75 3.75 0 0 1 3.75 1h8.5A3.75 3.75 0 0 1 16 4.75v5a3.75 3.75 0 0 1-3.75 3.75H9.81l1.018 1.018a.75.75 0 1 1-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 1 1 1.06 1.06L9.811 12h2.439a2.25 2.25 0 0 0 2.25-2.25v-5a2.25 2.25 0 0 0-2.25-2.25h-8.5A2.25 2.25 0 0 0 1.5 4.75v5A2.25 2.25 0 0 0 3.75 12H5v1.5H3.75A3.75 3.75 0 0 1 0 9.75v-5z" /></svg></button>
+          <button className={`ctl-mode ${shuffle && shuffle !== 'off' ? 'on' : ''}`} onClick={player.cycleShuffle} title={t('Shuffle')}><ShuffleGlyph size={18} /></button>
+          <button onClick={player.previous} title={t('Previous')}><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M3.3 1a.7.7 0 0 1 .7.7v5.15l9.95-5.744a.7.7 0 0 1 1.05.606v12.575a.7.7 0 0 1-1.05.607L4 9.149V14.3a.7.7 0 0 1-.7.7H1.7a.7.7 0 0 1-.7-.7V1.7a.7.7 0 0 1 .7-.7h1.6z" /></svg></button>
+          <button className="fs-play" onClick={player.toggle} title={playing ? t('Pause') : t('Play')}>{playing ? <PauseGlyph size={26} /> : <PlayGlyph size={26} />}</button>
+          <button onClick={player.next} title={t('Next')}><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M12.7 1a.7.7 0 0 0-.7.7v5.15L2.05 1.107A.7.7 0 0 0 1 1.712v12.575a.7.7 0 0 0 1.05.607L12 9.149V14.3a.7.7 0 0 0 .7.7h1.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-1.6z" /></svg></button>
+          <button className={`ctl-mode ${repeat && repeat !== 'off' ? 'on' : ''}`} onClick={player.cycleRepeat} title={t('Repeat')}><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M0 4.75A3.75 3.75 0 0 1 3.75 1h8.5A3.75 3.75 0 0 1 16 4.75v5a3.75 3.75 0 0 1-3.75 3.75H9.81l1.018 1.018a.75.75 0 1 1-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 1 1 1.06 1.06L9.811 12h2.439a2.25 2.25 0 0 0 2.25-2.25v-5a2.25 2.25 0 0 0-2.25-2.25h-8.5A2.25 2.25 0 0 0 1.5 4.75v5A2.25 2.25 0 0 0 3.75 12H5v1.5H3.75A3.75 3.75 0 0 1 0 9.75v-5z" /></svg></button>
         </div>
         {/* Bottom-right: the speaker picker with the device it is on as green text, and the volume. */}
         <div className="fs-output">
           {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} quality={quality} />}
-          <div className="fs-volume" title={`Volume ${volume}%`}>
-            <button onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? 'Mute' : 'Unmute'}>
+          <div className="fs-volume" title={t('Volume {n}%', { n: volume })}>
+            <button onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? t('Mute') : t('Unmute')}>
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
                 {volume === 0 ? (
                   <><path d="M13.86 5.47a.75.75 0 0 0-1.061 0l-1.47 1.47-1.47-1.47A.75.75 0 0 0 8.8 6.53L10.269 8l-1.47 1.47a.75.75 0 1 0 1.06 1.06l1.47-1.47 1.47 1.47a.75.75 0 0 0 1.06-1.06L12.39 8l1.47-1.47a.75.75 0 0 0 0-1.06z" /><path d="M10.116 1.5A.75.75 0 0 0 8.991.85l-6.925 4a3.642 3.642 0 0 0-1.33 4.967 3.639 3.639 0 0 0 1.33 1.332l6.925 4a.75.75 0 0 0 1.125-.649v-1.906a4.73 4.73 0 0 1-1.5-.694v1.3L2.817 9.852a2.141 2.141 0 0 1-.781-2.92c.187-.324.456-.594.78-.782l5.8-3.35v1.3c.45-.313.956-.55 1.5-.694V1.5z" /></>
@@ -364,8 +368,8 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
             <div className="fs-phone-device">
               {sessionDevice && <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} showName volume={volume} onVolume={player.setVolume} quality={quality} />}
             </div>
-            <button className={tab === 'lyrics' ? 'on' : ''} onClick={() => setTab(tab === 'lyrics' ? 'album' : 'lyrics')} title="Lyrics" aria-label="Lyrics">{G.lyrics}</button>
-            <button onClick={() => { close(); onPanel?.('queue'); }} title="Queue" aria-label="Queue">{G.queue}</button>
+            <button className={tab === 'lyrics' ? 'on' : ''} onClick={() => setTab(tab === 'lyrics' ? 'album' : 'lyrics')} title={t('Lyrics')} aria-label={t('Lyrics')}>{G.lyrics}</button>
+            <button onClick={() => { close(); onPanel?.('queue'); }} title={t('Queue')} aria-label={t('Queue')}>{G.queue}</button>
           </div>
         )}
       </div>

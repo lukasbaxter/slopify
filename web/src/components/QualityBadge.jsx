@@ -4,6 +4,7 @@
 // file, this device gets whatever its stream mode delivers (an iPhone plays an
 // AAC transcode of a FLAC, so it says AAC). Green when that is lossless.
 import React, { useEffect, useState } from 'react';
+import { t } from '../i18n.js';
 
 const khz = (hz) => { const k = hz / 1000; return `${Number.isInteger(k) ? k : k.toFixed(1)}kHz`; };
 
@@ -41,7 +42,7 @@ export function useQuality(player, jf) {
 export default function QualityBadge({ quality, className = '' }) {
   if (!quality) return null;
   return (
-    <span className={`quality-badge ${quality.lossless ? 'lossless' : ''} ${className}`} title={quality.lossless ? 'Lossless' : 'Compressed'}>
+    <span className={`quality-badge ${quality.lossless ? 'lossless' : ''} ${className}`} title={quality.lossless ? t('Lossless') : t('Compressed')}>
       {quality.text}
     </span>
   );

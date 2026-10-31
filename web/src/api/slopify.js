@@ -3,6 +3,7 @@ import { clientIdentity } from './deviceName.js';
 import { noteResponse, setOffline, isOffline } from '../offline/net.js';
 import { addPlay } from '../offline/store.js';
 import { clientLog } from './clientLog.js';
+import { t } from '../i18n.js';
 
 // The service worker refreshed a kept answer and it changed (sw.js): the
 // in-memory copies go and the pages that show it load again ('slopify:fresh').
@@ -120,7 +121,7 @@ export class Slopify {
         if (!res.ok) {
           // The service worker's "offline" answer (sw.js): one plain message
           // for every screen, not "503: offline".
-          if (res.headers.get('X-Slopify-Offline')) throw Object.assign(new Error('Not available offline'), { status: 503, offline: true });
+          if (res.headers.get('X-Slopify-Offline')) throw Object.assign(new Error(t('Not available offline')), { status: 503, offline: true });
           const body = await res.text().catch(() => '');
           let msg = body; try { msg = JSON.parse(body).error || body; } catch { /* plain */ }
           const err = new Error(`${res.status}${msg ? `: ${String(msg).slice(0, 180)}` : ''}`);
@@ -136,7 +137,7 @@ export class Slopify {
         if (unreachable) setOffline(true);
         if (!e.status && !opts.signal?.aborted) clientLog(`${what}: ${e.name === 'AbortError' ? 'timed out' : e.message} after ${Date.now() - t0} ms`);
         const transient = e.retry || e.name === 'AbortError' || e instanceof TypeError;
-        if (!transient || attempt >= retries) throw unreachable ? Object.assign(new Error('You’re offline'), { offline: true }) : e;
+        if (!transient || attempt >= retries) throw unreachable ? Object.assign(new Error(t('You’re offline')), { offline: true }) : e;
         attempt += 1;
         await new Promise((r) => setTimeout(r, 800 * attempt));
       } finally { clearTimeout(timer); }
@@ -447,9 +448,9 @@ export class Slopify {
       x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
       x.onload = () => {
         let body = {}; try { body = JSON.parse(x.responseText); } catch { /* plain */ }
-        if (x.status >= 200 && x.status < 300) resolve(body); else reject(new Error(body.error || `upload failed (${x.status})`));
+        if (x.status >= 200 && x.status < 300) resolve(body); else reject(new Error(body.error || t('upload failed ({status})', { status: x.status })));
       };
-      x.onerror = () => reject(new Error('upload failed (network)'));
+      x.onerror = () => reject(new Error(t('upload failed (network)')));
       x.send(file);
     });
   }
@@ -471,12 +472,12 @@ export class Slopify {
   async renamePlaylist(playlistId, name) { this._evict(`item:${playlistId}`); return this._fetch(`/api/playlists/${playlistId}`, { method: 'PATCH', body: JSON.stringify({ name }) }); }
   renameItem(itemId, name) { return this.renamePlaylist(itemId, name); }
   async uploadPrimaryImage(itemId, file) {
-    if (!isPlaylistId(itemId)) throw new Error('Only playlist covers can be changed here');
+    if (!isPlaylistId(itemId)) throw new Error(t('Only playlist covers can be changed here'));
     await this._fetch(`/api/playlists/${itemId}/cover`, { method: 'POST', raw: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } });
     this._evict('item:'); this.bustImage(itemId);
   }
   async deleteItem(itemId) {
-    if (!isPlaylistId(itemId)) throw new Error('Files are managed on the server, not from here');
+    if (!isPlaylistId(itemId)) throw new Error(t('Files are managed on the server, not from here'));
     return this.deletePlaylist(itemId);
   }
 

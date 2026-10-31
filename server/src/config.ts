@@ -76,6 +76,10 @@ export const config = {
   // is unlinked within a minute. 'keep' leaves such groups alone.
   bluosGroups: env('BLUOS_GROUPS', 'slopify') === 'keep' ? 'keep' as const : 'slopify' as const,
   serverName: env('SERVER_NAME', ''),
+  // The app's language for everyone on this server ('de', 'pt-BR', 'zh-TW'...);
+  // 'auto' follows each browser or phone. A person's own pick in Settings wins.
+  // Tolerates the gettext form (en_US:en).
+  language: env('LANGUAGE', 'auto').split(':')[0].split('.')[0].replace('_', '-') || 'auto',
   // A public try-it-out server: no sign-in, a guest account per visitor cloned from the admin's (demo.ts).
   demo: env('DEMO', '0') === '1',
   // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library

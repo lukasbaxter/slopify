@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { solveLag } from '../api/tapSync.js';
+import { t } from '../i18n.js';
+
+// A translated sentence with <b>bold</b> parts kept bold.
+const bold = (s) => s.split(/<b>(.*?)<\/b>/).map((part, i) => (i % 2 ? <b key={i}>{part}</b> : part));
 
 // Speaker timing calibration for the visualizer.
 //
@@ -121,16 +125,16 @@ export default function Calibrate({ player, device, shadow, reported, onDone, on
     if (ph === 'intro') { if (playingRef.current) jump(); return; }
     if (ph === 'jump') {
       const j = jumpRef.current;
-      if (!j?.armed || !playingRef.current) { setMsg('Too early, wait for the music.'); return; }
+      if (!j?.armed || !playingRef.current) { setMsg(t('Too early, wait for the music.')); return; }
       const d = reported(now) - j.target;
-      if (d < 0.05) { setMsg('Too early, wait for the music.'); return; }
-      if (d > 4) { setMsg('That was late. Tap the moment you hear it.'); return; }
+      if (d < 0.05) { setMsg(t('Too early, wait for the music.')); return; }
+      if (d > 4) { setMsg(t('That was late. Tap the moment you hear it.')); return; }
       flash();
       coarseRef.current.push(d);
       const cs = coarseRef.current;
       // Two rounds that agree, or three and take the middle one.
       const again = cs.length < 2 || (cs.length === 2 && Math.abs(cs[0] - cs[1]) > 0.35);
-      if (again) { setRound(cs.length); setMsg('Good.'); sleep(1500).then(() => { if (aliveRef.current && phaseRef.current === 'jump') jump(); }); }
+      if (again) { setRound(cs.length); setMsg(t('Good.')); sleep(1500).then(() => { if (aliveRef.current && phaseRef.current === 'jump') jump(); }); }
       else beat();
       return;
     }
@@ -153,62 +157,66 @@ export default function Calibrate({ player, device, shadow, reported, onDone, on
     return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onUp, true); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const name = device?.name || 'this speaker';
+  const name = device?.name || t('this speaker');
   const fmt = (v) => `${v > 0 ? '+' : ''}${(v * 1000).toFixed(0)} ms`;
   const stop = (e) => e.stopPropagation();
   return (
-    <div className="cal" onPointerDown={(e) => { if (e.button === 0) tap(); }} role="dialog" aria-label={`Calibrate ${name}`}>
+    <div className="cal" onPointerDown={(e) => { if (e.button === 0) tap(); }} role="dialog" aria-label={t('Calibrate {name}', { name })}>
       <div className="cal-card">
-        <div className="cal-title">Calibrate {name}</div>
+        <div className="cal-title">{t('Calibrate {name}', { name })}</div>
         {phase === 'intro' && (
           <>
-            <p className="cal-text">Speakers play a little behind what they report, so the bars can run ahead of the sound. Two quick steps measure {name}'s delay so the visualizer lines up.</p>
+            <p className="cal-text">{t("Speakers play a little behind what they report, so the bars can run ahead of the sound. Two quick steps measure {name}'s delay so the visualizer lines up.", { name })}</p>
             <ol className="cal-steps">
-              <li>Slopify pauses and jumps ahead. <b>Tap the moment you hear the music.</b> (Twice.)</li>
-              <li><b>Tap along to the beat</b> for {BEAT_SECONDS} seconds.</li>
+              <li>{bold(t('Slopify pauses and jumps ahead. <b>Tap the moment you hear the music.</b> (Twice.)'))}</li>
+              <li>{bold(t('<b>Tap along to the beat</b> for {n} seconds.', { n: BEAT_SECONDS }))}</li>
             </ol>
-            <p className="cal-text muted">Tap anywhere, or press Space. No microphone is used.</p>
-            {!player.playing && <p className="cal-text warn">Start playing on {name} first.</p>}
+            <p className="cal-text muted">{t('Tap anywhere, or press Space. No microphone is used.')}</p>
+            {!player.playing && <p className="cal-text warn">{t('Start playing on {name} first.', { name })}</p>}
             <div className="cal-btns" onPointerDown={stop}>
-              <button className="cal-btn" disabled={!player.playing} onClick={jump}>Start</button>
-              <button className="cal-btn ghost" onClick={onClose}>Cancel</button>
+              <button className="cal-btn" disabled={!player.playing} onClick={jump}>{t('Start')}</button>
+              <button className="cal-btn ghost" onClick={onClose}>{t('Cancel')}</button>
             </div>
           </>
         )}
         {phase === 'jump' && (
           <>
-            <div className="cal-step">Step 1 of 2 · {round + 1}</div>
-            <div className={`cal-pad ${pulse % 2 ? 'a' : 'b'}`} key={pulse}><span>Tap when you hear the music</span></div>
-            <p className="cal-text muted">{msg || 'Listen…'}</p>
-            <div className="cal-btns" onPointerDown={stop}><button className="cal-btn ghost" onClick={onClose}>Cancel</button></div>
+            <div className="cal-step">{t('Step 1 of 2 · {n}', { n: round + 1 })}</div>
+            <div className={`cal-pad ${pulse % 2 ? 'a' : 'b'}`} key={pulse}><span>{t('Tap when you hear the music')}</span></div>
+            <p className="cal-text muted">{msg || t('Listen…')}</p>
+            <div className="cal-btns" onPointerDown={stop}><button className="cal-btn ghost" onClick={onClose}>{t('Cancel')}</button></div>
           </>
         )}
         {(phase === 'beat' || phase === 'ready') && (
           <>
-            <div className="cal-step">Step 2 of 2</div>
-            <div className={`cal-pad ${phase === 'ready' ? 'wait' : pulse % 2 ? 'a' : 'b'}`} key={pulse}><span>{phase === 'ready' ? 'Get ready…' : 'Tap along to the beat'}</span></div>
+            <div className="cal-step">{t('Step 2 of 2')}</div>
+            <div className={`cal-pad ${phase === 'ready' ? 'wait' : pulse % 2 ? 'a' : 'b'}`} key={pulse}><span>{phase === 'ready' ? t('Get ready…') : t('Tap along to the beat')}</span></div>
             <div className="cal-bar"><div style={{ width: `${progress * 100}%` }} /></div>
-            <p className="cal-text muted">{phase === 'ready' ? 'Next: tap on every beat.' : `${count} tap${count === 1 ? '' : 's'}`}</p>
-            <div className="cal-btns" onPointerDown={stop}><button className="cal-btn ghost" onClick={onClose}>Cancel</button></div>
+            <p className="cal-text muted">{phase === 'ready' ? t('Next: tap on every beat.') : count === 1 ? t('1 tap') : t('{n} taps', { n: count })}</p>
+            <div className="cal-btns" onPointerDown={stop}><button className="cal-btn ghost" onClick={onClose}>{t('Cancel')}</button></div>
           </>
         )}
         {phase === 'result' && result && (
           <>
             <div className="cal-big">{fmt(result.offset)}</div>
-            <p className="cal-text">{name} plays {Math.abs(result.offset * 1000).toFixed(0)} ms {result.offset >= 0 ? 'behind' : 'ahead of'} what it reports. The visualizer now uses this.</p>
-            <p className="cal-text muted">Lock {result.quality >= 2.5 ? 'strong' : 'okay'} · {result.taps} taps</p>
+            <p className="cal-text">{result.offset >= 0
+              ? t('{name} plays {ms} ms behind what it reports. The visualizer now uses this.', { name, ms: Math.abs(result.offset * 1000).toFixed(0) })
+              : t('{name} plays {ms} ms ahead of what it reports. The visualizer now uses this.', { name, ms: Math.abs(result.offset * 1000).toFixed(0) })}</p>
+            <p className="cal-text muted">{result.quality >= 2.5 ? t('Lock strong · {n} taps', { n: result.taps }) : t('Lock okay · {n} taps', { n: result.taps })}</p>
             <div className="cal-btns" onPointerDown={stop}>
-              <button className="cal-btn" onClick={onClose}>Looks right</button>
-              <button className="cal-btn ghost" onClick={restart}>Try again</button>
+              <button className="cal-btn" onClick={onClose}>{t('Looks right')}</button>
+              <button className="cal-btn ghost" onClick={restart}>{t('Try again')}</button>
             </div>
           </>
         )}
         {phase === 'failed' && (
           <>
-            <p className="cal-text">Couldn't lock on to the beat{result ? ` (${result.taps} taps)` : ''}. Pick a part of the song with a clear beat and tap on every beat.</p>
+            <p className="cal-text">{result
+              ? t("Couldn't lock on to the beat ({n} taps). Pick a part of the song with a clear beat and tap on every beat.", { n: result.taps })
+              : t("Couldn't lock on to the beat. Pick a part of the song with a clear beat and tap on every beat.")}</p>
             <div className="cal-btns" onPointerDown={stop}>
-              <button className="cal-btn" onClick={restart}>Try again</button>
-              <button className="cal-btn ghost" onClick={onClose}>Close</button>
+              <button className="cal-btn" onClick={restart}>{t('Try again')}</button>
+              <button className="cal-btn ghost" onClick={onClose}>{t('Close')}</button>
             </div>
           </>
         )}

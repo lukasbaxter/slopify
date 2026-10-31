@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PlayGlyph, Heart, LikedCover, usePhone } from './TrackRow.jsx';
+import { t } from '../i18n.js';
 
 // Cover art that fades in once it has loaded (no pop). A cached image can be
 // complete before onLoad is wired, so the ref checks too.
@@ -22,16 +23,16 @@ export function tileTitle(name) {
 
 function greeting() {
   const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (h < 12) return t('Good morning');
+  if (h < 18) return t('Good afternoon');
+  return t('Good evening');
 }
 
 // Spotify's Daily Mix tiles: artist photo up top, a solid colour band with the
 // label at the bottom. One palette entry per mix, rotating.
 const MIX_COLORS = ['#e8115b', '#1e3264', '#8d67ab', '#e13300', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07'];
 
-export const topSongsSub = (year) => year === new Date().getFullYear() ? `Your most played songs of ${year} so far` : `The songs you played most in ${year}`;
+export const topSongsSub = (year) => year === new Date().getFullYear() ? t('Your most played songs of {year} so far', { year }) : t('The songs you played most in {year}', { year });
 
 function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder }) {
   return (
@@ -41,7 +42,7 @@ function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder }) {
         {image ? <FadeImg src={image} /> : <div className="ph" />}
         <div className="mixband">{label}</div>
         {!placeholder && (
-          <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title="Play">
+          <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
             <PlayGlyph />
           </button>
         )}
@@ -64,7 +65,7 @@ function Shortcut({ title, image, onOpen, onPlay, liked }) {
         <div className="shortcut-art ph" />
       )}
       <span className="shortcut-title">{tileTitle(title)}</span>
-      <button className="card-play shortcut-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title="Play">
+      <button className="card-play shortcut-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
         <PlayGlyph />
       </button>
     </div>
@@ -76,7 +77,7 @@ function Shelf({ title, children, onSeeAll }) {
     <section className="homeshelf">
       <div className="shelf-head">
         <h2 onClick={onSeeAll}>{title}</h2>
-        {onSeeAll && <button onClick={onSeeAll}>Show all</button>}
+        {onSeeAll && <button onClick={onSeeAll}>{t('Show all')}</button>}
       </div>
       <div className="shelf">{children}</div>
     </section>
@@ -89,7 +90,7 @@ function Card({ title, subtitle, image, round, onOpen, onPlay }) {
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.()}>
       <div className="card-art">
         {image ? <FadeImg src={image} /> : <div className="ph" />}
-        <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title="Play">
+        <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
           <PlayGlyph />
         </button>
       </div>
@@ -125,10 +126,10 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
     jf.recentlyAddedAlbums({ limit: 16 }).then((r) => { setAdded(r.items); jf._persist('home.added', r.items); }).catch(() => {});
     jf.topTracks({ limit: 200 }).then((top) => {
       const score = new Map(), last = new Map();
-      for (const t of top) {
-        for (const a of t.ArtistItems || []) {
-          score.set(a.Id, { Id: a.Id, Name: a.Name, n: (score.get(a.Id)?.n || 0) + 1 + (t.UserData?.PlayCount || 0) });
-          const lp = t.UserData?.LastPlayedDate || '';
+      for (const tr of top) {
+        for (const a of tr.ArtistItems || []) {
+          score.set(a.Id, { Id: a.Id, Name: a.Name, n: (score.get(a.Id)?.n || 0) + 1 + (tr.UserData?.PlayCount || 0) });
+          const lp = tr.UserData?.LastPlayedDate || '';
           if (lp > (last.get(a.Id)?.lp || '')) last.set(a.Id, { Id: a.Id, Name: a.Name, lp });
         }
       }
@@ -182,9 +183,9 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
   const explo = useMemo(() => {
     const pick = (re) => [...playlists].filter((p) => re.test(p.Name)).sort((a, b) => b.Name.localeCompare(a.Name))[0] || null;
     return [
-      { key: 'dw', label: 'Discover Weekly', sub: 'New music picked from your listening, every Monday.', color: '#1e3264', pl: pick(/^Weekly.?Exploration/i) },
-      { key: 'wj', label: 'Weekly Jams', sub: 'Songs you love, refreshed weekly.', color: '#8d67ab', pl: pick(/^Weekly.?Jams/i) },
-      { key: 'dj', label: 'Daily Jams', sub: 'A fresh mix every day.', color: '#e8115b', pl: pick(/^Daily.?Jams/i) },
+      { key: 'dw', label: t('Discover Weekly'), sub: t('New music picked from your listening, every Monday.'), color: '#1e3264', pl: pick(/^Weekly.?Exploration/i) },
+      { key: 'wj', label: t('Weekly Jams'), sub: t('Songs you love, refreshed weekly.'), color: '#8d67ab', pl: pick(/^Weekly.?Jams/i) },
+      { key: 'dj', label: t('Daily Jams'), sub: t('A fresh mix every day.'), color: '#e8115b', pl: pick(/^Daily.?Jams/i) },
     ];
   }, [playlists]);
 
@@ -199,7 +200,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
   const showArtists = !phone || filter !== 'music';
   const phoneBar = (
     <div className="pills">
-      {[['all', 'All'], ['music', 'Music'], ['artists', 'Artists']].map(([k, label]) => (
+      {[['all', t('All')], ['music', t('Music')], ['artists', t('Artists')]].map(([k, label]) => (
         <button key={k} className={`pill ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{label}</button>
       ))}
     </div>
@@ -223,7 +224,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
 
         {showMusic && <div className="shortcuts">
           {shortcuts.map((s, i) => s.kind === 'liked' ? (
-            <Shortcut key="liked" title="Liked Songs" liked onOpen={onOpenLiked} onPlay={playLiked} />
+            <Shortcut key="liked" title={t('Liked Songs')} liked onOpen={onOpenLiked} onPlay={playLiked} />
           ) : s.kind === 'playlist' ? (
             <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
               onOpen={() => onOpenPlaylist(s.item)} onPlay={() => playPlaylist(s.item)} />
@@ -233,9 +234,9 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           ))}
         </div>}
 
-        {showMusic && <Shelf title="Made For You">
+        {showMusic && <Shelf title={t('Made For You')}>
           {mixSeeds.map((a, i) => (
-            <MixTile key={a.Id} label={`Daily Mix ${i + 1}`} sub={`${a.Name} and more`}
+            <MixTile key={a.Id} label={t('Daily Mix {n}', { n: i + 1 })} sub={t('{name} and more', { name: a.Name })}
               image={jf.imageUrl(a.Id, { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
               onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length])} onPlay={() => playMix(a)} />
           ))}
@@ -243,14 +244,14 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
             <MixTile key={e.key} label={e.label} sub={e.sub} color={e.color} image={jf.imageUrl(e.pl.Id, { maxHeight: 320 })}
               onOpen={() => onOpenPlaylist(e.pl)} onPlay={() => playPlaylist(e.pl)} />
           ) : null)}
-          <MixTile label="Release Radar" sub="New releases from the artists you play most." color="#8d67ab"
+          <MixTile label={t('Release Radar')} sub={t('New releases from the artists you play most.')} color="#8d67ab"
             image={topArtists[0] ? jf.imageUrl(topArtists[0].Id, { maxHeight: 320 }) : null} onOpen={onOpenRadar} onPlay={onOpenRadar} />
         </Shelf>}
 
         {showMusic && topYears.length > 0 && (
-          <Shelf title="Your Top Songs">
+          <Shelf title={t('Your Top Songs')}>
             {topYears.map((y, i) => (
-              <MixTile key={y.year} label={`Your Top Songs ${y.year}`} sub={topSongsSub(y.year)}
+              <MixTile key={y.year} label={t('Your Top Songs {year}', { year: y.year })} sub={topSongsSub(y.year)}
                 image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={MIX_COLORS[i % MIX_COLORS.length]}
                 onOpen={() => onOpenTopSongs(y, MIX_COLORS[i % MIX_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
             ))}
@@ -258,36 +259,36 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
         )}
 
         {showMusic && recent.length > 0 && (
-          <Shelf title="Recently played" onSeeAll={() => onSeeAll('albums')}>
+          <Shelf title={t('Recently played')} onSeeAll={() => onSeeAll('albums')}>
             {recent.map((a) => (
-              <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || 'Album'} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
+              <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || t('Album')} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                 onOpen={() => onOpen(a)} onPlay={() => playAlbum(a)} />
             ))}
           </Shelf>
         )}
 
         {showArtists && recentArtists.length > 0 && (
-          <Shelf title="Jump back in" onSeeAll={() => onSeeAll('artists')}>
+          <Shelf title={t('Jump back in')} onSeeAll={() => onSeeAll('artists')}>
             {recentArtists.map((a) => (
-              <Card key={a.Id} title={a.Name} subtitle="Artist" round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
+              <Card key={a.Id} title={a.Name} subtitle={t('Artist')} round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                 onOpen={() => onOpenArtist(a.Id)} onPlay={() => playMix(a)} />
             ))}
           </Shelf>
         )}
 
         {showMusic && added.length > 0 && (
-          <Shelf title="Recently added" onSeeAll={() => onSeeAll('albums')}>
+          <Shelf title={t('Recently added')} onSeeAll={() => onSeeAll('albums')}>
             {added.map((a) => (
-              <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || 'Album'} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
+              <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || t('Album')} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                 onOpen={() => onOpen(a)} onPlay={() => playAlbum(a)} />
             ))}
           </Shelf>
         )}
 
         {showArtists && topArtists.length > 0 && (
-          <Shelf title="Your top artists" onSeeAll={() => onSeeAll('artists')}>
+          <Shelf title={t('Your top artists')} onSeeAll={() => onSeeAll('artists')}>
             {topArtists.map((a) => (
-              <Card key={a.Id} title={a.Name} subtitle="Artist" round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
+              <Card key={a.Id} title={a.Name} subtitle={t('Artist')} round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                 onOpen={() => onOpenArtist(a.Id)} onPlay={() => playMix(a)} />
             ))}
           </Shelf>

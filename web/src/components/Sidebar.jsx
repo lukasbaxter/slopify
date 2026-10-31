@@ -5,6 +5,7 @@ import { LikedCover, usePhone, I as MI, shareItem, DownloadedMark } from './Trac
 import { LIKED_ID } from './Library.jsx';
 import { useOffline } from '../api/offline.js';
 import { useOfflineMode } from '../offline/net.js';
+import { t } from '../i18n.js';
 
 const ICONS = {
   home: 'M12 3 3 10v11h6v-6h6v6h6V10z',
@@ -32,7 +33,7 @@ function Icon({ name, size = 22 }) {
  */
 // Spotify's green thumbtack, shown before the subtitle of pinned entries.
 const Pin = () => (
-  <svg className="libpin" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-label="Pinned">
+  <svg className="libpin" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-label={t('Pinned')}>
     <path d="M8.822.797a2.72 2.72 0 0 1 3.847 0l2.534 2.533a2.72 2.72 0 0 1 0 3.848l-3.678 3.678-1.337 4.988-4.486-4.486L1.28 15.78a.75.75 0 0 1-1.06-1.06l4.422-4.422L.156 5.812l4.987-1.337L8.822.797z" />
   </svg>
 );
@@ -72,7 +73,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     const d = downloaded.get(id);
     if (!d) return null;
     if (d.have >= d.total) return <DownloadedMark />;
-    return offlineMode ? <span className="libitem-partial">{d.have} of {d.total} downloaded • </span> : null;
+    return offlineMode ? <span className="libitem-partial">{t('{have} of {total} downloaded', { have: d.have, total: d.total })} • </span> : null;
   };
   const pinned = new Set(Array.isArray(prefs?.libraryPinned) ? prefs.libraryPinned : []);
   const togglePin = (id) => {
@@ -94,30 +95,30 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     if (enqueue) player.addToQueue(items); else player.playQueue(items, 0, e.id);
   };
   const menuItems = (e) => e.kind === 'liked' ? [
-    { label: 'Add to queue', onClick: async () => { const { items } = await jf.favoriteTracks(); player.addToQueue(items); } },
-    { label: 'Play', onClick: async () => { const { items } = await jf.favoriteTracks(); if (items.length) player.playQueue(items, 0, 'liked'); } },
+    { label: t('Add to queue'), onClick: async () => { const { items } = await jf.favoriteTracks(); player.addToQueue(items); } },
+    { label: t('Play'), onClick: async () => { const { items } = await jf.favoriteTracks(); if (items.length) player.playQueue(items, 0, 'liked'); } },
   ] : e.kind === 'album' ? [
-    { label: 'Add to queue', onClick: () => playEntry(e, true) },
-    { label: 'Play', onClick: () => playEntry(e) },
+    { label: t('Add to queue'), onClick: () => playEntry(e, true) },
+    { label: t('Play'), onClick: () => playEntry(e) },
     { sep: true },
-    { label: pinned.has(e.id) ? 'Unpin album' : 'Pin album', onClick: () => togglePin(e.id) },
-    e.item.AlbumArtists?.[0]?.Id ? { label: 'Go to artist', onClick: () => onOpenArtist?.(e.item.AlbumArtists[0].Id) } : null,
-    { label: 'Share', onClick: () => shareItem({ kind: 'album', id: e.id, title: e.item.Name, by: e.item.AlbumArtists?.[0]?.Name || e.item.AlbumArtist }) },
-    { label: 'Remove from Your Library', onClick: () => onFollowAlbum?.(e.item, false) },
+    { label: pinned.has(e.id) ? t('Unpin album') : t('Pin album'), onClick: () => togglePin(e.id) },
+    e.item.AlbumArtists?.[0]?.Id ? { label: t('Go to artist'), onClick: () => onOpenArtist?.(e.item.AlbumArtists[0].Id) } : null,
+    { label: t('Share'), onClick: () => shareItem({ kind: 'album', id: e.id, title: e.item.Name, by: e.item.AlbumArtists?.[0]?.Name || e.item.AlbumArtist }) },
+    { label: t('Remove from Your Library'), onClick: () => onFollowAlbum?.(e.item, false) },
   ] : e.kind === 'artist' ? [
-    { label: 'Add to queue', onClick: () => playEntry(e, true) },
-    { label: 'Play', onClick: () => playEntry(e) },
+    { label: t('Add to queue'), onClick: () => playEntry(e, true) },
+    { label: t('Play'), onClick: () => playEntry(e) },
     { sep: true },
-    { label: pinned.has(e.id) ? 'Unpin artist' : 'Pin artist', onClick: () => togglePin(e.id) },
-    { label: 'Share', onClick: () => shareItem({ kind: 'artist', id: e.id, title: e.item.Name }) },
-    { label: 'Unfollow', onClick: async () => { await jf.setFavorite(e.id, false).catch(() => {}); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); } },
+    { label: pinned.has(e.id) ? t('Unpin artist') : t('Pin artist'), onClick: () => togglePin(e.id) },
+    { label: t('Share'), onClick: () => shareItem({ kind: 'artist', id: e.id, title: e.item.Name }) },
+    { label: t('Unfollow'), onClick: async () => { await jf.setFavorite(e.id, false).catch(() => {}); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); } },
   ] : [
-    { label: 'Add to queue', onClick: () => playEntry(e, true) },
-    { label: 'Play', onClick: () => playEntry(e) },
+    { label: t('Add to queue'), onClick: () => playEntry(e, true) },
+    { label: t('Play'), onClick: () => playEntry(e) },
     { sep: true },
-    { label: pinned.has(e.id) ? 'Unpin playlist' : 'Pin playlist', onClick: () => togglePin(e.id) },
-    { label: 'Edit details', onClick: () => onEditPlaylist?.(e.item) },
-    { label: 'Delete', danger: true, onClick: () => { if (window.confirm(`Delete "${e.item.Name}"?`)) onDeletePlaylist?.(e.item); } },
+    { label: pinned.has(e.id) ? t('Unpin playlist') : t('Pin playlist'), onClick: () => togglePin(e.id) },
+    { label: t('Edit details'), onClick: () => onEditPlaylist?.(e.item) },
+    { label: t('Delete'), danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: e.item.Name }))) onDeletePlaylist?.(e.item); } },
   ];
   const openMenu = (ev, entry) => { ev.preventDefault(); ev.stopPropagation(); setMenu({ x: ev.clientX, y: ev.clientY, entry }); };
 
@@ -137,7 +138,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
   // The empty state waits for the library to have actually arrived (the
   // playlists request has no flag of its own, so also let the first paint settle).
   const [settled, setSettled] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setSettled(true), 1500); return () => clearTimeout(t); }, []);
+  useEffect(() => { const timer = setTimeout(() => setSettled(true), 1500); return () => clearTimeout(timer); }, []);
   // "+": Spotify's create menu, on the desktop too now that there are two
   // kinds: a plain playlist (named inline on the desktop, full screen on the
   // phone) or one the local model generates from a description.
@@ -147,12 +148,12 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     setCreateSheet({ x: r ? r.left : 0, y: r ? r.bottom + 4 : 0 });
   };
   const createItems = [
-    { label: 'Playlist', desc: phone ? null : 'Build a playlist with songs', icon: MI.playlist, onClick: () => { setName(''); if (phone) setNaming(true); else setCreating(true); } },
-    onGenerate && { label: 'Generated playlist (AI)', desc: phone ? null : 'Describe it, get 25 songs from your library', icon: MI.sparkle, onClick: () => onGenerate() },
+    { label: t('Playlist'), desc: phone ? null : t('Build a playlist with songs'), icon: MI.playlist, onClick: () => { setName(''); if (phone) setNaming(true); else setCreating(true); } },
+    onGenerate && { label: t('Generated playlist (AI)'), desc: phone ? null : t('Describe it, get 25 songs from your library'), icon: MI.sparkle, onClick: () => onGenerate() },
   ].filter(Boolean);
   const q = libQuery.trim().toLowerCase();
   const matches = (n) => !q || (n || '').toLowerCase().includes(q);
-  const showLiked = (!libFilter || libFilter === 'playlist') && matches('Liked Songs') && (!offlineMode || downloaded.has(LIKED_ID));
+  const showLiked = (!libFilter || libFilter === 'playlist') && matches(t('Liked Songs')) && (!offlineMode || downloaded.has(LIKED_ID));
   const shownEntries = entries.filter((e) => (!libFilter || e.kind === libFilter) && matches(e.item.Name) && (!offlineMode || downloaded.has(e.id)));
   // Artists cannot be downloaded: offline the chip goes, and a filter on it with it.
   useEffect(() => { if (offlineMode && libFilter === 'artist') setLibFilter(null); }, [offlineMode, libFilter]);
@@ -170,47 +171,47 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     <aside className="sidebar">
       <nav className="nav">
         <button className={`navitem ${view === 'home' ? 'on' : ''}`} onClick={() => onView('home')}>
-          <Icon name="home" /><span>Home</span>
+          <Icon name="home" /><span>{t('Home')}</span>
         </button>
         <button className={`navitem ${view === 'search' ? 'on' : ''}`} onClick={() => onView('search')}>
-          <Icon name="search" /><span>Search</span>
+          <Icon name="search" /><span>{t('Search')}</span>
         </button>
       </nav>
 
       <div className="libpanel">
         <div className="libhead">
           <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Icon name="library" /> Your Library
+            <Icon name="library" /> {t('Your Library')}
           </span>
           <span className="libhead-actions">
             {phone && (
-              <button className={`icon-btn ${searching ? 'on' : ''}`} onClick={() => { setSearching((v) => !v); setLibQuery(''); }} title="Find in Your Library" aria-label="Find in Your Library">
+              <button className={`icon-btn ${searching ? 'on' : ''}`} onClick={() => { setSearching((v) => !v); setLibQuery(''); }} title={t('Find in Your Library')} aria-label={t('Find in Your Library')}>
                 <Icon name="search" size={24} />
               </button>
             )}
-            <button className="icon-btn" onClick={openCreate} title="Create playlist" aria-label="Create playlist">
+            <button className="icon-btn" onClick={openCreate} title={t('Create playlist')} aria-label={t('Create playlist')}>
               <Icon name="plus" size={phone ? 24 : 18} />
             </button>
           </span>
         </div>
 
         <div className="libchips">
-          {libFilter && <button className="pill x" onClick={() => setLibFilter(null)} aria-label="Clear filter">×</button>}
-          {[['playlist', 'Playlists'], ['album', 'Albums'], ['artist', 'Artists']].filter(([k]) => !(offlineMode && k === 'artist')).map(([k, label]) => (!libFilter || libFilter === k) && (
+          {libFilter && <button className="pill x" onClick={() => setLibFilter(null)} aria-label={t('Clear filter')}>×</button>}
+          {[['playlist', t('Playlists')], ['album', t('Albums')], ['artist', t('Artists')]].filter(([k]) => !(offlineMode && k === 'artist')).map(([k, label]) => (!libFilter || libFilter === k) && (
             <button key={k} className={`pill ${libFilter === k ? 'on' : ''}`} onClick={() => setLibFilter(libFilter === k ? null : k)}>{label}</button>
           ))}
         </div>
         {searching && phone ? (
           <div className="libsearch">
             <Icon name="search" size={20} />
-            <input autoFocus value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder="Find in Your Library" spellCheck="false"
+            <input autoFocus value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder={t('Find in Your Library')} spellCheck="false"
               onKeyDown={(e) => e.key === 'Escape' && (setSearching(false), setLibQuery(''))} />
-            <button type="button" onClick={() => { setSearching(false); setLibQuery(''); }}>Cancel</button>
+            <button type="button" onClick={() => { setSearching(false); setLibQuery(''); }}>{t('Cancel')}</button>
           </div>
         ) : (
           <div className="libsort">
-            <span><Icon name="sort" size={16} /> Recents</span>
-            <button className="libview" onClick={() => setGridView((v) => !v)} title={gridView ? 'List view' : 'Grid view'} aria-label={gridView ? 'List view' : 'Grid view'}>
+            <span><Icon name="sort" size={16} /> {t('Recents')}</span>
+            <button className="libview" onClick={() => setGridView((v) => !v)} title={gridView ? t('List view') : t('Grid view')} aria-label={gridView ? t('List view') : t('Grid view')}>
               <Icon name={gridView ? 'list' : 'grid'} size={20} />
             </button>
           </div>
@@ -221,7 +222,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
               <input
                 className="newplaylist-input"
                 autoFocus
-                placeholder="Playlist name"
+                placeholder={t('Playlist name')}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Escape' && setCreating(false)}
@@ -229,11 +230,11 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
             </form>
           )}
 
-          {showLiked && <button className="libitem" onClick={onOpenLiked} onContextMenu={(ev) => openMenu(ev, { id: 'liked', kind: 'liked' })} title="Liked Songs">
+          {showLiked && <button className="libitem" onClick={onOpenLiked} onContextMenu={(ev) => openMenu(ev, { id: 'liked', kind: 'liked' })} title={t('Liked Songs')}>
             <LikedCover />
             <span className="libitem-text">
-              <span className="libitem-name">Liked Songs</span>
-              <span className="libitem-sub"><Pin />{dlSub(LIKED_ID)}Playlist{likedCount != null ? ` • ${likedCount} songs` : ''}</span>
+              <span className="libitem-name">{t('Liked Songs')}</span>
+              <span className="libitem-sub"><Pin />{dlSub(LIKED_ID)}{t('Playlist')}{likedCount != null ? ` • ${t('{n} songs', { n: likedCount })}` : ''}</span>
             </span>
           </button>}
 
@@ -241,9 +242,9 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
             const it = e.item;
             const art = jf.imageUrl(it.Id, { maxHeight: 84 });
             const sub = e.kind === 'album'
-              ? `Album • ${it.AlbumArtist || it.AlbumArtists?.[0]?.Name || ''}`
-              : e.kind === 'artist' ? 'Artist'
-              : `Playlist${it.ChildCount ? ` • ${it.ChildCount} songs` : ''}`;
+              ? `${t('Album')} • ${it.AlbumArtist || it.AlbumArtists?.[0]?.Name || ''}`
+              : e.kind === 'artist' ? t('Artist')
+              : `${t('Playlist')}${it.ChildCount ? ` • ${t('{n} songs', { n: it.ChildCount })}` : ''}`;
             return (
               <button
                 key={e.id}
@@ -273,12 +274,12 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
           )}
           {naming && createPortal(
             <form className="newpl" onSubmit={(e) => { submit(e); setNaming(false); }}>
-              <h2>Give your playlist a name</h2>
-              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="My playlist #1" spellCheck="false"
+              <h2>{t('Give your playlist a name')}</h2>
+              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('My playlist #1')} spellCheck="false"
                 onKeyDown={(e) => e.key === 'Escape' && setNaming(false)} />
               <div className="newpl-actions">
-                <button type="button" className="newpl-cancel" onClick={() => setNaming(false)}>Cancel</button>
-                <button type="submit" className="newpl-create" disabled={!name.trim()}>Create</button>
+                <button type="button" className="newpl-cancel" onClick={() => setNaming(false)}>{t('Cancel')}</button>
+                <button type="submit" className="newpl-create" disabled={!name.trim()}>{t('Create')}</button>
               </div>
             </form>,
             document.body,
@@ -286,37 +287,37 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
 
           {offlineMode && !showLiked && !shownEntries.length && !q && (
             <div className="libempty">
-              <b>Nothing downloaded</b>
-              <p>Download a playlist or album while you have a connection and it shows here.</p>
+              <b>{t('Nothing downloaded')}</b>
+              <p>{t('Download a playlist or album while you have a connection and it shows here.')}</p>
             </div>
           )}
           {!offlineMode && !shownEntries.length && !loading && settled && likedCount != null && !q && (!libFilter || libFilter === 'playlist') && (phone ? (
             <div className="libempty">
-              <b>Create your first playlist</b>
-              <p>It's easy, we'll help you.</p>
-              <button onClick={openCreate}>Create playlist</button>
+              <b>{t('Create your first playlist')}</b>
+              <p>{t("It's easy, we'll help you.")}</p>
+              <button onClick={openCreate}>{t('Create playlist')}</button>
             </div>
           ) : (
             <p className="devicemenu-empty">
-              Create your first playlist with the + button.
+              {t('Create your first playlist with the + button.')}
             </p>
           ))}
           {q && !showLiked && !shownEntries.length && (
             <div className="libempty">
-              <b>Couldn&rsquo;t find &ldquo;{libQuery.trim()}&rdquo;</b>
-              <p>Try a different playlist, album or artist name.</p>
+              <b>{t('Couldn’t find “{query}”', { query: libQuery.trim() })}</b>
+              <p>{t('Try a different playlist, album or artist name.')}</p>
             </div>
           )}
           {!q && !offlineMode && phone && libFilter === 'artist' && !shownEntries.length && !loading && (
             <div className="libempty">
-              <b>No artists yet</b>
-              <p>Follow an artist and they show up here.</p>
+              <b>{t('No artists yet')}</b>
+              <p>{t('Follow an artist and they show up here.')}</p>
             </div>
           )}
           {!q && !offlineMode && phone && libFilter === 'album' && !shownEntries.length && !loading && (
             <div className="libempty">
-              <b>Save your first album</b>
-              <p>Add an album to Your Library and it shows up here.</p>
+              <b>{t('Save your first album')}</b>
+              <p>{t('Add an album to Your Library and it shows up here.')}</p>
             </div>
           )}
         </div>

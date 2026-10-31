@@ -14,7 +14,8 @@
     "e2e": "playwright test",
     "lint": "eslint . --ext .ts,.tsx,.mjs",
     "fixtures": "node fixtures/generate.mjs",
-    "licenses": "node tools/third-party-licenses.mjs"
+    "licenses": "node tools/third-party-licenses.mjs",
+    "i18n": "node tools/i18n.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",

@@ -4,6 +4,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import { clientLog } from './api/clientLog.js';
+import { loadSession } from './api/slopify.js';
+import { loadLanguage, checkServerLanguage, t } from './i18n.js';
 import './styles/app.css';
 import './styles/mobile-nowplaying.css';
 import './styles/mobile-home-search.css';
@@ -20,9 +22,9 @@ class Boundary extends React.Component {
     if (!this.state.error) return this.props.children;
     return (
       <div style={{ padding: '24px', color: '#fff', background: '#000', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
-        <h2 style={{ margin: '0 0 8px' }}>Slopify stopped</h2>
+        <h2 style={{ margin: '0 0 8px' }}>{t('Slopify stopped')}</h2>
         <p style={{ opacity: .8, margin: '0 0 16px' }}>{String(this.state.error?.message || this.state.error)}</p>
-        <button type="button" onClick={() => window.location.reload()} style={{ padding: '10px 18px', borderRadius: 999, border: 0, background: '#1db954', color: '#000', fontWeight: 700 }}>Reload</button>
+        <button type="button" onClick={() => window.location.reload()} style={{ padding: '10px 18px', borderRadius: 999, border: 0, background: '#1db954', color: '#000', fontWeight: 700 }}>{t('Reload')}</button>
       </div>
     );
   }
@@ -40,10 +42,15 @@ window.addEventListener('unhandledrejection', (e) => crumb(`unhandled: ${e.reaso
   });
 }
 
-createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <Boundary>
-      <App />
-    </Boundary>
-  </React.StrictMode>
-);
+// The words come first: the dictionary is a kept file, so this costs nothing
+// after the first visit, and nothing renders in the wrong language.
+loadLanguage().finally(() => {
+  createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <Boundary>
+        <App />
+      </Boundary>
+    </React.StrictMode>
+  );
+  checkServerLanguage(loadSession()?.baseUrl || '');
+});

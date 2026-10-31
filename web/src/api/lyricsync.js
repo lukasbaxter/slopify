@@ -4,6 +4,7 @@
 // component can watch, toasts the outcome, and tells an open lyrics view to
 // load the new lyrics. Jobs still running after a reload are picked back up.
 import { useSyncExternalStore } from 'react';
+import { t } from '../i18n.js';
 
 const jobs = new Map(); // trackId -> { trackId, title, state, step, ahead, result }
 const subs = new Set();
@@ -18,11 +19,11 @@ const active = (j) => j && (j.state === 'queued' || j.state === 'running');
 function absorb(list) {
   for (const j of list || []) {
     const before = jobs.get(j.trackId);
-    const title = j.title || before?.title || 'This song';
+    const title = j.title || before?.title || t('This song');
     if (active(j)) { jobs.set(j.trackId, { ...before, ...j, title }); continue; }
     if (before) {
       jobs.delete(j.trackId);
-      toast(`${title}: ${j.result || (j.state === 'failed' ? "Couldn't sync" : 'Done')}`, 5000);
+      toast(`${title}: ${j.result || (j.state === 'failed' ? t("Couldn't sync") : t('Done'))}`, 5000);
       window.dispatchEvent(new CustomEvent('slopify:lyricschanged', { detail: j.trackId }));
     }
   }
@@ -51,13 +52,13 @@ export async function syncLyrics(jf, track) {
     const r = await jf.syncLyrics(track.Id);
     jobs.set(track.Id, { ...r, title: r.title || track.Name });
     emit();
-    if (r.already) toast(`Already syncing "${track.Name}"`);
+    if (r.already) toast(t('Already syncing "{name}"', { name: track.Name }));
     follow();
-  } catch (e) { toast(`Couldn't sync lyrics: ${e.message}`); }
+  } catch (e) { toast(t("Couldn't sync lyrics: {error}", { error: e.message })); }
 }
 
 // What a job is doing, in words.
-export const jobLabel = (j) => (!j ? '' : j.state === 'queued' ? (j.ahead ? `Waiting · ${j.ahead} ahead` : 'Starting') : j.step || 'Starting');
+export const jobLabel = (j) => (!j ? '' : j.state === 'queued' ? (j.ahead ? t('Waiting · {n} ahead', { n: j.ahead }) : t('Starting')) : j.step || t('Starting'));
 
 export function useLyricJobs() {
   useSyncExternalStore(subscribe, () => version);

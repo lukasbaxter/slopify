@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import QualityBadge from './QualityBadge.jsx';
 import { LOCAL_DEVICE } from '../player/usePlayer.js';
 import { usePhone, slideOut } from './Player.jsx';
+import { t } from '../i18n.js';
 
 // Filled paths (Material-style) rather than strokes: the Cast glyph in
 // particular is unreadable as an outline at 18px.
@@ -109,10 +110,10 @@ function SheetVolume({ volume, onChange }) {
   const [shown, move, end] = useThrottledVolume(volume, onChange);
   const touch = useTouchSlider(move, end);
   return (
-    <div className="dm-volume" title={`Volume ${shown}%`}>
+    <div className="dm-volume" title={t('Volume {n}%', { n: shown })}>
       <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.642 3.642 0 0 1-1.33-4.967 3.639 3.639 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.139 2.139 0 0 0 0 3.7l5.8 3.35V2.8l-5.8 3.35z" /></svg>
       <input
-        ref={touch} type="range" min="0" max="100" value={shown} aria-label="Speaker volume"
+        ref={touch} type="range" min="0" max="100" value={shown} aria-label={t('Speaker volume')}
         onChange={(e) => move(Number(e.target.value))}
         onPointerUp={end} onPointerCancel={end} onKeyUp={end}
         style={{ '--pct': `${shown}%` }}
@@ -159,30 +160,32 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
   // and every speaker the music is on shows as playing.
   const nameOf = new Map(devices.map((d) => [d.id, d.name]));
   const visible = devices.filter((d) => !(d.kind === 'bluos' && (d.isSlave || slaveHosts.has(d.host))));
+  // This client's own entry is named in English (it goes over the network too): translate it only here.
+  const nameFor = (d) => (d.kind === 'local' ? t(d.name) : d.name);
   const labelFor = (d) => {
     if (d.playingOn?.length > 1) return d.playingOn.map((id) => nameOf.get(id) || id).join(' + ');
-    if (d.kind !== 'bluos' || !d.slaves?.length) return d.name;
+    if (d.kind !== 'bluos' || !d.slaves?.length) return nameFor(d);
     return [d.name, ...d.slaves.map((s) => s.name)].join(' + ');
   };
   const subtitleFor = (d) => {
-    if (d.group?.length > 1) return `Grouped with ${d.group.slice(1).map((id) => nameOf.get(id) || id).join(', ')}`;
+    if (d.group?.length > 1) return t('Grouped with {names}', { names: d.group.slice(1).map((id) => nameOf.get(id) || id).join(', ') });
     if (d.kind === 'bluos' && d.slaves?.length) {
-      return `Grouped • ${d.slaves.length + 1} speakers`;
+      return t('Grouped • {n} speakers', { n: d.slaves.length + 1 });
     }
-    return d.model;
+    return d.model ? t(d.model) : d.model;
   };
 
   const all = [LOCAL_DEVICE, ...visible];
   const groups = [
-    { label: 'This device', items: all.filter((d) => d.kind === 'local') },
-    { label: 'Your devices', items: all.filter((d) => d.kind === 'relay') },
-    { label: 'Speakers & TVs', items: all.filter((d) => d.kind === 'cast' || d.kind === 'bridge') },
-    { label: 'Bluesound', items: all.filter((d) => d.kind === 'bluos') },
+    { label: t('This device'), items: all.filter((d) => d.kind === 'local') },
+    { label: t('Your devices'), items: all.filter((d) => d.kind === 'relay') },
+    { label: t('Speakers & TVs'), items: all.filter((d) => d.kind === 'cast' || d.kind === 'bridge') },
+    { label: t('Bluesound'), items: all.filter((d) => d.kind === 'bluos') },
   ].filter((g) => g.items.length);
 
   const remoteCount = visible.length;
   const isBrowser = typeof window !== 'undefined' && !window.conduit;
-  const kindLabel = (d) => (d.kind === 'local' ? 'This phone' : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? d.model || 'Speaker' : 'Slopify');
+  const kindLabel = (d) => (d.kind === 'local' ? t('This phone') : d.kind === 'cast' ? 'Google Cast' : d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? (d.model ? t(d.model) : t('Speaker')) : 'Slopify');
   const playing = new Set(active.playingOn || [active.id]);
   const isActive = (d) => playing.has(d.id);
   const others = all.filter((d) => !isActive(d));
@@ -192,7 +195,7 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
       <button
         className={`devicebtn ${active.kind !== 'local' ? 'casting' : ''} ${showName ? 'with-name' : ''}`}
         onClick={() => (open ? close() : setOpen(true))}
-        title={`Playing on ${active.name}`}
+        title={t('Playing on {name}', { name: nameFor(active) })}
       >
         <ConnectIcon />
         {/* A long name (a speaker group) scrolls rather than spilling over the buttons beside it. */}
@@ -205,19 +208,19 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
            green, then the others, then a line on where speakers come from. */
         <div className="devicemenu" role="menu">
           <div className="devicemenu-head">
-            <strong>Connect to a device</strong>
-            <span>{remoteCount ? `${remoteCount} on your network` : (isBrowser ? '' : 'Searching your network...')}</span>
+            <strong>{t('Connect to a device')}</strong>
+            <span>{remoteCount ? t('{n} on your network', { n: remoteCount }) : (isBrowser ? '' : t('Searching your network...'))}</span>
           </div>
           <div className="dm-current">
             <DeviceIcon kind={active.kind} form={active.form} phone size={32} />
             <span className="dm-current-text">
-              <span className="dm-current-label">Current device</span>
+              <span className="dm-current-label">{t('Current device')}</span>
               <span className="dm-current-name">{labelFor(active)}</span>
               <span className="dm-current-sub">{subtitleFor(active) || kindLabel(active)}</span>
               <QualityBadge quality={quality} />
             </span>
           </div>
-          {others.length > 0 && <div className="dm-others">Select another device</div>}
+          {others.length > 0 && <div className="dm-others">{t('Select another device')}</div>}
           {others.map((d) => (
             <button key={d.id} className="deviceitem" onClick={() => { onSelect(d); close(); }} role="menuitem">
               <DeviceIcon kind={d.kind} form={d.form} phone size={24} />
@@ -229,8 +232,8 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
           ))}
           <p className="dm-note">
             {isBrowser
-              ? 'Speakers and TVs show up in the Slopify app. In the browser, playback stays on this device.'
-              : 'Chromecast and Bluesound players on this network appear here automatically once they are awake.'}
+              ? t('Speakers and TVs show up in the Slopify app. In the browser, playback stays on this device.')
+              : t('Chromecast and Bluesound players on this network appear here automatically once they are awake.')}
           </p>
           {active.kind !== 'local' && onVolume && typeof volume === 'number' && <SheetVolume volume={volume} onChange={onVolume} />}
         </div>
@@ -238,8 +241,8 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
       {open && !phone && (
         <div className="devicemenu" role="menu">
           <div className="devicemenu-head">
-            <strong>Play on</strong>
-            <span>{remoteCount ? `${remoteCount} found` : (isBrowser ? '' : 'searching...')}</span>
+            <strong>{t('Play on')}</strong>
+            <span>{remoteCount ? t('{n} found', { n: remoteCount }) : (isBrowser ? '' : t('searching...'))}</span>
           </div>
 
           {groups.map((g) => (
@@ -266,14 +269,12 @@ export default function DevicePicker({ devices, active, onSelect, showName = fal
 
           {!remoteCount && isBrowser && (
             <p className="devicemenu-empty">
-              Speaker control lives in the Slopify desktop app for now. In your
-              browser you can play through this device.
+              {t('Speaker control lives in the Slopify desktop app for now. In your browser you can play through this device.')}
             </p>
           )}
           {!remoteCount && !isBrowser && (
             <p className="devicemenu-empty">
-              No speakers found yet. Chromecast and Bluesound players appear here
-              automatically once they are awake on the same network.
+              {t('No speakers found yet. Chromecast and Bluesound players appear here automatically once they are awake on the same network.')}
             </p>
           )}
         </div>

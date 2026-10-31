@@ -10,6 +10,7 @@ import { vibrantColor } from '../api/colors.js';
 import { seekHover } from '../api/seekHover.js';
 import { useLiked } from '../api/likes.js';
 import { ctxItemId } from '../api/context.js';
+import { t } from '../i18n.js';
 
 // usePhone() lives in TrackRow.jsx; re-exported so the player screens keep their import.
 export { usePhone };
@@ -21,20 +22,20 @@ export { usePhone };
  */
 export function usePlayingFrom(player, jf) {
   const ctx = player.contextId;
-  const [from, setFrom] = useState({ kind: 'PLAYING FROM', name: 'Your Library' });
+  const [from, setFrom] = useState(() => ({ kind: t('PLAYING FROM'), name: t('Your Library') }));
   useEffect(() => {
     let alive = true;
-    const fallback = { kind: 'PLAYING FROM', name: 'Your Library' };
+    const fallback = { kind: t('PLAYING FROM'), name: t('Your Library') };
     const set = (v) => { if (alive) setFrom(v || fallback); };
     const id = String(ctx || '');
     if (!ctx) { set(null); return undefined; }
-    if (ctx === 'liked' || ctx === '__liked__') { set({ kind: 'PLAYING FROM PLAYLIST', name: 'Liked Songs' }); return undefined; }
-    if (ctx === 'radar') { set({ kind: 'PLAYING FROM PLAYLIST', name: 'Release Radar' }); return undefined; }
+    if (ctx === 'liked' || ctx === '__liked__') { set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Liked Songs') }); return undefined; }
+    if (ctx === 'radar') { set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Release Radar') }); return undefined; }
     if (id.startsWith('browse:')) {
       // Genre tiles are cached by the search page; the id is the tile's.
       let tiles = null; try { tiles = JSON.parse(localStorage.getItem('slopify.browse') || 'null'); } catch {}
-      const tile = Array.isArray(tiles) ? tiles.find((t) => t.id === id.slice(7)) : null;
-      set({ kind: 'PLAYING FROM GENRE', name: tile?.name || 'Genre' });
+      const tile = Array.isArray(tiles) ? tiles.find((x) => x.id === id.slice(7)) : null;
+      set({ kind: t('PLAYING FROM GENRE'), name: tile?.name || t('Genre') });
       return undefined;
     }
     if (id.startsWith('mix:')) {
@@ -43,14 +44,14 @@ export function usePlayingFrom(player, jf) {
       const seedId = id.slice(4);
       const top = jf?.persisted?.('home.topArtists');
       const n = Array.isArray(top) ? top.findIndex((a) => a?.Id === seedId) : -1;
-      if (n >= 0) { set({ kind: 'PLAYING FROM PLAYLIST', name: `Daily Mix ${n + 1}` }); return undefined; }
-      jf.itemById(seedId).then((it) => set({ kind: 'PLAYING FROM PLAYLIST', name: it?.Name ? `${it.Name} Mix` : 'Daily Mix' })).catch(() => set({ kind: 'PLAYING FROM PLAYLIST', name: 'Daily Mix' }));
+      if (n >= 0) { set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Daily Mix {n}', { n: n + 1 }) }); return undefined; }
+      jf.itemById(seedId).then((it) => set({ kind: t('PLAYING FROM PLAYLIST'), name: it?.Name ? t('{name} Mix', { name: it.Name }) : t('Daily Mix') })).catch(() => set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Daily Mix') }));
       return () => { alive = false; };
     }
     jf.itemById(ctxItemId(ctx)).then((it) => {
       if (!it) { set(null); return; }
-      const kind = it.Type === 'MusicArtist' ? 'ARTIST' : it.Type === 'MusicAlbum' ? 'ALBUM' : 'PLAYLIST';
-      set({ kind: `PLAYING FROM ${kind}`, name: it.Name });
+      const kind = it.Type === 'MusicArtist' ? t('PLAYING FROM ARTIST') : it.Type === 'MusicAlbum' ? t('PLAYING FROM ALBUM') : t('PLAYING FROM PLAYLIST');
+      set({ kind, name: it.Name });
     }).catch(() => set(null));
     return () => { alive = false; };
   }, [ctx, jf]);
@@ -160,7 +161,7 @@ export function PlayingElsewhereBar({ player }) {
   return (
     <div className="playing-elsewhere">
       {form ? <DeviceIcon kind="relay" form={form} size={15} /> : <CastGlyph />}
-      <Marquee as="span" className="elsewhere-text" text={`Playing on ${label}`} />
+      <Marquee as="span" className="elsewhere-text" text={t('Playing on {name}', { name: label })} />
     </div>
   );
 }
@@ -254,7 +255,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
   return (
     <footer className="player">
       {error && (
-        <div className="player-error" onClick={player.clearError} title="Dismiss">
+        <div className="player-error" onClick={player.clearError} title={t('Dismiss')}>
           {error}
         </div>
       )}
@@ -275,17 +276,17 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
               className={`player-art ${nowPlaying?.albumId ? 'clickable' : ''}`}
               src={art}
               alt=""
-              title="Go to album"
+              title={t('Go to album')}
               onClick={phone ? undefined : () => nowPlaying?.albumId && onOpenAlbum?.(nowPlaying.albumId)}
             />
           ) : (
             <div className="player-art placeholder" />
           )}
           <div className="player-meta">
-            <div className="player-title">{nowPlaying?.title || 'Nothing playing'}</div>
+            <div className="player-title">{nowPlaying?.title || t('Nothing playing')}</div>
             {/* Phone, sound elsewhere: Spotify puts the device line inside the card, in green. */}
             {phone && elsewhere ? (
-              <div className="player-artist player-elsewhere"><CastGlyph /><Marquee as="span" className="elsewhere-text" text={`Playing on ${elsewhere}`} /></div>
+              <div className="player-artist player-elsewhere"><CastGlyph /><Marquee as="span" className="elsewhere-text" text={t('Playing on {name}', { name: elsewhere })} /></div>
             ) : (
             <div className="player-artist">
               {/* Phone: plain text, so a tap anywhere on the card opens now
@@ -313,7 +314,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
               // track, which after a relaunch or a hand-off is not the session's
               // (the desktop liked an old song while the heart stayed off).
               onClick={() => onLike?.(current?.Id === nowPlaying.itemId ? current : { Id: nowPlaying.itemId, Name: nowPlaying.title, _partial: true }, !liked)}
-              title={liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}
+              title={liked ? t('Remove from Liked Songs') : t('Save to Liked Songs')}
             >
               <Heart on={liked} />
             </button>
@@ -325,7 +326,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
             <button
               className={`ctl-mode ${shuffle && shuffle !== 'off' ? 'on' : ''}`}
               onClick={player.cycleShuffle}
-              title={shuffle === 'smart' ? 'Smart shuffle' : shuffle === 'on' ? 'Shuffle' : 'Enable shuffle'}
+              title={shuffle === 'smart' ? t('Smart shuffle') : shuffle === 'on' ? t('Shuffle') : t('Enable shuffle')}
             >
               <ShuffleGlyph size={16} />
               {shuffle === 'smart' && (
@@ -334,13 +335,13 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
                 </svg>
               )}
             </button>
-            <button onClick={player.previous} disabled={!nowPlaying} title="Previous">
+            <button onClick={player.previous} disabled={!nowPlaying} title={t('Previous')}>
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
                 <path d="M3.3 1a.7.7 0 0 1 .7.7v5.15l9.95-5.744a.7.7 0 0 1 1.05.606v12.575a.7.7 0 0 1-1.05.607L4 9.149V14.3a.7.7 0 0 1-.7.7H1.7a.7.7 0 0 1-.7-.7V1.7a.7.7 0 0 1 .7-.7h1.6z" />
               </svg>
             </button>
             <button className="play" onClick={player.toggle} disabled={!nowPlaying}
-              title={playing ? 'Pause' : 'Play'}>
+              title={playing ? t('Pause') : t('Play')}>
               {playing ? (
                 <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
                   <path d="M2.7 1a.7.7 0 0 0-.7.7v12.6a.7.7 0 0 0 .7.7h2.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7H2.7zm8 0a.7.7 0 0 0-.7.7v12.6a.7.7 0 0 0 .7.7h2.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-2.6z" />
@@ -351,7 +352,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
                 </svg>
               )}
             </button>
-            <button onClick={player.next} disabled={!nowPlaying} title="Next">
+            <button onClick={player.next} disabled={!nowPlaying} title={t('Next')}>
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
                 <path d="M12.7 1a.7.7 0 0 0-.7.7v5.15L2.05 1.107A.7.7 0 0 0 1 1.712v12.575a.7.7 0 0 0 1.05.607L12 9.149V14.3a.7.7 0 0 0 .7.7h1.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-1.6z" />
               </svg>
@@ -359,7 +360,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
             <button
               className={`ctl-mode ${repeat && repeat !== 'off' ? 'on' : ''}`}
               onClick={player.cycleRepeat}
-              title={repeat === 'one' ? 'Repeat one' : repeat === 'all' ? 'Repeat' : 'Enable repeat'}
+              title={repeat === 'one' ? t('Repeat one') : repeat === 'all' ? t('Repeat') : t('Enable repeat')}
             >
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -395,23 +396,23 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
           <button
             className={`icon-btn ${panel === 'lyrics' ? 'on' : ''}`}
             onClick={() => onPanel(panel === 'lyrics' ? null : 'lyrics')}
-            title="Lyrics"
+            title={t('Lyrics')}
           >
             <LyricsGlyph size={18} />
           </button>
           <button
             className={`icon-btn ${panel === 'queue' ? 'on' : ''}`}
             onClick={() => onPanel(panel === 'queue' ? null : 'queue')}
-            title="Queue"
+            title={t('Queue')}
           >
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
               <path d="M15 15H1v-1.5h14V15zm0-4.5H1V9h14v1.5zm-14-7A2.5 2.5 0 0 1 3.5 1h9a2.5 2.5 0 0 1 0 5h-9A2.5 2.5 0 0 1 1 3.5zm2.5-1a1 1 0 0 0 0 2h9a1 1 0 1 0 0-2h-9z" />
             </svg>
           </button>
           <DevicePicker devices={devices} active={sessionDevice} onSelect={player.setDevice} volume={volume} onVolume={player.setVolume} quality={quality} />
-          <div className="player-volume" title={`Volume ${volume}%`}>
+          <div className="player-volume" title={t('Volume {n}%', { n: volume })}>
             {/* Spotify's speaker glyph, one arc per volume band; click = mute toggle. */}
-            <button className="vol-ico" onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? 'Mute' : 'Unmute'}>
+            <button className="vol-ico" onClick={() => player.setVolume(volume > 0 ? 0 : 60)} title={volume > 0 ? t('Mute') : t('Unmute')}>
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
                 {volume === 0 ? (
                   <>
@@ -433,7 +434,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
               style={{ '--pct': `${volShown}%` }}
             />
           </div>
-          <button className="icon-btn" onClick={onFullScreen} title="Now playing view">
+          <button className="icon-btn" onClick={onFullScreen} title={t('Now playing view')}>
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6.53 9.47a.75.75 0 0 1 0 1.06l-2.72 2.72h1.018a.75.75 0 0 1 0 1.5H1.25v-3.579a.75.75 0 0 1 1.5 0v1.018l2.72-2.72a.75.75 0 0 1 1.06 0zm2.94-2.94a.75.75 0 0 1 0-1.06l2.72-2.72h-1.018a.75.75 0 1 1 0-1.5h3.578v3.579a.75.75 0 0 1-1.5 0V3.81l-2.72 2.72a.75.75 0 0 1-1.06 0z" /></svg>
           </button>
         </div>

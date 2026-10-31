@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { clientLogLines } from '../api/clientLog.js';
 import { clientIdentity } from '../api/deviceName.js';
+import { t } from '../i18n.js';
 
 const deviceInfo = () => {
   let standalone = false;
@@ -42,23 +43,23 @@ export function LogsDialog({ jf, onClose }) {
     try {
       await jf._fetch('/api/reports', { method: 'POST', body: JSON.stringify({ message: text.trim(), logs: lines.slice(-300), info: deviceInfo() }) });
       setState('sent'); setText('');
-    } catch (err) { setState(err.message || 'Could not send'); }
+    } catch (err) { setState(err.message || t('Could not send')); }
   };
   return (
     <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form className="modal logs-modal" onSubmit={send}>
         <div className="logs-head">
-          <h3>Logs</h3>
-          <button type="button" className="btn-secondary" onClick={copy} disabled={!lines.length}>{copied ? 'Copied' : 'Copy'}</button>
+          <h3>{t('Logs')}</h3>
+          <button type="button" className="btn-secondary" onClick={copy} disabled={!lines.length}>{copied ? t('Copied') : t('Copy')}</button>
         </div>
-        <pre className="logs-view" ref={view}>{lines.length ? lines.join('\n') : 'Nothing logged on this device yet.'}</pre>
-        <h3>Report a problem</h3>
-        <textarea value={text} onChange={(e) => { setText(e.target.value); if (state !== 'sending') setState(null); }} placeholder="What happened, and what were you doing?" rows={4} maxLength={4000} />
-        <div className="settings-hint">Sends what you write, the log above and this device&apos;s type to your Slopify server.</div>
-        {state && state !== 'sending' && <div className={`settings-hint ${state === 'sent' ? 'logs-sent' : 'logs-error'}`}>{state === 'sent' ? 'Sent. Thanks.' : state}</div>}
+        <pre className="logs-view" ref={view}>{lines.length ? lines.join('\n') : t('Nothing logged on this device yet.')}</pre>
+        <h3>{t('Report a problem')}</h3>
+        <textarea value={text} onChange={(e) => { setText(e.target.value); if (state !== 'sending') setState(null); }} placeholder={t('What happened, and what were you doing?')} rows={4} maxLength={4000} />
+        <div className="settings-hint">{t("Sends what you write, the log above and this device's type to your Slopify server.")}</div>
+        {state && state !== 'sending' && <div className={`settings-hint ${state === 'sent' ? 'logs-sent' : 'logs-error'}`}>{state === 'sent' ? t('Sent. Thanks.') : state}</div>}
         <div className="modal-actions">
-          <button type="button" className="btn-secondary" onClick={onClose}>Close</button>
-          <button type="submit" className="primary" disabled={!text.trim() || state === 'sending'}>{state === 'sending' ? 'Sending…' : 'Send report'}</button>
+          <button type="button" className="btn-secondary" onClick={onClose}>{t('Close')}</button>
+          <button type="submit" className="primary" disabled={!text.trim() || state === 'sending'}>{state === 'sending' ? t('Sending…') : t('Send report')}</button>
         </div>
       </form>
     </div>

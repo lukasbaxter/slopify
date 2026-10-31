@@ -130,7 +130,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   // Every /api route must carry a sign-in check unless it is one of the few
   // public ones by design: a route registered without its `auth` options
   // used to come up open and nobody would know.
-  const PUBLIC_API = new Set(['/api/healthz', '/api/auth/login', '/api/auth/register', '/api/auth/demo', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
+  const PUBLIC_API = new Set(['/api/healthz', '/api/i18n', '/api/auth/login', '/api/auth/register', '/api/auth/demo', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
   const open: string[] = [];
   app.addHook('onRoute', (r) => {
     if (!r.url.startsWith('/api/') || PUBLIC_API.has(r.url) || (r as any).websocket) return;
@@ -142,6 +142,8 @@ export async function buildServer(opts: BuildOptions = {}) {
   // fingerprint); nothing in web/src consumes it.
   const health = async () => ({ ok: true });
   app.get('/healthz', health);
+  // Before sign-in too: the login page is already in the server's language.
+  app.get('/api/i18n', async () => ({ language: config.language }));
   app.get('/api/healthz', health);
 
   const webDist = path.join(repoRoot, 'web', 'dist');

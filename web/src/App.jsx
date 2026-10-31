@@ -13,6 +13,7 @@ import RightPanel from './components/RightPanel.jsx';
 import FullScreen from './components/FullScreen.jsx';
 import { downloadTrack } from './api/download.js';
 import { applyTheme, DEFAULT_THEME } from './api/prefs.js';
+import { setUserLanguage, t, N_ } from './i18n.js';
 import { search as relaySearch, popular as relayPopular, likes as relayLikes, playlistTracks as relayPlaylist, likedFast } from './api/search.js';
 import { likesLoad, likesSet, likesSnapshot, likedIds, likesReady, isLiked, useLikesVersion } from './api/likes.js';
 import { offsetsMerge } from './api/offsets.js';
@@ -39,8 +40,8 @@ function ChangePassword({ jf, onDone }) {
   const [err, setErr] = useState(null);
   const submit = async (e) => {
     e.preventDefault();
-    if (pw.length < 8) { setErr('Use 8 characters or more.'); return; }
-    if (pw !== again) { setErr('The two passwords differ.'); return; }
+    if (pw.length < 8) { setErr(t('Use 8 characters or more.')); return; }
+    if (pw !== again) { setErr(t('The two passwords differ.')); return; }
     setBusy(true); setErr(null);
     try {
       await jf.changePassword(undefined, pw);
@@ -51,18 +52,18 @@ function ChangePassword({ jf, onDone }) {
   return (
     <div className="login">
       <form onSubmit={submit}>
-        <h1>Choose a new password</h1>
-        <p className="login-sub">The default password only opens this page. Pick a new one for <b>{jf.user?.name || 'this account'}</b>.</p>
+        <h1>{t('Choose a new password')}</h1>
+        <p className="login-sub">{t('The default password only opens this page. Pick a new one for {name}.', { name: jf.user?.name || t('this account') })}</p>
         <label>
-          New password
+          {t('New password')}
           <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus autoComplete="new-password" />
         </label>
         <label>
-          Again
+          {t('Again')}
           <input type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" />
         </label>
         {err && <div className="banner error" style={{ margin: 0 }}>{err}</div>}
-        <button className="primary" disabled={busy || !pw}>{busy ? 'Saving…' : 'Save and continue'}</button>
+        <button className="primary" disabled={busy || !pw}>{busy ? t('Saving…') : t('Save and continue')}</button>
       </form>
     </div>
   );
@@ -85,7 +86,7 @@ function Login({ onConnected }) {
       .then((jf) => { if (!jf) return setTryingDemo(false); persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId }); onConnected(jf); })
       .catch(() => setTryingDemo(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (tryingDemo) return <div className="boot">Starting Slopify...</div>;
+  if (tryingDemo) return <div className="boot">{t('Starting Slopify...')}</div>;
   if (needPw) return <ChangePassword jf={needPw} onDone={() => onConnected(needPw)} />;
 
   const submit = async (e) => {
@@ -118,30 +119,29 @@ function Login({ onConnected }) {
           <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.6 14.4a.62.62 0 0 1-.86.2c-2.35-1.43-5.3-1.76-8.78-.96a.62.62 0 1 1-.28-1.22c3.8-.87 7.07-.5 9.7 1.12.3.18.4.57.22.86zm1.23-2.73a.78.78 0 0 1-1.07.26c-2.69-1.65-6.79-2.13-9.97-1.17a.78.78 0 1 1-.45-1.5c3.64-1.1 8.16-.57 11.24 1.33.37.23.48.71.25 1.08zm.1-2.85C14.7 9.16 9.4 8.98 6.32 9.92a.94.94 0 1 1-.55-1.8c3.54-1.07 9.41-.87 13.13 1.34a.94.94 0 0 1-.96 1.62z" /></svg>
         </div>
         <h1>Slopify</h1>
-        <p className="login-sub">Your library, on any speaker in the house.</p>
+        <p className="login-sub">{t('Your library, on any speaker in the house.')}</p>
         {IS_DESKTOP && (
           <label>
-            Server
+            {t('Server')}
             <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} spellCheck="false" />
           </label>
         )}
         <label>
-          Username
+          {t('Username')}
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus spellCheck="false" autoCapitalize="none" autoCorrect="off" autoComplete="username" />
         </label>
         <label>
-          Password
+          {t('Password')}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={invite ? 'new-password' : 'current-password'} />
         </label>
         {err && <div className="banner error" style={{ margin: 0 }}>{err}</div>}
-        {invite && <p className="login-hint">You have been invited. Pick a username and a password (8 characters or more).</p>}
+        {invite && <p className="login-hint">{t('You have been invited. Pick a username and a password (8 characters or more).')}</p>}
         <button className="primary" disabled={busy || !username}>
-          {busy ? (invite ? 'Creating account…' : 'Logging in…') : invite ? 'Create account' : 'Log in'}
+          {busy ? (invite ? t('Creating account…') : t('Logging in…')) : invite ? t('Create account') : t('Log in')}
         </button>
         {IS_DESKTOP && (
           <p className="login-hint">
-            Default is the public address, which works at home and away. Speakers fetch
-            audio themselves, so whatever you enter must be reachable from them too.
+            {t('Default is the public address, which works at home and away. Speakers fetch audio themselves, so whatever you enter must be reachable from them too.')}
           </p>
         )}
       </form>
@@ -184,7 +184,7 @@ function OfflinePill() {
     window.addEventListener('resize', place);
     return () => { clearInterval(t); window.removeEventListener('resize', place); };
   }, []);
-  return <div className="offline-banner" role="status" style={{ bottom: bottom ?? 16 }}>Offline · downloaded music only</div>;
+  return <div className="offline-banner" role="status" style={{ bottom: bottom ?? 16 }}>{t('Offline · downloaded music only')}</div>;
 }
 
 export default function App() {
@@ -273,6 +273,8 @@ export default function App() {
   // Account settings: theme + playback quality. Loaded from Jellyfin, applied
   // to the CSS variables, kept in sync across clients over the relay.
   const [prefs, setPrefs] = useState({ theme: DEFAULT_THEME, quality: 'original' });
+  // The language follows the account: a pick on one device reaches the others (and reloads them).
+  useEffect(() => { if (typeof prefs.language === 'string') setUserLanguage(prefs.language); }, [prefs.language]);
   // What THIS device streams at: the phone has its own setting (default 320
   // kbps MP3: a third of the data of the FLACs, starts faster on cellular),
   // everything else uses the account's quality.
@@ -519,15 +521,15 @@ export default function App() {
     // what another had just saved.
     setPrefs((cur) => { const next = { ...cur, ...patch }; applyTheme(next.theme); applyPlayback(next); jf._persist('prefs', next); return next; });
     player.relay?.sendPrefs?.(patch);
-    try { await jf.setPrefs(patch); } catch (e) { notify(`Could not save settings: ${e.message}`); }
+    try { await jf.setPrefs(patch); } catch (e) { notify(t('Could not save settings: {error}', { error: e.message })); }
   };
   const onUploadAvatar = async (file) => {
-    try { await jf.uploadUserImage(file); setAvatarOk(true); setAvatarV(Date.now()); notify('Profile picture updated'); }
-    catch (e) { notify(`Could not upload: ${e.message}`); }
+    try { await jf.uploadUserImage(file); setAvatarOk(true); setAvatarV(Date.now()); notify(t('Profile picture updated')); }
+    catch (e) { notify(t('Could not upload: {error}', { error: e.message })); }
   };
   const openSettings = () => {
     setView('home');
-    setDetail({ item: { Id: 'settings', Name: 'Settings', Type: 'Settings' }, tracks: [], kind: 'Settings' });
+    setDetail({ item: { Id: 'settings', Name: t('Settings'), Type: 'Settings' }, tracks: [], kind: 'Settings' });
   };
 
   // Load the library once connected. Albums/artists feed Home and Search;
@@ -714,8 +716,8 @@ export default function App() {
       // the hero all re-render with the busted image URL right away.
       await refreshPlaylists();
       setDetail((d) => (d && d.item?.Id === pl.Id ? { ...d, item: { ...d.item, Name: name || d.item.Name, _v: Date.now() } } : d));
-      notify('Playlist updated');
-    } catch (e) { notify(`Could not update playlist: ${e.message}`); }
+      notify(t('Playlist updated'));
+    } catch (e) { notify(t('Could not update playlist: {error}', { error: e.message })); }
   };
   const onDeletePlaylist = async (pl) => {
     try {
@@ -723,8 +725,8 @@ export default function App() {
       await refreshPlaylists();
       player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
       setDetail(null);
-      notify(`Deleted ${pl.Name}`);
-    } catch (e) { notify(`Could not delete: ${e.message}`); }
+      notify(t('Deleted {name}', { name: pl.Name }));
+    } catch (e) { notify(t('Could not delete: {error}', { error: e.message })); }
   };
 
   // Footer links: art -> album, artist name -> artist page.
@@ -758,7 +760,7 @@ export default function App() {
         if (!t?.AlbumId) return;
         await openAlbumById(t.AlbumId);
         setDetail((d) => (d && d.item?.Id === t.AlbumId ? { ...d, highlightId: track } : d));
-      }).catch(() => notify("That song isn't in this library"));
+      }).catch(() => notify(t("That song isn't in this library")));
     }
   }, [booting, jf, me]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -830,7 +832,7 @@ export default function App() {
 
   // Spotify's profile page: avatar, top artists / tracks this month, playlists.
   const openProfile = async () => {
-    const item = { Id: 'profile', Name: me?.Name || 'You', Type: 'Profile' };
+    const item = { Id: 'profile', Name: me?.Name || t('You'), Type: 'Profile' };
     setView('home');
     setDetail({ item, tracks: [], kind: 'Profile', topArtists: [], loading: true });
     try {
@@ -850,11 +852,11 @@ export default function App() {
 
   const openDownloads = () => {
     setView('home');
-    setDetail({ item: { Id: 'downloads', Name: 'Downloads', Type: 'Downloads' }, tracks: [], kind: 'Downloads', loading: false });
+    setDetail({ item: { Id: 'downloads', Name: t('Downloads'), Type: 'Downloads' }, tracks: [], kind: 'Downloads', loading: false });
   };
   const openHistory = () => {
     setView('home');
-    setDetail({ item: { Id: 'history', Name: 'Listening history', Type: 'History' }, tracks: [], kind: 'History', loading: false });
+    setDetail({ item: { Id: 'history', Name: t('Listening history'), Type: 'History' }, tracks: [], kind: 'History', loading: false });
   };
 
   // Liked Songs = the store's ids, newest first; rows fetched by id (chunks of
@@ -862,7 +864,7 @@ export default function App() {
   // so nothing can "vanish" between an optimistic row and a server list.
   const likedRows = (ids) => ids.map((id) => likedCacheRef.current.get(id)).filter(Boolean);
   const openLiked = async () => {
-    const item = { Id: LIKED_ID, Name: 'Liked Songs', Type: 'Playlist' };
+    const item = { Id: LIKED_ID, Name: t('Liked Songs'), Type: 'Playlist' };
     setView('home');
     const ids = likedIds();
     setDetail({ item, tracks: likedRows(ids), kind: 'Playlist', loading: ids.some((id) => !likedCacheRef.current.has(id)) });
@@ -906,8 +908,8 @@ export default function App() {
     // reading OPEN while dead, and a like sent on it was lost with no error
     // (the heart flipped back on the next reconnect). The server echoes it to
     // every client (this one included, with its timestamp) either way.
-    try { await jf.setFavorite(track.Id, liked); } catch (e) { likesSet(track.Id, !liked); notify(`Not saved: ${e.message.slice(0, 60)}`); return; }
-    notify(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs');
+    try { await jf.setFavorite(track.Id, liked); } catch (e) { likesSet(track.Id, !liked); notify(t('Not saved: {error}', { error: e.message.slice(0, 60) })); return; }
+    notify(liked ? t('Added to Liked Songs') : t('Removed from Liked Songs'));
     // Keep the row so Liked Songs can show it without a fetch.
     if (liked) {
       let row = track;
@@ -923,7 +925,7 @@ export default function App() {
     setSavedAlbums((list) => (on ? [album, ...list.filter((a) => a.Id !== album.Id)] : list.filter((a) => a.Id !== album.Id)));
     try {
       await jf.setFavorite(album.Id, on);
-      notify(on ? 'Added to Your Library' : 'Removed from Your Library');
+      notify(on ? t('Added to Your Library') : t('Removed from Your Library'));
       const a = await jf.favoriteAlbums(); setSavedAlbums(a.items); jf._persist('savedAlbums', a.items);
       player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
     } catch (e) { notify(`Could not update: ${e.message}`); }
@@ -942,12 +944,12 @@ export default function App() {
       await jf.createPlaylist(name, firstTrack ? [firstTrack.Id] : []);
       await refreshPlaylists();
       player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
-      notify(firstTrack ? `Added to ${name}` : `Created ${name}`);
-    } catch (e) { notify(`Could not create playlist: ${e.message}`); }
+      notify(firstTrack ? t('Added to {name}', { name }) : t('Created {name}', { name }));
+    } catch (e) { notify(t('Could not create playlist: {error}', { error: e.message })); }
   };
 
   const onNewPlaylistWithTrack = (track) => {
-    setNameDraft(track.Album || 'My Playlist');
+    setNameDraft(track.Album || t('My Playlist'));
     setNamePrompt({ track });
   };
   const submitNamePrompt = (e) => {
@@ -965,27 +967,27 @@ export default function App() {
     player.patchQueue?.(patch);
     try {
       await jf.setDislike(track.Id, excluded);
-      notify(excluded ? 'Excluded from your taste profile' : 'Included in your taste profile');
+      notify(excluded ? t('Excluded from your taste profile') : t('Included in your taste profile'));
     } catch (e) { notify(`Could not update: ${e.message}`); }
   };
 
   const onDownload = async (track, fmt) => {
-    notify(fmt === 'wav' ? 'Converting to WAV...' : 'Downloading...');
+    notify(fmt === 'wav' ? t('Converting to WAV...') : t('Downloading...'));
     try { await downloadTrack(jf, track, fmt); }
-    catch (e) { notify(`Download failed: ${e.message}`); }
+    catch (e) { notify(t('Download failed: {error}', { error: e.message })); }
   };
 
   const onAddTo = async (pl, track) => {
     try {
       await jf.addToPlaylist(pl.Id, [track.Id]);
-      notify(`Added to ${pl.Name}`);
+      notify(t('Added to {name}', { name: pl.Name }));
       refreshPlaylists();
       // If that playlist is open, show the new row.
       if (detail?.item?.Id === pl.Id) {
         const { items } = await jf.playlistTracks(pl.Id);
         setDetail((d) => d ? { ...d, tracks: items } : d);
       }
-    } catch (e) { notify(`Could not add: ${e.message}`); }
+    } catch (e) { notify(t('Could not add: {error}', { error: e.message })); }
   };
 
   const onRemoveFromPlaylist = async (pl, track) => {
@@ -993,9 +995,9 @@ export default function App() {
     try {
       await jf.removeFromPlaylist(pl.Id, [track.PlaylistItemId]);
       setDetail((d) => d ? { ...d, tracks: d.tracks.filter((t) => t.PlaylistItemId !== track.PlaylistItemId) } : d);
-      notify('Removed from playlist');
+      notify(t('Removed from playlist'));
       refreshPlaylists();
-    } catch (e) { notify(`Could not remove: ${e.message}`); }
+    } catch (e) { notify(t('Could not remove: {error}', { error: e.message })); }
   };
 
   const onReorder = async (pl, track, from, to) => {
@@ -1010,7 +1012,7 @@ export default function App() {
     try {
       await jf.movePlaylistItem(pl.Id, track.PlaylistItemId, to);
     } catch (e) {
-      notify(`Could not reorder: ${e.message}`);
+      notify(t('Could not reorder: {error}', { error: e.message }));
       const { items } = await jf.playlistTracks(pl.Id).catch(() => ({ items: null }));
       if (items) setDetail((d) => d ? { ...d, tracks: items } : d);
     }
@@ -1177,7 +1179,7 @@ export default function App() {
     const offNet = subscribeNet(online);
     const offDl = subscribeOffline((s, d) => {
       const f = d?.finished;
-      if (f) notify(f.failed ? `${f.name}: ${f.done} of ${f.total} songs downloaded, ${f.failed} failed (Update download to retry)` : `${f.name} is ready offline (${f.done} songs)`, 5000);
+      if (f) notify(f.failed ? t('{name}: {done} of {total} songs downloaded, {failed} failed (Update download to retry)', { name: f.name, done: f.done, total: f.total, failed: f.failed }) : f.done === 1 ? t('{name} is ready offline (1 song)', { name: f.name }) : t('{name} is ready offline ({n} songs)', { name: f.name, n: f.done }), 5000);
     });
     return () => { offNet(); offDl(); };
   }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1370,7 +1372,7 @@ export default function App() {
     return () => { window.removeEventListener('touchstart', down); window.removeEventListener('touchend', up); };
   }, [isMobile, fullScreen, panel]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (booting) return <div className="boot">Starting Slopify...</div>;
+  if (booting) return <div className="boot">{t('Starting Slopify...')}</div>;
   if (!jf) return <Login onConnected={setJf} />;
   // A restored session whose first password was never chosen (the page was
   // reloaded on the way): the server answers 403 to everything else.
@@ -1379,8 +1381,8 @@ export default function App() {
   // Phone chrome: root tabs show avatar + page title (Spotify's Home/Search/
   // Library headers); detail pages hide the bar and float a back chevron.
   const mobileDetail = isMobile && !mobileLib && (detail || seeAll);
-  const mobileTitle = mobileLib ? 'Your Library' : view === 'search' ? 'Search' : '';
-  const detailTitle = detail?.item?.Name || (seeAll === 'albums' ? 'Albums' : seeAll === 'artists' ? 'Artists' : '');
+  const mobileTitle = mobileLib ? t('Your Library') : view === 'search' ? t('Search') : '';
+  const detailTitle = detail?.item?.Name || (seeAll === 'albums' ? t('Albums') : seeAll === 'artists' ? t('Artists') : '');
   return (
     <div className={`app ${isMobile ? 'mobile' : ''} ${mobileDetail ? 'mobile-detail' : ''} ${isMobile ? (mobileLib ? 'tab-library' : mobileDetail ? 'tab-detail' : `tab-${view}`) : ''}`}>
       {offlineMode && <OfflinePill />}
@@ -1388,7 +1390,7 @@ export default function App() {
         // Spotify's detail header: a round back chevron floating over the hero
         // that becomes a solid bar carrying the title once the hero scrolls away.
         <div className="mobile-topbar" style={{ '--topbar': topbar, '--topbar-bg': topbarBg }}>
-          <button className="mobile-back" onClick={goBack} title="Go back" aria-label="Go back">
+          <button className="mobile-back" onClick={goBack} title={t('Go back')} aria-label={t('Go back')}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M15.957 2.793a1 1 0 0 1 0 1.414L8.164 12l7.793 7.793a1 1 0 1 1-1.414 1.414L5.336 12l9.207-9.207a1 1 0 0 1 1.414 0z" /></svg>
           </button>
           <div className="mobile-topbar-title">{detailTitle}</div>
@@ -1397,35 +1399,35 @@ export default function App() {
       <header className="navbar">
         {/* App menu (the ⋯ Spotify keeps at the top-left), then history arrows. */}
         <div className="appmenuwrap">
-          <button className="appmenu-btn" onClick={() => setAppMenu((v) => !v)} title="Menu" aria-label="Menu">
+          <button className="appmenu-btn" onClick={() => setAppMenu((v) => !v)} title={t('Menu')} aria-label={t('Menu')}>
             <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><circle cx="2.25" cy="8" r="2" /><circle cx="8" cy="8" r="2" /><circle cx="13.75" cy="8" r="2" /></svg>
           </button>
           {appMenu && (
             <div className="avatarmenu appmenu">
-              <button onClick={() => { setAppMenu(false); goView('home'); }}>Home</button>
-              <button onClick={() => { setAppMenu(false); goView('search'); }}>Search</button>
+              <button onClick={() => { setAppMenu(false); goView('home'); }}>{t('Home')}</button>
+              <button onClick={() => { setAppMenu(false); goView('search'); }}>{t('Search')}</button>
               <div className="ctxmenu-sep" />
-              <button onClick={() => { setAppMenu(false); openProfile(); }}>Profile</button>
-              <button onClick={() => { setAppMenu(false); openHistory(); }}>History</button>
-              <button onClick={() => { setAppMenu(false); openSettings(); }}>Settings</button>
+              <button onClick={() => { setAppMenu(false); openProfile(); }}>{t('Profile')}</button>
+              <button onClick={() => { setAppMenu(false); openHistory(); }}>{t('History')}</button>
+              <button onClick={() => { setAppMenu(false); openSettings(); }}>{t('Settings')}</button>
               <div className="ctxmenu-sep" />
-              <button onClick={() => { setAppMenu(false); window.location.reload(); }}>Reload</button>
-              <button onClick={signOut}>Log out</button>
+              <button onClick={() => { setAppMenu(false); window.location.reload(); }}>{t('Reload')}</button>
+              <button onClick={signOut}>{t('Log out')}</button>
             </div>
           )}
         </div>
         {isMobile && <div className="mobile-title">{mobileTitle}</div>}
         <div className="navarrows">
-          <button className="navarrow" onClick={goBack} disabled={!canBack} title="Go back">
+          <button className="navarrow" onClick={goBack} disabled={!canBack} title={t('Go back')}>
             <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.5 1.5 4 8l6.5 6.5" /></svg>
           </button>
-          <button className="navarrow" onClick={goForward} disabled={!canForward} title="Go forward">
+          <button className="navarrow" onClick={goForward} disabled={!canForward} title={t('Go forward')}>
             <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5.5 1.5 6.5 6.5-6.5 6.5" /></svg>
           </button>
         </div>
         <div className="navbar-right">
           <div className="avatarwrap">
-            <button className="avatar" onClick={() => setUserMenu((v) => !v)} title={me?.Name || 'Account'}>
+            <button className="avatar" onClick={() => setUserMenu((v) => !v)} title={me?.Name || t('Account')}>
               {avatarOk ? (
                 <img key={avatarV} src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} ref={avatarFailedRef} />
               ) : (
@@ -1453,28 +1455,28 @@ export default function App() {
               >
                 <button className="who" onClick={() => { setUserMenu(false); openProfile(); }}>
                   <span className="who-avatar">{avatarOk ? <img src={jf.userImageUrl()} alt="" onError={() => setAvatarOk(false)} ref={avatarFailedRef} /> : (me?.Name || '?').slice(0, 1).toUpperCase()}</span>
-                  <span className="who-text"><b>{me?.Name || 'Signed in'}</b><small>View profile</small></span>
+                  <span className="who-text"><b>{me?.Name || t('Signed in')}</b><small>{t('View profile')}</small></span>
                 </button>
                 <div className="sub">{jf.baseUrl.replace(/^https?:\/\//, '')}</div>
-                <button className="desktop-only" onClick={() => { setUserMenu(false); openProfile(); }}><MenuIco d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8a7 7 0 0 1 14 0" />Profile</button>
-                <button onClick={() => { setUserMenu(false); openHistory(); }}><MenuIco d="M12 8v4l3 2M21 12a9 9 0 1 1-3-6.7M21 3v5h-5" /><span className="phone-only">Listening history</span><span className="desktop-only">History</span></button>
-                <button onClick={() => { setUserMenu(false); openDownloads(); }}><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />Downloads</button>
-                <button onClick={() => { setUserMenu(false); openSettings(); }}><MenuIco d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />Settings</button>
+                <button className="desktop-only" onClick={() => { setUserMenu(false); openProfile(); }}><MenuIco d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8a7 7 0 0 1 14 0" />{t('Profile')}</button>
+                <button onClick={() => { setUserMenu(false); openHistory(); }}><MenuIco d="M12 8v4l3 2M21 12a9 9 0 1 1-3-6.7M21 3v5h-5" /><span className="phone-only">{t('Listening history')}</span><span className="desktop-only">{t('History')}</span></button>
+                <button onClick={() => { setUserMenu(false); openDownloads(); }}><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />{t('Downloads')}</button>
+                <button onClick={() => { setUserMenu(false); openSettings(); }}><MenuIco d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />{t('Settings')}</button>
                 {window.conduit?.updates && (
                   update?.status === 'ready' ? (
-                    <button className="update-ready" onClick={() => { setUserMenu(false); window.conduit.updates.install(); }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />Restart to update{update.version ? ` (${update.version})` : ''}</button>
+                    <button className="update-ready" onClick={() => { setUserMenu(false); window.conduit.updates.install(); }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />{update.version ? t('Restart to update ({version})', { version: update.version }) : t('Restart to update')}</button>
                   ) : update?.status === 'checking' || update?.status === 'downloading' ? (
-                    <button disabled><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />{update.status === 'checking' ? 'Checking for updates' : `Downloading ${update.version || 'update'}`}</button>
+                    <button disabled><MenuIco d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />{update.status === 'checking' ? t('Checking for updates') : update.version ? t('Downloading {version}', { version: update.version }) : t('Downloading update')}</button>
                   ) : (
                     <button onClick={() => {
                       window.conduit.updates.check().then((st) => {
-                        if (st?.status === 'current') notify('Slopify is up to date');
-                        else if (st?.status === 'error') notify(`Could not check for updates: ${st.error}`);
-                      }).catch((e) => notify(`Could not check for updates: ${e.message}`));
-                    }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />Check for updates</button>
+                        if (st?.status === 'current') notify(t('Slopify is up to date'));
+                        else if (st?.status === 'error') notify(t('Could not check for updates: {error}', { error: st.error }));
+                      }).catch((e) => notify(t('Could not check for updates: {error}', { error: e.message })));
+                    }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />{t('Check for updates')}</button>
                   )
                 )}
-                <button onClick={signOut}><MenuIco d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />Log out</button>
+                <button onClick={signOut}><MenuIco d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />{t('Log out')}</button>
               </div>
             )}
           </div>
@@ -1513,7 +1515,7 @@ export default function App() {
           className="rail-resizer"
           onPointerDown={onRailDown}
           onDoubleClick={onRailDouble}
-          title="Drag to resize. Double-click to collapse."
+          title={t('Drag to resize. Double-click to collapse.')}
           role="separator"
           aria-orientation="vertical"
         />
@@ -1555,7 +1557,7 @@ export default function App() {
           onFollowAlbum={onFollowAlbum}
           notify={notify}
         />
-        {panel && <div className="panel-spacer rail-resizer" onPointerDown={onPanelDown} title="Drag to resize" role="separator" aria-orientation="vertical" />}
+        {panel && <div className="panel-spacer rail-resizer" onPointerDown={onPanelDown} title={t('Drag to resize')} role="separator" aria-orientation="vertical" />}
         {panel && (
           <RightPanel
             mode={panel}
@@ -1586,24 +1588,24 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
       {generating && (
         <GeneratePlaylist jf={jf} onClose={() => setGenerating(false)}
           onDone={async (r, { hidden, error } = {}) => {
-            if (error) { notify(`Could not generate the playlist: ${error}`); return; }
+            if (error) { notify(t('Could not generate the playlist: {error}', { error })); return; }
             setGenerating(false);
             await refreshPlaylists();
             player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
-            const more = r.requested ? ` ${r.requested} more ${r.requested === 1 ? 'song is' : 'songs are'} downloading and will be added.` : '';
-            if (hidden) notify(`${r.name} is ready in Your Library.${more}`);
-            else if (more) notify(more.trim());
+            const more = !r.requested ? '' : r.requested === 1 ? t('1 more song is downloading and will be added.') : t('{n} more songs are downloading and will be added.', { n: r.requested });
+            if (hidden) notify(more ? t('{name} is ready in Your Library. {more}', { name: r.name, more }) : t('{name} is ready in Your Library.', { name: r.name }));
+            else if (more) notify(more);
             else openPlaylist({ Id: r.playlistId, Name: r.name, Type: 'Playlist', ChildCount: r.count, ImageTags: {}, UserData: {} });
           }} />
       )}
       {namePrompt && (
         <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) setNamePrompt(null); }}>
           <form className="modal" onSubmit={submitNamePrompt}>
-            <h3>New playlist</h3>
+            <h3>{t('New playlist')}</h3>
             <input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onFocus={(e) => e.target.select()} spellCheck="false" />
             <div className="modal-actions">
-              <button type="button" className="btn-secondary" onClick={() => setNamePrompt(null)}>Cancel</button>
-              <button type="submit" className="primary" disabled={!nameDraft.trim()}>Create</button>
+              <button type="button" className="btn-secondary" onClick={() => setNamePrompt(null)}>{t('Cancel')}</button>
+              <button type="submit" className="primary" disabled={!nameDraft.trim()}>{t('Create')}</button>
             </div>
           </form>
         </div>
@@ -1611,7 +1613,7 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
 
       {isMobile && (
         <nav className="tabbar">
-          {[['home', 'Home', TabHome], ['search', 'Search', TabSearch], ['library', 'Your Library', TabLib]].map(([k, label, Icon]) => {
+          {[['home', N_('Home'), TabHome], ['search', N_('Search'), TabSearch], ['library', N_('Your Library'), TabLib]].map(([k, label, Icon]) => {
             const on = mobileTab === k;
             // Tapping the lit tab pops its stack to the root, or scrolls a root page to the top.
             const tap = () => {
@@ -1621,7 +1623,7 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
             };
             return (
               <button key={k} className={on ? 'on' : ''} onClick={tap}>
-                <Icon on={on} /><span>{label}</span>
+                <Icon on={on} /><span>{t(label)}</span>
               </button>
             );
           })}

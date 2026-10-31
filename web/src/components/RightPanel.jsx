@@ -5,13 +5,14 @@ import ContextMenu from './ContextMenu.jsx';
 import { isLiked } from '../api/likes.js';
 import { useOfflineMode } from '../offline/net.js';
 import { syncLyrics, useLyricJob, jobLabel } from '../api/lyricsync.js';
+import { t } from '../i18n.js';
 
 // This song's lyrics being synced: what stage it is at.
 function SyncBanner({ job }) {
   return (
     <p className="lyrics-syncing" role="status" aria-live="polite">
       <span className="lyricsync-spin" aria-hidden="true" />
-      <span><b>Syncing these lyrics</b> · {jobLabel(job)}</span>
+      <span><b>{t('Syncing these lyrics')}</b> · {jobLabel(job)}</span>
     </p>
   );
 }
@@ -62,7 +63,7 @@ function QueueRow({ track, jf, active, onPlay, onOpenArtist, onOpenAlbum, menuIt
       onContextMenu={menuItems ? (e) => { e.preventDefault(); openMenu({ x: e.clientX, y: e.clientY }); } : undefined}
       onDoubleClick={onPlay}
     >
-      <button className="qrow-art" onClick={onPlay} title="Play">
+      <button className="qrow-art" onClick={onPlay} title={t('Play')}>
         {art ? <img src={art} alt="" loading="lazy" draggable={false} /> : <div className="ph" />}
         <span className="qrow-play"><PlayGlyph size={14} /></span>
       </button>
@@ -72,14 +73,14 @@ function QueueRow({ track, jf, active, onPlay, onOpenArtist, onOpenAlbum, menuIt
       </span>
       {/* Phone rows open their sheet on a long-press (Spotify); the ⋯ is desktop only. */}
       {menuItems && !phone && (
-        <button className="qrow-more" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openMenu({ x: r.right, y: r.bottom + 4, fromButton: true }); }} title="More options">
+        <button className="qrow-more" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openMenu({ x: r.right, y: r.bottom + 4, fromButton: true }); }} title={t('More options')}>
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M3 8a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm6.5 0a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zM16 8a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z" /></svg>
         </button>
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} anchorRight={Boolean(menu.fromButton)} items={menuItems} onClose={closeMenu} header={phone ? header : null} />}
       {/* Phone: Spotify's drag handle at the right; HTML5 drag does not fire on touch. */}
       {onHandleDown && (
-        <span className="qrow-handle" onPointerDown={onHandleDown} title="Drag to reorder" aria-label="Drag to reorder"><Handle /></span>
+        <span className="qrow-handle" onPointerDown={onHandleDown} title={t('Drag to reorder')} aria-label={t('Drag to reorder')}><Handle /></span>
       )}
     </div>
   );
@@ -103,7 +104,7 @@ function NowPlaying({ player, jf, onOpenArtist, onOpenAlbum, onShowQueue }) {
             onClick={() => nowPlaying?.albumId && onOpenAlbum(nowPlaying.albumId)}
             style={{ cursor: nowPlaying?.albumId ? 'pointer' : 'default' }}
           >
-            {nowPlaying?.title || 'Nothing playing'}
+            {nowPlaying?.title || t('Nothing playing')}
           </div>
           <div className="npv-artist" style={{ cursor: 'default' }}>
             {nowPlaying?.artists?.length
@@ -116,31 +117,29 @@ function NowPlaying({ player, jf, onOpenArtist, onOpenAlbum, onShowQueue }) {
       </div>
 
       <section className="section">
-        <div className="section-head"><h2>About the artist</h2></div>
+        <div className="section-head"><h2>{t('About the artist')}</h2></div>
         <p className="placeholder-note">
-          Artist images, monthly listeners and bios need a metadata provider.
-          Not wired up yet.
+          {t('Artist images, monthly listeners and bios need a metadata provider. Not wired up yet.')}
         </p>
       </section>
 
       <section className="section">
-        <div className="section-head"><h2>Credits</h2></div>
+        <div className="section-head"><h2>{t('Credits')}</h2></div>
         <p className="placeholder-note">
-          Performer and writer credits come from MusicBrainz. They will fill in
-          as the retag completes.
+          {t('Performer and writer credits come from MusicBrainz. They will fill in as the retag completes.')}
         </p>
       </section>
 
       <section className="section">
         <div className="section-head">
-          <h2>Next in queue</h2>
-          <button onClick={onShowQueue}>Open queue</button>
+          <h2>{t('Next in queue')}</h2>
+          <button onClick={onShowQueue}>{t('Open queue')}</button>
         </div>
         {upNext ? (
           <QueueRow track={upNext} jf={jf} onPlay={() => player.skipTo(index + 1)} />
         ) : (
           <p className="placeholder-note" style={{ margin: 0 }}>
-            {current ? 'Nothing queued after this track.' : 'Your queue is empty.'}
+            {current ? t('Nothing queued after this track.') : t('Your queue is empty.')}
           </p>
         )}
       </section>
@@ -210,18 +209,18 @@ function Queue({ player, jf, onOpenArtist, onOpenAlbum, onLike, onAddTo, playlis
   if (!queue.length) {
     return (
       <div style={{ padding: '32px 0', textAlign: 'center' }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px' }}>Add to your queue</h2>
-        <p className="qrow-sub" style={{ margin: 0 }}>Play an album or playlist, or use “Add to queue” on any song.</p>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px' }}>{t('Add to your queue')}</h2>
+        <p className="qrow-sub" style={{ margin: 0 }}>{t('Play an album or playlist, or use “Add to queue” on any song.')}</p>
       </div>
     );
   }
-  const items = (t, pos) => [
-    { label: 'Remove from queue', onClick: () => player.removeFromQueue(pos) },
-    { label: isLiked(t.Id) ? 'Remove from Liked Songs' : 'Add to Liked Songs', onClick: () => onLike?.(t, !isLiked(t.Id)) },
-    playlists.length ? { label: 'Add to playlist', sub: playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo?.(p, t) })) } : null,
+  const items = (tr, pos) => [
+    { key: 'remove', label: t('Remove from queue'), onClick: () => player.removeFromQueue(pos) },
+    { label: isLiked(tr.Id) ? t('Remove from Liked Songs') : t('Add to Liked Songs'), onClick: () => onLike?.(tr, !isLiked(tr.Id)) },
+    playlists.length ? { label: t('Add to playlist'), sub: playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo?.(p, tr) })) } : null,
     { sep: true },
-    t.ArtistItems?.[0]?.Id ? { label: 'Go to artist', onClick: () => onOpenArtist?.(t.ArtistItems[0].Id) } : null,
-    t.AlbumId ? { label: 'Go to album', onClick: () => onOpenAlbum?.(t.AlbumId) } : null,
+    tr.ArtistItems?.[0]?.Id ? { label: t('Go to artist'), onClick: () => onOpenArtist?.(tr.ArtistItems[0].Id) } : null,
+    tr.AlbumId ? { label: t('Go to album'), onClick: () => onOpenAlbum?.(tr.AlbumId) } : null,
   ];
   const row = (t, pos, key) => (
     <QueueRow key={key} track={t} jf={jf} onPlay={() => player.skipTo(pos)} onOpenArtist={onOpenArtist} onOpenAlbum={onOpenAlbum}
@@ -234,16 +233,16 @@ function Queue({ player, jf, onOpenArtist, onOpenAlbum, onLike, onAddTo, playlis
     <>
       {current && (
         <section>
-          <div className="section-head" style={{ marginBottom: 8 }}><h2>Now playing</h2></div>
+          <div className="section-head" style={{ marginBottom: 8 }}><h2>{t('Now playing')}</h2></div>
           <QueueRow track={current} jf={jf} active onPlay={() => player.skipTo(index)} onOpenArtist={onOpenArtist} onOpenAlbum={onOpenAlbum}
-            menuItems={items(current, index).filter((x) => x && x.label !== 'Remove from queue')} phone={phone} />
+            menuItems={items(current, index).filter((x) => x && x.key !== 'remove')} phone={phone} />
         </section>
       )}
       {queued.length > 0 && (
         <section>
           <div className="section-head" style={{ marginBottom: 8 }}>
-            <h2>Next in queue</h2>
-            <button className="linkish" onClick={() => player.clearQueued()}>Clear queue</button>
+            <h2>{t('Next in queue')}</h2>
+            <button className="linkish" onClick={() => player.clearQueued()}>{t('Clear queue')}</button>
           </div>
           {queued.map((t, i) => row(t, base + i, `q-${t.Id}-${i}`))}
         </section>
@@ -251,13 +250,13 @@ function Queue({ player, jf, onOpenArtist, onOpenAlbum, onLike, onAddTo, playlis
       {fromCtx.length > 0 && (
         <section>
           <div className="section-head" style={{ marginBottom: 8 }}>
-            <h2>{ctxName ? `Next from: ${ctxName}` : 'Next up'}</h2>
+            <h2>{ctxName ? t('Next from: {name}', { name: ctxName }) : t('Next up')}</h2>
             {!phone && <span className="qrow-sub">{fromCtx.length}</span>}
           </div>
           {fromCtx.slice(0, 80).map((t, i) => row(t, base + split + i, `c-${t.Id}-${i}`))}
         </section>
       )}
-      {!queued.length && !fromCtx.length && <p className="qrow-sub" style={{ padding: '12px 0' }}>End of the queue.</p>}
+      {!queued.length && !fromCtx.length && <p className="qrow-sub" style={{ padding: '12px 0' }}>{t('End of the queue.')}</p>}
     </>
   );
 }
@@ -298,7 +297,7 @@ export function Lyrics({ player, jf }) {
   // (where `current` is null but nowPlayingId still points at the song).
   const trackId = player.nowPlayingId;
   const job = useLyricJob(trackId);
-  const askSync = () => syncLyrics(jf, { Id: trackId, Name: player.current?.Name || 'This song' });
+  const askSync = () => syncLyrics(jf, { Id: trackId, Name: player.current?.Name || t('This song') });
   const [lines, setLines] = useState(null);
   const [state, setState] = useState('idle');
   const activeRef = useRef(null);
@@ -388,16 +387,16 @@ export function Lyrics({ player, jf }) {
     return () => clearInterval(t);
   }, [trackId, state, lines, position, activeIndex]);
 
-  if (state === 'loading') return <p className="placeholder-note">Loading lyrics...</p>;
-  if (state === 'idle') return <p className="placeholder-note">Play something to see lyrics.</p>;
+  if (state === 'loading') return <p className="placeholder-note">{t('Loading lyrics...')}</p>;
+  if (state === 'idle') return <p className="placeholder-note">{t('Play something to see lyrics.')}</p>;
   if (state === 'none') {
     if (job) return <SyncBanner job={job} />;
     // Offline: lyrics come with a download; finding them needs the server.
-    if (offline) return <div className="placeholder-note"><p>Lyrics aren&rsquo;t available offline for this song.</p></div>;
+    if (offline) return <div className="placeholder-note"><p>{t('Lyrics aren’t available offline for this song.')}</p></div>;
     return (
       <div className="placeholder-note">
-        <p>Looks like we don&rsquo;t have the lyrics for this song.</p>
-        <button type="button" className="lyrics-findsync" onClick={askSync}>Find and sync lyrics</button>
+        <p>{t('Looks like we don’t have the lyrics for this song.')}</p>
+        <button type="button" className="lyrics-findsync" onClick={askSync}>{t('Find and sync lyrics')}</button>
       </div>
     );
   }
@@ -409,8 +408,8 @@ export function Lyrics({ player, jf }) {
       {job && <SyncBanner job={job} />}
       {!synced && !job && (
         <p className="qrow-sub lyrics-unsynced-note">
-          These lyrics aren&rsquo;t synced to the song yet.
-          <button type="button" className="lyrics-findsync" onClick={askSync}>Sync them</button>
+          {t('These lyrics aren’t synced to the song yet.')}
+          <button type="button" className="lyrics-findsync" onClick={askSync}>{t('Sync them')}</button>
         </p>
       )}
       {lines.map((l, i) => (
@@ -425,14 +424,14 @@ export function Lyrics({ player, jf }) {
         </button>
       ))}
       {manual && synced && (
-        <button className="lyrics-sync" onClick={() => { setManual(false); follow(); }}>Sync</button>
+        <button className="lyrics-sync" onClick={() => { setManual(false); follow(); }}>{t('Sync')}</button>
       )}
     </div>
   );
 }
 
 export default function RightPanel({ mode, onClose, onMode, player, jf, onOpenArtist, onOpenAlbum, onLike, onAddTo, playlists }) {
-  const titles = { npv: 'Now playing', queue: 'Queue', lyrics: 'Lyrics' };
+  const titles = { npv: t('Now playing'), queue: t('Queue'), lyrics: t('Lyrics') };
   const phone = usePhone();
   const from = usePlayingFrom(player, jf);
   const rootRef = useRef(null);
@@ -445,15 +444,15 @@ export default function RightPanel({ mode, onClose, onMode, player, jf, onOpenAr
     <aside ref={rootRef} className={`rightpanel ${bg ? 'with-bg' : ''}`}>
       {bg && <div className="panel-bg" style={{ backgroundImage: `url("${bg}")` }} />}
       <div className="panel-header">
-        <button className="icon-btn" onClick={close} title="Close panel">{phone ? <ChevronDown /> : <Close />}</button>
+        <button className="icon-btn" onClick={close} title={t('Close panel')}>{phone ? <ChevronDown /> : <Close />}</button>
         {phone && mode === 'queue'
           ? <span className="title"><small>{from.kind}</small>{from.name}</span>
           : <span className="title">{titles[mode]}</span>}
       </div>
       {mode !== 'npv' && (
         <div className="tabs" style={{ gridRow: 'auto' }}>
-          <button className={mode === 'queue' ? 'on' : ''} onClick={() => onMode('queue')}>Queue</button>
-          <button className={mode === 'lyrics' ? 'on' : ''} onClick={() => onMode('lyrics')}>Lyrics</button>
+          <button className={mode === 'queue' ? 'on' : ''} onClick={() => onMode('queue')}>{t('Queue')}</button>
+          <button className={mode === 'lyrics' ? 'on' : ''} onClick={() => onMode('lyrics')}>{t('Lyrics')}</button>
         </div>
       )}
       <div className="panel-body">
@@ -471,11 +470,11 @@ export default function RightPanel({ mode, onClose, onMode, player, jf, onOpenAr
       {phone && mode === 'queue' && player.nowPlaying && (
         <div className="panel-transport">
           <div className="panel-transport-row">
-            <button className={`ctl-mode ${shuffle && shuffle !== 'off' ? 'on' : ''}`} onClick={player.cycleShuffle} title="Shuffle"><ShuffleGlyph size={24} /></button>
-            <button onClick={player.previous} title="Previous"><svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor"><path d="M3.3 1a.7.7 0 0 1 .7.7v5.15l9.95-5.744a.7.7 0 0 1 1.05.606v12.575a.7.7 0 0 1-1.05.607L4 9.149V14.3a.7.7 0 0 1-.7.7H1.7a.7.7 0 0 1-.7-.7V1.7a.7.7 0 0 1 .7-.7h1.6z" /></svg></button>
-            <button className="panel-play" onClick={player.toggle} title={playing ? 'Pause' : 'Play'}>{playing ? <PauseGlyph size={22} /> : <PlayGlyph size={22} />}</button>
-            <button onClick={player.next} title="Next"><svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor"><path d="M12.7 1a.7.7 0 0 0-.7.7v5.15L2.05 1.107A.7.7 0 0 0 1 1.712v12.575a.7.7 0 0 0 1.05.607L12 9.149V14.3a.7.7 0 0 0 .7.7h1.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-1.6z" /></svg></button>
-            <button className={`ctl-mode ${repeat && repeat !== 'off' ? 'on' : ''}`} onClick={player.cycleRepeat} title="Repeat"><svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor"><path d="M0 4.75A3.75 3.75 0 0 1 3.75 1h8.5A3.75 3.75 0 0 1 16 4.75v5a3.75 3.75 0 0 1-3.75 3.75H9.81l1.018 1.018a.75.75 0 1 1-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 1 1 1.06 1.06L9.811 12h2.439a2.25 2.25 0 0 0 2.25-2.25v-5a2.25 2.25 0 0 0-2.25-2.25h-8.5A2.25 2.25 0 0 0 1.5 4.75v5A2.25 2.25 0 0 0 3.75 12H5v1.5H3.75A3.75 3.75 0 0 1 0 9.75v-5z" /></svg></button>
+            <button className={`ctl-mode ${shuffle && shuffle !== 'off' ? 'on' : ''}`} onClick={player.cycleShuffle} title={t('Shuffle')}><ShuffleGlyph size={24} /></button>
+            <button onClick={player.previous} title={t('Previous')}><svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor"><path d="M3.3 1a.7.7 0 0 1 .7.7v5.15l9.95-5.744a.7.7 0 0 1 1.05.606v12.575a.7.7 0 0 1-1.05.607L4 9.149V14.3a.7.7 0 0 1-.7.7H1.7a.7.7 0 0 1-.7-.7V1.7a.7.7 0 0 1 .7-.7h1.6z" /></svg></button>
+            <button className="panel-play" onClick={player.toggle} title={playing ? t('Pause') : t('Play')}>{playing ? <PauseGlyph size={22} /> : <PlayGlyph size={22} />}</button>
+            <button onClick={player.next} title={t('Next')}><svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor"><path d="M12.7 1a.7.7 0 0 0-.7.7v5.15L2.05 1.107A.7.7 0 0 0 1 1.712v12.575a.7.7 0 0 0 1.05.607L12 9.149V14.3a.7.7 0 0 0 .7.7h1.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-1.6z" /></svg></button>
+            <button className={`ctl-mode ${repeat && repeat !== 'off' ? 'on' : ''}`} onClick={player.cycleRepeat} title={t('Repeat')}><svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor"><path d="M0 4.75A3.75 3.75 0 0 1 3.75 1h8.5A3.75 3.75 0 0 1 16 4.75v5a3.75 3.75 0 0 1-3.75 3.75H9.81l1.018 1.018a.75.75 0 1 1-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 1 1 1.06 1.06L9.811 12h2.439a2.25 2.25 0 0 0 2.25-2.25v-5a2.25 2.25 0 0 0-2.25-2.25h-8.5A2.25 2.25 0 0 0 1.5 4.75v5A2.25 2.25 0 0 0 3.75 12H5v1.5H3.75A3.75 3.75 0 0 1 0 9.75v-5z" /></svg></button>
           </div>
           <div className="panel-progress"><span style={{ width: `${duration ? Math.min(100, (position / duration) * 100) : 0}%` }} /></div>
         </div>

@@ -2,6 +2,7 @@
 // which song and what stage ("Waiting · 2 ahead", "Lining the lyrics up with
 // the vocals"), so asking is never followed by silence.
 import { useLyricJobs, jobLabel } from '../api/lyricsync.js';
+import { t } from '../i18n.js';
 
 export default function LyricSyncStatus() {
   const jobs = useLyricJobs();
@@ -10,7 +11,7 @@ export default function LyricSyncStatus() {
   return (
     <div className="lyricsync-pill" role="status" aria-live="polite">
       <span className="lyricsync-spin" aria-hidden="true" />
-      <span className="lyricsync-text"><b>Syncing lyrics</b> · {j.title} — {jobLabel(j)}{jobs.length > 1 ? ` · ${jobs.length - 1} more` : ''}</span>
+      <span className="lyricsync-text"><b>{t('Syncing lyrics')}</b> · {j.title} — {jobLabel(j)}{jobs.length > 1 ? ` · ${t('{n} more', { n: jobs.length - 1 })}` : ''}</span>
     </div>
   );
 }

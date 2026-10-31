@@ -3,27 +3,29 @@
 // DisplayPreferences for client "conduit", so they follow the account to any
 // device; pushed live to the account's other open clients over the relay.
 
+import { t, N_ } from '../i18n.js';
+
 export const QUALITIES = [
-  { id: 'original', label: 'Lossless (original file)', hint: 'FLAC / whatever was ripped. Bit-perfect; phones stream it as Apple Lossless.' },
-  { id: 'high', label: 'Very high (320 kbps)', hint: 'MP3 transcode. Good for a phone on data.', bitrate: 320000 },
-  { id: 'normal', label: 'Normal (160 kbps)', bitrate: 160000 },
-  { id: 'low', label: 'Low (96 kbps)', bitrate: 96000 },
+  { id: 'original', label: N_('Lossless (original file)'), hint: N_('FLAC / whatever was ripped. Bit-perfect; phones stream it as Apple Lossless.') },
+  { id: 'high', label: N_('Very high (320 kbps)'), hint: N_('MP3 transcode. Good for a phone on data.'), bitrate: 320000 },
+  { id: 'normal', label: N_('Normal (160 kbps)'), bitrate: 160000 },
+  { id: 'low', label: N_('Low (96 kbps)'), bitrate: 96000 },
 ];
 
 // Crossfade lengths offered (seconds; 0 = off), as Spotify's slider runs 0-12.
 export const CROSSFADES = [0, 1, 2, 3, 5, 8, 12];
-export const crossfadeLabel = (sec) => { const n = Number(sec) || 0; return n ? `${n} second${n === 1 ? '' : 's'}` : 'Off'; };
+export const crossfadeLabel = (sec) => { const n = Number(sec) || 0; return n ? (n === 1 ? t('1 second') : t('{n} seconds', { n })) : t('Off'); };
 
 // The four colours that define the look; everything else is derived.
 export const DEFAULT_THEME = { accent: '#1ed760', bg: '#121212', surface: '#1f1f1f', fg: '#ffffff' };
 
 export const THEME_PRESETS = [
   { name: 'Spotify', theme: DEFAULT_THEME },
-  { name: 'Midnight', theme: { accent: '#4c8dff', bg: '#0b1020', surface: '#151d33', fg: '#ffffff' } },
-  { name: 'Ember', theme: { accent: '#ff7a3d', bg: '#151010', surface: '#241a18', fg: '#fff5ee' } },
-  { name: 'Orchid', theme: { accent: '#c77dff', bg: '#120f18', surface: '#1e1826', fg: '#ffffff' } },
-  { name: 'Mono', theme: { accent: '#ffffff', bg: '#000000', surface: '#161616', fg: '#ffffff' } },
-  { name: 'Paper', theme: { accent: '#1a7f4b', bg: '#f4f1ea', surface: '#ffffff', fg: '#141414' } },
+  { name: N_('Midnight'), theme: { accent: '#4c8dff', bg: '#0b1020', surface: '#151d33', fg: '#ffffff' } },
+  { name: N_('Ember'), theme: { accent: '#ff7a3d', bg: '#151010', surface: '#241a18', fg: '#fff5ee' } },
+  { name: N_('Orchid'), theme: { accent: '#c77dff', bg: '#120f18', surface: '#1e1826', fg: '#ffffff' } },
+  { name: N_('Mono'), theme: { accent: '#ffffff', bg: '#000000', surface: '#161616', fg: '#ffffff' } },
+  { name: N_('Paper'), theme: { accent: '#1a7f4b', bg: '#f4f1ea', surface: '#ffffff', fg: '#141414' } },
 ];
 
 const clamp = (x) => Math.max(0, Math.min(255, Math.round(x)));

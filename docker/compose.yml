@@ -15,6 +15,7 @@ services:
     environment:
       PORT: "8080"
       TZ: Europe/London        # your time zone, for scheduled tasks
+      # LANGUAGE: "de"           # app language for everyone (default: each device's own); see docs/configuration.md
       # PUID: "1000"               # the user it runs as; /data is set up for it
       # PGID: "1000"
       # SAVE_TO_LIBRARY: "1"       # write found lyrics/artwork next to your files

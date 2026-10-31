@@ -1,4 +1,5 @@
 import { clientLog } from '../api/clientLog.js';
+import { t, N_ } from '../i18n.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepAlive, bridgeKeepAlive, quietKeepAlive, standInPausedBySystem, standInElement, onStandInResumed, state as keepAliveState } from './keepalive.js';
 
@@ -25,8 +26,8 @@ const IN_TV_APP = IN_PHONE_APP && window.slopifyShell.deviceForm === 'tv';
 // The line under another client's name in the speaker list. The form (what
 // the device is) says more than the kind (which app it runs): the TV and
 // tablet apps are the phone app's shell, kind 'phone'.
-const FORM_MODEL = { tv: 'Slopify TV', tablet: 'Tablet', phone: 'Phone', laptop: 'Laptop', desktop: 'Desktop' };
-const modelOfClient = (p) => FORM_MODEL[p.form] || (p.kind === 'desktop' ? 'Desktop' : p.kind === 'phone' ? 'Phone' : 'Slopify');
+const FORM_MODEL = { tv: 'Slopify TV', tablet: N_('Tablet'), phone: N_('Phone'), laptop: N_('Laptop'), desktop: N_('Desktop') };
+const modelOfClient = (p) => FORM_MODEL[p.form] || (p.kind === 'desktop' ? N_('Desktop') : p.kind === 'phone' ? N_('Phone') : 'Slopify');
 // The web app opened from the home screen (iOS: navigator.standalone): its own
 // process like the phone app, suspended the same way once nothing plays.
 const IN_STANDALONE = typeof window !== 'undefined' && (window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
@@ -109,8 +110,8 @@ const BRIDGE_MAX_MS = 2 * 60 * 1000;
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
-  name: IS_DESKTOP ? 'This Computer' : IN_TV_APP ? 'This TV' : IN_PHONE_APP ? 'This Phone' : 'This Web Player',
-  model: IS_DESKTOP ? 'Local playback' : IN_TV_APP ? 'TV playback' : IN_PHONE_APP ? 'Phone playback' : 'Browser playback',
+  name: IS_DESKTOP ? N_('This Computer') : IN_TV_APP ? N_('This TV') : IN_PHONE_APP ? N_('This Phone') : N_('This Web Player'),
+  model: IS_DESKTOP ? N_('Local playback') : IN_TV_APP ? N_('TV playback') : IN_PHONE_APP ? N_('Phone playback') : N_('Browser playback'),
 };
 
 const MIME_BY_CONTAINER = {
@@ -587,7 +588,7 @@ export function usePlayer(jf) {
     // A speaker this desktop can see itself is driven from here, not listed twice.
     .filter((d) => !remote || !localDevicesRef.current.some((x) => x.id === d.id))
     .filter((d, i, arr) => arr.findIndex((x) => x.id === d.id) === i)
-    .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? d.model || 'Speaker' : d.kind === 'tv' ? 'Slopify TV' : 'Chromecast', viaClient: d.viaClient, group: d.group }));
+    .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? d.model || N_('Speaker') : d.kind === 'tv' ? 'Slopify TV' : 'Chromecast', viaClient: d.viaClient, group: d.group }));
 
   // Remote players from the relay, presented as selectable devices.
   const relayDevices = roster.players
@@ -602,7 +603,7 @@ export function usePlayer(jf) {
       const art = jf?.imageUrl(track.Id || track.AlbumId, { maxHeight: 1000 });
       const artistArt = artistId ? jf?.imageUrl(artistId, { maxHeight: 1000 }) : null;
       return {
-        title: track.Name || 'Unknown title',
+        title: track.Name || t('Unknown title'),
         artist: track.Artists?.join(', ') || track.AlbumArtist || '',
         album: track.Album || '',
         artwork: art || artistArt || undefined,
@@ -779,7 +780,7 @@ export function usePlayer(jf) {
       const off = isOffline();
       if (off) {
         const chosen = tracks[startIndex];
-        if (!chosen || !isKept(chosen.Id)) { setError('Offline: only downloaded songs play'); return; }
+        if (!chosen || !isKept(chosen.Id)) { setError(t('Offline: only downloaded songs play')); return; }
         tracks = tracks.filter((t) => isKept(t.Id));
         startIndex = tracks.indexOf(chosen);
         // A speaker cannot be reached either: the music plays here.
@@ -1490,7 +1491,7 @@ export function usePlayer(jf) {
         // The target failed: the old device is still playing, go back to it
         // with the playhead it has reached meanwhile.
         setDeviceState(prev); deviceRef.current = prev;
-        setError(`Could not move playback to ${nextDevice.name}: ${e.message}`);
+        setError(t('Could not move playback to {name}: {error}', { name: nextDevice.kind === 'local' ? t(nextDevice.name) : nextDevice.name, error: e.message }));
         if (wasPlaying) { anchorAt(at + (Date.now() - startedAt) / 1000, true); setPlaying(true); }
       } finally {
         // Show the incoming device's real volume rather than carrying the old
@@ -1784,7 +1785,7 @@ export function usePlayer(jf) {
           st.restarted = true;
           const track = queueRef.current[indexRef.current];
           if (track) {
-            setError('Stream stalled on the speaker, restarting it');
+            setError(t('Stream stalled on the speaker, restarting it'));
             startOn(device, track, 0).catch(() => {});
           }
         }
@@ -2381,7 +2382,7 @@ export function usePlayer(jf) {
           const at = Math.max(0, tracks.findIndex((t) => t.Id === chosenId));
           setQueue(tracks); queueRef.current = tracks;
           setIndex(at); indexRef.current = at;
-        } catch (e) { window.conduit?.debug?.(`transfer FAILED: ${e.message}`); setError(`Could not take over playback: ${e.message}`); setPlaying(false); }
+        } catch (e) { window.conduit?.debug?.(`transfer FAILED: ${e.message}`); setError(t('Could not take over playback: {error}', { error: e.message })); setPlaying(false); }
       } else {
         window.conduit?.debug?.('transfer carried no tracks: nothing to start');
       }
@@ -2731,7 +2732,7 @@ export function usePlayer(jf) {
     else if (jf && nowPlaying.artistId) artwork.push({ src: jf.imageUrl(nowPlaying.artistId, { maxHeight: 512, full: true }), sizes: '512x512', type: 'image/jpeg' });
     try {
       ms.metadata = new window.MediaMetadata({
-        title: nowPlaying.title || 'Unknown title',
+        title: nowPlaying.title || t('Unknown title'),
         artist: nowPlaying.artist || '',
         album: relayTarget?.album || current?.Album || '',
         artwork,
@@ -2746,7 +2747,7 @@ export function usePlayer(jf) {
   useEffect(() => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
     if (!ms || !downloadHold || msLocal || msRemote) return;
-    try { ms.metadata = new MediaMetadata({ title: `Downloading ${downloading.name}`, artist: `${downloading.done} of ${downloading.total} songs`, album: 'Slopify' }); } catch { /* unsupported */ }
+    try { ms.metadata = new MediaMetadata({ title: t('Downloading {name}', { name: downloading.name }), artist: t('{done} of {total} songs', { done: downloading.done, total: downloading.total }), album: 'Slopify' }); } catch { /* unsupported */ }
   }, [downloadHold, downloading?.name, downloading?.done, downloading?.total, msLocal, msRemote]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;

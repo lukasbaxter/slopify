@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { history as relayHistory } from '../api/search.js';
 import { usePhone } from './TrackRow.jsx';
+import { t, N_, language } from '../i18n.js';
 
 // The profile menu's History page, built to stats.fm's user page: its
 // Tailwind tokens (background #111111, foreground #181818, primary #1ed760,
@@ -12,31 +13,31 @@ import { usePhone } from './TrackRow.jsx';
 
 // Range labels and the section-description suffix, verbatim from stats.fm.
 const RANGES = [
-  ['today', 'today', 'from today'],
-  ['week', 'this week', 'from this week'],
-  ['4w', '4 weeks', 'from the past 4 weeks'],
-  ['6m', '6 months', 'from the past 6 months'],
-  ['year', String(new Date().getFullYear()), 'from this year'],
-  ['all', 'lifetime', ''],
+  ['today', N_('today'), N_('from today')],
+  ['week', N_('this week'), N_('from this week')],
+  ['4w', N_('4 weeks'), N_('from the past 4 weeks')],
+  ['6m', N_('6 months'), N_('from the past 6 months')],
+  ['year', String(new Date().getFullYear()), N_('from this year')],
+  ['all', N_('lifetime'), ''],
 ];
-const fmtN = (n) => (n ?? 0).toLocaleString('en-US');
-const LL = (ts) => new Date(ts * 1000).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+const fmtN = (n) => (n ?? 0).toLocaleString(language());
+const LL = (ts) => new Date(ts * 1000).toLocaleDateString(language(), { month: 'long', day: 'numeric', year: 'numeric' });
 const fromNow = (ts) => {
   const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  const u = (n, w) => `${n} ${w}${n === 1 ? '' : 's'} ago`;
-  if (s < 45) return 'a few seconds ago';
-  if (s < 90) return 'a minute ago';
-  if (s < 2700) return u(Math.round(s / 60), 'minute');
-  if (s < 5400) return 'an hour ago';
-  if (s < 79200) return u(Math.round(s / 3600), 'hour');
-  if (s < 129600) return 'a day ago';
-  if (s < 2246400) return u(Math.round(s / 86400), 'day');
-  if (s < 3888000) return 'a month ago';
-  if (s < 27993600) return u(Math.round(s / 2592000), 'month');
-  if (s < 47260800) return 'a year ago';
-  return u(Math.round(s / 31536000), 'year');
+  if (s < 45) return t('a few seconds ago');
+  if (s < 90) return t('a minute ago');
+  if (s < 2700) return t('{n} minutes ago', { n: Math.round(s / 60) });
+  if (s < 5400) return t('an hour ago');
+  if (s < 79200) return t('{n} hours ago', { n: Math.round(s / 3600) });
+  if (s < 129600) return t('a day ago');
+  if (s < 2246400) return t('{n} days ago', { n: Math.round(s / 86400) });
+  if (s < 3888000) return t('a month ago');
+  if (s < 27993600) return t('{n} months ago', { n: Math.round(s / 2592000) });
+  if (s < 47260800) return t('a year ago');
+  const y = Math.round(s / 31536000);
+  return y === 1 ? t('1 year ago') : t('{n} years ago', { n: y });
 };
-const fullDate = (ts) => new Date(ts * 1000).toLocaleString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+const fullDate = (ts) => new Date(ts * 1000).toLocaleString(language(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 const hm = (secs) => { const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60); return h ? `${h}h ${m}m` : `${m}m`; };
 
 // stats.fm's toolbar icons (Material: grid_on, navigate_before, navigate_next, more_horiz, check, unfold_more).
@@ -64,7 +65,7 @@ function RangeListbox({ value, onChange }) {
   return (
     <div className="sf-listbox" ref={ref}>
       <button className="sf-listbox-btn" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open}>
-        <span className="sf-truncate">{cur[1]}</span>
+        <span className="sf-truncate">{t(cur[1])}</span>
         <span className="sf-listbox-chev">{I.updown}</span>
       </button>
       {open && (
@@ -72,7 +73,7 @@ function RangeListbox({ value, onChange }) {
           {RANGES.map(([k, label]) => (
             <li key={k} role="option" aria-selected={k === value} className={`sf-listbox-opt ${k === value ? 'selected' : ''}`} onClick={() => { onChange(k); setOpen(false); }}>
               {k === value && <span className="sf-listbox-check">{I.check}</span>}
-              <span className="sf-truncate">{label}</span>
+              <span className="sf-truncate">{t(label)}</span>
             </li>
           ))}
         </ul>
@@ -120,13 +121,13 @@ function Carousel({ items, itemHeight, render, empty }) {
   const pages = Math.max(1, Math.ceil(items.length / perPage));
   const tools = (
     <>
-      <ToolBtn label={grid ? 'Show as carousel' : 'Show as grid'} onClick={() => setGrid((v) => !v)}><span className={grid ? 'on' : ''}>{I.grid}</span></ToolBtn>
-      {!grid && <ToolBtn label="Go to previous slide" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}><span className={page === 0 ? '' : 'on'}>{I.prev}</span></ToolBtn>}
-      {!grid && <ToolBtn label="Go to next slide" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}><span className={page >= pages - 1 ? '' : 'on'}>{I.next}</span></ToolBtn>}
+      <ToolBtn label={grid ? t('Show as carousel') : t('Show as grid')} onClick={() => setGrid((v) => !v)}><span className={grid ? 'on' : ''}>{I.grid}</span></ToolBtn>
+      {!grid && <ToolBtn label={t('Go to previous slide')} disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}><span className={page === 0 ? '' : 'on'}>{I.prev}</span></ToolBtn>}
+      {!grid && <ToolBtn label={t('Go to next slide')} disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}><span className={page >= pages - 1 ? '' : 'on'}>{I.next}</span></ToolBtn>}
     </>
   );
   const body = !items.length ? (
-    <div className="sf-empty"><p>{empty || 'Not enough data to complete this list'}</p></div>
+    <div className="sf-empty"><p>{empty || t('Not enough data to complete this list')}</p></div>
   ) : grid ? (
     <ul className="sf-carousel-grid">{items.map((it, i) => <li key={i}>{render(it, i)}</li>)}</ul>
   ) : (
@@ -181,7 +182,7 @@ function ticksFor(max) {
   const out = []; for (let v = 0; v <= max + step * 0.999; v += step) out.push(Math.round(v * 100) / 100);
   return out;
 }
-const shortDay = (iso) => { const d = new Date(`${iso}T00:00:00`); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+const shortDay = (iso) => { const d = new Date(`${iso}T00:00:00`); return d.toLocaleDateString(language(), { month: 'short', day: 'numeric' }); };
 
 // The "Daily" / "Cumulative" line charts: two thin lines (streams bright green,
 // minutes the same green at half opacity), 3-4 y ticks, x labels ~8 across,
@@ -210,10 +211,10 @@ function LineChart({ title, points, cumulative = false }) {
     <div className="sf-chart">
       <div className="sf-chart-head"><h4>{title}</h4></div>
       <svg viewBox={`0 0 ${W} ${H}`} className="sf-chart-svg" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img">
-        {ticks.map((t) => (
-          <g key={t}>
-            <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)} className="sf-chart-grid" />
-            <text x={PL - 8} y={y(t) + 4} className="sf-chart-tick" textAnchor="end">{fmtN(t)}</text>
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={PL} x2={W - PR} y1={y(v)} y2={y(v)} className="sf-chart-grid" />
+            <text x={PL - 8} y={y(v) + 4} className="sf-chart-tick" textAnchor="end">{fmtN(v)}</text>
           </g>
         ))}
         {rows.map((r, i) => (i % every === 0 || i === n - 1) && n > 1 && (
@@ -232,17 +233,17 @@ function LineChart({ title, points, cumulative = false }) {
       {h && (
         <div className="sf-tip" style={{ left: `${(x(hover) / W) * 100}%` }}>
           <b>{h.label}</b>
-          <span>{fmtN(h.streams)} stream{h.streams === 1 ? '' : 's'}</span>
-          <span>{fmtN(h.minutes)} minute{h.minutes === 1 ? '' : 's'} streamed</span>
+          <span>{h.streams === 1 ? t('1 stream') : t('{n} streams', { n: fmtN(h.streams) })}</span>
+          <span>{h.minutes === 1 ? t('1 minute streamed') : t('{n} minutes streamed', { n: fmtN(h.minutes) })}</span>
         </div>
       )}
-      <div className="sf-legend"><span><i className="streams" />streams</span><span><i className="minutes" />minutes streamed</span></div>
+      <div className="sf-legend"><span><i className="streams" />{t('streams')}</span><span><i className="minutes" />{t('minutes streamed')}</span></div>
     </div>
   );
 }
 
 export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSettings }) {
-  const name = me?.Name || 'You';
+  const name = me?.Name || t('You');
   const [range, setRange] = useState(() => localStorage.getItem('conduit.histRange2') || '4w');
   const phone = usePhone();
   const [data, setData] = useState({});
@@ -284,21 +285,24 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
   const st = data[range];
   const suffix = (RANGES.find((r) => r[0] === range) || RANGES[2])[2];
   // Own profile: stats.fm says "Your top tracks from the past 4 weeks".
-  const desc = (what) => `Your ${what}${suffix ? ` ${suffix}` : ''}`;
+  // Each description is a whole sentence with the range in it, or without one for lifetime.
+  const R = { range: suffix ? t(suffix) : '' };
+  const desc = (withRange, bare) => (suffix ? withRange : bare);
 
   const cover = (r, size = 320) => (r.albumId || r.id ? jf.imageUrl(r.albumId || r.id, { maxHeight: size }) : null);
   const minutes = (secs) => fmtN(Math.floor(secs / 60));
-  const streams = (n) => `${fmtN(n)} stream${n === 1 ? '' : 's'}`;
+  const streams = (n) => (n === 1 ? t('1 stream') : t('{n} streams', { n: fmtN(n) }));
+  const mins = (secs) => t('{n} minutes', { n: minutes(secs) });
 
   // Cards, class for class from stats.fm's TrackCard / ArtistCard / AlbumCard.
-  const trackCard = (t, i) => (
+  const trackCard = (tr, i) => (
     <div className="sf-track-card">
-      <a role="button" tabIndex={0} onClick={() => t.albumId && onOpenAlbum(t.albumId)} title={t.albumId ? 'Open album' : 'Not in your library'}>
-        <div className="sf-square">{cover(t) ? <img src={cover(t)} alt="" loading="lazy" width={160} height={160} /> : <div className="sf-ph" />}</div>
-        <h4 className="sf-clamp2">{i + 1}. {t.name}</h4>
+      <a role="button" tabIndex={0} onClick={() => tr.albumId && onOpenAlbum(tr.albumId)} title={tr.albumId ? t('Open album') : t('Not in your library')}>
+        <div className="sf-square">{cover(tr) ? <img src={cover(tr)} alt="" loading="lazy" width={160} height={160} /> : <div className="sf-ph" />}</div>
+        <h4 className="sf-clamp2">{i + 1}. {tr.name}</h4>
       </a>
-      <p className="sf-clamp2" title={`${minutes(t.seconds)} minutes • ${streams(t.count)}`}>
-        {minutes(t.seconds)} minutes • {streams(t.count)} • <span>{t.artistId ? <a role="button" tabIndex={0} className="sf-artist-link" onClick={() => onOpenArtist(t.artistId)}>{t.artist}</a> : t.artist}</span>
+      <p className="sf-clamp2" title={`${mins(tr.seconds)} • ${streams(tr.count)}`}>
+        {mins(tr.seconds)} • {streams(tr.count)} • <span>{tr.artistId ? <a role="button" tabIndex={0} className="sf-artist-link" onClick={() => onOpenArtist(tr.artistId)}>{tr.artist}</a> : tr.artist}</span>
       </p>
     </div>
   );
@@ -307,7 +311,7 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
       <div className="sf-avatar" style={{ width: 160, height: 160 }}>{a.artistId ? <img src={jf.imageUrl(a.artistId, { maxHeight: 320 })} alt="" loading="lazy" /> : <p>{(a.name || '?').slice(0, 1).toUpperCase()}</p>}</div>
       <div className="sf-artist-text">
         <h4 className="sf-clamp2">{i + 1}. {a.name}</h4>
-        <p className="sf-clamp2 sf-tight">{minutes(a.seconds)} minutes • {streams(a.count)}</p>
+        <p className="sf-clamp2 sf-tight">{mins(a.seconds)} • {streams(a.count)}</p>
       </div>
     </a>
   );
@@ -316,7 +320,7 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
       <div className="sf-square">{a.albumId ? <img src={jf.imageUrl(a.albumId, { maxHeight: 320 })} alt="" loading="lazy" width={160} height={160} /> : <div className="sf-ph" />}</div>
       <div className="sf-album-text">
         <h4 className="sf-clamp2">{i + 1}. {a.name}</h4>
-        <p className="sf-truncate">{minutes(a.seconds)} minutes • {streams(a.count)}</p>
+        <p className="sf-truncate">{mins(a.seconds)} • {streams(a.count)}</p>
       </div>
     </a>
   );
@@ -348,10 +352,10 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
               <span className="sf-handle">@{(me?.Name || '').toLowerCase()}</span>
               {st?.connected && (
                 <div className="sf-friends">
-                  <span>{fmtN(st.total)} streams</span>
-                  {st.sources?.spotify ? <><span className="sf-dot-wrap"><span className="sf-dot" /></span><span>{fmtN(st.sources.spotify)} from Spotify</span></> : null}
+                  <span>{t('{n} streams', { n: fmtN(st.total) })}</span>
+                  {st.sources?.spotify ? <><span className="sf-dot-wrap"><span className="sf-dot" /></span><span>{t('{n} from Spotify', { n: fmtN(st.sources.spotify) })}</span></> : null}
                   <span className="sf-dot-wrap"><span className="sf-dot" /></span>
-                  <button className="sf-textbtn" onClick={onOpenSettings}>Edit profile</button>
+                  <button className="sf-textbtn" onClick={onOpenSettings}>{t('Edit profile')}</button>
                 </div>
               )}
             </div>
@@ -365,26 +369,26 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
           {phone ? (
             /* Phone: the range as Spotify-style chips instead of a listbox. */
             <div className="sf-range-chips">
-              {RANGES.map(([k, label]) => <button key={k} className={`pill ${k === range ? 'on' : ''}`} onClick={() => setRange(k)}>{label}</button>)}
+              {RANGES.map(([k, label]) => <button key={k} className={`pill ${k === range ? 'on' : ''}`} onClick={() => setRange(k)}>{t(label)}</button>)}
             </div>
           ) : (
             <div className="sf-listbox-wrap"><RangeListbox value={range} onChange={setRange} /></div>
           )}
           {st?.connected ? (
             <ul className="sf-stats">
-              {[['streams', st.streams, st.prev?.streams], ['minutes streamed', st.minutes, st.prev?.minutes], ['hours streamed', Math.round(st.minutes / 60), st.prev ? Math.round(st.prev.minutes / 60) : null], ['days streamed', st.daysStreamed, st.prev?.daysStreamed], ['different tracks', st.uniqueTracks, st.prev?.uniqueTracks], ['different artists', st.uniqueArtists, st.prev?.uniqueArtists], ['different albums', st.uniqueAlbums, st.prev?.uniqueAlbums]].map(([label, value, before]) => (
-                <li key={label}><h3 className="sf-truncate">{fmtN(value)}<Delta now={value} before={before} /></h3><span className="sf-stat-label">{label}</span></li>
+              {[[N_('streams'), st.streams, st.prev?.streams], [N_('minutes streamed'), st.minutes, st.prev?.minutes], [N_('hours streamed'), Math.round(st.minutes / 60), st.prev ? Math.round(st.prev.minutes / 60) : null], [N_('days streamed'), st.daysStreamed, st.prev?.daysStreamed], [N_('different tracks'), st.uniqueTracks, st.prev?.uniqueTracks], [N_('different artists'), st.uniqueArtists, st.prev?.uniqueArtists], [N_('different albums'), st.uniqueAlbums, st.prev?.uniqueAlbums]].map(([label, value, before]) => (
+                <li key={label}><h3 className="sf-truncate">{fmtN(value)}<Delta now={value} before={before} /></h3><span className="sf-stat-label">{t(label)}</span></li>
               ))}
             </ul>
           ) : st && !st.error && !st.connected ? (
             <div className="sf-gate">
               <div className="sf-blur">
-                <ul className="sf-stats">{['minutes streamed', 'hours streamed', 'streams'].map((l) => <li key={l}><h3>?</h3><span className="sf-stat-label">{l}</span></li>)}</ul>
+                <ul className="sf-stats">{[N_('minutes streamed'), N_('hours streamed'), N_('streams')].map((l) => <li key={l}><h3>?</h3><span className="sf-stat-label">{t(l)}</span></li>)}</ul>
               </div>
-              <div className="sf-gate-msg"><p>Connect ListenBrainz under Settings › Scrobbling to see your streaming history</p><button className="sf-textbtn" onClick={onOpenSettings}>Open settings</button></div>
+              <div className="sf-gate-msg"><p>{t('Connect ListenBrainz under Settings › Scrobbling to see your streaming history')}</p><button className="sf-textbtn" onClick={onOpenSettings}>{t('Open settings')}</button></div>
             </div>
           ) : st?.error ? (
-            <p className="sf-grey">Could not load history: {st.error}</p>
+            <p className="sf-grey">{t('Could not load history: {error}', { error: st.error })}</p>
           ) : (
             <ul className="sf-stats">{[0, 1, 2, 3, 4, 5].map((i) => <li key={i}><div className="sf-skel-row"><span className="sf-skel-text" style={{ width: '50%', height: 28 }} /></div><span className="sf-skel-text" style={{ width: '70%' }} /></li>)}</ul>
           )}
@@ -392,15 +396,15 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
 
         {st?.connected && (
           <>
-            <Section title="Top genres" description={desc('top genres')}>
+            <Section title={t('Top genres')} description={desc(t('Your top genres {range}', R), t('Your top genres'))}>
               {st.topGenres.length ? (
                 <ul className="sf-chips">{st.topGenres.map((g) => <li key={g.id} className="sf-chip"><a>{g.name.toLowerCase()}</a></li>)}</ul>
-              ) : <div className="sf-empty"><p>Not enough data to complete this list</p></div>}
+              ) : <div className="sf-empty"><p>{t('Not enough data to complete this list')}</p></div>}
             </Section>
-            <Section title="Top tracks" description={desc('top tracks')} tools={tracks.tools}>{tracks.body}</Section>
-            <Section title="Top artists" description={desc('top artists')} tools={artists.tools}>{artists.body}</Section>
-            <Section title="Top albums" description={desc('top albums')} tools={albums.tools}>{albums.body}</Section>
-            <Section title="Streams and minutes streamed per day" description={desc('listening over time')}>
+            <Section title={t('Top tracks')} description={desc(t('Your top tracks {range}', R), t('Your top tracks'))} tools={tracks.tools}>{tracks.body}</Section>
+            <Section title={t('Top artists')} description={desc(t('Your top artists {range}', R), t('Your top artists'))} tools={artists.tools}>{artists.body}</Section>
+            <Section title={t('Top albums')} description={desc(t('Your top albums {range}', R), t('Your top albums'))} tools={albums.tools}>{albums.body}</Section>
+            <Section title={t('Streams and minutes streamed per day')} description={desc(t('Your listening over time {range}', R), t('Your listening over time'))}>
               {(() => {
                 const days = st.perDay || [];
                 const streamed = days.filter((d) => d.count > 0).length || 1;
@@ -411,7 +415,7 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
                   for (const d of rows) {
                     const dt = new Date(`${d.day}T00:00:00`);
                     const key = mode === 'month' ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}` : (() => { const m = new Date(dt); m.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); return m.toISOString().slice(0, 10); })();
-                    const cur = out.get(key) || { label: mode === 'month' ? dt.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) : shortDay(key), streams: 0, minutes: 0 };
+                    const cur = out.get(key) || { label: mode === 'month' ? dt.toLocaleDateString(language(), { month: 'short', year: '2-digit' }) : shortDay(key), streams: 0, minutes: 0 };
                     cur.streams += d.count; cur.minutes += d.minutes; out.set(key, cur);
                   }
                   return [...out.values()];
@@ -421,35 +425,35 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
                 return (
                   <>
                     <div className="sf-avg-cards">
-                      <div className="sf-avg-card"><h3>{fmtN(Math.round(st.streams / streamed))}</h3><span>average streams per day</span></div>
-                      <div className="sf-avg-card"><h3>{fmtN(Math.round(st.minutes / streamed))}</h3><span>average minutes per day</span></div>
+                      <div className="sf-avg-card"><h3>{fmtN(Math.round(st.streams / streamed))}</h3><span>{t('average streams per day')}</span></div>
+                      <div className="sf-avg-card"><h3>{fmtN(Math.round(st.minutes / streamed))}</h3><span>{t('average minutes per day')}</span></div>
                     </div>
                     <div className="sf-charts">
-                      <LineChart title="Daily" points={rows} />
-                      <LineChart title="Cumulative" points={rows} cumulative />
+                      <LineChart title={t('Daily')} points={rows} />
+                      <LineChart title={t('Cumulative')} points={rows} cumulative />
                     </div>
                   </>
                 );
               })()}
             </Section>
-            <Section title="Listening clocks" description={desc('listening habits throughout the day')}>
+            <Section title={t('Listening clocks')} description={desc(t('Your listening habits throughout the day {range}', R), t('Your listening habits throughout the day'))}>
               <div className="sf-clocks">
-                <div className="sf-clock-box"><Clock values={st.byHour} format={(v) => streams(v)} /><p>streams</p></div>
-                <div className="sf-clock-box"><Clock values={st.byHourSeconds || st.byHour} format={(v) => (st.byHourSeconds ? hm(v) : streams(v))} /><p>minutes streamed</p></div>
+                <div className="sf-clock-box"><Clock values={st.byHour} format={(v) => streams(v)} /><p>{t('streams')}</p></div>
+                <div className="sf-clock-box"><Clock values={st.byHourSeconds || st.byHour} format={(v) => (st.byHourSeconds ? hm(v) : streams(v))} /><p>{t('minutes streamed')}</p></div>
               </div>
             </Section>
-            <Section title="Recent streams" description="Your recently played tracks">
+            <Section title={t('Recent streams')} description={t('Your recently played tracks')}>
               {recent === null ? (
                 <ul className="sf-streams">{[0, 1, 2, 3].map((i) => <li key={i} className="sf-stream-skel"><span className="sf-skel-img" /><span className="sf-skel-text" style={{ width: '15rem' }} /><span className="sf-skel-text sf-right" style={{ width: '4rem' }} /></li>)}</ul>
               ) : recent.length === 0 ? (
-                <div className="sf-empty sf-empty-icon">{I.musicOff}<p>Looks like you don't have any recent streams</p></div>
+                <div className="sf-empty sf-empty-icon">{I.musicOff}<p>{t("Looks like you don't have any recent streams")}</p></div>
               ) : (
                 <>
                   {groups.map((g) => (
                     <React.Fragment key={g.day}>
                       <p className="sf-day">{g.day}</p>
                       {g.rows.map((r, i) => (
-                        <a key={`${r.ts}-${i}`} role="button" tabIndex={0} className="sf-stream" onClick={() => r.albumId && onOpenAlbum(r.albumId)} title={r.albumId ? 'Open album' : 'Not in your library'}>
+                        <a key={`${r.ts}-${i}`} role="button" tabIndex={0} className="sf-stream" onClick={() => r.albumId && onOpenAlbum(r.albumId)} title={r.albumId ? t('Open album') : t('Not in your library')}>
                           <div className="sf-stream-row">
                             <div className="sf-stream-main">
                               <div className="sf-stream-img">{cover(r, 96) ? <img src={cover(r, 96)} alt="" loading="lazy" width={48} height={48} /> : <div className="sf-ph" />}</div>
@@ -465,9 +469,9 @@ export default function History({ jf, me, onOpenArtist, onOpenAlbum, onOpenSetti
                       ))}
                     </React.Fragment>
                   ))}
-                  {!showAll && recent.length > 8 && <a role="button" tabIndex={0} className="sf-showall" onClick={() => setShowAll(true)}>show all</a>}
+                  {!showAll && recent.length > 8 && <a role="button" tabIndex={0} className="sf-showall" onClick={() => setShowAll(true)}>{t('show all')}</a>}
                   {showAll && !done && <div ref={endRef} className="sf-spinner-wrap">{more && <span className="sf-spinner" />}</div>}
-                  {showAll && done && <div className="sf-empty sf-empty-icon"><p>No streams to load!</p></div>}
+                  {showAll && done && <div className="sf-empty sf-empty-icon"><p>{t('No streams to load!')}</p></div>}
                 </>
               )}
             </Section>

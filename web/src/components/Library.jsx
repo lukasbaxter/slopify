@@ -7,6 +7,7 @@ import { primeKeepAlive } from '../player/keepalive.js';
 import { useOfflineMode, isOffline } from '../offline/net.js';
 import { canSaveOffline, useOffline, saveOffline, removeOffline, searchOffline, estimateBytes, savesLossless } from '../api/offline.js';
 import { vibrantColor } from '../api/colors.js';
+import { LANGUAGES, userLanguage, t, N_ } from '../i18n.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
 import Home, { topSongsSub } from './Home.jsx';
@@ -28,7 +29,7 @@ function Card({ title, subtitle, image, round, onOpen, onPlay }) {
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.()}>
       <div className="card-art">
         {image ? <img src={image} alt="" loading="lazy" /> : <div className="ph" />}
-        <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title="Play">
+        <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
           <PlayGlyph />
         </button>
       </div>
@@ -44,12 +45,12 @@ function Shelf({ title, items, jf, round, onOpen, onPlay, onSeeAll, subtitle }) 
     <section>
       <div className="shelf-head">
         <h2 onClick={onSeeAll}>{title}</h2>
-        {onSeeAll && <button onClick={onSeeAll}>Show all</button>}
+        {onSeeAll && <button onClick={onSeeAll}>{t('Show all')}</button>}
       </div>
       <div className="shelf">
         {items.map((it) => (
           <Card key={it.Id} title={it.Name}
-            subtitle={subtitle ? subtitle(it) : (round ? 'Artist' : it.AlbumArtist)}
+            subtitle={subtitle ? subtitle(it) : (round ? t('Artist') : it.AlbumArtist)}
             image={jf.imageUrl(it.Id, { maxHeight: 320 })} round={round}
             onOpen={() => onOpen(it)} onPlay={() => onPlay(it)} />
         ))}
@@ -60,7 +61,7 @@ function Shelf({ title, items, jf, round, onOpen, onPlay, onSeeAll, subtitle }) 
 
 // "Everywhere" searches the whole catalog (through Lidarr's metadata)
 // and offers a Request button for what the library does not have.
-const SEARCH_TYPES = ['All', 'Songs', 'Artists', 'Albums', 'Playlists', 'Everywhere'];
+const SEARCH_TYPES = [N_('All'), N_('Songs'), N_('Artists'), N_('Albums'), N_('Playlists'), N_('Everywhere')];
 
 // Phone layout flag: usePhone() from TrackRow.jsx (same breakpoint as the
 // phone CSS). The search page renders a flat Spotify-style result list there.
@@ -68,6 +69,8 @@ const SEARCH_TYPES = ['All', 'Songs', 'Artists', 'Albums', 'Playlists', 'Everywh
 // A recent search is the thing that was opened or played from a result list:
 // { q, kind, id, art, name, sub }. Spotify lists those, never the typed text.
 const recentKey = (x) => `${x.kind}:${x.id}`;
+// A translated sentence with {name} slots filled by elements (links, <code>).
+const rich = (s, nodes) => s.split(/(\{\w+\})/).map((part, i) => { const n = /^\{(\w+)\}$/.exec(part); return n && nodes[n[1]] ? <React.Fragment key={i}>{nodes[n[1]]}</React.Fragment> : part; });
 
 const CloseGlyph = () => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M2.47 2.47a.75.75 0 0 1 1.06 0L8 6.94l4.47-4.47a.75.75 0 1 1 1.06 1.06L9.06 8l4.47 4.47a.75.75 0 1 1-1.06 1.06L8 9.06l-4.47 4.47a.75.75 0 0 1-1.06-1.06L6.94 8 2.47 3.53a.75.75 0 0 1 0-1.06z" /></svg>
@@ -86,7 +89,7 @@ function SearchRow({ image, round, name, sub, onClick, onRemove, action = null, 
       </div>
       {action}
       {onRemove && (
-        <button className="srow-x" onClick={(e) => { e.stopPropagation(); onRemove(); }} title="Remove" aria-label="Remove">
+        <button className="srow-x" onClick={(e) => { e.stopPropagation(); onRemove(); }} title={t('Remove')} aria-label={t('Remove')}>
           <CloseGlyph />
         </button>
       )}
@@ -142,13 +145,13 @@ export function phoneHero(color) {
 function fmtTotal(ticks) {
   const s = Math.round((ticks || 0) / 10_000_000);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return h ? `${h} hr ${m} min` : `${m} min ${sec} sec`;
+  return h ? t('{h} hr {m} min', { h, m }) : t('{m} min {sec} sec', { m, sec });
 }
 // Spotify's phone headers: "3h 7min", "9min 39sec".
 function fmtTotalShort(ticks) {
   const s = Math.round((ticks || 0) / 10_000_000);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return h ? `${h}h ${m}min` : `${m}min ${sec}sec`;
+  return h ? t('{h}h {m}min', { h, m }) : t('{m}min {sec}sec', { m, sec });
 }
 const Clock = () => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z" /><path d="M8 3.25a.75.75 0 0 1 .75.75v3.25H11a.75.75 0 0 1 0 1.5H7.25V4A.75.75 0 0 1 8 3.25z" /></svg>
@@ -163,9 +166,9 @@ const Dots = () => (
 function FilterPills({ where, setSeeAll, goHome }) {
   return (
     <div className="pills">
-      <button className={`pill ${where === 'all' ? 'on' : ''}`} onClick={goHome}>All</button>
-      <button className={`pill ${where === 'albums' ? 'on' : ''}`} onClick={() => setSeeAll('albums')}>Music</button>
-      <button className={`pill ${where === 'artists' ? 'on' : ''}`} onClick={() => setSeeAll('artists')}>Artists</button>
+      <button className={`pill ${where === 'all' ? 'on' : ''}`} onClick={goHome}>{t('All')}</button>
+      <button className={`pill ${where === 'albums' ? 'on' : ''}`} onClick={() => setSeeAll('albums')}>{t('Music')}</button>
+      <button className={`pill ${where === 'artists' ? 'on' : ''}`} onClick={() => setSeeAll('artists')}>{t('Artists')}</button>
     </div>
   );
 }
@@ -174,12 +177,12 @@ export function releaseType(album) {
   const n = album.ChildCount ?? album.SongCount ?? 0;
   const mins = (album.RunTimeTicks || 0) / 600_000_000;
   const name = album.Name || '';
-  if (/various artists/i.test(album.AlbumArtist || '')) return 'Compilation';
-  if (/\b(EP)\b\s*$|\s[-–]\s*EP\s*$/i.test(name)) return 'EP';
-  if (/\s[-–]\s*Single\s*$|\(single\)$/i.test(name)) return 'Single';
-  if (n && n <= 3 && (!mins || mins < 30)) return 'Single';
-  if (n && n <= 6 && (!mins || mins < 30)) return 'EP';
-  return 'Album';
+  if (/various artists/i.test(album.AlbumArtist || '')) return N_('Compilation');
+  if (/\b(EP)\b\s*$|\s[-–]\s*EP\s*$/i.test(name)) return N_('EP');
+  if (/\s[-–]\s*Single\s*$|\(single\)$/i.test(name)) return N_('Single');
+  if (n && n <= 3 && (!mins || mins < 30)) return N_('Single');
+  if (n && n <= 6 && (!mins || mins < 30)) return N_('EP');
+  return N_('Album');
 }
 
 export default function Library({
@@ -223,7 +226,7 @@ export default function Library({
   // shown like a playlist (list, play, shuffle) rather than played blind.
   const openMix = async (seed, n, color) => {
     const id = `mix:${seed.Id}`;
-    setDetail({ item: { Id: id, Name: `Daily Mix ${n}`, Type: 'Playlist', _mix: true, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: `${seed.Name} and more` }, tracks: [], kind: 'Playlist', loading: true });
+    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: t('{name} and more', { name: seed.Name }) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.instantMix(seed.Id, 50);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
@@ -233,14 +236,14 @@ export default function Library({
   // account's own plays), shown like a Daily Mix.
   const openTopSongs = async (y, color) => {
     const id = `top:${y.year}`;
-    setDetail({ item: { Id: id, Name: `Your Top Songs ${y.year}`, Type: 'Playlist', _mix: true, _art: y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 464, full: true }) : null, _color: color, _sub: topSongsSub(y.year) }, tracks: [], kind: 'Playlist', loading: true });
+    setDetail({ item: { Id: id, Name: t('Your Top Songs {year}', { year: y.year }), Type: 'Playlist', _mix: true, _art: y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 464, full: true }) : null, _color: color, _sub: topSongsSub(y.year) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.topSongs(y.year);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   const openRadar = async () => {
-    setDetail({ item: { Id: 'radar', Name: 'Release Radar', Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
+    setDetail({ item: { Id: 'radar', Name: t('Release Radar'), Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
     try {
       const r = await relayRadar(jf);
       setDetail((d) => (d && d.item?.Id === 'radar' ? { ...d, releases: r.releases || [] } : d));
@@ -381,7 +384,7 @@ export default function Library({
   const PENDING = ['queued', 'exists', 'downloading'];
   const stateOf = (r) => { const mine = requesting[r.album_id]; const srv = r.requestStatus; return mine && (!srv || srv === 'failed') ? mine : srv || mine; };
   const requestUi = (st) => ({
-    label: st === 'queued' ? 'Requested' : st === 'exists' ? 'Requested' : st === 'downloading' ? 'Downloading…' : st === 'failed' ? 'Retry' : st === 'error' ? 'Failed' : 'Request',
+    label: st === 'queued' ? t('Requested') : st === 'exists' ? t('Requested') : st === 'downloading' ? t('Downloading…') : st === 'failed' ? t('Retry') : st === 'error' ? t('Failed') : t('Request'),
     busy: PENDING.includes(st),
   });
   const requestRelease = async (artistId, rel) => {
@@ -610,15 +613,15 @@ export default function Library({
         <div className="content" style={{ '--hero': phone ? phoneHero(item._color) : item._color }}>
           <header className="hero tinted browse-hero">
             <div style={{ minWidth: 0 }}>
-              <div className="kind">Made for you</div>
-              <FittedTitle text="Release Radar" maxLines={2} />
-              <p className="hero-meta">{rels == null ? 'Checking the last 90 days for the artists you play most…' : `${rels.length} new releases from the artists you play most • last 90 days`}</p>
+              <div className="kind">{t('Made for you')}</div>
+              <FittedTitle text={t('Release Radar')} maxLines={2} />
+              <p className="hero-meta">{rels == null ? t('Checking the last 90 days for the artists you play most…') : t('{n} new releases from the artists you play most • last 90 days', { n: rels.length })}</p>
             </div>
           </header>
           <div className="actions slim" />
           <div className="pad">
             {err && <div className="banner error">{err}</div>}
-            {rels && rels.length === 0 && <p className="placeholder-note">Nothing new from your top artists in the last 90 days.</p>}
+            {rels && rels.length === 0 && <p className="placeholder-note">{t('Nothing new from your top artists in the last 90 days.')}</p>}
             {rels && rels.length > 0 && (
               <div className="grid">
                 {/* Two artists can share a release (splits, features): the key needs both ids. */}
@@ -635,7 +638,7 @@ export default function Library({
                       })()}
                     </div>
                     <div className="card-title">{r.title}</div>
-                    <div className="card-sub"><button className="rowlink" onClick={() => onOpenArtistById(r.artistId)}>{r.artistName}</button> • {r.rtype} • {r.date}</div>
+                    <div className="card-sub"><button className="rowlink" onClick={() => onOpenArtistById(r.artistId)}>{r.artistName}</button> • {r.rtype ? t(r.rtype) : ''} • {r.date}</div>
                   </div>
                 ))}
               </div>
@@ -648,7 +651,7 @@ export default function Library({
     if (kind === 'Browse') {
       const hub = detail.hub;
       const byAlbum = new Map();
-      for (const t of tracks) if (t.AlbumId && !byAlbum.has(t.AlbumId)) byAlbum.set(t.AlbumId, { Id: t.AlbumId, Name: t.Album || 'Unknown album', AlbumArtist: t.AlbumArtist || (t.Artists || [])[0] });
+      for (const x of tracks) if (x.AlbumId && !byAlbum.has(x.AlbumId)) byAlbum.set(x.AlbumId, { Id: x.AlbumId, Name: x.Album || t('Unknown album'), AlbumArtist: x.AlbumArtist || (x.Artists || [])[0] });
       // A genre mix: everything in the genre, leaning toward plays and likes.
       const playMix = async (shuffleFirst) => {
         const mix = item._genre ? await jf.genreMix(item._genre).catch(() => tracks) : tracks;
@@ -661,30 +664,30 @@ export default function Library({
 
           <header className="hero tinted browse-hero">
             <div style={{ minWidth: 0 }}>
-              <div className="kind">Genre</div>
+              <div className="kind">{t('Genre')}</div>
               <FittedTitle text={item.Name} maxLines={2} />
-              <p className="hero-meta">{hub ? `${(hub.trackCount || 0).toLocaleString()} songs • ${(hub.albumCount || 0).toLocaleString()} albums` : tracks.length ? `${tracks.length} most played` : detail.loading ? 'Loading…' : detail.loadFailed ? (offlineMode ? 'Not available offline' : 'Couldn’t load this — try again') : 'Nothing in this genre yet'}</p>
+              <p className="hero-meta">{hub ? t('{songs} songs • {albums} albums', { songs: (hub.trackCount || 0).toLocaleString(), albums: (hub.albumCount || 0).toLocaleString() }) : tracks.length ? t('{n} most played', { n: tracks.length }) : detail.loading ? t('Loading…') : detail.loadFailed ? (offlineMode ? t('Not available offline') : t('Couldn’t load this — try again')) : t('Nothing in this genre yet')}</p>
             </div>
           </header>
           <div className="actions">
-            <button className="iconbtn shuffle" onClick={() => playMix(true)} title="Shuffle"><Shuffle /></button>
-            <button className="bigplay" onClick={() => playMix(false)} title="Play"><PlayGlyph size={24} /></button>
+            <button className="iconbtn shuffle" onClick={() => playMix(true)} title={t('Shuffle')}><Shuffle /></button>
+            <button className="bigplay" onClick={() => playMix(false)} title={t('Play')}><PlayGlyph size={24} /></button>
           </div>
           <div className="pad">
             {err && <div className="banner error">{err}</div>}
             {hub?.topArtists?.length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Top artists</h2></div>
+                <div className="shelf-head"><h2>{t('Top artists')}</h2></div>
                 <div className="shelf">
                   {hub.topArtists.map((a) => (
-                    <Card key={a.id} title={a.name} subtitle="Artist" round image={jf.imageUrl(a.id, { maxHeight: 320 })} onOpen={() => onOpenArtistById(a.id)} onPlay={() => playItem({ Id: a.id, Type: 'MusicArtist', Name: a.name })} />
+                    <Card key={a.id} title={a.name} subtitle={t('Artist')} round image={jf.imageUrl(a.id, { maxHeight: 320 })} onOpen={() => onOpenArtistById(a.id)} onPlay={() => playItem({ Id: a.id, Type: 'MusicArtist', Name: a.name })} />
                   ))}
                 </div>
               </section>
             )}
             {(hub?.albums?.length || byAlbum.size) > 0 && (
               <section>
-                <div className="shelf-head"><h2>Albums</h2></div>
+                <div className="shelf-head"><h2>{t('Albums')}</h2></div>
                 <div className="grid">
                   {(hub?.albums || [...byAlbum.values()].map((a) => ({ id: a.Id, name: a.Name, artist: a.AlbumArtist }))).slice(0, 18).map((a) => (
                     <Card key={a.id} title={a.name} subtitle={`${a.artist}${a.year ? ` • ${a.year}` : ''}`} image={jf.imageUrl(a.id, { maxHeight: 320 })}
@@ -695,7 +698,7 @@ export default function Library({
             )}
             {hub?.recent?.length > 0 && (
               <section>
-                <div className="shelf-head"><h2>New additions</h2></div>
+                <div className="shelf-head"><h2>{t('New additions')}</h2></div>
                 <div className="shelf">
                   {hub.recent.slice(0, 12).map((a) => (
                     <Card key={a.id} title={a.name} subtitle={a.artist} image={jf.imageUrl(a.id, { maxHeight: 320 })}
@@ -706,7 +709,7 @@ export default function Library({
             )}
             {tracks.length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Popular</h2></div>
+                <div className="shelf-head"><h2>{t('Popular')}</h2></div>
                 <div className="tracklist" style={{ padding: 0 }}>
                   {tracks.map((t, i) => <TrackRow key={t.Id} {...rowProps(tracks, i, { showArt: true }, item.Id)} />)}
                 </div>
@@ -735,22 +738,22 @@ export default function Library({
         return (
           <div className="content settings-phone sub">
             <div className="settings-nav">
-              <button onClick={() => setSettingsSub(null)} aria-label="Back"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.957 2.793a1 1 0 0 1 0 1.414L8.164 12l7.793 7.793a1 1 0 1 1-1.414 1.414L5.336 12l9.207-9.207a1 1 0 0 1 1.414 0z" /></svg></button>
-              <b>Scrobbling</b>
+              <button onClick={() => setSettingsSub(null)} aria-label={t('Back')}><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.957 2.793a1 1 0 0 1 0 1.414L8.164 12l7.793 7.793a1 1 0 1 1-1.414 1.414L5.336 12l9.207-9.207a1 1 0 0 1 1.414 0z" /></svg></button>
+              <b>{t('Scrobbling')}</b>
             </div>
             <form className="pad settings" onSubmit={async (e) => { e.preventDefault(); await onUpdatePrefs({ listenbrainz: { user: d.user.trim(), token: d.token.trim() } }); setLbDraft(null); setLbSaved(true); setTimeout(() => setLbSaved(false), 2500); }}>
-              <p className="settings-caption">Every song you play for at least half its length is sent to ListenBrainz as a listen. That history powers the Weekly Exploration and Daily Jams playlists on Home. Get the token from listenbrainz.org, under Settings.</p>
+              <p className="settings-caption">{t('Every song you play for at least half its length is sent to ListenBrainz as a listen. That history powers the Weekly Exploration and Daily Jams playlists on Home. Get the token from listenbrainz.org, under Settings.')}</p>
               <div className="settings-field">
-                <label>ListenBrainz username</label>
-                <input className="settings-input" value={d.user} onChange={(e) => setLbDraft({ ...d, user: e.target.value })} spellCheck="false" autoCapitalize="none" placeholder="username" />
+                <label>{t('ListenBrainz username')}</label>
+                <input className="settings-input" value={d.user} onChange={(e) => setLbDraft({ ...d, user: e.target.value })} spellCheck="false" autoCapitalize="none" placeholder={t('username')} />
               </div>
               <div className="settings-field">
-                <label>ListenBrainz user token</label>
+                <label>{t('ListenBrainz user token')}</label>
                 <input className="settings-input" type="password" value={d.token} onChange={(e) => setLbDraft({ ...d, token: e.target.value })} spellCheck="false" placeholder="xxxxxxxx-xxxx-…" />
               </div>
-              <button type="submit" className="settings-save" disabled={!dirty}>{lbSaved ? 'Saved' : 'Save'}</button>
-              <p className="settings-caption">{cur.token ? `Scrobbling as ${cur.user || 'your account'}.` : 'Scrobbling is off until a token is saved.'}</p>
-              {cur.token && <button type="button" className="settings-disconnect" onClick={async () => { await onUpdatePrefs({ listenbrainz: { user: '', token: '' } }); setLbDraft(null); }}>Disconnect</button>}
+              <button type="submit" className="settings-save" disabled={!dirty}>{lbSaved ? t('Saved') : t('Save')}</button>
+              <p className="settings-caption">{cur.token ? (cur.user ? t('Scrobbling as {user}.', { user: cur.user }) : t('Scrobbling as your account.')) : t('Scrobbling is off until a token is saved.')}</p>
+              {cur.token && <button type="button" className="settings-disconnect" onClick={async () => { await onUpdatePrefs({ listenbrainz: { user: '', token: '' } }); setLbDraft(null); }}>{t('Disconnect')}</button>}
             </form>
           </div>
         );
@@ -763,45 +766,51 @@ export default function Library({
                 <img key={avatarV} src={jf.userImageUrl({ maxHeight: 128 })} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                 <span>{(me?.Name || '?').slice(0, 1).toUpperCase()}</span>
               </span>
-              <span className="setrow-text"><b>{me?.Name}</b><small>View profile</small></span>
+              <span className="setrow-text"><b>{me?.Name}</b><small>{t('View profile')}</small></span>
               <Chev />
             </button>
 
-            <h2>Playback</h2>
+            <h2>{t('Playback')}</h2>
             <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'phoneQuality' }); }}>
-              <span className="setrow-text"><b>Streaming quality on phones</b><small>{phoneQuality.label}</small></span>
+              <span className="setrow-text"><b>{t('Streaming quality on phones')}</b><small>{t(phoneQuality.label)}</small></span>
               <Chev />
             </button>
             <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'quality' }); }}>
-              <span className="setrow-text"><b>Streaming quality elsewhere</b><small>{quality.label}</small></span>
+              <span className="setrow-text"><b>{t('Streaming quality elsewhere')}</b><small>{t(quality.label)}</small></span>
               <Chev />
             </button>
             <button className="setrow" onClick={() => onUpdatePrefs({ normalize: prefs?.normalize === false })}>
-              <span className="setrow-text"><b>Normalize volume</b><small>{prefs?.normalize === false ? 'Off' : 'On: every song at the same loudness'}</small></span>
+              <span className="setrow-text"><b>{t('Normalize volume')}</b><small>{prefs?.normalize === false ? t('Off') : t('On: every song at the same loudness')}</small></span>
             </button>
             <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'crossfade' }); }}>
-              <span className="setrow-text"><b>Crossfade</b><small>{crossfadeLabel(prefs?.crossfade)}. Not on iPhone yet</small></span>
+              <span className="setrow-text"><b>{t('Crossfade')}</b><small>{t('{value}. Not on iPhone yet', { value: crossfadeLabel(prefs?.crossfade) })}</small></span>
               <Chev />
             </button>
             <button className="setrow" onClick={() => onUpdatePrefs({ gapless: prefs?.gapless === false })}>
-              <span className="setrow-text"><b>Gapless playback</b><small>{prefs?.gapless === false ? 'Off' : 'On'}. Not on iPhone yet</small></span>
+              <span className="setrow-text"><b>{t('Gapless playback')}</b><small>{prefs?.gapless === false ? t('Off. Not on iPhone yet') : t('On. Not on iPhone yet')}</small></span>
             </button>
 
-            <h2>Scrobbling</h2>
+            <h2>{t('Scrobbling')}</h2>
             <button className="setrow" onClick={() => setSettingsSub('scrobbling')}>
-              <span className="setrow-text"><b>Scrobbling</b><small>{cur.token ? `On, as ${cur.user || 'your account'}` : 'Off'}</small></span>
+              <span className="setrow-text"><b>{t('Scrobbling')}</b><small>{cur.token ? (cur.user ? t('On, as {user}', { user: cur.user }) : t('On, as your account')) : t('Off')}</small></span>
               <Chev />
             </button>
 
-            <h2>Import from Spotify</h2>
+            <h2>{t('Import from Spotify')}</h2>
             <SpotifyImport jf={jf} />
 
-            <h2>Appearance</h2>
-            <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'theme' }); }}>
-              <span className="setrow-text"><b>Theme</b><small>{preset ? preset.name : 'Custom'}</small></span>
+            <h2>{t('Language')}</h2>
+            <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'language' }); }}>
+              <span className="setrow-text"><b>{t('Language')}</b><small>{LANGUAGES.find(([k]) => k === userLanguage())?.[1] || t('Automatic')}</small></span>
               <Chev />
             </button>
-            {[['accent', 'Accent', 'Play button, likes, the active track'], ['bg', 'Background', 'The page behind everything'], ['surface', 'Surface', 'Cards, menus, the queue panel'], ['fg', 'Text', 'Titles and icons']].map(([k, label, hint]) => (
+
+            <h2>{t('Appearance')}</h2>
+            <button className="setrow" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSettingsMenu({ x: r.left, y: r.bottom, kind: 'theme' }); }}>
+              <span className="setrow-text"><b>{t('Theme')}</b><small>{preset ? t(preset.name) : t('Custom')}</small></span>
+              <Chev />
+            </button>
+            {[['accent', t('Accent'), t('Play button, likes, the active track')], ['bg', t('Background'), t('The page behind everything')], ['surface', t('Surface'), t('Cards, menus, the queue panel')], ['fg', t('Text'), t('Titles and icons')]].map(([k, label, hint]) => (
               <label key={k} className={`setrow color ${hexOpen === k ? 'open' : ''}`} onClick={() => setHexOpen(k)}>
                 <input type="color" value={theme[k]} onChange={(e) => setColor(k, e.target.value)} />
                 <span className="setrow-text"><b>{label}</b><small>{hexOpen === k ? theme[k] : hint}</small></span>
@@ -809,14 +818,14 @@ export default function Library({
               </label>
             ))}
             <button className="setrow" onClick={() => onUpdatePrefs({ theme: DEFAULT_THEME })} disabled={themeEquals(theme, DEFAULT_THEME)}>
-              <span className="setrow-text"><b>Reset to default</b></span>
+              <span className="setrow-text"><b>{t('Reset to default')}</b></span>
             </button>
-            <p className="settings-caption">Saved to your account and applied to every Slopify you have open.</p>
+            <p className="settings-caption">{t('Saved to your account and applied to every Slopify you have open.')}</p>
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} phone />}
 
-            <h2>Help</h2>
+            <h2>{t('Help')}</h2>
             <button className="setrow" onClick={() => setLogsOpen(true)}>
-              <span className="setrow-text"><b>Logs</b><small>See what the app logged, report a problem</small></span>
+              <span className="setrow-text"><b>{t('Logs')}</b><small>{t('See what the app logged, report a problem')}</small></span>
               <Chev />
             </button>
             {logsOpen && <LogsDialog jf={jf} onClose={() => setLogsOpen(false)} />}
@@ -824,14 +833,16 @@ export default function Library({
 
             {settingsMenu && (
               <ContextMenu x={settingsMenu.x} y={settingsMenu.y} onClose={() => setSettingsMenu(null)}
-                header={settingsMenu.kind === 'crossfade' ? { icon: MI.play, title: 'Crossfade', sub: 'Songs that end by themselves fade into the next. Albums played in order stay gapless.' } : settingsMenu.kind === 'phoneQuality' ? { icon: MI.play, title: 'Streaming quality on phones', sub: 'Applies from the next track on every phone signed in as you.' } : settingsMenu.kind === 'quality' ? { icon: MI.play, title: 'Streaming quality elsewhere', sub: 'Desktop and tablet. Applies from the next track. Speakers always get the original file.' } : { icon: MI.photo, title: 'Theme', sub: 'Applied to every Slopify you have open, instantly.' }}
-                items={settingsMenu.kind === 'crossfade'
+                header={settingsMenu.kind === 'language' ? { icon: MI.gear, title: t('Language'), sub: t('Saved to your account. Automatic follows the server, then this device.') } : settingsMenu.kind === 'crossfade' ? { icon: MI.play, title: t('Crossfade'), sub: t('Songs that end by themselves fade into the next. Albums played in order stay gapless.') } : settingsMenu.kind === 'phoneQuality' ? { icon: MI.play, title: t('Streaming quality on phones'), sub: t('Applies from the next track on every phone signed in as you.') } : settingsMenu.kind === 'quality' ? { icon: MI.play, title: t('Streaming quality elsewhere'), sub: t('Desktop and tablet. Applies from the next track. Speakers always get the original file.') } : { icon: MI.photo, title: t('Theme'), sub: t('Applied to every Slopify you have open, instantly.') }}
+                items={settingsMenu.kind === 'language'
+                  ? [['', t('Automatic')], ...LANGUAGES].map(([k, label]) => ({ key: `l${k}`, label, icon: userLanguage() === k ? MI.check : null, onClick: () => onUpdatePrefs({ language: k }) }))
+                  : settingsMenu.kind === 'crossfade'
                   ? CROSSFADES.map((sec) => ({ key: `x${sec}`, label: crossfadeLabel(sec), icon: (Number(prefs?.crossfade) || 0) === sec ? MI.check : null, onClick: () => onUpdatePrefs({ crossfade: sec }) }))
                   : settingsMenu.kind === 'phoneQuality'
-                  ? QUALITIES.map((q) => ({ key: q.id, label: q.label, icon: q.id === phoneQuality.id ? MI.check : null, onClick: () => onUpdatePrefs({ phoneQuality: q.id }) }))
+                  ? QUALITIES.map((q) => ({ key: q.id, label: t(q.label), icon: q.id === phoneQuality.id ? MI.check : null, onClick: () => onUpdatePrefs({ phoneQuality: q.id }) }))
                   : settingsMenu.kind === 'quality'
-                  ? QUALITIES.map((q) => ({ key: q.id, label: q.label, icon: q.id === quality.id ? MI.check : null, onClick: () => onUpdatePrefs({ quality: q.id }) }))
-                  : THEME_PRESETS.map((p) => ({ key: p.name, label: p.name, icon: preset?.name === p.name ? MI.check : <span className="theme-dot" style={{ background: p.theme.accent }} />, onClick: () => onUpdatePrefs({ theme: p.theme }) }))} />
+                  ? QUALITIES.map((q) => ({ key: q.id, label: t(q.label), icon: q.id === quality.id ? MI.check : null, onClick: () => onUpdatePrefs({ quality: q.id }) }))
+                  : THEME_PRESETS.map((p) => ({ key: p.name, label: t(p.name), icon: preset?.name === p.name ? MI.check : <span className="theme-dot" style={{ background: p.theme.accent }} />, onClick: () => onUpdatePrefs({ theme: p.theme }) }))} />
             )}
           </div>
         </div>
@@ -844,62 +855,62 @@ export default function Library({
         <div className="content">
 
           <div className="pad settings">
-            <h1 className="greeting">Settings</h1>
+            <h1 className="greeting">{t('Settings')}</h1>
 
             <section className="settings-section">
-              <h2>Profile</h2>
+              <h2>{t('Profile')}</h2>
               <div className="settings-row">
-                <label className="settings-avatar" title="Choose photo">
+                <label className="settings-avatar" title={t('Choose photo')}>
                   <img key={avatarV} src={jf.userImageUrl({ maxHeight: 256 })} alt="" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
-                  <span>Choose photo</span>
+                  <span>{t('Choose photo')}</span>
                   <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadAvatar(f); e.target.value = ''; }} />
                 </label>
                 <div>
                   <div className="settings-name">{me?.Name}</div>
-                  <div className="settings-hint">Profile picture is stored on your account and shows on every device.</div>
+                  <div className="settings-hint">{t('Profile picture is stored on your account and shows on every device.')}</div>
                 </div>
               </div>
             </section>
 
             <section className="settings-section">
-              <h2>Playback</h2>
+              <h2>{t('Playback')}</h2>
               <div className="settings-field">
-                <label>Streaming quality</label>
+                <label>{t('Streaming quality')}</label>
                 <select value={prefs?.quality || 'original'} onChange={(e) => onUpdatePrefs({ quality: e.target.value })}>
-                  {QUALITIES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+                  {QUALITIES.map((q) => <option key={q.id} value={q.id}>{t(q.label)}</option>)}
                 </select>
-                <div className="settings-hint">{QUALITIES.find((q) => q.id === (prefs?.quality || 'original'))?.hint || 'Applies from the next track. Speakers always get the original file.'}</div>
+                <div className="settings-hint">{(() => { const h = QUALITIES.find((q) => q.id === (prefs?.quality || 'original'))?.hint; return h ? t(h) : t('Applies from the next track. Speakers always get the original file.'); })()}</div>
               </div>
               <div className="settings-field">
-                <label>Normalize volume</label>
+                <label>{t('Normalize volume')}</label>
                 <select value={prefs?.normalize === false ? 'off' : 'on'} onChange={(e) => onUpdatePrefs({ normalize: e.target.value === 'on' })}>
-                  <option value="on">On</option>
-                  <option value="off">Off</option>
+                  <option value="on">{t('On')}</option>
+                  <option value="off">{t('Off')}</option>
                 </select>
-                <div className="settings-hint">Every song at the same loudness, like Spotify&apos;s Normal (-14 LUFS). An album played in order keeps its own balance. Not applied on speakers or to lossless on iPhone.</div>
+                <div className="settings-hint">{t('Every song at the same loudness, like Spotify’s Normal (-14 LUFS). An album played in order keeps its own balance. Not applied on speakers or to lossless on iPhone.')}</div>
               </div>
               <div className="settings-field">
-                <label>Crossfade</label>
+                <label>{t('Crossfade')}</label>
                 <select value={String(Number(prefs?.crossfade) || 0)} onChange={(e) => onUpdatePrefs({ crossfade: Number(e.target.value) })}>
                   {CROSSFADES.map((sec) => <option key={sec} value={sec}>{crossfadeLabel(sec)}</option>)}
                 </select>
-                <div className="settings-hint">Songs that end by themselves fade into the next. Albums played in order stay gapless. On computers and Android, not on iPhone or speakers yet.</div>
+                <div className="settings-hint">{t('Songs that end by themselves fade into the next. Albums played in order stay gapless. On computers and Android, not on iPhone or speakers yet.')}</div>
               </div>
               <div className="settings-field">
-                <label>Gapless playback</label>
+                <label>{t('Gapless playback')}</label>
                 <select value={prefs?.gapless === false ? 'off' : 'on'} onChange={(e) => onUpdatePrefs({ gapless: e.target.value === 'on' })}>
-                  <option value="on">On</option>
-                  <option value="off">Off</option>
+                  <option value="on">{t('On')}</option>
+                  <option value="off">{t('Off')}</option>
                 </select>
-                <div className="settings-hint">The next song starts the moment one ends, so live albums and mixes play through. On computers and Android.</div>
+                <div className="settings-hint">{t('The next song starts the moment one ends, so live albums and mixes play through. On computers and Android.')}</div>
               </div>
             </section>
 
             <section className="settings-section">
-              <h2>Scrobbling &amp; discovery</h2>
+              <h2>{t('Scrobbling & discovery')}</h2>
               <div className="settings-hint" style={{ marginBottom: 12 }}>
-                Every song you play for at least half its length is sent to <a href="https://listenbrainz.org" target="_blank" rel="noreferrer">ListenBrainz</a> as a listen.
-                That history powers the Weekly Exploration / Daily Jams playlists on Home. Get the token from listenbrainz.org → Settings.
+                {rich(t('Every song you play for at least half its length is sent to {service} as a listen.'), { service: <a href="https://listenbrainz.org" target="_blank" rel="noreferrer">ListenBrainz</a> })}
+                {' '}{t('That history powers the Weekly Exploration / Daily Jams playlists on Home. Get the token from listenbrainz.org → Settings.')}
               </div>
               {(() => {
                 const cur = prefs?.listenbrainz || {};
@@ -908,17 +919,17 @@ export default function Library({
                 return (
                   <form className="lb-form" onSubmit={async (e) => { e.preventDefault(); await onUpdatePrefs({ listenbrainz: { user: d.user.trim(), token: d.token.trim() } }); setLbDraft(null); setLbSaved(true); setTimeout(() => setLbSaved(false), 2500); }}>
                     <div className="settings-field">
-                      <label>ListenBrainz username</label>
-                      <input className="settings-input" value={d.user} onChange={(e) => setLbDraft({ ...d, user: e.target.value })} spellCheck="false" placeholder="username" />
+                      <label>{t('ListenBrainz username')}</label>
+                      <input className="settings-input" value={d.user} onChange={(e) => setLbDraft({ ...d, user: e.target.value })} spellCheck="false" placeholder={t('username')} />
                     </div>
                     <div className="settings-field" style={{ marginTop: 10 }}>
-                      <label>ListenBrainz user token</label>
+                      <label>{t('ListenBrainz user token')}</label>
                       <input className="settings-input" type="password" value={d.token} onChange={(e) => setLbDraft({ ...d, token: e.target.value })} spellCheck="false" placeholder="xxxxxxxx-xxxx-…" />
                     </div>
                     <div className="settings-actions">
-                      <button type="submit" className="primary" disabled={!dirty}>{lbSaved ? 'Saved' : 'Save'}</button>
-                      {cur.token && <button type="button" className="btn-secondary" onClick={async () => { await onUpdatePrefs({ listenbrainz: { user: '', token: '' } }); setLbDraft(null); }}>Disconnect</button>}
-                      <span className="settings-hint" style={{ margin: 0 }}>{cur.token ? `Scrobbling as ${cur.user || 'your account'}.` : 'Scrobbling is off until a token is saved.'}</span>
+                      <button type="submit" className="primary" disabled={!dirty}>{lbSaved ? t('Saved') : t('Save')}</button>
+                      {cur.token && <button type="button" className="btn-secondary" onClick={async () => { await onUpdatePrefs({ listenbrainz: { user: '', token: '' } }); setLbDraft(null); }}>{t('Disconnect')}</button>}
+                      <span className="settings-hint" style={{ margin: 0 }}>{cur.token ? (cur.user ? t('Scrobbling as {user}.', { user: cur.user }) : t('Scrobbling as your account.')) : t('Scrobbling is off until a token is saved.')}</span>
                     </div>
                   </form>
                 );
@@ -926,23 +937,34 @@ export default function Library({
             </section>
 
             <section className="settings-section">
-              <h2>Import from Spotify</h2>
+              <h2>{t('Import from Spotify')}</h2>
               <SpotifyImport jf={jf} />
             </section>
 
             <section className="settings-section">
-              <h2>Appearance</h2>
-              <div className="settings-hint" style={{ marginBottom: 12 }}>Saved to your account and applied to every Slopify you have open, instantly.</div>
+              <h2>{t('Language')}</h2>
+              <div className="settings-field">
+                <select value={userLanguage()} onChange={(e) => onUpdatePrefs({ language: e.target.value })}>
+                  <option value="">{t('Automatic')}</option>
+                  {LANGUAGES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+                <div className="settings-hint">{t('Saved to your account. Automatic follows the server, then this device.')}</div>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <h2>{t('Appearance')}</h2>
+              <div className="settings-hint" style={{ marginBottom: 12 }}>{t('Saved to your account and applied to every Slopify you have open, instantly.')}</div>
               <div className="theme-presets">
                 {THEME_PRESETS.map((p) => (
                   <button key={p.name} className={`theme-preset ${themeEquals(p.theme, theme) ? 'on' : ''}`} onClick={() => onUpdatePrefs({ theme: p.theme })} style={{ '--p-bg': p.theme.bg, '--p-surface': p.theme.surface, '--p-accent': p.theme.accent, '--p-fg': p.theme.fg }}>
                     <span className="theme-swatch"><i /><i /><i /></span>
-                    {p.name}
+                    {t(p.name)}
                   </button>
                 ))}
               </div>
               <div className="theme-colors">
-                {[['accent', 'Accent', 'Play button, likes, the active track'], ['bg', 'Background', 'The page behind everything'], ['surface', 'Surface', 'Cards, menus, the queue panel'], ['fg', 'Text', 'Titles and icons']].map(([k, label, hint]) => (
+                {[['accent', t('Accent'), t('Play button, likes, the active track')], ['bg', t('Background'), t('The page behind everything')], ['surface', t('Surface'), t('Cards, menus, the queue panel')], ['fg', t('Text'), t('Titles and icons')]].map(([k, label, hint]) => (
                   <label key={k} className="theme-color">
                     <input type="color" value={theme[k]} onChange={(e) => setColor(k, e.target.value)} />
                     <span className="theme-color-body"><b>{label}</b><small>{hint}</small></span>
@@ -950,15 +972,15 @@ export default function Library({
                   </label>
                 ))}
               </div>
-              <button className="btn-secondary" style={{ marginTop: 16 }} onClick={() => onUpdatePrefs({ theme: DEFAULT_THEME })} disabled={themeEquals(theme, DEFAULT_THEME)}>Reset to default</button>
+              <button className="btn-secondary" style={{ marginTop: 16 }} onClick={() => onUpdatePrefs({ theme: DEFAULT_THEME })} disabled={themeEquals(theme, DEFAULT_THEME)}>{t('Reset to default')}</button>
             </section>
 
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} />}
 
             <section className="settings-section">
-              <h2>Help</h2>
-              <div className="settings-hint" style={{ marginBottom: 12 }}>What this device logged. Something wrong? Send a report with it.</div>
-              <button className="btn-secondary" onClick={() => setLogsOpen(true)}>Logs and problem reports</button>
+              <h2>{t('Help')}</h2>
+              <div className="settings-hint" style={{ marginBottom: 12 }}>{t('What this device logged. Something wrong? Send a report with it.')}</div>
+              <button className="btn-secondary" onClick={() => setLogsOpen(true)}>{t('Logs and problem reports')}</button>
               {logsOpen && <LogsDialog jf={jf} onClose={() => setLogsOpen(false)} />}
             </section>
             <About jf={jf} />
@@ -973,32 +995,32 @@ export default function Library({
         <div className="content" style={{ '--hero': '#4a4a4a' }}>
 
           <header className="hero profile">
-            <label className="hero-cover profile-avatar editable" title="Choose photo">
+            <label className="hero-cover profile-avatar editable" title={t('Choose photo')}>
               <img key={avatarV} src={avatar} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'grid'; }} />
               <span className="profile-initial" style={{ display: 'none' }}>{(item.Name || '?').slice(0, 1).toUpperCase()}</span>
-              <span className="hero-cover-edit">Choose photo</span>
+              <span className="hero-cover-edit">{t('Choose photo')}</span>
               <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadAvatar(f); e.target.value = ''; }} />
             </label>
             <div style={{ minWidth: 0 }}>
-              <div className="kind">Profile</div>
+              <div className="kind">{t('Profile')}</div>
               <FittedTitle text={item.Name} maxLines={2} />
-              <p className="hero-meta">{phone ? `${playlists.length} public playlist${playlists.length === 1 ? '' : 's'}` : <b>{playlists.length} Public Playlist{playlists.length === 1 ? '' : 's'}</b>}</p>
+              <p className="hero-meta">{phone ? (playlists.length === 1 ? t('1 public playlist') : t('{n} public playlists', { n: playlists.length })) : <b>{playlists.length === 1 ? t('1 Public Playlist') : t('{n} Public Playlists', { n: playlists.length })}</b>}</p>
             </div>
           </header>
           {phone ? (
             /* Spotify's profile: an outlined "Edit" pill + ⋯ under the name. */
             <div className="actions profile-actions">
               <label className="btn-secondary">
-                Edit
+                {t('Edit')}
                 <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadAvatar(f); e.target.value = ''; }} />
               </label>
-              <button className="iconbtn more" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHeroMenu({ x: r.left, y: r.bottom + 4 }); }} title="More options"><Dots /></button>
+              <button className="iconbtn more" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHeroMenu({ x: r.left, y: r.bottom + 4 }); }} title={t('More options')}><Dots /></button>
               {heroMenu && (
                 <ContextMenu x={heroMenu.x} y={heroMenu.y} onClose={() => setHeroMenu(null)}
-                  header={{ icon: <span className="sheet-initial">{(item.Name || '?').slice(0, 1).toUpperCase()}</span>, title: item.Name, sub: 'Profile' }}
+                  header={{ icon: <span className="sheet-initial">{(item.Name || '?').slice(0, 1).toUpperCase()}</span>, title: item.Name, sub: t('Profile') }}
                   items={[
-                    { label: 'Change photo', icon: MI.photo, onClick: () => profileFileRef.current?.click() },
-                    { label: 'Settings', icon: MI.gear, onClick: () => onOpenSettings?.() },
+                    { label: t('Change photo'), icon: MI.photo, onClick: () => profileFileRef.current?.click() },
+                    { label: t('Settings'), icon: MI.gear, onClick: () => onOpenSettings?.() },
                   ]} />
               )}
               <input ref={profileFileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadAvatar(f); e.target.value = ''; }} />
@@ -1010,11 +1032,11 @@ export default function Library({
             {err && <div className="banner error">{err}</div>}
             {detail.topArtists?.length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Top artists this month</h2></div>
-                <p className="shelf-sub">Only visible to you</p>
+                <div className="shelf-head"><h2>{t('Top artists this month')}</h2></div>
+                <p className="shelf-sub">{t('Only visible to you')}</p>
                 <div className="shelf">
                   {detail.topArtists.map((a) => (
-                    <Card key={a.Id} title={a.Name} subtitle="Artist" round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
+                    <Card key={a.Id} title={a.Name} subtitle={t('Artist')} round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                       onOpen={() => onOpenArtistById(a.Id)} onPlay={() => startMix({ Id: a.Id })} />
                   ))}
                 </div>
@@ -1022,28 +1044,28 @@ export default function Library({
             )}
             {tracks.length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Top tracks this month</h2></div>
-                <p className="shelf-sub">Only visible to you</p>
+                <div className="shelf-head"><h2>{t('Top tracks this month')}</h2></div>
+                <p className="shelf-sub">{t('Only visible to you')}</p>
                 <div className="tracklist" style={{ padding: 0 }}>
                   {(phone && !profileAll ? tracks.slice(0, 5) : tracks).map((t, i) => <TrackRow key={t.Id} {...rowProps(tracks, i, { showArt: true }, 'profile')} />)}
                 </div>
                 {phone && tracks.length > 5 && (
-                  <button className="btn-secondary seeall" onClick={() => setProfileAll((v) => !v)}>{profileAll ? 'See less' : 'See all'}</button>
+                  <button className="btn-secondary seeall" onClick={() => setProfileAll((v) => !v)}>{profileAll ? t('See less') : t('See all')}</button>
                 )}
               </section>
             )}
             {playlists.length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Public Playlists</h2></div>
+                <div className="shelf-head"><h2>{t('Public Playlists')}</h2></div>
                 <div className="shelf">
                   {playlists.map((p) => (
-                    <Card key={p.Id} title={p.Name} subtitle={`By ${item.Name}`} image={jf.imageUrl(p.Id, { maxHeight: 320 })}
+                    <Card key={p.Id} title={p.Name} subtitle={t('By {name}', { name: item.Name })} image={jf.imageUrl(p.Id, { maxHeight: 320 })}
                       onOpen={() => onOpenPlaylist(p)} onPlay={() => playItem(p)} />
                   ))}
                 </div>
               </section>
             )}
-            {detail.loading && <p className="placeholder-note">Loading...</p>}
+            {detail.loading && <p className="placeholder-note">{t('Loading…')}</p>}
           </div>
         </div>
       );
@@ -1054,8 +1076,8 @@ export default function Library({
     if (isArtist && offlineMode && !detail.loading && !item.Name) {
       return (
         <div className="content offline-empty">
-          <h2>Not available offline</h2>
-          <p>Open this artist once with a connection, and they show up here offline too.</p>
+          <h2>{t('Not available offline')}</h2>
+          <p>{t('Open this artist once with a connection, and they show up here offline too.')}</p>
         </div>
       );
     }
@@ -1070,7 +1092,7 @@ export default function Library({
       );
     }
 
-    const SORTS = [['recent', 'Recently added'], ['title', 'Title'], ['artist', 'Artist'], ['album', 'Album']];
+    const SORTS = [['recent', t('Recently added')], ['title', t('Title')], ['artist', t('Artist')], ['album', t('Album')]];
     return (
       <div className={`content ${phone && isLiked ? 'liked-page' : ''}`} style={heroStyle}>
         {err && <div className="banner error">{err}</div>}
@@ -1080,12 +1102,12 @@ export default function Library({
           <div className="liked-find">
             <label className="liked-find-field">
               <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M7 1.75a5.25 5.25 0 1 0 0 10.5 5.25 5.25 0 0 0 0-10.5zM.25 7a6.75 6.75 0 1 1 12.096 4.12l3.184 3.185a.75.75 0 1 1-1.06 1.06L11.284 12.18A6.75 6.75 0 0 1 .25 7z" /></svg>
-              <input value={within} onChange={(e) => setWithin(e.target.value)} placeholder="Find in Liked Songs" spellCheck="false" />
-              {within && <button type="button" onClick={() => setWithin('')} aria-label="Clear">×</button>}
+              <input value={within} onChange={(e) => setWithin(e.target.value)} placeholder={t('Find in Liked Songs')} spellCheck="false" />
+              {within && <button type="button" onClick={() => setWithin('')} aria-label={t('Clear')}>×</button>}
             </label>
-            <button className="pill sortchip" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenu({ x: r.left, y: r.bottom }); }}>Sort</button>
+            <button className="pill sortchip" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenu({ x: r.left, y: r.bottom }); }}>{t('Sort')}</button>
             {sortMenu && (
-              <ContextMenu x={sortMenu.x} y={sortMenu.y} onClose={() => setSortMenu(null)} header={{ icon: MI.playlist, title: 'Sort by', sub: SORTS.find(([k]) => k === likedSort)?.[1] }}
+              <ContextMenu x={sortMenu.x} y={sortMenu.y} onClose={() => setSortMenu(null)} header={{ icon: MI.playlist, title: t('Sort by'), sub: SORTS.find(([k]) => k === likedSort)?.[1] }}
                 items={SORTS.map(([k, label]) => ({ key: k, label, icon: k === likedSort ? MI.check : null, onClick: () => setLikedSort(k) }))} />
             )}
           </div>
@@ -1107,11 +1129,11 @@ export default function Library({
                 <button
                   className={`hero-cover ${canEdit ? 'editable' : ''}`}
                   onClick={canEdit ? () => setEditPl({ name: item.Name, file: null, preview: null }) : undefined}
-                  title={canEdit ? 'Choose photo' : undefined}
+                  title={canEdit ? t('Choose photo') : undefined}
                   disabled={!canEdit}
                 >
                   {item._art ? <img src={item._art} alt="" /> : <ProgressiveImg lo={jf.imageUrl(item.Id, { maxHeight: 320 })} hi={jf.imageUrl(item.Id, { maxHeight: 464, full: true })} alt="" />}
-                  {canEdit && <span className="hero-cover-edit">Choose photo</span>}
+                  {canEdit && <span className="hero-cover-edit">{t('Choose photo')}</span>}
                 </button>
               )}
               <div style={{ minWidth: 0 }}>
@@ -1120,13 +1142,13 @@ export default function Library({
                     <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
                       <path d="M12 2 9.6 4.6 6.1 4l-.6 3.5L2 9.6 4.6 12 2 14.4l3.5 2.1.6 3.5 3.5-.6L12 22l2.4-2.6 3.5.6.6-3.5 3.5-2.1L19.4 12 22 9.6l-3.5-2.1-.6-3.5-3.5.6L12 2zm-1.2 13.6L7 11.8l1.4-1.4 2.4 2.4 4.8-4.8L17 9.4l-6.2 6.2z" />
                     </svg>
-                    Verified Artist
+                    {t('Verified Artist')}
                   </span>
                 ) : (
-                  <div className="kind">{isLiked || item._mix ? 'Playlist' : kind === 'Album' ? releaseType({ ...item, ChildCount: item.ChildCount ?? tracks.length, RunTimeTicks: item.RunTimeTicks || totalTicks }) : kind}</div>
+                  <div className="kind">{isLiked || item._mix ? t('Playlist') : kind === 'Album' ? t(releaseType({ ...item, ChildCount: item.ChildCount ?? tracks.length, RunTimeTicks: item.RunTimeTicks || totalTicks })) : kind === 'Playlist' ? t('Playlist') : kind}</div>
                 )}
                 {canEdit ? (
-                  <button className="hero-title-edit" onClick={() => setEditPl({ name: item.Name, file: null, preview: null })} title="Edit details">
+                  <button className="hero-title-edit" onClick={() => setEditPl({ name: item.Name, file: null, preview: null })} title={t('Edit details')}>
                     <FittedTitle text={item.Name} maxLines={2} />
                   </button>
                 ) : item.Name ? (
@@ -1151,16 +1173,16 @@ export default function Library({
                       <span className="hero-owner">
                         <img className="hero-avatar" src={jf.userImageUrl({ maxHeight: 48 })} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'grid'; }} />
                         <span className="hero-avatar initial" style={{ display: 'none' }}>{(me?.Name || '?').slice(0, 1).toUpperCase()}</span>
-                        <button className="rowlink strong" onClick={onOpenProfile}>{me?.Name || 'You'}</button>
+                        <button className="rowlink strong" onClick={onOpenProfile}>{me?.Name || t('You')}</button>
                       </span>
                     )}
-                    {item._mix && <span className="hero-owner"><span className="hero-avatar mixmark" style={{ '--mix': item._color }}><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6 3v7.4A2.5 2.5 0 1 0 7.5 12.7V5.2l6-1.5v5.7A2.5 2.5 0 1 0 15 11.7V1.5L6 3z" /></svg></span><b>Made for you</b></span>}
+                    {item._mix && <span className="hero-owner"><span className="hero-avatar mixmark" style={{ '--mix': item._color }}><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6 3v7.4A2.5 2.5 0 1 0 7.5 12.7V5.2l6-1.5v5.7A2.5 2.5 0 1 0 15 11.7V1.5L6 3z" /></svg></span><b>{t('Made for you')}</b></span>}
                     <span className="hero-stats">
                       {kind === 'Album'
-                        ? [releaseType({ ...item, ChildCount: item.ChildCount ?? tracks.length, RunTimeTicks: item.RunTimeTicks || totalTicks }), item.ProductionYear].filter(Boolean).join(' • ')
-                        : isLiked ? `Playlist • ${tracks.length} song${tracks.length === 1 ? '' : 's'}`
+                        ? [t(releaseType({ ...item, ChildCount: item.ChildCount ?? tracks.length, RunTimeTicks: item.RunTimeTicks || totalTicks })), item.ProductionYear].filter(Boolean).join(' • ')
+                        : isLiked ? (tracks.length === 1 ? t('Playlist • 1 song') : t('Playlist • {n} songs', { n: tracks.length }))
                         : item._mix ? [item._sub, totalTicks ? fmtTotalShort(totalTicks) : null].filter(Boolean).join(' • ')
-                        : ['Playlist', totalTicks ? fmtTotalShort(totalTicks) : `${tracks.length} songs`].join(' • ')}
+                        : [t('Playlist'), totalTicks ? fmtTotalShort(totalTicks) : t('{n} songs', { n: tracks.length })].join(' • ')}
                     </span>
                   </p>
                 ) : (
@@ -1176,9 +1198,9 @@ export default function Library({
                       {' • '}
                     </>
                   )}
-                  {isPlaylist && !item._mix && <><button className="rowlink strong" onClick={onOpenProfile}>{me?.Name || 'You'}</button>{' • '}</>}
-                  {item._mix && <><b>Made for you</b>{item._sub ? ` • ${item._sub}` : ''}{' • '}</>}
-                  {isArtist ? `${tracks.length} songs in your library` : `${tracks.length} songs`}
+                  {isPlaylist && !item._mix && <><button className="rowlink strong" onClick={onOpenProfile}>{me?.Name || t('You')}</button>{' • '}</>}
+                  {item._mix && <><b>{t('Made for you')}</b>{item._sub ? ` • ${item._sub}` : ''}{' • '}</>}
+                  {isArtist ? t('{n} songs in your library', { n: tracks.length }) : t('{n} songs', { n: tracks.length })}
                   {!isArtist && totalTicks ? `, ${fmtTotal(totalTicks)}` : ''}
                 </p>
                 )}
@@ -1204,67 +1226,67 @@ export default function Library({
                 // download keeps going with the app in the background.
                 if (!player.playing) primeKeepAlive();
                 const gb = estimateBytes(tracks, savesLossless(jf)) / 1e9;
-                if (!held && gb > 1 && !window.confirm(`${tracks.length} songs, about ${gb.toFixed(1)} GB. Download for offline?`)) return;
+                if (!held && gb > 1 && !window.confirm(t('{n} songs, about {gb} GB. Download for offline?', { n: tracks.length, gb: gb.toFixed(1) }))) return;
                 try {
                   const when = await saveOffline(jf, item, okind, tracks);
-                  notify?.(when === 'later' ? 'You’re offline. It downloads when you’re back online.' : held ? 'Downloading the rest' : `Downloading ${tracks.length} songs. Keep Slopify open until it finishes.`, 4000);
+                  notify?.(when === 'later' ? t('You’re offline. It downloads when you’re back online.') : held ? t('Downloading the rest') : t('Downloading {n} songs. Keep Slopify open until it finishes.', { n: tracks.length }), 4000);
                 }
                 catch (e) { notify?.(e.message, 5000); }
               };
-              const remove = async () => { if (window.confirm(`Remove the downloaded songs of "${item.Name}" from this device?`)) { await removeOffline(item.Id); notify?.('Download removed'); } };
+              const remove = async () => { if (window.confirm(t('Remove the downloaded songs of "{name}" from this device?', { name: item.Name }))) { await removeOffline(item.Id); notify?.(t('Download removed')); } };
               return { held, busy, download, remove };
             })() : null;
             const heroItems = [
-              { label: 'Add to queue', icon: MI.queue, onClick: () => all((t) => player.addToQueue(t)) },
-              isArtist ? { label: isFollowed ? 'Unfollow' : 'Follow', icon: MI.follow, onClick: () => toggleFollow(item) } : null,
-              !isLiked ? { label: 'Go to radio', icon: MI.radio, onClick: () => startMix(item) } : null,
-              tracks.length ? { label: 'Add to playlist', icon: MI.plus, sub: [
-                { label: 'New playlist', icon: MI.plus, onClick: () => onNewPlaylist?.(tracks[0]) },
+              { label: t('Add to queue'), icon: MI.queue, offline: true, onClick: () => all((t) => player.addToQueue(t)) },
+              isArtist ? { label: isFollowed ? t('Unfollow') : t('Follow'), icon: MI.follow, onClick: () => toggleFollow(item) } : null,
+              !isLiked ? { label: t('Go to radio'), icon: MI.radio, onClick: () => startMix(item) } : null,
+              tracks.length ? { label: t('Add to playlist'), icon: MI.plus, sub: [
+                { label: t('New playlist'), icon: MI.plus, onClick: () => onNewPlaylist?.(tracks[0]) },
                 // One POST with every id (the API takes an array), one toast --
                 // not a request and a toast per track.
                 ...playlists.filter((p) => p.Id !== item.Id).map((p) => ({ key: p.Id, label: p.Name, onClick: async () => {
-                  try { await jf.addToPlaylist(p.Id, tracks.map((t) => t.Id)); notify?.(`Added to ${p.Name}`); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); }
+                  try { await jf.addToPlaylist(p.Id, tracks.map((t) => t.Id)); notify?.(t('Added to {name}', { name: p.Name })); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); }
                   catch (e) { setErr(e.message); }
                 } })),
               ] } : null,
-              lead ? { label: 'Go to artist', icon: MI.artist, onClick: () => onOpenArtistById(lead.Id) } : null,
-              kind === 'Album' ? { label: item.UserData?.IsFavorite ? 'Remove from Your Library' : 'Save to Your Library', icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
-              kind === 'Album' || isArtist ? { label: 'Share', icon: MI.share, onClick: () => shareItem({ kind: isArtist ? 'artist' : 'album', id: item.Id, title: item.Name, by: isArtist ? null : lead?.Name }) } : null,
+              lead ? { label: t('Go to artist'), icon: MI.artist, offline: true, onClick: () => onOpenArtistById(lead.Id) } : null,
+              kind === 'Album' ? { label: item.UserData?.IsFavorite ? t('Remove from Your Library') : t('Save to Your Library'), icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,
+              kind === 'Album' || isArtist ? { label: t('Share'), icon: MI.share, onClick: () => shareItem({ kind: isArtist ? 'artist' : 'album', id: item.Id, title: item.Name, by: isArtist ? null : lead?.Name }) } : null,
               // Kept for offline (api/offline.js): the same actions as the header's download button.
               ...(dl ? [
                 dl.held
-                  ? { label: `Remove download${dl.busy ? ` (${dl.busy.done}/${dl.busy.total})` : ''}`, icon: MI.trash, onClick: dl.remove }
-                  : { label: 'Download for offline', icon: MI.down, onClick: dl.download },
-                dl.held && dl.held.have < tracks.length && !dl.busy ? { label: `Update download (${dl.held.have}/${tracks.length})`, icon: MI.down, onClick: dl.download } : null,
+                  ? { label: dl.busy ? t('Remove download ({done}/{total})', { done: dl.busy.done, total: dl.busy.total }) : t('Remove download'), icon: MI.trash, offline: true, onClick: dl.remove }
+                  : { label: t('Download for offline'), icon: MI.down, offline: true, onClick: dl.download },
+                dl.held && dl.held.have < tracks.length && !dl.busy ? { label: t('Update download ({have}/{total})', { have: dl.held.have, total: tracks.length }), icon: MI.down, offline: true, onClick: dl.download } : null,
               ] : []),
-              isPlaylist && !isLiked && !item._mix && tracks.length ? { label: 'Download as zip', icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
+              isPlaylist && !isLiked && !item._mix && tracks.length ? { label: t('Download as zip'), icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
-              isPlaylist && !isLiked && !item._mix ? { label: 'Edit details', icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
-              isPlaylist && !isLiked && !item._mix ? { label: 'Delete', icon: MI.trash, danger: true, onClick: () => { if (window.confirm(`Delete "${item.Name}"?`)) onDeletePlaylist(item); } } : null,
+              isPlaylist && !isLiked && !item._mix ? { label: t('Edit details'), icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
+              isPlaylist && !isLiked && !item._mix ? { label: t('Delete'), icon: MI.trash, danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: item.Name }))) onDeletePlaylist(item); } } : null,
             ];
-            const heroHeader = { image: isLiked ? null : (item._art || jf.imageUrl(item.Id, { maxHeight: 120 })), icon: isLiked ? <LikedCover className="ctxmenu-head-liked" heart={45} /> : undefined, round: isArtist, title: item.Name, sub: isArtist ? 'Artist' : isLiked || isPlaylist ? 'Playlist' : kind === 'Album' ? (lead?.Name || 'Album') : kind };
+            const heroHeader = { image: isLiked ? null : (item._art || jf.imageUrl(item.Id, { maxHeight: 120 })), icon: isLiked ? <LikedCover className="ctxmenu-head-liked" heart={45} /> : undefined, round: isArtist, title: item.Name, sub: isArtist ? t('Artist') : isLiked || isPlaylist ? t('Playlist') : kind === 'Album' ? (lead?.Name || t('Album')) : kind };
             return (
               <>
                 <button
                   className="bigplay"
                   onClick={() => (here ? player.toggle() : tracks.length && player.playQueue(tracks, 0, ctxOf(item)))}
-                  title={showPause ? 'Pause' : 'Play'}
+                  title={showPause ? t('Pause') : t('Play')}
                 >
                   {showPause ? <PauseGlyph size={24} /> : <PlayGlyph size={24} />}
                 </button>
                 {(!isArtist || phone) && (
-                  <button className={`iconbtn shuffle ${shuffled ? 'on' : ''}`} onClick={() => player.setShuffle(shuffled ? 'off' : 'on')} title={shuffled ? 'Disable shuffle' : 'Enable shuffle'}>
+                  <button className={`iconbtn shuffle ${shuffled ? 'on' : ''}`} onClick={() => player.setShuffle(shuffled ? 'off' : 'on')} title={shuffled ? t('Disable shuffle') : t('Enable shuffle')}>
                     <Shuffle />
                   </button>
                 )}
                 {kind === 'Album' && (() => { const saved = Boolean(item.UserData?.IsFavorite); return (
-                  <button className={`iconbtn ${saved ? 'on' : ''}`} onClick={() => onFollowAlbum?.(item, !saved)} title={saved ? 'Remove from Your Library' : 'Save to Your Library'}>
+                  <button className={`iconbtn ${saved ? 'on' : ''}`} onClick={() => onFollowAlbum?.(item, !saved)} title={saved ? t('Remove from Your Library') : t('Save to Your Library')}>
                     <Heart on={saved} size={24} />
                   </button>
                 ); })()}
                 {isArtist && (
-                  <button className={`btn-secondary follow ${isFollowed ? 'on' : ''}`} onClick={() => toggleFollow(item)} title={isFollowed ? 'Unfollow' : 'Follow'}>
-                    {isFollowed ? 'Following' : 'Follow'}
+                  <button className={`btn-secondary follow ${isFollowed ? 'on' : ''}`} onClick={() => toggleFollow(item)} title={isFollowed ? t('Unfollow') : t('Follow')}>
+                    {isFollowed ? t('Following') : t('Follow')}
                   </button>
                 )}
                 {dl && (() => {
@@ -1274,11 +1296,11 @@ export default function Library({
                   const total = busy ? busy.total : tracks.length;
                   const have = busy ? busy.done : held?.have || 0;
                   const full = held && !busy && have >= tracks.length;
-                  const label = busy ? `Downloading ${have} of ${total}` : full ? 'Downloaded' : held ? `Downloaded ${have} of ${tracks.length}` : 'Download for offline';
+                  const label = busy ? t('Downloading {have} of {total}', { have, total }) : full ? t('Downloaded') : held ? t('Downloaded {have} of {total}', { have, total: tracks.length }) : t('Download for offline');
                   return (
                     <>
                       <span className="dlwrap">
-                      <button className={`iconbtn dlbtn ${held ? 'on' : ''}`} onClick={busy ? undefined : full ? dl.remove : dl.download} title={full ? 'Remove download' : label} aria-label={label}>
+                      <button className={`iconbtn dlbtn ${held ? 'on' : ''}`} onClick={busy ? undefined : full ? dl.remove : dl.download} title={full ? t('Remove download') : label} aria-label={label}>
                         <DownloadGlyph state={busy ? 'busy' : full ? 'done' : held ? 'part' : 'none'} progress={total ? have / total : 0} />
                       </button>
                       {/* Under the button, out of the row's flow: the buttons beside it never move. */}
@@ -1287,15 +1309,15 @@ export default function Library({
                     </>
                   );
                 })()}
-                <button className="iconbtn more" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHeroMenu({ x: r.left, y: r.bottom + 4 }); }} title={`More options for ${item.Name}`}>
+                <button className="iconbtn more" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHeroMenu({ x: r.left, y: r.bottom + 4 }); }} title={t('More options for {name}', { name: item.Name })}>
                   <Dots />
                 </button>
                 {heroMenu && <ContextMenu x={heroMenu.x} y={heroMenu.y} items={offlineMode ? heroOffline(heroItems) : heroItems} onClose={() => setHeroMenu(null)} header={heroHeader} />}
                 {!isArtist && tracks.length > 8 && (
-                  <label className="within" title="Search in this list">
+                  <label className="within" title={t('Search in this list')}>
                     <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M7 1.75a5.25 5.25 0 1 0 0 10.5 5.25 5.25 0 0 0 0-10.5zM.25 7a6.75 6.75 0 1 1 12.096 4.12l3.184 3.185a.75.75 0 1 1-1.06 1.06L11.284 12.18A6.75 6.75 0 0 1 .25 7z" /></svg>
-                    <input value={within} onChange={(e) => setWithin(e.target.value)} placeholder={phone ? (isPlaylist ? 'Find in playlist' : 'Find in album') : (isPlaylist ? 'Search in playlist' : 'Search in album')} spellCheck="false" />
-                    {within && <button type="button" onClick={() => setWithin('')} aria-label="Clear">×</button>}
+                    <input value={within} onChange={(e) => setWithin(e.target.value)} placeholder={phone ? (isPlaylist ? t('Find in playlist') : t('Find in album')) : (isPlaylist ? t('Search in playlist') : t('Search in album'))} spellCheck="false" />
+                    {within && <button type="button" onClick={() => setWithin('')} aria-label={t('Clear')}>×</button>}
                   </label>
                 )}
               </>
@@ -1306,17 +1328,17 @@ export default function Library({
         {editPl && (
           <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditPl(null); }}>
             <form className="modal editdetails" onSubmit={(e) => { e.preventDefault(); onEditPlaylist(item, { name: editPl.name.trim(), imageFile: editPl.file }); setEditPl(null); }}>
-              <h3>Edit details</h3>
+              <h3>{t('Edit details')}</h3>
               <div className="editdetails-body">
-                <label className="editdetails-cover" title="Choose photo">
+                <label className="editdetails-cover" title={t('Choose photo')}>
                   <img src={editPl.preview || jf.imageUrl(item.Id, { maxHeight: 360, full: true })} alt="" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
-                  <span>Choose photo</span>
+                  <span>{t('Choose photo')}</span>
                   <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setEditPl((d) => ({ ...d, file: f, preview: URL.createObjectURL(f) })); }} />
                 </label>
-                <input value={editPl.name} onChange={(e) => setEditPl((d) => ({ ...d, name: e.target.value }))} placeholder="Add a name" autoFocus spellCheck="false" />
+                <input value={editPl.name} onChange={(e) => setEditPl((d) => ({ ...d, name: e.target.value }))} placeholder={t('Add a name')} autoFocus spellCheck="false" />
               </div>
               <div className="modal-actions">
-                <button type="submit" className="primary" disabled={!editPl.name.trim()}>Save</button>
+                <button type="submit" className="primary" disabled={!editPl.name.trim()}>{t('Save')}</button>
               </div>
             </form>
           </div>
@@ -1325,16 +1347,16 @@ export default function Library({
         {isArtist ? (
           <div className="pad">
             <section>
-              <div className="shelf-head"><h2>Popular</h2></div>
+              <div className="shelf-head"><h2>{t('Popular')}</h2></div>
               <div className="tracklist popular" style={{ padding: 0 }}>
                 {/* Spotify's Popular rows: 40px cover next to the number
                     (chunk_xpui-routes-artist: flex:0 0 40px, radius 4px),
                     title only, no artist line. */}
-                {tracks.slice(0, popularExpanded ? 10 : 5).map((t, i) => <TrackRow key={t.Id} {...rowProps(tracks, i, { showArt: true, hideArtists: true, subtitle: phone ? (t.UserData?.PlayCount > 0 ? `${t.UserData.PlayCount.toLocaleString()} play${t.UserData.PlayCount === 1 ? '' : 's'}` : t.Album || null) : null }, ctxOf(item))} />)}
+                {tracks.slice(0, popularExpanded ? 10 : 5).map((x, i) => <TrackRow key={x.Id} {...rowProps(tracks, i, { showArt: true, hideArtists: true, subtitle: phone ? (x.UserData?.PlayCount > 0 ? (x.UserData.PlayCount === 1 ? t('1 play') : t('{n} plays', { n: x.UserData.PlayCount.toLocaleString() })) : x.Album || null) : null }, ctxOf(item))} />)}
               </div>
               {tracks.length > 5 && (
                 <button className="seemore" onClick={() => setPopularExpanded((v) => !v)}>
-                  {popularExpanded ? 'Show less' : 'See more'}
+                  {popularExpanded ? t('Show less') : t('See more')}
                 </button>
               )}
             </section>
@@ -1350,13 +1372,13 @@ export default function Library({
               if (!all.length && dg !== null && !dg?.failed) return null;
               const counts = all.reduce((m, x) => ({ ...m, [x.type]: (m[x.type] || 0) + 1 }), {});
               const pills = [
-                ['all', 'All'],
-                counts.Album ? ['album', 'Albums'] : null,
-                counts.Single ? ['single', 'Singles'] : null,
-                counts.EP ? ['ep', 'EPs'] : null,
-                counts.Compilation ? ['compilation', 'Compilations'] : null,
+                ['all', t('All')],
+                counts.Album ? ['album', t('Albums')] : null,
+                counts.Single ? ['single', t('Singles')] : null,
+                counts.EP ? ['ep', t('EPs')] : null,
+                counts.Compilation ? ['compilation', t('Compilations')] : null,
               ].filter(Boolean);
-              const libPills = [['all', 'Everything'], ['have', 'In your library'], ['missing', 'Not in library']];
+              const libPills = [['all', t('Everything')], ['have', t('In your library')], ['missing', t('Not in library')]];
               // Newest first, one timeline; library releases stand out, the rest are dimmed with Request.
               const yearOf = (x) => Number(String(x.r.date || x.year || '').slice(0, 4)) || 0;
               const shown = all.filter((x) =>
@@ -1371,7 +1393,7 @@ export default function Library({
               const requestBtn = (r) => {
                 const { label, busy } = requestUi(stateOf(r));
                 return (
-                  <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy || !r.album_id} onClick={(e) => { e.stopPropagation(); requestRelease(item.Id, r); }} title="Download this release into your library">
+                  <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy || !r.album_id} onClick={(e) => { e.stopPropagation(); requestRelease(item.Id, r); }} title={t('Download this release into your library')}>
                     {label}
                   </button>
                 );
@@ -1382,9 +1404,9 @@ export default function Library({
                 const top = [...all].sort((a, b) => (yearOf(b) - yearOf(a)) || String(b.r.date || '').localeCompare(String(a.r.date || ''))).slice(0, 5);
                 return (
                   <section className="releases">
-                    <div className="shelf-head"><h2>Popular releases</h2></div>
-                    {dg === null && !top.length && <p className="placeholder-note">Loading…</p>}
-                    {dg?.failed && <p className="placeholder-note">{offlineMode ? 'Not available offline.' : <>Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></>}</p>}
+                    <div className="shelf-head"><h2>{t('Popular releases')}</h2></div>
+                    {dg === null && !top.length && <p className="placeholder-note">{t('Loading…')}</p>}
+                    {dg?.failed && <p className="placeholder-note">{offlineMode ? t('Not available offline.') : <>{t('Couldn’t load the full discography.')} <button className="rowlink" onClick={() => loadDiscog(item)}>{t('Retry')}</button></>}</p>}
                     {top.map(({ key, r, type, year, inLib }) => (
                       <div key={key} className={`release ${inLib ? '' : 'missing'}`} role="button" tabIndex={0}
                         onClick={inLib ? () => openAlbum({ Id: inLib, Name: r.localName || r.title }) : undefined}
@@ -1392,13 +1414,13 @@ export default function Library({
                         {inLib ? <img src={jf.imageUrl(inLib, { maxHeight: 160 })} alt="" loading="lazy" /> : r.image ? <img src={r.image} alt="" loading="lazy" /> : <span className="release-ph"><svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor"><path d="M6 3v7.4A2.5 2.5 0 1 0 7.5 12.7V5.2l6-1.5v5.7A2.5 2.5 0 1 0 15 11.7V1.5L6 3z" /></svg></span>}
                         <span className="release-text">
                           <span className="release-name">{r.localName || r.title}</span>
-                          <span className="release-sub">{[year, type].filter(Boolean).join(' • ')}</span>
+                          <span className="release-sub">{[year, type && t(type)].filter(Boolean).join(' • ')}</span>
                         </span>
                         {!inLib && requestBtn(r)}
                       </div>
                     ))}
                     {all.length > 0 && (
-                      <button className="btn-secondary seedisco" onClick={() => setDiscoOpen(true)}>See discography</button>
+                      <button className="btn-secondary seedisco" onClick={() => setDiscoOpen(true)}>{t('See discography')}</button>
                     )}
                   </section>
                 );
@@ -1406,10 +1428,10 @@ export default function Library({
               return (
                 <section ref={discoRef} style={discoMinH ? { minHeight: discoMinH } : undefined}>
                   <div className="shelf-head">
-                    <h2>Discography</h2>
-                    {dg === null ? <span className="settings-hint">Loading…</span> : all.length ? <span className="settings-hint">{have} of {all.length} in your library</span> : null}
+                    <h2>{t('Discography')}</h2>
+                    {dg === null ? <span className="settings-hint">{t('Loading…')}</span> : all.length ? <span className="settings-hint">{t('{have} of {total} in your library', { have, total: all.length })}</span> : null}
                   </div>
-                  {dg?.failed && <p className="placeholder-note">{offlineMode ? 'Not available offline.' : <>Couldn&rsquo;t load the full discography. <button className="rowlink" onClick={() => loadDiscog(item)}>Retry</button></>}</p>}
+                  {dg?.failed && <p className="placeholder-note">{offlineMode ? t('Not available offline.') : <>{t('Couldn’t load the full discography.')} <button className="rowlink" onClick={() => loadDiscog(item)}>{t('Retry')}</button></>}</p>}
                   <div className="disco-filters">
                     <div className="pills">
                       {libPills.map(([k, label]) => (
@@ -1426,7 +1448,7 @@ export default function Library({
                   </div>
                   <div className="grid">
                     {shown.map(({ key, r, type, year, inLib }) => inLib ? (
-                      <Card key={key} title={r.localName || r.title} subtitle={year ? `${year} • ${type}` : type}
+                      <Card key={key} title={r.localName || r.title} subtitle={year ? `${year} • ${t(type)}` : t(type)}
                         image={jf.imageUrl(inLib, { maxHeight: 320 })} onOpen={() => openAlbum({ Id: inLib, Name: r.localName || r.title })} onPlay={() => playItem({ Id: inLib, Type: 'MusicAlbum' })} />
                     ) : (
                       <div key={key} className="card missing" role="group">
@@ -1435,7 +1457,7 @@ export default function Library({
                           {requestBtn(r)}
                         </div>
                         <div className="card-title">{r.title}</div>
-                        <div className="card-sub">{year ? `${year} • ${type}` : type}{!phone && r.total_tracks ? ` • ${r.total_tracks} track${r.total_tracks === 1 ? '' : 's'}` : ''}</div>
+                        <div className="card-sub">{year ? `${year} • ${t(type)}` : t(type)}{!phone && r.total_tracks ? ` • ${r.total_tracks === 1 ? t('1 track') : t('{n} tracks', { n: r.total_tracks })}` : ''}</div>
                       </div>
                     ))}
                   </div>
@@ -1444,7 +1466,7 @@ export default function Library({
             })()}
             {(detail.appearsOn || []).length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Appears On</h2></div>
+                <div className="shelf-head"><h2>{t('Appears On')}</h2></div>
                 <div className="shelf">
                   {detail.appearsOn.map((a) => (
                     <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || (a.AlbumArtists || [])[0]?.Name} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
@@ -1455,17 +1477,17 @@ export default function Library({
             )}
             {(simil[item.Id] || []).length > 0 && (
               <section>
-                <div className="shelf-head"><h2>Fans also like</h2></div>
+                <div className="shelf-head"><h2>{t('Fans also like')}</h2></div>
                 <div className="shelf">
                   {simil[item.Id].map((a) => (
-                    <Card key={a.id} title={a.name} subtitle="Artist" round image={jf.imageUrl(a.id, { maxHeight: 320 })} onOpen={() => onOpenArtistById(a.id)} onPlay={() => startMix({ Id: a.id })} />
+                    <Card key={a.id} title={a.name} subtitle={t('Artist')} round image={jf.imageUrl(a.id, { maxHeight: 320 })} onOpen={() => onOpenArtistById(a.id)} onPlay={() => startMix({ Id: a.id })} />
                   ))}
                 </div>
               </section>
             )}
             {item.Overview && (
               <section>
-                <div className="shelf-head"><h2>About</h2></div>
+                <div className="shelf-head"><h2>{t('About')}</h2></div>
                 <p className="placeholder-note">{item.Overview}</p>
               </section>
             )}
@@ -1477,8 +1499,8 @@ export default function Library({
               <div className={`trackhead ${isPlaylist ? 'with-art' : ''} ${headStuck ? 'stuck' : ''}`}>
                 <span className="th-n">#</span>
                 {isPlaylist && <span />}
-                <span>Title</span>
-                <span>{isPlaylist ? 'Album' : ''}</span>
+                <span>{t('Title')}</span>
+                <span>{isPlaylist ? t('Album') : ''}</span>
                 <span />
                 <span className="th-dur"><Clock /></span>
                 <span />
@@ -1486,11 +1508,11 @@ export default function Library({
             )}
             {tracks.length === 0 && !detail.loading && (
               <p className="placeholder-note">
-                {detail.loadFailed ? (offlineMode ? 'Not available offline. Open it once with a connection, or download it.' : 'Couldn’t load this — try again.')
-                  : isLiked ? 'Songs you like will appear here. Save songs by tapping the heart icon.'
-                  : isPlaylist ? 'This playlist is empty.'
-                  : kind === 'Album' ? 'This album is empty.'
-                  : 'Nothing here yet.'}
+                {detail.loadFailed ? (offlineMode ? t('Not available offline. Open it once with a connection, or download it.') : t('Couldn’t load this — try again.'))
+                  : isLiked ? t('Songs you like will appear here. Save songs by tapping the heart icon.')
+                  : isPlaylist ? t('This playlist is empty.')
+                  : kind === 'Album' ? t('This album is empty.')
+                  : t('Nothing here yet.')}
               </p>
             )}
             {/* Rows still on their way: grey placeholders the page is laid out on, like Spotify's. */}
@@ -1500,7 +1522,7 @@ export default function Library({
               </div>
             )}
             {within.trim() && withinRes && withinRes.length === 0 && (
-              <p className="placeholder-note">No matches for &ldquo;{within}&rdquo; in here.</p>
+              <p className="placeholder-note">{t('No matches for “{query}” in here.', { query: within })}</p>
             )}
             {tracks.length > 0 && (() => {
               let shown = within.trim() && withinRes ? withinRes : tracks;
@@ -1534,21 +1556,21 @@ export default function Library({
                 <section className="reco">
                   <div className="reco-head">
                     <div>
-                      <h2>Recommended</h2>
-                      <p>Based on what&rsquo;s in this playlist</p>
+                      <h2>{t('Recommended')}</h2>
+                      <p>{t('Based on what’s in this playlist')}</p>
                     </div>
                   </div>
-                  {rec.items === null ? <p className="placeholder-note">Finding songs&hellip;</p> : rec.items.map((t, i) => (
-                    <div key={t.Id} className="reco-row">
+                  {rec.items === null ? <p className="placeholder-note">{t('Finding songs…')}</p> : rec.items.map((x, i) => (
+                    <div key={x.Id} className="reco-row">
                       <TrackRow
                         {...rowProps(rec.items, i, { showArt: true }, null)}
                         n=""
                       />
-                      <button className="reco-add" onClick={() => addRecommended(item, t)}>Add</button>
+                      <button className="reco-add" onClick={() => addRecommended(item, x)}>{t('Add')}</button>
                     </div>
                   ))}
                   {rec.items !== null && (
-                    <button className="reco-refresh" onClick={() => setRecoGen((g) => ({ ...g, [item.Id]: (g[item.Id] || 0) + 1 }))}>Refresh</button>
+                    <button className="reco-refresh" onClick={() => setRecoGen((g) => ({ ...g, [item.Id]: (g[item.Id] || 0) + 1 }))}>{t('Refresh')}</button>
                   )}
                 </section>
               );
@@ -1568,10 +1590,10 @@ export default function Library({
           <FilterPills where={seeAll} setSeeAll={setSeeAll} goHome={() => onView('home')} />
         </div>
         <div className="pad">
-          <h2 style={{ margin: '0 0 16px', fontSize: 24 }}>{seeAll === 'artists' ? 'Artists' : 'Albums'}</h2>
+          <h2 style={{ margin: '0 0 16px', fontSize: 24 }}>{seeAll === 'artists' ? t('Artists') : t('Albums')}</h2>
           <div className="grid">
             {items.map((it) => (
-              <Card key={it.Id} title={it.Name} subtitle={seeAll === 'artists' ? 'Artist' : it.AlbumArtist}
+              <Card key={it.Id} title={it.Name} subtitle={seeAll === 'artists' ? t('Artist') : it.AlbumArtist}
                 image={jf.imageUrl(it.Id, { maxHeight: 320 })} round={seeAll === 'artists'}
                 onOpen={() => open(it)} onPlay={() => playItem(it)} />
             ))}
@@ -1587,10 +1609,11 @@ export default function Library({
     // Top result comes from the engine (exact artist > exact album > best score).
     const top = r?.top || null;
     const show = (t) => searchType === 'All' || searchType === t;
-    const subOf = (kind, item) => kind === 'Artist' ? 'Artist'
-      : kind === 'Album' ? ['Album', item.ProductionYear || '', item.AlbumArtist || ''].filter(Boolean).join(' • ')
-      : kind === 'Playlist' ? 'Playlist'
-      : ['Song', item.Artists?.join(', ') || item.AlbumArtist || ''].filter(Boolean).join(' • ');
+    const subOf = (kind, item) => kind === 'Artist' ? t('Artist')
+      : kind === 'Album' ? [t('Album'), item.ProductionYear || '', item.AlbumArtist || ''].filter(Boolean).join(' • ')
+      : kind === 'Playlist' ? t('Playlist')
+      : [t('Song'), item.Artists?.join(', ') || item.AlbumArtist || ''].filter(Boolean).join(' • ');
+    const kindLabel = (k) => ({ Artist: t('Artist'), Album: t('Album'), Song: t('Song'), Playlist: t('Playlist') })[k] || k;
     const hit = (kind, item) => ({ kind, item, sub: subOf(kind, item) });
     const actOn = (kind, item) => {
       remember(query, hit(kind, item));
@@ -1658,8 +1681,8 @@ export default function Library({
     };
     const typeChips = (r || (searchType === 'Everywhere' && query.trim())) && (
       <div className="searchtypes">
-        {SEARCH_TYPES.map((t) => (
-          <button key={t} className={`pill ${searchType === t ? 'on' : ''}`} onClick={(e) => { setSearchType(t); e.currentTarget.scrollIntoView?.({ inline: 'nearest', block: 'nearest', behavior: 'smooth' }); }}>{t}</button>
+        {SEARCH_TYPES.map((ty) => (
+          <button key={ty} className={`pill ${searchType === ty ? 'on' : ''}`} onClick={(e) => { setSearchType(ty); e.currentTarget.scrollIntoView?.({ inline: 'nearest', block: 'nearest', behavior: 'smooth' }); }}>{t(ty)}</button>
         ))}
       </div>
     );
@@ -1678,16 +1701,16 @@ export default function Library({
         {/* Covers: Daily Mix 1's seed artist, the newest album, the most
             played track's album (Home persists the first two). */}
         <button className="tile" style={{ '--tile': '#1e3264' }} onClick={() => onView('home')}>
-          <span>Made For You</span>{mixCover && <img src={jf.imageUrl(mixCover, { maxHeight: 200 })} alt="" />}
+          <span>{t('Made For You')}</span>{mixCover && <img src={jf.imageUrl(mixCover, { maxHeight: 200 })} alt="" />}
         </button>
         <button className="tile" style={{ '--tile': '#e13300' }} onClick={() => setSeeAll('albums')}>
-          <span>New Releases</span>{newestCover && <img src={jf.imageUrl(newestCover, { maxHeight: 200 })} alt="" />}
+          <span>{t('New Releases')}</span>{newestCover && <img src={jf.imageUrl(newestCover, { maxHeight: 200 })} alt="" />}
         </button>
-        <button className="tile" style={{ '--tile': '#8d67ab' }} onClick={() => openBrowse({ id: 'charts', name: 'Charts', color: '#8d67ab', filter: 'plays > 0' })}>
-          <span>Charts</span>{chartsCover && <img src={jf.imageUrl(chartsCover, { maxHeight: 200 })} alt="" />}
+        <button className="tile" style={{ '--tile': '#8d67ab' }} onClick={() => openBrowse({ id: 'charts', name: t('Charts'), color: '#8d67ab', filter: 'plays > 0' })}>
+          <span>{t('Charts')}</span>{chartsCover && <img src={jf.imageUrl(chartsCover, { maxHeight: 200 })} alt="" />}
         </button>
         <button className="tile" style={{ '--tile': '#5038a0' }} onClick={onOpenLiked}>
-          <span>Liked Songs</span><LikedCover className="tile-liked" heart={50} />
+          <span>{t('Liked Songs')}</span><LikedCover className="tile-liked" heart={50} />
         </button>
       </>
     );
@@ -1695,11 +1718,11 @@ export default function Library({
     return (
       <div className="content">
         <div className="contentbar">
-          <input ref={searchRef} className="search" autoFocus={!phone} placeholder={phone ? 'What do you want to listen to?' : 'What do you want to play?'}
+          <input ref={searchRef} className="search" autoFocus={!phone} placeholder={phone ? t('What do you want to listen to?') : t('What do you want to play?')}
             value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKey} spellCheck="false"
             onFocus={() => setSearchFocus(true)} />
           {phone && focusMode && (
-            <button className="search-cancel" onClick={() => { setQuery(''); setSearchFocus(false); searchRef.current?.blur(); }}>Cancel</button>
+            <button className="search-cancel" onClick={() => { setQuery(''); setSearchFocus(false); searchRef.current?.blur(); }}>{t('Cancel')}</button>
           )}
           {/* Invisible marker for the tests: which engine answered and how fast. */}
           {r?.tookMs != null && <span className="search-took" hidden>{r.engine === 'meili' ? `${r.tookMs} ms` : 'basic search'}</span>}
@@ -1711,23 +1734,23 @@ export default function Library({
           {err && <div className="banner error">{err}</div>}
           {!query.trim() && recents.length > 0 && (!phone || focusMode) && (phone ? (
             <section className="recentlist">
-              <div className="shelf-head"><h2>Recent searches</h2></div>
+              <div className="shelf-head"><h2>{t('Recent searches')}</h2></div>
               {recents.map((x) => (
-                <SearchRow key={recentKey(x)} name={x.name} sub={x.sub || x.kind} round={x.kind === 'Artist'}
+                <SearchRow key={recentKey(x)} name={x.name} sub={x.sub || kindLabel(x.kind)} round={x.kind === 'Artist'}
                   image={jf.imageUrl(x.art || x.id, { maxHeight: 96 })}
                   onClick={() => openRecent(x)} onRemove={() => forgetRecent(x)} />
               ))}
-              <button className="pill clear-recents" onClick={() => onUpdatePrefs?.({ recentSearches: [] })}>Clear recent searches</button>
+              <button className="pill clear-recents" onClick={() => onUpdatePrefs?.({ recentSearches: [] })}>{t('Clear recent searches')}</button>
             </section>
           ) : (
             <section>
-              <div className="shelf-head"><h2>Recent searches</h2><button onClick={() => onUpdatePrefs?.({ recentSearches: [] })}>Clear recent searches</button></div>
+              <div className="shelf-head"><h2>{t('Recent searches')}</h2><button onClick={() => onUpdatePrefs?.({ recentSearches: [] })}>{t('Clear recent searches')}</button></div>
               <div className="grid recents">
                 {recents.map((x) => (
                   <div key={recentKey(x)} className="recentcard">
-                    <Card title={x.name} subtitle={x.sub || x.kind} round={x.kind === 'Artist'}
+                    <Card title={x.name} subtitle={x.sub || kindLabel(x.kind)} round={x.kind === 'Artist'}
                       image={jf.imageUrl(x.art || x.id, { maxHeight: 320 })} onOpen={() => openRecent(x)} onPlay={() => playRecent(x)} />
-                    <button className="recent-x" onClick={() => forgetRecent(x)} title="Remove" aria-label="Remove"><CloseGlyph /></button>
+                    <button className="recent-x" onClick={() => forgetRecent(x)} title={t('Remove')} aria-label={t('Remove')}><CloseGlyph /></button>
                   </div>
                 ))}
               </div>
@@ -1735,13 +1758,13 @@ export default function Library({
           ))}
           {!query.trim() && phone && !focusMode && (
             <section className="startbrowse">
-              <div className="shelf-head"><h2>Start browsing</h2></div>
+              <div className="shelf-head"><h2>{t('Start browsing')}</h2></div>
               <div className="tilegrid">{startTiles}</div>
             </section>
           )}
           {!query.trim() && !focusMode && (
             <section className="browseall">
-              <div className="shelf-head"><h2>Browse all</h2></div>
+              <div className="shelf-head"><h2>{t('Browse all')}</h2></div>
               <div className="tilegrid">
                 {!phone && startTiles}
                 {browseTiles}
@@ -1750,8 +1773,8 @@ export default function Library({
           )}
           {!query.trim() && !phone && (
             <section>
-              <div className="shelf-head"><h2>Tips</h2></div>
-              <p className="placeholder-note">Type a lyric you remember. Narrow with <code>artist:</code>, <code>album:</code>, <code>year:2013</code>, <code>year:2010-2015</code>, <code>genre:house</code> or <code>liked:</code>. Typos are fine. Press <code>/</code> anywhere to get here, arrows and Enter to open.</p>
+              <div className="shelf-head"><h2>{t('Tips')}</h2></div>
+              <p className="placeholder-note">{rich(t('Type a lyric you remember. Narrow with {artist}, {album}, {year}, {years}, {genre} or {liked}. Typos are fine. Press {slash} anywhere to get here, arrows and Enter to open.'), { artist: <code>artist:</code>, album: <code>album:</code>, year: <code>year:2013</code>, years: <code>year:2010-2015</code>, genre: <code>genre:house</code>, liked: <code>liked:</code>, slash: <code>/</code> })}</p>
             </section>
           )}
           {r?.chips?.length > 0 && (
@@ -1762,7 +1785,7 @@ export default function Library({
 
           {r && r.scoped && r.tracks.length > 0 && (
             <section>
-              <div className="shelf-head"><h2>Songs</h2></div>
+              <div className="shelf-head"><h2>{t('Songs')}</h2></div>
               <div className="tracklist" style={{ padding: 0 }}>
                 {r.tracks.map((t, i) => <TrackRow key={t.Id} {...searchRow(i, { highlight: hi === i })} />)}
               </div>
@@ -1773,23 +1796,23 @@ export default function Library({
             const btn = (a) => {
               const { label, busy } = requestUi(stateOf(a));
               return (
-                <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy} onClick={(e) => { e.stopPropagation(); requestRelease(a.artistId, a); }} title="Download this release into your library">{label}</button>
+                <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy} onClick={(e) => { e.stopPropagation(); requestRelease(a.artistId, a); }} title={t('Download this release into your library')}>{label}</button>
               );
             };
             const openOrRequest = (a) => { if (a.inLibrary) openAlbum({ Id: a.inLibrary, Name: a.title }); else if (!stateOf(a)) requestRelease(a.artistId, a); };
             // A release that is in the library plays straight from its result.
             const playBtn = (a) => (
-              <button className="card-play" onClick={(e) => { e.stopPropagation(); playItem({ Id: a.inLibrary, Type: 'MusicAlbum', Name: a.title }); }} title="Play"><PlayGlyph /></button>
+              <button className="card-play" onClick={(e) => { e.stopPropagation(); playItem({ Id: a.inLibrary, Type: 'MusicAlbum', Name: a.title }); }} title={t('Play')}><PlayGlyph /></button>
             );
-            const sub = (a) => [a.rtype, a.year, a.artist].filter(Boolean).join(' • ');
-            if (!gres) return <p className="placeholder-note gsearch-note">Searching everywhere…</p>;
-            if (gres.failed) return <p className="placeholder-note gsearch-note">Couldn&rsquo;t search everywhere right now.</p>;
+            const sub = (a) => [a.rtype && t(a.rtype), a.year, a.artist].filter(Boolean).join(' • ');
+            if (!gres) return <p className="placeholder-note gsearch-note">{t('Searching everywhere…')}</p>;
+            if (gres.failed) return <p className="placeholder-note gsearch-note">{t('Couldn’t search everywhere right now.')}</p>;
             if (!gres.albums?.length) return (
-              <div className="search-empty"><b>Couldn&rsquo;t find &ldquo;{query.trim()}&rdquo; anywhere</b><span>Try a different spelling, or the artist and album together.</span></div>
+              <div className="search-empty"><b>{t('Couldn’t find “{query}” anywhere', { query: query.trim() })}</b><span>{t('Try a different spelling, or the artist and album together.')}</span></div>
             );
             return (
               <section className="gsearch">
-                <div className="shelf-head"><h2>Everywhere</h2><span className="settings-hint">{gres.albums.filter((a) => a.inLibrary).length} of {gres.albums.length} in your library</span></div>
+                <div className="shelf-head"><h2>{t('Everywhere')}</h2><span className="settings-hint">{t('{have} of {total} in your library', { have: gres.albums.filter((a) => a.inLibrary).length, total: gres.albums.length })}</span></div>
                 {phone ? (
                   <div className="searchlist">
                     {gres.albums.map((a) => (
@@ -1832,7 +1855,7 @@ export default function Library({
           {!phone && r && !r.scoped && searchType === 'All' && top && (
             <div className="searchgrid">
               <section>
-                <div className="shelf-head"><h2>Top result</h2></div>
+                <div className="shelf-head"><h2>{t('Top result')}</h2></div>
                 <div className={`topresult ${top.kind === 'Artist' ? 'round' : ''} ${hi === 0 ? 'hi' : ''}`}
                   onClick={() => { remember(query, hit(top.kind, top.item)); top.kind === 'Song' ? openAlbum({ Id: top.item.AlbumId, Name: top.item.Album }) : top.kind === 'Playlist' ? onOpenPlaylist(top.item) : open(top.item); }}>
                   <img src={jf.imageUrl(top.kind === 'Song' ? (top.item.AlbumId || top.item.Id) : top.item.Id, { maxHeight: 200 })} alt="" />
@@ -1843,7 +1866,7 @@ export default function Library({
                     {top.kind !== 'Artist' && (
                       <div className="kind">
                         {top.kind === 'Song' ? (top.item.Artists?.join(', ') || '') : (top.item.AlbumArtist || '')}
-                        <b>{top.kind}</b>
+                        <b>{kindLabel(top.kind)}</b>
                       </div>
                     )}
                   </div>
@@ -1853,7 +1876,7 @@ export default function Library({
                 </div>
               </section>
               <section>
-                <div className="shelf-head"><h2>Songs</h2></div>
+                <div className="shelf-head"><h2>{t('Songs')}</h2></div>
                 <div className="tracklist" style={{ padding: 0 }}>
                   {r.tracks.slice(0, 4).map((t, i) => <TrackRow key={t.Id} {...searchRow(i, { highlight: hi === i + (top ? 1 : 0) })} />)}
                 </div>
@@ -1863,7 +1886,7 @@ export default function Library({
 
           {!phone && r && !r.scoped && show('Songs') && searchType !== 'All' && r.tracks.length > 0 && (
             <section>
-              <div className="shelf-head"><h2>Songs</h2></div>
+              <div className="shelf-head"><h2>{t('Songs')}</h2></div>
               <div className="tracklist" style={{ padding: 0 }}>
                 {r.tracks.map((t, i) => <TrackRow key={t.Id} {...searchRow(i)} />)}
               </div>
@@ -1871,10 +1894,10 @@ export default function Library({
           )}
           {!phone && r && show('Artists') && r.artists.length > 0 && (
             <section>
-              <div className="shelf-head"><h2>Artists</h2></div>
+              <div className="shelf-head"><h2>{t('Artists')}</h2></div>
               <div className="grid">
                 {r.artists.map((a) => (
-                  <Card key={a.Id} title={a.Name} subtitle="Artist" round
+                  <Card key={a.Id} title={a.Name} subtitle={t('Artist')} round
                     image={jf.imageUrl(a.Id, { maxHeight: 320 })} onOpen={() => { remember(query, hit('Artist', a)); openArtist(a); }} onPlay={() => { remember(query, hit('Artist', a)); startMix(a); }} />
                 ))}
               </div>
@@ -1882,10 +1905,10 @@ export default function Library({
           )}
           {!phone && r && show('Albums') && r.albums.length > 0 && (
             <section>
-              <div className="shelf-head"><h2>Albums</h2></div>
+              <div className="shelf-head"><h2>{t('Albums')}</h2></div>
               <div className="grid">
                 {r.albums.map((a) => (
-                  <Card key={a.Id} title={a.Name} subtitle={`${a.ProductionYear ? a.ProductionYear + ' • ' : ''}${a.AlbumArtist || 'Album'}`}
+                  <Card key={a.Id} title={a.Name} subtitle={`${a.ProductionYear ? a.ProductionYear + ' • ' : ''}${a.AlbumArtist || t('Album')}`}
                     image={jf.imageUrl(a.Id, { maxHeight: 320 })} onOpen={() => { remember(query, hit('Album', a)); openAlbum(a); }} onPlay={() => { remember(query, hit('Album', a)); playItem(a); }} />
                 ))}
               </div>
@@ -1893,10 +1916,10 @@ export default function Library({
           )}
           {!phone && r && show('Playlists') && r.playlists.length > 0 && (
             <section>
-              <div className="shelf-head"><h2>Playlists</h2></div>
+              <div className="shelf-head"><h2>{t('Playlists')}</h2></div>
               <div className="grid">
                 {r.playlists.map((p) => (
-                  <Card key={p.Id} title={p.Name} subtitle="Playlist"
+                  <Card key={p.Id} title={p.Name} subtitle={t('Playlist')}
                     image={jf.imageUrl(p.Id, { maxHeight: 320 })} onOpen={() => { remember(query, hit('Playlist', p)); onOpenPlaylist(p); }} onPlay={() => { remember(query, hit('Playlist', p)); playItem(p); }} />
                 ))}
               </div>
@@ -1904,12 +1927,12 @@ export default function Library({
           )}
           {phoneRows && phoneRows.length === 0 && searchType !== 'Everywhere' && (
             <div className="search-empty">
-              <b>Couldn&rsquo;t find &ldquo;{query.trim()}&rdquo;</b>
-              <span>Try searching again using a different spelling or keyword.</span>
+              <b>{t('Couldn’t find “{query}”', { query: query.trim() })}</b>
+              <span>{t('Try searching again using a different spelling or keyword.')}</span>
             </div>
           )}
           {!phone && r && searchType !== 'Everywhere' && !r.tracks.length && !r.albums.length && !r.artists.length && !r.playlists.length && (
-            <div className="banner">No results found for &ldquo;{query}&rdquo;. Check the spelling, or try a different search.</div>
+            <div className="banner">{t('No results found for “{query}”. Check the spelling, or try a different search.', { query })}</div>
           )}
         </div>
       </div>
@@ -1934,9 +1957,9 @@ export default function Library({
 
 // A list's menu offline: what works without the server (queueing, going to
 // the artist, the download itself: removing it, or saving it for later).
-const HERO_OFFLINE = /^(Add to queue|Go to artist|Remove download|Download for offline|Update download)/;
+// Marked with offline: true (labels are translated, so not matched by text).
 const heroOffline = (items) => {
-  const kept = items.filter((it) => it && (it.sep || HERO_OFFLINE.test(it.label || '')));
+  const kept = items.filter((it) => it && (it.sep || it.offline));
   return kept.filter((it, i) => !it.sep || (i > 0 && i < kept.length - 1 && !kept[i - 1].sep));
 };
 

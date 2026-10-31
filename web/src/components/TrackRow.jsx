@@ -5,6 +5,7 @@ import { FORMATS } from '../api/download.js';
 import { useLiked } from '../api/likes.js';
 import { useDownloaded } from '../api/offline.js';
 import { useOfflineMode } from '../offline/net.js';
+import { t } from '../i18n.js';
 
 // True on the phone layout (the same breakpoint as app.css's phone block), so
 // components can gate phone-only markup without a prop threaded from App.
@@ -46,9 +47,9 @@ export async function shareItem({ kind, id, title, by }) {
     const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
     if (coarse && navigator.share) { await navigator.share({ title: by ? `${title} — ${by}` : title, url }); return; }
     await navigator.clipboard.writeText(url);
-    toast('Link copied');
+    toast(t('Link copied'));
   } catch (e) {
-    if (e?.name !== 'AbortError') toast('Could not copy the link'); // AbortError: the share sheet was dismissed
+    if (e?.name !== 'AbortError') toast(t('Could not copy the link')); // AbortError: the share sheet was dismissed
   }
 }
 
@@ -108,7 +109,7 @@ export function LikedCover({ className = '', heart = 45 }) {
 }
 // Spotify's subtle "now playing" mark: three animated bars in the index column.
 export const NowPlayingBars = () => (
-  <span className="npbars" aria-label="Now playing"><i /><i /><i /></span>
+  <span className="npbars" aria-label={t('Now playing')}><i /><i /><i /></span>
 );
 
 // Spotify's liked heart is #1DB954, one of the two places that shade is used.
@@ -171,14 +172,15 @@ function fmtDur(ticks) {
  */
 // Spotify's small green arrow before the artist line: this song is kept for offline.
 export const DownloadedMark = () => (
-  <svg className="dl-mark" viewBox="0 0 16 16" width="12" height="12" aria-label="Downloaded"><circle cx="8" cy="8" r="8" fill="currentColor" /><path d="M8 4v6m0 0L5.5 7.5M8 10l2.5-2.5" stroke="#000" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  <svg className="dl-mark" viewBox="0 0 16 16" width="12" height="12" aria-label={t('Downloaded')}><circle cx="8" cy="8" r="8" fill="currentColor" /><path d="M8 4v6m0 0L5.5 7.5M8 10l2.5-2.5" stroke="#000" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
 // The offline subset of a menu: going places, and queueing when the song is
 // downloaded; separators tidied so none leads, trails or doubles.
-const OFFLINE_OK = new Set(['Go to artist', 'Go to album', 'Add to queue']);
+// Labels are compared as shown (translated).
 export function offlineMenu(items, playable = true) {
-  const kept = items.filter((it) => it && (it.sep || (OFFLINE_OK.has(it.label) && (it.label !== 'Add to queue' || playable))));
+  const ok = new Set([t('Go to artist'), t('Go to album'), t('Add to queue')]);
+  const kept = items.filter((it) => it && (it.sep || (ok.has(it.label) && (it.label !== t('Add to queue') || playable))));
   return kept.filter((it, i) => !it.sep || (i > 0 && i < kept.length - 1 && !kept[i - 1].sep));
 }
 
@@ -204,27 +206,27 @@ export default function TrackRow({
 
   // Spotify's row menu, top to bottom. Submenus open on hover.
   const allItems = [
-    onAddToQueue ? { label: 'Add to queue', icon: I.queue, onClick: () => onAddToQueue(track) } : null,
-    { label: 'Add to playlist', icon: I.plus, sub: [
-      { label: 'New playlist', icon: I.plus, onClick: () => onNewPlaylist?.(track) },
+    onAddToQueue ? { label: t('Add to queue'), icon: I.queue, onClick: () => onAddToQueue(track) } : null,
+    { label: t('Add to playlist'), icon: I.plus, sub: [
+      { label: t('New playlist'), icon: I.plus, onClick: () => onNewPlaylist?.(track) },
       playlists.length ? { sep: true } : null,
       ...playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo?.(p, track) })),
     ] },
-    onRemove ? { label: 'Remove from this playlist', icon: I.trash, onClick: () => onRemove(track) } : null,
-    { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.heartOn : I.heart, onClick: () => onLike?.(track, !liked) },
-    onExclude ? { label: excluded ? 'Include in your taste profile' : 'Exclude from your taste profile', icon: I.ban, onClick: () => onExclude(track, !excluded) } : null,
+    onRemove ? { label: t('Remove from this playlist'), icon: I.trash, onClick: () => onRemove(track) } : null,
+    { label: liked ? t('Remove from Liked Songs') : t('Add to Liked Songs'), icon: liked ? I.heartOn : I.heart, onClick: () => onLike?.(track, !liked) },
+    onExclude ? { label: excluded ? t('Include in your taste profile') : t('Exclude from your taste profile'), icon: I.ban, onClick: () => onExclude(track, !excluded) } : null,
     { sep: true },
-    onRadio ? { label: 'Go to song radio', icon: I.radio, onClick: () => onRadio(track) } : null,
+    onRadio ? { label: t('Go to song radio'), icon: I.radio, onClick: () => onRadio(track) } : null,
     onOpenArtist && artistsOf.some((a) => a.Id) ? (
       artistsOf.filter((a) => a.Id).length > 1
-        ? { label: 'Go to artist', icon: I.artist, sub: artistsOf.filter((a) => a.Id).map((a) => ({ key: a.Id, label: a.Name, onClick: () => onOpenArtist(a.Id) })) }
-        : { label: 'Go to artist', icon: I.artist, onClick: () => onOpenArtist(artistsOf.find((a) => a.Id).Id) }
+        ? { label: t('Go to artist'), icon: I.artist, sub: artistsOf.filter((a) => a.Id).map((a) => ({ key: a.Id, label: a.Name, onClick: () => onOpenArtist(a.Id) })) }
+        : { label: t('Go to artist'), icon: I.artist, onClick: () => onOpenArtist(artistsOf.find((a) => a.Id).Id) }
     ) : null,
-    onOpenAlbum && track.AlbumId ? { label: 'Go to album', icon: I.album, onClick: () => onOpenAlbum(track.AlbumId) } : null,
-    jf ? { label: lyricJob ? 'Syncing Lyrics…' : 'Sync Lyrics', icon: I.lyrics, disabled: Boolean(lyricJob), onClick: () => syncLyrics(jf, track) } : null,
-    { label: 'Share', icon: I.share, onClick: () => shareItem({ kind: 'track', id: track.Id, title: track.Name, by: artistsOf.map((a) => a.Name).join(', ') }) },
+    onOpenAlbum && track.AlbumId ? { label: t('Go to album'), icon: I.album, onClick: () => onOpenAlbum(track.AlbumId) } : null,
+    jf ? { label: lyricJob ? t('Syncing Lyrics…') : t('Sync Lyrics'), icon: I.lyrics, disabled: Boolean(lyricJob), onClick: () => syncLyrics(jf, track) } : null,
+    { label: t('Share'), icon: I.share, onClick: () => shareItem({ kind: 'track', id: track.Id, title: track.Name, by: artistsOf.map((a) => a.Name).join(', ') }) },
     onDownload ? { sep: true } : null,
-    onDownload ? { label: 'Download', icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: f.label, onClick: () => onDownload(track, f.id) })) } : null,
+    onDownload ? { label: t('Download'), icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: t(f.label), onClick: () => onDownload(track, f.id) })) } : null,
   ];
   // Offline: only what works without the server (queueing a downloaded
   // song, going to its artist or album).
@@ -255,7 +257,7 @@ export default function TrackRow({
       <button
         className="trackrow-n"
         onClick={active && onToggle ? onToggle : onPlay}
-        title={active && isPlaying ? 'Pause' : 'Play'}
+        title={active && isPlaying ? t('Pause') : t('Play')}
       >
         <span className="trackrow-idx">{active && isPlaying ? <NowPlayingBars /> : n}</span>
         {/* Hovering the row that is playing offers pause (the two bars), like Spotify. */}
@@ -266,7 +268,7 @@ export default function TrackRow({
         <img
           className={`trackrow-art ${track.AlbumId && onOpenAlbum ? 'link' : ''}`}
           src={jf.imageUrl(track.Id || track.AlbumId, { maxHeight: 80 })} alt="" loading="lazy"
-          title={track.AlbumId && onOpenAlbum ? track.Album || 'Open album' : undefined}
+          title={track.AlbumId && onOpenAlbum ? track.Album || t('Open album') : undefined}
           onClick={track.AlbumId && onOpenAlbum ? (e) => { e.stopPropagation(); onOpenAlbum(track.AlbumId); } : undefined}
         />
       )}
@@ -285,10 +287,10 @@ export default function TrackRow({
         {snippet && (
           <small
             className={`lyric-snippet ${snippetAt != null && onPlayAt ? 'playable' : ''}`}
-            title={snippetAt != null && onPlayAt ? 'Play from this line' : undefined}
+            title={snippetAt != null && onPlayAt ? t('Play from this line') : undefined}
             onClick={snippetAt != null && onPlayAt ? (e) => { e.stopPropagation(); onPlayAt(track, snippetAt); } : undefined}
           >
-            <span className="lyric-tag">Lyrics</span>
+            <span className="lyric-tag">{t('Lyrics')}</span>
             <span>
               {snippet.split(/(\u0001[^\u0002]*\u0002)/g).map((part, i) => (
                 part.startsWith('\u0001') ? <mark key={i}>{part.slice(1, -1)}</mark> : <React.Fragment key={i}>{part}</React.Fragment>
@@ -309,7 +311,7 @@ export default function TrackRow({
       <button
         className={`trackrow-like ${liked ? 'on' : ''}`}
         onClick={(e) => { e.stopPropagation(); onLike?.(track, !liked); }}
-        title={liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}
+        title={liked ? t('Remove from Liked Songs') : t('Save to Liked Songs')}
       >
         <Heart on={liked} />
       </button>
@@ -320,7 +322,7 @@ export default function TrackRow({
         <button
           className="trackrow-more"
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right, y: r.bottom + 4, fromButton: true }); }}
-          title="More options"
+          title={t('More options')}
         >
           <Dots />
         </button>

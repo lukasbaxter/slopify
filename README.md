@@ -92,6 +92,7 @@ In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 | **Sonos, Denon / HEOS, DLNA** | Sonos, HEOS receivers, smart TVs, Kodi, WiiM and anything else that's a DLNA renderer |
 | **AirPlay** | Apple TV, HomePod and AirPlay speakers. Apple TVs that ask for a PIN get paired once in Settings › Speakers. Streams through Music Assistant's [cliairplay](https://github.com/music-assistant/airplay-cli), which ships in the image |
 | **Roku** | Roku players and Roku TVs, through Play on Roku |
+| **Fire TV / Android TV** | The Slopify TV app (`tv/`), sideloaded; it shows up in every device list under the TV's name |
 | **DIY speakers** | Anything that speaks the small `slopify-speaker/1` HTTP API on port 7780 shows up as a speaker (see `server/src/speakers/transports.ts`) |
 | **Home Assistant** | Every person and speaker becomes a media player. Install with HACS ([guide](docs/home-assistant.md)) |
 | **Soulseek (slskd)** | Weekly Exploration downloads and Upgrade to FLAC ([guide](docs/downloads.md)) |

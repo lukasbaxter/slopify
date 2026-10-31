@@ -13,6 +13,7 @@ import { AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View }
 import * as Device from 'expo-device';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
+import SlopifyMedia from './modules/slopify-media';
 
 // The server this build opens, set when it is built (the release build
 // takes it from the repository's SLOPIFY_URL variable).
@@ -35,7 +36,35 @@ const stayIn = (req) => {
 // behind an entitlement, so the model it is.
 const DEVICE_NAME = (Platform.OS === 'android' && Device.deviceName) || Device.modelName || (Platform.OS === 'ios' ? 'iPhone' : 'Android phone');
 const DEVICE_FORM = Device.deviceType === Device.DeviceType.TABLET ? 'tablet' : 'phone';
-const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev' })}; true;`;
+// Android's WebView has no navigator.mediaSession: this stand-in takes what
+// the page tells it (the same calls it makes in Safari and Chrome) to the
+// app, which puts it on the system's media session and notification
+// (modules/slopify-media), and brings the lock-screen, notification and
+// headset buttons back to the page's own action handlers.
+const MEDIA_SESSION = `(function () {
+  if (navigator.mediaSession || !window.ReactNativeWebView) return;
+  var handlers = {}, metadata = null, state = 'none', position = null, t = null;
+  var post = function () {
+    clearTimeout(t);
+    t = setTimeout(function () {
+      var art = metadata && metadata.artwork && metadata.artwork[0] ? metadata.artwork[0].src : null;
+      try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mediasession', state: metadata ? state : 'none', metadata: metadata ? { title: metadata.title, artist: metadata.artist, album: metadata.album, artwork: art ? new URL(art, location.href).href : null } : null, position: position, actions: Object.keys(handlers) })); } catch (e) {}
+    }, 30);
+  };
+  window.MediaMetadata = function (o) { o = o || {}; this.title = o.title || ''; this.artist = o.artist || ''; this.album = o.album || ''; this.artwork = o.artwork || []; };
+  var ms = {
+    get metadata() { return metadata; }, set metadata(v) { metadata = v || null; post(); },
+    get playbackState() { return state; }, set playbackState(v) { state = v || 'none'; post(); },
+    setActionHandler: function (a, fn) { if (fn) handlers[a] = fn; else delete handlers[a]; post(); },
+    setPositionState: function (p) { position = p ? { duration: p.duration, position: p.position, rate: p.playbackRate || 1, at: Date.now() } : null; post(); },
+  };
+  Object.defineProperty(navigator, 'mediaSession', { value: ms, configurable: true });
+  window.addEventListener('slopify:mediaaction', function (e) {
+    var d = e.detail || {}, fn = handlers[d.action];
+    if (fn) fn(d.action === 'seekto' ? { action: 'seekto', seekTime: d.seekTime } : { action: d.action });
+  });
+})();`;
+const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev' })};${Platform.OS === 'android' && SlopifyMedia ? MEDIA_SESSION : ''} true;`;
 
 // iOS: a music player's audio session. The volume listener switches the
 // session to Ambient as the module starts (only then: VolumeManager init),
@@ -64,11 +93,15 @@ export default function App() {
   // Recognised by value, not by a quiet period after each press, so presses
   // in quick succession all count.
   const echo = useRef(null);
+  const echoAt = useRef(0);
   // Shown in the page's diag report: what the shell heard and dropped.
   const note = (msg) => web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:shellnote', { detail: { msg: ${JSON.stringify(msg)} } })); true;`);
   const putBack = (level) => {
-    echo.current = level;
-    VolumeManager.setVolume(level, { showUI: false }).catch(() => {});
+    echo.current = level; echoAt.current = Date.now();
+    // Android sets the level as (int)(value * steps): a value read back from
+    // a step (2/15 = 0.1333...) can land one step lower. A hair more lands
+    // on the step itself, whatever the phone's number of steps.
+    VolumeManager.setVolume(Platform.OS === 'android' ? Math.min(1, level + 0.01) : level, { showUI: false }).catch(() => {});
   };
 
   useEffect(() => {
@@ -80,9 +113,16 @@ export default function App() {
         const vol = typeof ev === 'number' ? ev : ev?.volume;
         if (typeof vol !== 'number') return;
         const reason = typeof ev === 'object' ? ev?.reason || '' : '';
-        // Our own put-back. iOS rounds the level to its own steps, so the
-        // echo can come back a little off the value we set: matched within
-        // a third of a press (one press is 1/16 = 0.0625).
+        // Android reports every stream (ring, alarms, calls): only music's
+        // level is the one the buttons move while music plays.
+        if (Platform.OS === 'android' && typeof ev === 'object' && ev?.type && ev.type !== 'music') return;
+        // Our own put-back. iOS rounds the level to its own steps (1/16), so
+        // the echo can come back a little off the value we set: matched
+        // within a third of a press (Android's steps are smaller, 1/25 on
+        // some phones, so no wider than that). Android does not always report
+        // a level the app set itself: an echo not heard within a second and a
+        // half is not waited for, or it swallowed the next real press.
+        if (echo.current != null && Date.now() - echoAt.current > 1500) echo.current = null;
         if (echo.current != null && Math.abs(vol - echo.current) < 0.02) { echo.current = null; return; }
         if (!remote.current || base.current == null) { base.current = vol; return; }
         // Only a button press counts. iOS also reports volume changes when
@@ -104,12 +144,20 @@ export default function App() {
       // drops it when the app is leaving (iOS pauses that session on close).
       web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: ${JSON.stringify(s)} } })); true;`);
     });
-    return () => { try { sub?.remove(); } catch { /* gone */ } appState.remove(); };
+    // Lock screen, notification and headset buttons, to the page's handlers.
+    const media = SlopifyMedia?.addListener?.('onAction', (e) => {
+      web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:mediaaction', { detail: ${JSON.stringify({ action: e?.action, seekTime: e?.seekTime ?? null })} })); true;`);
+    });
+    return () => { try { sub?.remove(); } catch { /* gone */ } try { media?.remove(); } catch { /* gone */ } appState.remove(); };
   }, []);
 
   const onMessage = (e) => {
     let msg = null;
     try { msg = JSON.parse(e.nativeEvent.data); } catch { return; }
+    if (msg?.type === 'mediasession' && SlopifyMedia) {
+      try { if (msg.state === 'none') SlopifyMedia.stop(); else SlopifyMedia.update(msg); } catch { /* module gone */ }
+      return;
+    }
     if (msg?.type === 'session') {
       const was = remote.current; remote.current = !!msg.remote;
       if (remote.current && !was) {
@@ -118,8 +166,9 @@ export default function App() {
         VolumeManager.getVolume().then((v) => {
           let b = typeof v === 'number' ? v : v?.volume;
           if (typeof b !== 'number') return;
-          // On one of iOS's own steps (sixteenths), so a put-back reads back exactly.
-          const q = Math.round(b * 16) / 16;
+          // On one of iOS's own steps (sixteenths), so a put-back reads back
+          // exactly. Android's steps vary by phone: its level stays as it is.
+          const q = Platform.OS === 'ios' ? Math.round(b * 16) / 16 : b;
           if (b > 0.95 || b < 0.05) b = b > 0.95 ? 0.8125 : 0.1875; else b = q;
           if (Math.abs(b - (typeof v === 'number' ? v : v?.volume)) > 0.001) putBack(b);
           base.current = b;

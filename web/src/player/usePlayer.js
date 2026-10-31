@@ -2080,8 +2080,15 @@ export function usePlayer(jf) {
   useEffect(() => {
     if (device.kind !== 'local' || !playing || !current || !ROUTES_WEB_AUDIO) return undefined;
     let timer = null, cancelled = false;
+    // WebKit reports a little past the real end (8.05 s for an 8.00 s file,
+    // the codec's padding) and the song ended before a handoff aimed at that
+    // could start: within a quarter second the library's length is the end.
+    // Further apart the element's own is kept (the library's can be an
+    // estimate, and ending a song early is worse than a gap).
     const remainingOf = (el) => {
-      const len = Number.isFinite(el.duration) && el.duration > 0 && !localBaseRef.current ? el.duration : ticksToSeconds(current.RunTimeTicks) - localBaseRef.current;
+      const known = ticksToSeconds(current.RunTimeTicks) - localBaseRef.current;
+      const own = Number.isFinite(el.duration) && el.duration > 0 && !localBaseRef.current ? el.duration : 0;
+      const len = own && known > 0 && own > known && own - known < 0.25 ? known : own || known;
       return len - el.currentTime;
     };
     // Close to the moment, wait on a timer (re-aimed until within ~15 ms);

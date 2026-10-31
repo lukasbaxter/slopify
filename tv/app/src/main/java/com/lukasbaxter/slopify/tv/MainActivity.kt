@@ -83,6 +83,9 @@ class MainActivity : Activity() {
             override fun onConsoleMessage(m: ConsoleMessage): Boolean { Log.i("SlopifyTV", "${m.messageLevel()} ${m.sourceId()}:${m.lineNumber()} ${m.message()}"); return true }
         }
         web.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                if (originOf(url) == originOf(server())) legacySeed?.let { view.evaluateJavascript(it, null) }
+            }
             override fun onPageFinished(view: WebView, url: String) {
                 view.evaluateJavascript(HELPER, null)
                 val css = prefs.getString("tvcss", "") ?: ""
@@ -133,14 +136,23 @@ class MainActivity : Activity() {
         """.trimIndent()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(web, script, setOf(originOf(server())))
-        } else {
-            // older WebView: at least seed before the first navigation completes
-            web.evaluateJavascript(script, null)
+        } else if (seed.isNotEmpty()) {
+            // An older WebView (Fire OS ships WebView 90, which has no
+            // document-start scripts): the identity comes from the bridge
+            // instead (Bridge.shell, read by web/index.html before the app's
+            // scripts), and the sign-in is seeded into the server's page as
+            // soon as it commits, then the page loads once more with it.
+            legacySeed = "(function(){ var had = !!localStorage.getItem('slopify.session'); ${seed.trim()} if (!had && localStorage.getItem('slopify.session')) location.reload(); })();"
         }
     }
+    private var legacySeed: String? = null
 
     inner class Bridge {
         @JavascriptInterface fun state(nowPlaying: Boolean) { nowPlayingOpen = nowPlaying }
+        /** Who this is (no sign-in in it: every frame can call the bridge). There before any of the page's scripts, on every WebView. */
+        @JavascriptInterface fun shell(): String = JSONObject()
+            .put("deviceName", Settings.Global.getString(contentResolver, "device_name") ?: "TV")
+            .put("deviceForm", "tv").put("platform", "androidtv").put("version", "1.0").toString()
         /** The setup form's answer; only taken while that form is up (no server yet). */
         @JavascriptInterface fun setServer(url: String) {
             val u = url.trim().trimEnd('/')
@@ -197,6 +209,17 @@ class MainActivity : Activity() {
               if (!document.getElementById('tvcss-base')) { const st = document.createElement('style'); st.id = 'tvcss-base'; st.textContent = '.fs-close{display:none!important} .fs-lyrics{width:min(1200px,100%)!important} .fs-lyrics .lyric-line,.fs-lyrics p{font-size:40px!important} .fs-art{max-width:min(66vh,90vw)!important} .fs-thumb{width:84px!important;height:84px!important}'; document.head.appendChild(st); }
               const q = (s) => document.querySelector(s);
               const click = (s) => { const b = q(s); if (b && !b.disabled) { b.click(); return true; } return false; };
+              // In a text field the remote's up / down are caret keys that go
+              // nowhere (the sign-in form: down never reached the password):
+              // they move to the previous / next control, like Tab.
+              document.addEventListener('keydown', (e) => {
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+                const el = document.activeElement;
+                if (!el || el.tagName !== 'INPUT' || !/^(text|password|email|url|search|tel|number)?${'$'}/.test(el.type || '')) return;
+                const all = [...document.querySelectorAll('input, button, select, textarea, a[href], [tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled && x.offsetParent !== null);
+                const next = all[all.indexOf(el) + (e.key === 'ArrowDown' ? 1 : -1)];
+                if (next) { e.preventDefault(); next.focus(); }
+              }, true);
               const TABS = ['Album', 'Lyrics', 'Visualizer'];
               window.__tv = {
                 open() { if (!q('.fs-top')) click('button[title="Now playing view"]'); },

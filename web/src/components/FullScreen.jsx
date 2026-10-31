@@ -27,11 +27,6 @@ const G = {
   artist: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6.233.371a4.388 4.388 0 0 1 5.002 1.052c.421.459.713.992.904 1.554.143.421.263 1.173.22 1.894-.078 1.322-.638 2.408-1.399 3.316l-.127.152a.75.75 0 0 0 .201 1.13l2.209 1.275a4.75 4.75 0 0 1 2.375 4.114V16H0v-1.142a4.75 4.75 0 0 1 2.375-4.114l2.209-1.275a.75.75 0 0 0 .201-1.13l-.126-.152c-.761-.908-1.322-1.994-1.4-3.316-.043-.721.077-1.473.22-1.894a4.346 4.346 0 0 1 .904-1.554c.411-.448.91-.807 1.85-1.052zM8 1.5a2.9 2.9 0 0 0-2.8 2.087 5.53 5.53 0 0 0-.131 1.293c.055.934.44 1.717 1.062 2.459l.126.152a2.25 2.25 0 0 1-.603 3.39L3.445 12.156A3.25 3.25 0 0 0 1.5 14.5h13a3.25 3.25 0 0 0-1.945-2.344L10.346 10.88a2.25 2.25 0 0 1-.603-3.39l.127-.152c.62-.742 1.006-1.525 1.061-2.46a5.53 5.53 0 0 0-.13-1.292A2.9 2.9 0 0 0 8 1.5z" /></svg>,
   album: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM8 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z" /></svg>,
 };
-// Spotify's save control on the phone: a circled plus, a green disc with a
-// black check once saved.
-const PlusCircle = ({ on }) => (on
-  ? <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="var(--accent, #1ed760)" /><path d="M6.5 12.3l3.4 3.4 7.6-7.6" fill="none" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-  : <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10.1" /><path d="M12 7.5v9M7.5 12h9" /></svg>);
 const G16 = {
   moon: <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"><path d="M14 9.8A6 6 0 0 1 6.2 2 6 6 0 1 0 14 9.8z" /></svg>,
   queue: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M15 15H1v-1.5h14V15zm0-4.5H1V9h14v1.5zm-14-7A2.5 2.5 0 0 1 3.5 1h9a2.5 2.5 0 0 1 0 5h-9A2.5 2.5 0 0 1 1 3.5zm2.5-1a1 1 0 0 0 0 2h9a1 1 0 1 0 0-2h-9z" /></svg>,
@@ -226,7 +221,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
       onNewPlaylist && playlists.length ? { sep: true } : null,
       ...playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo(p, fullTrack) })),
     ] } : null,
-    { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.checkCircle : I.plusCircle, onClick: toggleLike },
+    { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.heartOn : I.heart, onClick: toggleLike },
     { sep: true },
     { label: 'Go to song radio', icon: G16.radio, onClick: () => { jf.instantMix(nowPlaying.itemId).then((items) => { if (items?.length) player.playQueue(items, 0); }).catch(() => {}); } },
     artistsOf.length > 1
@@ -333,9 +328,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
           </div>
           {nowPlaying?.itemId && (
             <button className={`fs-like ${liked ? 'on' : ''}`} onClick={toggleLike} title={liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}>
-              {phone
-                ? <PlusCircle on={liked} />
-                : <svg viewBox="0 0 16 16" width="20" height="20" fill={liked ? 'var(--seek-accent)' : 'currentColor'}><HeartPath on={liked} /></svg>}
+              <svg viewBox="0 0 16 16" width="20" height="20" fill={liked ? 'var(--seek-accent)' : 'currentColor'}><HeartPath on={liked} /></svg>
             </button>
           )}
         </div>

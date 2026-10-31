@@ -134,9 +134,6 @@ const Dots = () => (
 // Shared with the entity-header sheets (artist / album / playlist ⋯), so every
 // phone sheet row carries the same 16px glyphs.
 export const I = {
-  // Spotify's "add" pair: circled plus, and a green filled circle with a check once saved.
-  plusCircle: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z" /><path d="M11.75 8a.75.75 0 0 1-.75.75H8.75V11a.75.75 0 0 1-1.5 0V8.75H5a.75.75 0 0 1 0-1.5h2.25V5a.75.75 0 0 1 1.5 0v2.25H11a.75.75 0 0 1 .75.75z" /></svg>,
-  checkCircle: <svg viewBox="0 0 16 16" width="16" height="16" fill="var(--seek-accent, #1db954)"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm11.748-1.97a.75.75 0 0 0-1.06-1.06l-3.72 3.72-1.72-1.72a.75.75 0 0 0-1.06 1.06L6.968 10.81l4.78-4.78z" /></svg>,
   plus: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M15.25 8a.75.75 0 0 1-.75.75H8.75v5.75a.75.75 0 0 1-1.5 0V8.75H1.5a.75.75 0 0 1 0-1.5h5.75V1.5a.75.75 0 0 1 1.5 0v5.75h5.75a.75.75 0 0 1 .75.75z" /></svg>,
   queue: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M15 15H1v-1.5h14V15zm0-4.5H1V9h14v1.5zm-14-7A2.5 2.5 0 0 1 3.5 1h9a2.5 2.5 0 0 1 0 5h-9A2.5 2.5 0 0 1 1 3.5zm2.5-1a1 1 0 0 0 0 2h9a1 1 0 1 0 0-2h-9z" /></svg>,
   ban: <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z" /><path d="M4.97 4.97a.75.75 0 0 1 1.06 0L8 6.94l1.97-1.97a.75.75 0 1 1 1.06 1.06L9.06 8l1.97 1.97a.75.75 0 1 1-1.06 1.06L8 9.06l-1.97 1.97a.75.75 0 0 1-1.06-1.06L6.94 8 4.97 6.03a.75.75 0 0 1 0-1.06z" /></svg>,
@@ -214,7 +211,7 @@ export default function TrackRow({
       ...playlists.map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo?.(p, track) })),
     ] },
     onRemove ? { label: 'Remove from this playlist', icon: I.trash, onClick: () => onRemove(track) } : null,
-    { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.checkCircle : I.plusCircle, onClick: () => onLike?.(track, !liked) },
+    { label: liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', icon: liked ? I.heartOn : I.heart, onClick: () => onLike?.(track, !liked) },
     onExclude ? { label: excluded ? 'Include in your taste profile' : 'Exclude from your taste profile', icon: I.ban, onClick: () => onExclude(track, !excluded) } : null,
     { sep: true },
     onRadio ? { label: 'Go to song radio', icon: I.radio, onClick: () => onRadio(track) } : null,

@@ -264,3 +264,16 @@ describe('add to queue on a speaker', () => {
     expect(p.markQueued(rows, ['now', 'gone', 'a', 'ctx1'], [false, true, true, false]).map((t: any) => t._queued)).toEqual([false, true, false]);
   });
 });
+
+describe('codec to type', () => {
+  it("reads the scanner's codec names", async () => {
+    const { mimeFor } = await import('./player.js');
+    expect(mimeFor('FLAC')).toBe('audio/flac');
+    expect(mimeFor('MPEG 1 Layer 3')).toBe('audio/mpeg');
+    expect(mimeFor('MPEG-4/AAC')).toBe('audio/mp4');
+    expect(mimeFor('ALAC')).toBe('audio/mp4');
+    expect(mimeFor('Opus')).toBe('audio/ogg');
+    expect(mimeFor('PCM')).toBe('audio/wav');
+    expect(mimeFor(null)).toBe('audio/mpeg');
+  });
+});

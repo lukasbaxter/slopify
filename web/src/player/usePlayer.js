@@ -107,6 +107,8 @@ if (audioSession) {
 // start (usePlayer: a song change with the screen locked).
 const BRIDGE_MAX_MS = 2 * 60 * 1000;
 
+// Speakers that are really TVs get the TV glyph (a Roku, an Apple TV, a DLNA TV).
+const SPEAKER_TV = /^roku |appletv|apple tv|\btv\b|television|bravia|webos|tizen|viera/i;
 export const LOCAL_DEVICE = {
   id: 'local',
   kind: 'local',
@@ -588,7 +590,7 @@ export function usePlayer(jf) {
     // A speaker this desktop can see itself is driven from here, not listed twice.
     .filter((d) => !remote || !localDevicesRef.current.some((x) => x.id === d.id))
     .filter((d, i, arr) => arr.findIndex((x) => x.id === d.id) === i)
-    .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? d.model || N_('Speaker') : d.kind === 'tv' ? 'Slopify TV' : 'Chromecast', viaClient: d.viaClient, group: d.group }));
+    .map((d) => ({ id: d.id, kind: d.kind, name: d.name, model: d.kind === 'bluos' ? 'Bluesound' : d.kind === 'bridge' ? d.model || N_('Speaker') : d.kind === 'tv' ? 'Slopify TV' : d.kind === 'upnp' ? d.model || 'DLNA' : d.kind === 'airplay' ? 'AirPlay' : d.kind === 'roku' ? d.model || 'Roku' : 'Chromecast', form: SPEAKER_TV.test(`${d.kind} ${d.model || ''}`) ? 'tv' : undefined, viaClient: d.viaClient, group: d.group }));
 
   // Remote players from the relay, presented as selectable devices.
   const relayDevices = roster.players

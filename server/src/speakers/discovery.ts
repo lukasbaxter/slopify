@@ -3,6 +3,13 @@
 //   _musc._tcp             -> Bluesound / BluOS players (plain HTTP on :11000)
 //   _slopify-speaker._tcp  -> anything speaking the small "slopify-speaker/1" HTTP API on :7780
 //                             (see BridgeTransport; e.g. an ESP32 bridge to a Bluetooth soundbar)
+//   _raop._tcp / _airplay._tcp -> AirPlay receivers: Apple TV, HomePod, AirPlay speakers (airplay.ts)
+//   SSDP MediaRenderer     -> DLNA renderers: Sonos, HEOS, smart TVs, Kodi... (upnp.ts)
+//   SSDP roku:ecp          -> Roku players and TVs (roku.ts)
+// A box that speaks several of these is listed once, by the best of them
+// (BluOS, then Cast, then DLNA, then AirPlay, then Roku): a Denon receiver
+// answers HEOS/DLNA and AirPlay, a Sonos DLNA and AirPlay, a Google TV Cast
+// and DLNA.
 // mDNS is not enough on its own: Google TV devices in particular go missing
 // from the multicast browse (a wired Google TV Streamer never showed up
 // while it answered on :8009 the whole time), so every minute the local /24
@@ -13,8 +20,30 @@ import { Bonjour, type Browser } from 'bonjour-service';
 import net from 'node:net';
 import os from 'node:os';
 import http from 'node:http';
+import { parseDescription, RENDERER, ROKU_ST, search, SONOS_ZP, type SsdpHit } from './ssdp.js';
+import { parseRokuInfo, ROKU_PORT } from './roku.js';
+import { airplayConfig } from './airplay.js';
 
-export type Speaker = { id: string; kind: 'cast' | 'bluos' | 'bridge'; name: string; model: string; host: string; port: number; swept?: boolean };
+export type SpeakerKind = 'cast' | 'bluos' | 'bridge' | 'upnp' | 'airplay' | 'roku';
+export type Speaker = {
+  id: string; kind: SpeakerKind; name: string; model: string; host: string; port: number; swept?: boolean;
+  // Found by SSDP (missed searches count against it, like the sweep).
+  ssdp?: boolean;
+  // DLNA control endpoints (kind 'upnp').
+  avTransport?: string; renderingControl?: string | null; connectionManager?: string | null; sonos?: boolean;
+  // AirPlay services and their TXT records (kind 'airplay').
+  raop?: { port: number; name: string; txt: Record<string, string> } | null;
+  airplay?: { port: number; host: string; txt: Record<string, string> } | null;
+};
+// "Denon" + "Denon AVR-X1700H" is "Denon AVR-X1700H"; a long credits line
+// for a manufacturer ("Ivo Clarysse, Henner Zeller") is left out.
+function upnpModel(manufacturer: string, model: string) {
+  const m = (model || '').trim(), maker = (manufacturer || '').trim().replace(/,? (inc|corp|corporation|ltd|gmbh|co)\.?$/i, '');
+  if (!maker || maker.length > 24 || /,/.test(maker) || m.toLowerCase().startsWith(maker.toLowerCase().split(' ')[0])) return (m || maker || 'DLNA').slice(0, 64);
+  return `${maker} ${m}`.trim().slice(0, 64);
+}
+// One entry per box: lower wins.
+const RANK: Record<SpeakerKind, number> = { bluos: 0, bridge: 1, cast: 2, upnp: 3, airplay: 4, roku: 5 };
 
 const CAST_PORT = 8009;
 export const BLUOS_PORT = 11000;
@@ -52,15 +81,23 @@ export class Discovery {
   start() {
     if (this.bonjour) return;
     const iface = lanAddress();
-    try { this.bonjour = new Bonjour((iface ? { interface: iface } : undefined) as any); }
+    // Bound to every address, joined on the LAN interface: a socket bound to
+    // the interface's own address (multicast-dns's default when given one)
+    // never receives multicast on Linux, so pinned browsing heard no
+    // announcements at all (advertise.ts has the same fix).
+    try { this.bonjour = new Bonjour((iface ? { interface: iface, bind: '0.0.0.0', reuseAddr: true } : undefined) as any); }
     catch (e: any) { this.log(`mdns: ${e.message}`); return; }
     const cast = this.bonjour.find({ type: 'googlecast' }, (s) => this.add(this.fromCast(s)));
     const blu = this.bonjour.find({ type: 'musc' }, (s) => this.add(this.fromBluOS(s)));
     const bridge = this.bonjour.find({ type: 'slopify-speaker' }, (s) => { this.identifyBridge(this.address(s), s.port || BRIDGE_PORT).then((d) => d && this.add({ ...d, swept: false })).catch(() => {}); });
+    const raop = this.bonjour.find({ type: 'raop' }, (s) => this.addAirPlay(s, 'raop'));
+    const air = this.bonjour.find({ type: 'airplay' }, (s) => this.addAirPlay(s, 'airplay'));
     this.browsers = [cast, blu, bridge];
     for (const b of this.browsers) b.on('down', (s) => this.remove(s));
-    this.sweepTimer = setInterval(() => this.sweep().catch(() => {}), SWEEP_EVERY);
-    setTimeout(() => this.sweep().catch(() => {}), 1500);
+    for (const b of [raop, air]) b.on('down', (s) => this.removeAirPlay(s));
+    this.browsers.push(raop, air);
+    this.sweepTimer = setInterval(() => { this.sweep().catch(() => {}); this.ssdpSweep().catch(() => {}); }, SWEEP_EVERY);
+    setTimeout(() => { this.sweep().catch(() => {}); this.ssdpSweep().catch(() => {}); }, 1500);
   }
   stop() {
     if (this.sweepTimer) clearInterval(this.sweepTimer); this.sweepTimer = null;
@@ -68,7 +105,19 @@ export class Discovery {
     this.browsers = [];
     if (this.bonjour) { try { this.bonjour.destroy(); } catch { /* torn down */ } this.bonjour = null; }
   }
-  list(): Speaker[] { return [...this.devices.values()].sort((a, b) => a.name.localeCompare(b.name)); }
+  // Every box once, by the best way to drive it: an entry is hidden when a
+  // better kind on the same address has the same name (a Denon is "Denon
+  // AVR-X1700H" over HEOS/DLNA and over AirPlay). Two different players on
+  // one machine (Kodi with AirPlay, a Linux box with a DLNA renderer and
+  // shairport-sync) have their own names and both stay.
+  list(): Speaker[] {
+    const all = [...this.devices.values()];
+    const norm = (n: string) => n.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    const same = (a: string, b: string) => { const x = norm(a), y = norm(b); return !!x && !!y && (x === y || x.startsWith(y) || y.startsWith(x)); };
+    return all
+      .filter((d) => !all.some((o) => o !== d && o.host === d.host && RANK[o.kind] < RANK[d.kind] && same(o.name, d.name)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
   get(id: string) { return this.devices.get(id) ?? null; }
   agentAt(host: string): TvAgent | null { return this.agents.get(host) ?? null; }
   async identifyTvAgent(host: string, port = TV_AGENT_PORT): Promise<TvAgent | null> {
@@ -99,8 +148,88 @@ export class Discovery {
   private remove(service: any) {
     const host = this.address(service);
     let changed = false;
-    for (const [id, d] of this.devices) if (d.host === host && !d.swept) { this.devices.delete(id); changed = true; }
+    for (const [id, d] of this.devices) if (d.host === host && !d.swept && !d.ssdp && d.kind !== 'airplay') { this.devices.delete(id); changed = true; }
     if (changed) this.onChange(this.list());
+  }
+
+  // ---- AirPlay (mDNS) --------------------------------------------------------
+  // _raop._tcp is "AABBCCDDEEFF@Kitchen" with the stream TXT (et, cn, md, pk...);
+  // _airplay._tcp is "Kitchen" with features / deviceid / model. Both are
+  // merged into one speaker per address.
+  private airplaySeen = new Map<string, { raop?: any; airplay?: any }>();
+  private addAirPlay(service: any, which: 'raop' | 'airplay') {
+    const host = this.address(service);
+    if (!airplayConfig.binary) return; // nothing to stream with
+    if (!host) return;
+    const entry = this.airplaySeen.get(host) || {};
+    entry[which] = service;
+    this.airplaySeen.set(host, entry);
+    const txt = (s: any): Record<string, string> => Object.fromEntries(Object.entries(s?.txt || {}).map(([k, v]) => [k, Buffer.isBuffer(v) ? v.toString('utf8') : String(v)]));
+    const r = entry.raop, a = entry.airplay;
+    const rt = r ? txt(r) : null, at = a ? txt(a) : null;
+    const mac = (at?.deviceid || (r ? String(r.name).split('@')[0] : '') || host).replace(/[^0-9a-f]/gi, '').toLowerCase();
+    const name = a ? String(a.name) : String(r.name).split('@').slice(1).join('@') || String(r.name);
+    this.add({
+      id: `airplay:${mac}`, kind: 'airplay', name: name.slice(0, 64), model: at?.model || rt?.am || 'AirPlay', host, port: a?.port || r?.port || 7000,
+      raop: r ? { port: r.port, name: String(r.name), txt: rt! } : null,
+      airplay: a ? { port: a.port, host: String(a.host || host), txt: at! } : null,
+    });
+  }
+  private removeAirPlay(service: any) {
+    const host = this.address(service);
+    this.airplaySeen.delete(host);
+    let changed = false;
+    for (const [id, d] of this.devices) if (d.kind === 'airplay' && d.host === host) { this.devices.delete(id); changed = true; }
+    if (changed) this.onChange(this.list());
+  }
+
+  // ---- SSDP: DLNA renderers and Rokus -----------------------------------------
+  private described = new Map<string, { at: number; dev: Speaker | null }>(); // by LOCATION
+  private ssdpMissed = new Map<string, number>();
+  private ssdpBusy = false;
+  async ssdpSweep() {
+    if (this.ssdpBusy) return;
+    this.ssdpBusy = true;
+    try {
+      const hits = await search([RENDERER, SONOS_ZP, ROKU_ST], lanAddress());
+      const byLocation = new Map<string, SsdpHit>();
+      for (const h of hits) if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h.host) && !byLocation.has(h.location)) byLocation.set(h.location, h);
+      const seen = new Set<string>();
+      let changed = false;
+      await Promise.all([...byLocation.values()].map(async (h) => {
+        const dev = await this.describe(h).catch(() => null);
+        if (!dev) return;
+        seen.add(dev.id);
+        const before = JSON.stringify(this.devices.get(dev.id));
+        this.devices.set(dev.id, dev);
+        if (before !== JSON.stringify(dev)) changed = true;
+      }));
+      // UDP answers go missing: three searches in a row without it.
+      for (const [id, d] of this.devices) {
+        if (!d.ssdp) continue;
+        if (seen.has(id)) { this.ssdpMissed.delete(id); continue; }
+        const n = (this.ssdpMissed.get(id) || 0) + 1;
+        this.ssdpMissed.set(id, n);
+        if (n >= 3) { this.devices.delete(id); this.ssdpMissed.delete(id); changed = true; }
+      }
+      if (changed) this.onChange(this.list());
+    } finally { this.ssdpBusy = false; }
+  }
+  private async describe(h: SsdpHit): Promise<Speaker | null> {
+    const cached = this.described.get(h.location);
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.dev;
+    let dev: Speaker | null = null;
+    const loc = new URL(h.location);
+    if (loc.hostname !== h.host) return null; // a description elsewhere than the answer came from
+    if (/roku:ecp/i.test(h.st)) {
+      const info = parseRokuInfo(await this.getText(`http://${h.host}:${loc.port || ROKU_PORT}/query/device-info`));
+      if (info) dev = { id: `roku:${info.udn.toLowerCase()}`, kind: 'roku', name: info.name, model: info.model, host: h.host, port: Number(loc.port) || ROKU_PORT, ssdp: true };
+    } else {
+      const d = parseDescription(await this.getText(h.location, 3000), h.location);
+      if (d) dev = { id: `upnp:${d.udn.toLowerCase()}`, kind: 'upnp', name: d.name, model: d.sonos ? `Sonos ${d.model}`.replace(/^Sonos Sonos/, 'Sonos') : upnpModel(d.manufacturer, d.model), host: h.host, port: Number(loc.port) || 80, ssdp: true, avTransport: d.avTransport, renderingControl: d.renderingControl, connectionManager: d.connectionManager, sonos: d.sonos };
+    }
+    this.described.set(h.location, { at: Date.now(), dev });
+    return dev;
   }
 
   // ---- port sweep -------------------------------------------------------------
@@ -186,7 +315,7 @@ export class Discovery {
         if (n >= 2) { this.agents.delete(host); this.missedAgents.delete(host); }
       }
       for (const [id, d] of this.devices) {
-        if (!d.swept) continue;
+        if (!d.swept || d.ssdp) continue;
         const key = `${d.host}:${d.port}`;
         if (seen.has(key)) { this.missed.delete(key); continue; }
         const n = (this.missed.get(key) || 0) + 1;

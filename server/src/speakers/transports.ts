@@ -9,6 +9,9 @@
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import type { Speaker } from './discovery.js';
+import { UpnpTransport } from './upnp.js';
+import { RokuTransport } from './roku.js';
+import { AirPlayTransport } from './airplay.js';
 
 const require = createRequire(import.meta.url);
 const castv2 = require('castv2-client');
@@ -23,7 +26,7 @@ function bounded<T>(p: Promise<T>, what: string, ms = CAST_TIMEOUT_MS): Promise<
   return Promise.race([p, new Promise<T>((_, reject) => { t = setTimeout(() => reject(Object.assign(new Error(`Cast ${what} timed out`), { code: 'ECASTTIMEOUT' })), ms); })]).finally(() => clearTimeout(t));
 }
 
-export type PlayMeta = { title?: string; artist?: string; album?: string; artwork?: string; artworkFallback?: string; contentType?: string };
+export type PlayMeta = { duration?: number; title?: string; artist?: string; album?: string; artwork?: string; artworkFallback?: string; contentType?: string };
 export type Status = { playing: boolean; state: string | null; title?: string | null; artist?: string | null; album?: string | null; position: number; duration: number; volume: number | null; muted?: boolean; streamUrl?: string | null; ended?: boolean; gone?: boolean; canSeek?: boolean; coarse?: boolean; service?: string | null; serviceName?: string | null; inputId?: string | null; image?: string | null };
 export interface Transport {
   play(url: string, meta?: PlayMeta, startAt?: number): Promise<unknown>;
@@ -400,5 +403,12 @@ export class BridgeTransport implements Transport {
 }
 
 export function transportFor(device: Speaker): Transport {
-  return device.kind === 'cast' ? new CastTransport(device) : device.kind === 'bridge' ? new BridgeTransport(device) : new BluOSTransport(device);
+  switch (device.kind) {
+    case 'cast': return new CastTransport(device);
+    case 'bridge': return new BridgeTransport(device);
+    case 'upnp': return new UpnpTransport(device);
+    case 'roku': return new RokuTransport(device);
+    case 'airplay': return new AirPlayTransport(device);
+    default: return new BluOSTransport(device);
+  }
 }

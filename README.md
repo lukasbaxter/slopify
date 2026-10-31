@@ -41,7 +41,7 @@ services:
     image: ghcr.io/lukasbaxter/slopify:latest
     container_name: slopify
     restart: unless-stopped
-    network_mode: host          # needed to find Chromecast / Bluesound speakers
+    network_mode: host          # needed to find speakers and TVs on your network
     volumes:
       - /path/to/music:/music:ro
       - ./data:/data
@@ -89,6 +89,9 @@ In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 |---|---|
 | **Chromecast** | Play to any Cast speaker, TV or group, from any device |
 | **Bluesound / BluOS** | Same, plus grouping and volume |
+| **Sonos, Denon / HEOS, DLNA** | Sonos, HEOS receivers, smart TVs, Kodi, WiiM and anything else that's a DLNA renderer |
+| **AirPlay** | Apple TV, HomePod and AirPlay speakers. Apple TVs that ask for a PIN get paired once in Settings › Speakers. Streams through Music Assistant's [cliairplay](https://github.com/music-assistant/airplay-cli), which ships in the image |
+| **Roku** | Roku players and Roku TVs, through Play on Roku |
 | **DIY speakers** | Anything that speaks the small `slopify-speaker/1` HTTP API on port 7780 shows up as a speaker (see `server/src/speakers/transports.ts`) |
 | **Home Assistant** | Every person and speaker becomes a media player. Install with HACS ([guide](docs/home-assistant.md)) |
 | **Soulseek (slskd)** | Weekly Exploration downloads and Upgrade to FLAC ([guide](docs/downloads.md)) |

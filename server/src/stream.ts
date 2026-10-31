@@ -444,7 +444,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // One progressive transcode, started at `startAt` seconds: what a browser
   // without HLS plays at a reduced quality (it seeks by asking for a new
   // stream), and what the visualizer decodes on a device that is mirroring.
-  app.get('/api/stream/:id/mp3', auth, async (req, reply) => {
+  const mp3 = async (req: any, reply: any) => {
     const id = (req.params as any).id as string;
     const src = srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
@@ -461,6 +461,20 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     reply.raw.on('close', () => { try { ff.kill('SIGKILL'); } catch { /* gone */ } slot(); });
     reply.header('Cache-Control', 'no-store').header('Accept-Ranges', 'none').type('audio/mpeg');
     return reply.send(ff.stdout);
+  };
+  app.get('/api/stream/:id/mp3', auth, mp3);
+  // The same two streams under a file name, for speakers that choose their
+  // decoder from the URL's extension (DLNA renderers, Roku): track.mp3 with
+  // a bitrate or startAt (or for a file that is not an mp3) is the
+  // transcode, any other track.<ext> is the original file, byte ranges and all.
+  app.get('/api/stream/:id/track.:ext', auth, async (req, reply) => {
+    const { id, ext } = req.params as any;
+    const q = req.query as any;
+    const src = srcOf(id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
+    const orig = path.extname(src.name).toLowerCase();
+    if (ext === 'mp3' && (q.bitrate != null || q.startAt != null || orig !== '.mp3')) return mp3(req, reply);
+    return sendRanged(req, reply, src.file, MIME[orig] || 'application/octet-stream', 'private, max-age=3600', src, chunkOf(req.query));
   });
 
   // Save to disk: the original file with its real name, or a transcode.

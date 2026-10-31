@@ -32,6 +32,11 @@ The Docker image adds, from Debian bookworm (source at https://sources.debian.or
   https://acoustid.org/chromaprint
 - Node.js: MIT, https://nodejs.org
 
+and, as a separate program, from Music Assistant:
+
+- cliairplay (AirPlay streaming): GPL-3.0, https://github.com/music-assistant/airplay-cli;
+  its license and third-party notices are in /usr/share/doc/cliairplay in the image
+
 The "gpu" image adds the lyric aligner's Python packages (aligner/requirements.txt):
 
 - PyTorch and torchaudio: BSD-3-Clause, https://pytorch.org; the CUDA wheels

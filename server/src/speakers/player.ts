@@ -10,7 +10,19 @@ import type { Discovery, Speaker } from './discovery.js';
 import { BluOSTransport, transportFor, type Transport } from './transports.js';
 
 type Row = { Id: string; Name: string; Artists: string[]; AlbumArtist: string; Album: string; AlbumId: string; RunTimeTicks: number; ArtistItems: { Id: string; Name: string }[]; AlbumArtists: { Id: string; Name: string }[]; UserData: { IsFavorite: boolean }; _queued: boolean; _codec?: string | null };
-const MIME: Record<string, string> = { flac: 'audio/flac', mp3: 'audio/mpeg', aac: 'audio/mp4', m4a: 'audio/mp4', alac: 'audio/mp4', ogg: 'audio/ogg', vorbis: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', aiff: 'audio/aiff' };
+// The codec as the scanner stores it (music-metadata's names: "FLAC",
+// "MPEG 1 Layer 3", "MPEG-4/AAC", "ALAC", "Vorbis", "Opus", "PCM"...) to the
+// type a speaker is told. A plain lookup of "mp3"/"aac" missed most of them,
+// and every AAC file went out as audio/mpeg.
+export function mimeFor(codec: string | null | undefined): string {
+  const c = String(codec || '').toLowerCase();
+  if (/flac/.test(c)) return 'audio/flac';
+  if (/aac|alac|mp4|m4a/.test(c)) return 'audio/mp4';
+  if (/vorbis|opus|ogg/.test(c)) return 'audio/ogg';
+  if (/aiff/.test(c)) return 'audio/aiff';
+  if (/pcm|wav/.test(c)) return 'audio/wav';
+  return 'audio/mpeg';
+}
 
 
 const STEP_SIZE = 5;
@@ -101,7 +113,7 @@ export class ServerPlayer {
   private url(path: string) { const base = `${this.d.publicUrl.replace(/\/+$/, '')}${path}`; return path.startsWith('/api/image/') ? base : `${base}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(this.d.token())}`; }
   private meta(t: Row) {
     const artistId = t.ArtistItems?.[0]?.Id || null;
-    return { title: t.Name, artist: t.Artists?.join(', ') || t.AlbumArtist || '', album: t.Album || '', artwork: this.url(`/api/image/${t.AlbumId || t.Id}?size=640`), artworkFallback: artistId ? this.url(`/api/image/${artistId}?size=640`) : undefined, contentType: MIME[(t._codec || 'mp3').toLowerCase()] || 'audio/mpeg' };
+    return { duration: t.RunTimeTicks / 10000000, title: t.Name, artist: t.Artists?.join(', ') || t.AlbumArtist || '', album: t.Album || '', artwork: this.url(`/api/image/${t.AlbumId || t.Id}?size=640`), artworkFallback: artistId ? this.url(`/api/image/${artistId}?size=640`) : undefined, contentType: mimeFor(t._codec) };
   }
   nowPlaying() {
     const t = this.current; if (!t || !this.device) return null;
@@ -585,7 +597,7 @@ export class ServerPlayer {
     this.stopPolling();
     // BluOS only reports whole seconds, so it is polled four times a second
     // to catch the moment each second ticks over (see tick()).
-    const every = this.device?.kind === 'bluos' ? 250 : 1000;
+    const every = this.device?.kind === 'bluos' ? 250 : this.device?.kind === 'upnp' ? 500 : 1000;
     this.timer = setInterval(() => {
       if (this.ticking) return;
       this.ticking = true;

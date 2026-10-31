@@ -16,7 +16,9 @@ import { z } from 'zod';
 import type { DB } from './db.js';
 import { userByToken } from './auth.js';
 import { token as newToken } from './ids.js';
-import { Discovery } from './speakers/discovery.js';
+import { randomBytes } from 'node:crypto';
+import { Discovery, lanAddress } from './speakers/discovery.js';
+import { airplayConfig, AirPlayPairing, findBinary } from './speakers/airplay.js';
 import { linkedGroups, ServerPlayer } from './speakers/player.js';
 import { BluOSTransport } from './speakers/transports.js';
 import { speakerGroups } from './speakers/groups.js';
@@ -245,6 +247,21 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     const ids = new Set(list.map((d) => d.id));
     for (const c of clients.values()) c.player?.speakersChanged(ids);
   }, (m) => app.log.warn(m)) : null;
+  // AirPlay: the cliairplay program, this server's DACP id (pairings are
+  // signed with it, so it is kept), and the pairing credentials per speaker.
+  const kvGet = (k: string) => (db.prepare('SELECT v FROM kv WHERE k = ?').get(k) as { v: string } | undefined)?.v ?? null;
+  const kvSet = (k: string, v: string) => db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(k, v);
+  if (discovery) {
+    airplayConfig.binary = findBinary();
+    let dacp = kvGet('airplay_dacp');
+    if (!dacp) { dacp = randomBytes(8).toString('hex').toUpperCase(); kvSet('airplay_dacp', dacp); }
+    airplayConfig.dacp = dacp;
+    airplayConfig.credentials = (id) => kvGet(`airplay_credentials:${id}`);
+    airplayConfig.password = (id) => kvGet(`airplay_password:${id}`);
+    airplayConfig.log = (m) => app.log.info(m);
+    airplayConfig.iface = lanAddress();
+    if (!airplayConfig.binary) app.log.warn('AirPlay speakers are off: the cliairplay program was not found (it ships in the Docker image; set CLIAIRPLAY to its path otherwise)');
+  }
   if (discovery) { discovery.start(); app.addHook('onClose', async () => { discovery.stop(); states?.stop(); for (const c of clients.values()) await c.player?.shutdown(); }); }
   const speakerToken = (uid: string) => {
     const row = db.prepare("SELECT token FROM tokens WHERE user_id = ? AND kind = 'speaker' LIMIT 1").get(uid) as any;
@@ -293,6 +310,38 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   app.post('/api/speakers/:id/control', { preHandler: (app as any).requireUser }, async (req, reply) => {
     const b = SpeakerControl.safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'action must be play, pause, next or previous' });
     return speakerCall(reply, () => states!.control(sid(req), b.data.action));
+  });
+
+  // --- AirPlay pairing (Apple TV and other devices that ask for a PIN) -------------
+  // POST without a pin: the speaker shows a PIN. POST again with it: the
+  // credentials are kept and used from the next connection on. POST with
+  // { password } instead: the speaker's AirPlay password.
+  const pairings = new Map<string, AirPlayPairing>();
+  app.post('/api/admin/speakers/:id/pair', { preHandler: (app as any).requireAdmin }, async (req, reply) => {
+    const d = discovery?.get(sid(req));
+    if (!d || d.kind !== 'airplay') return reply.code(404).send({ error: 'no such AirPlay speaker' });
+    const pin = String((req.body as any)?.pin ?? '').replace(/\D/g, '');
+    // A speaker with a password (AirPlay settings on the device): kept, and
+    // sent from the next connection on. An empty one clears it.
+    const password = (req.body as any)?.password;
+    if (typeof password === 'string') {
+      if (password) kvSet(`airplay_password:${d.id}`, password.slice(0, 128)); else db.prepare('DELETE FROM kv WHERE k = ?').run(`airplay_password:${d.id}`);
+      return { ok: true };
+    }
+    try {
+      if (!pin) {
+        pairings.get(d.id)?.cancel();
+        const p = new AirPlayPairing(d);
+        pairings.set(d.id, p);
+        await p.start();
+        return { ok: true, waitingForPin: true };
+      }
+      const p = pairings.get(d.id);
+      if (!p) return reply.code(409).send({ error: 'start pairing first' });
+      pairings.delete(d.id);
+      kvSet(`airplay_credentials:${d.id}`, await p.finish(pin));
+      return { ok: true, paired: true };
+    } catch (e: any) { pairings.delete(d.id); return reply.code(502).send({ error: e.message }); }
   });
 
   // --- speaker groups ------------------------------------------------------------
@@ -483,7 +532,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         // reaches everyone on their next hello; the live update only goes
         // to this account's clients. Only ids shaped like our speaker ids
         // are persisted (the kv store is not a free-form dump).
-        if (typeof msg.id !== 'string' || !msg.id || msg.id.length > 128 || !/^(cast|bluos|bridge):/.test(msg.id)) break;
+        if (typeof msg.id !== 'string' || !msg.id || msg.id.length > 128 || !/^(cast|bluos|bridge|upnp|airplay|roku):/.test(msg.id)) break;
         const offset = Number.isFinite(msg.offset) ? Math.max(-5, Math.min(5, msg.offset)) : null;
         if (offset == null) db.prepare('DELETE FROM kv WHERE k = ?').run(`offset:${msg.id}`); else db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(`offset:${msg.id}`, String(offset));
         for (const c of ofUser(me.uid)) send(c, { type: 'offset', id: msg.id, offset });

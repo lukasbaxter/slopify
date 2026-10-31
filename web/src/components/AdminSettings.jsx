@@ -265,9 +265,30 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
           <h2>{t('Speakers')}</h2>
           {status.speakers.length ? (
             <ul className="admin-list">
-              {status.speakers.map((d) => <li key={d.id}><b>{d.name}</b><span>{d.kind === 'cast' ? 'Chromecast' : d.kind === 'bluos' ? 'BluOS' : d.model || d.kind} · {d.host}{d.playing ? ` · ${t('playing')}` : ''}</span></li>)}
+              {status.speakers.map((d) => (
+                <li key={d.id}>
+                  <b>{d.name}</b>
+                  <span>{d.kind === 'cast' ? 'Chromecast' : d.kind === 'bluos' ? 'BluOS' : d.kind === 'airplay' ? `AirPlay · ${d.model}` : d.model || d.kind} · {d.host}{d.playing ? ` · ${t('playing')}` : ''}</span>
+                  {/* Apple TVs (and HomePods set to ask) need a PIN once. */}
+                  {d.kind === 'airplay' && (
+                    <button type="button" className="btn-secondary" disabled={!!busy} onClick={() => run(t('Could not pair with {name}', { name: d.name }), async () => {
+                      await jf._fetch(`/api/admin/speakers/${encodeURIComponent(d.id)}/pair`, { method: 'POST', body: '{}' });
+                      const pin = window.prompt(t('Enter the PIN shown on {name}', { name: d.name }));
+                      if (!pin) throw new Error(t('No PIN entered'));
+                      await jf._fetch(`/api/admin/speakers/${encodeURIComponent(d.id)}/pair`, { method: 'POST', body: JSON.stringify({ pin }) });
+                    }, t('Paired with {name}', { name: d.name }))}>{t('Pair')}</button>
+                  )}
+                  {d.kind === 'airplay' && (d.raop?.txt?.pw === 'true' || d.airplay?.txt?.pw === 'true') && (
+                    <button type="button" className="btn-secondary" disabled={!!busy} onClick={() => {
+                      const password = window.prompt(t('Password for {name}', { name: d.name }));
+                      if (password == null) return;
+                      run(t('Password for {name}', { name: d.name }), () => jf._fetch(`/api/admin/speakers/${encodeURIComponent(d.id)}/pair`, { method: 'POST', body: JSON.stringify({ password }) }), t('Saved'));
+                    }}>{t('Password')}</button>
+                  )}
+                </li>
+              ))}
             </ul>
-          ) : <div className="settings-hint">{t("No Chromecast or BluOS players found on the server's network yet. They are looked for continuously.")}</div>}
+          ) : <div className="settings-hint">{t("No speakers found on the server's network yet. They are looked for continuously.")}</div>}
         </section>
       )}
 

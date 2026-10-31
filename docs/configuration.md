@@ -28,13 +28,14 @@ environment values for them only seed the defaults.
 | `INGEST_SETTLE_MIN` | `10` | A file must be this old before it moves |
 | `INGEST_DELETE` | `0` | Delete emptied incoming folders |
 | `INGEST_DELETE_SETTLE_MIN` | `60` | Folder quiet this long before deletion |
-| `PUBLIC_URL` | this machine's LAN address | Address speakers fetch audio from, e.g. `http://192.168.1.10:8080`. Worked out on its own with host networking (the log says which); set it if that guess is wrong |
+| `PUBLIC_URL` | this machine's LAN address | Address speakers fetch audio from, e.g. `http://<server's LAN address>:8080`. Worked out on its own with host networking (the log says which); set it if that guess is wrong |
 | `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin` | First account; password change forced on first login |
 | `LOG_LEVEL` | `info` | Fastify log level |
 | `TRUST_PROXY` | `1` | How many proxy hops to trust for the client IP (`true`/`false`/hop count). Keep `1` behind a single nginx; rate limits key on the resulting IP. |
 | `LOGIN_RATE_MAX` | `10` | Login attempts per IP per minute |
 | `RATE_MAX` | `600` | All API requests per IP per minute |
-| `SPEAKERS` | `1` | Chromecast / BluOS discovery (needs host networking in Docker); `0` = off |
+| `SPEAKERS` | `1` | Speaker discovery: Chromecast, BluOS, Sonos / DLNA, AirPlay, Roku (needs host networking in Docker); `0` = off |
+| `CLIAIRPLAY` | bundled | Path to the `cliairplay` binary outside the Docker image; without it AirPlay speakers are not offered |
 | `MDNS` | `1` | Announce the server on the LAN (`_slopify._tcp`) so Home Assistant finds it; `0` = off |
 | `BLUOS_GROUPS` | `slopify` | BluOS speakers are grouped only by Slopify's speaker groups; a group made elsewhere (the BluOS app) is unlinked within a minute. `keep` leaves those alone |
 | `SOURCE_URL` | this repository | The source code link every app shows in Settings › About; point it at your fork if you run a modified Slopify (the AGPL asks you to offer your users its source) |

@@ -11,8 +11,21 @@ const rosterShape = (r) => JSON.stringify(r, (k, v) => (k === 'position' || k ==
 let lastVisibilityChange = 0;
 if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { lastVisibilityChange = Date.now(); });
 import { createTrackCache } from './trackCache.js';
+import { noteStarve, starvedWithin } from './linkWatch.js';
 const WHOLE_AFTER_S = 12;            // buffered ahead before whole-song downloads start
-const WHOLE_AFTER_MAX_MS = 45000;    // or this long into the track, whatever the buffer
+const WHOLE_AFTER_MAX_MS = 45000;    // or this long into the track, if it has not starved lately
+const WHOLE_PAUSE_S = 6;             // under this much buffered ahead, the whole-song download waits
+const NET_EXTRAS_S = 8;              // buffered ahead before the next songs are fetched (prewarm, spare)
+const STUCK_NO_DATA_MS = 30000;      // a song stuck with nothing buffered is reloaded only after this
+// Seconds buffered past the playhead.
+function bufferedAhead(el) {
+  if (!el) return 0;
+  const at = el.currentTime;
+  for (let k = 0; k < el.buffered.length; k++) if (el.buffered.start(k) <= at + 0.05 && at <= el.buffered.end(k)) return el.buffered.end(k) - at;
+  return 0;
+}
+// Buffered through to the end of the song (a known, non-zero length).
+const bufferedToEnd = (el) => !!el && Number.isFinite(el.duration) && el.duration > 0 && el.duration - el.currentTime - bufferedAhead(el) < 0.5;
 import { localUrl, ensureLocal, keepLocal } from '../offline/local.js';
 import { isKept, useDownloadActive } from '../api/offline.js';
 import { isOffline } from '../offline/net.js';
@@ -318,6 +331,9 @@ export function usePlayer(jf) {
   // track and the next, so a dead zone on the road does not stop the music.
   // A track that starts, or restarts after a stall, plays from here when it
   // is in. The spare is re-pointed at the in-memory copy when it arrives.
+  const jfNowRef = useRef(jf); jfNowRef.current = jf;
+  const rebuffersRef = useRef({ id: null, n: 0, stepped: false });
+  const seekNowRef = useRef(null);
   const trackCache = useMemo(() => (jf ? createTrackCache((id) => jf.wholeUrl(id, bakeNormRef.current(id)), {
     onReady: (id, url) => {
       const spare = spareRef.current;
@@ -1195,6 +1211,8 @@ export function usePlayer(jf) {
     },
     [anchorAt, remote, startOn]
   );
+  seekNowRef.current = seek;
+
 
   const setVolume = useCallback(
     async (level) => {
@@ -1588,12 +1606,36 @@ export function usePlayer(jf) {
     // when it is heard: a song still loading (or a stall) put it ahead by the
     // wait, for the rest of the song (reanchorRef, below).
     let waitingSince = 0;
-    const onWaiting = () => { if (el === audioRef.current && !waitingSince) waitingSince = Date.now(); };
+    // A song that stops mid-play for data is the link starving (not a seek,
+    // not the first load: those are timed in onPlaying). 'stalled' is no
+    // signal: Chrome fires it every few seconds while a full buffer plays on.
+    const onWaiting = () => {
+      if (el !== audioRef.current) return;
+      if (!waitingSince) waitingSince = Date.now();
+      if (playingRef.current && !el.seeking && el.currentTime > 0.5) {
+        const r = noteStarve('rebuffer');
+        mediaLog(`link starving: rebuffer at ${el.currentTime.toFixed(1)}${r.capped ? ' (mobile data: next songs a rung lower for 10 min)' : ''}`);
+        // A transcode (Android) can step down mid-song too: a seek is a new
+        // stream from here, at the lower rate, once the song has run dry twice.
+        const id = el.dataset.track;
+        const n = rebuffersRef.current.id === id ? rebuffersRef.current.n + 1 : 1;
+        rebuffersRef.current = { id, n, stepped: rebuffersRef.current.id === id && rebuffersRef.current.stepped };
+        const want = /[?&]bitrate=(\d+)/.exec(jfNowRef.current?.playbackUrl?.(id) || '')?.[1];
+        const have = /[?&]bitrate=(\d+)/.exec(el.src || '')?.[1];
+        if (r.capped && n >= 2 && !rebuffersRef.current.stepped && jfNowRef.current?.transcoded?.() && want && have && Number(want) < Number(have)) {
+          rebuffersRef.current.stepped = true;
+          const at = localBaseRef.current + el.currentTime;
+          mediaLog(`stepping down to ${Math.round(Number(want) / 1000)}k at ${at.toFixed(1)}`);
+          seekNowRef.current?.(at);
+        }
+      }
+    };
     el.addEventListener('waiting', onWaiting);
     const onPlaying = () => {
       if (el === audioRef.current && bridgeSinceRef.current) { bridgeSinceRef.current = 0; bridgeKeepAlive(false, 'playing'); }
       const waited = waitingSince ? Date.now() - waitingSince : 0;
       waitingSince = 0;
+      if (el === audioRef.current && waited > 4000) { const r = noteStarve('slow start'); mediaLog(`link starving: ${(waited / 1000).toFixed(1)} s to sound${r.capped ? ' (mobile data: next songs a rung lower for 10 min)' : ''}`); }
       // A second later, with the element's clock running (it still reads 0
       // for a moment after 'playing' while the decoder starts).
       if (el === audioRef.current && waited > 150) {
@@ -1652,15 +1694,26 @@ export function usePlayer(jf) {
         bridgeSinceRef.current = 0; bridgeKeepAlive(false, playingRef.current && deviceRef.current.kind === 'local' ? 'gave up' : 'stopped');
       }
       if (recovering || deviceRef.current.kind !== 'local' || !playingRef.current || el !== audioRef.current || el.paused || el.ended
-        || !el.getAttribute('src') || transitionRef.current || Date.now() < ownUntilRef.current || jf?.transcoded?.()) { stuckSince = 0; lastT = t; return; }
+        || !el.getAttribute('src') || transitionRef.current || Date.now() < ownUntilRef.current || jfNowRef.current?.transcoded?.()) { stuckSince = 0; lastT = t; return; }
       if (t !== lastT) { lastT = t; stuckSince = 0; return; }
       if (!stuckSince) { stuckSince = Date.now(); return; }
       const id = el.dataset.track; if (!id) return;
-      if (Date.now() - stuckSince < (wholeFor(id) ? 3000 : 6000)) return; // from memory it cannot fail, so sooner
+      // Stuck with data in hand is the decoder: reload (from memory it cannot
+      // fail, so sooner). Stuck with nothing buffered is the network, and a
+      // reload throws away what was on its way: on a weak link the reloads
+      // came every few seconds and the song never got going (10-30). Only a
+      // connection that stays dead that long is reloaded.
+      const limit = wholeFor(id) ? 3000 : bufferedAhead(el) >= 1 ? 6000 : STUCK_NO_DATA_MS;
+      if (Date.now() - stuckSince < limit) return;
       stuckSince = 0; recovering = true;
       mediaLog(`watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
       if (document.hidden && !bridgeSinceRef.current) { bridgeKeepAlive(true, 'stalled'); bridgeSinceRef.current = Date.now(); }
-      const url = wholeFor(id) || jf.playbackUrl(id, { norm: bakeNormRef.current(id) });
+      // The client as it is now: this effect can outlive the one it was set
+      // up with (it was null before sign-in), and a throw here left
+      // `recovering` set, which switched the watchdog off for the element.
+      const api = jfNowRef.current;
+      if (!api) { recovering = false; return; }
+      const url = wholeFor(id) || api.playbackUrl(id, { norm: bakeNormRef.current(id) });
       ownUntilRef.current = Date.now() + 10000;
       el.muted = false; el.src = url;
       // The wait below can outlive the song: a skip, a pause, an element swap
@@ -1890,6 +1943,7 @@ export function usePlayer(jf) {
   // track's own first segments; the whole-song downloads wait longer still
   // (see the buffer gate below).
   const preloadRef = useRef(() => {});
+  const preloadRetryRef = useRef(null);
   preloadRef.current = () => {
     if (deviceRef.current.kind !== 'local' || !playingRef.current || !jf) return;
     const q = queueRef.current, i = indexRef.current;
@@ -1905,6 +1959,16 @@ export function usePlayer(jf) {
       trackCache?.keep([!isKept(cur.Id) && { id: cur.Id, durationMs: ms(cur) }, nextItem && !isKept(nextItem.Id) && { id: nextItem.Id, durationMs: ms(nextItem) }], { hold: true });
     }
     if (!ahead.length || isOffline()) return;
+    // The next songs' fetches wait until this one has buffer in hand: on a
+    // weak link the spare climbing the next song to 320k (and the prewarms)
+    // took the bandwidth the song playing was starving for (10-30, 4G).
+    const el = audioRef.current;
+    const roomy = !el || isKept(cur.Id) || !!wholeFor(cur.Id) || jf.streamMode?.() !== 'hls' || bufferedAhead(el) >= NET_EXTRAS_S || bufferedToEnd(el) || el.ended;
+    if (!roomy) {
+      clearTimeout(preloadRetryRef.current);
+      preloadRetryRef.current = setTimeout(() => { if (queueRef.current[indexRef.current]?.Id === cur.Id) preloadRef.current(); }, 2000);
+      return;
+    }
     const bake = bakeNorm(nextItem || cur);
     jf.warm?.(ahead, bake);
     // A few seconds apart: each one costs the server a short foreground
@@ -1951,22 +2015,29 @@ export function usePlayer(jf) {
   // at the chosen quality: what rides out a dead zone, and what lets the
   // next song start from memory at full quality). They begin once this
   // track has WHOLE_AFTER_S buffered ahead, or is itself playing from
-  // memory, or has simply been playing a while: on a weak link the start
-  // rung's segments come first, a 320k whole file second.
+  // memory, or has played a while without starving. And they get out of the
+  // way again whenever the song playing runs short (under WHOLE_PAUSE_S
+  // ahead, or it starved just now): a 12 MB whole file pulled alongside the
+  // segments the ear was waiting on kept a song at 0:00 for half a minute
+  // on 4G (10-30). Paused, the download keeps its bytes and goes on with a
+  // Range request once the buffer is back.
   useEffect(() => {
     if (device.kind !== 'local' || !playing || !jf || !current || !jf.hasWhole?.() || !trackCache) return undefined;
     const t0 = Date.now();
-    let t;
-    const bufferedAhead = (el) => {
-      if (!el) return 0;
-      const at = el.currentTime;
-      for (let k = 0; k < el.buffered.length; k++) if (el.buffered.start(k) <= at && at <= el.buffered.end(k)) return el.buffered.end(k) - at;
-      return 0;
-    };
+    let t; let open = false;
     const tick = () => {
       const el = audioRef.current;
-      const ready = wholeFor(current.Id) || bufferedAhead(el) >= WHOLE_AFTER_S || el?.ended || Date.now() - t0 > WHOLE_AFTER_MAX_MS;
-      if (ready) trackCache.resume(); else t = setTimeout(tick, 2000);
+      const ahead = bufferedAhead(el);
+      // Buffered to the end of the song counts as plenty, however little is left.
+      const toEnd = bufferedToEnd(el);
+      const fromMemory = !!wholeFor(current.Id);
+      if (open) {
+        if (!fromMemory && !el?.ended && !toEnd && (ahead < WHOLE_PAUSE_S || starvedWithin(10000))) { trackCache.pause(); open = false; mediaLog(`whole-song download paused: ${ahead.toFixed(1)} s buffered`); }
+      } else if (fromMemory || ahead >= WHOLE_AFTER_S || toEnd || el?.ended || (Date.now() - t0 > WHOLE_AFTER_MAX_MS && el && !el.paused && el.currentTime > 5 && !starvedWithin(30000))) {
+        if (trackCache.paused) mediaLog(`whole-song download resumed: ${ahead.toFixed(1)} s buffered`);
+        trackCache.resume(); open = true;
+      }
+      t = setTimeout(tick, 2000);
     };
     t = setTimeout(tick, 3000);
     return () => clearTimeout(t);

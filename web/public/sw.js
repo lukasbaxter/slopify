@@ -35,6 +35,8 @@ const INDEX = new URL('./', SCOPE).href;
 // here: not fetched again for every hold (29 MB an hour on a phone plan),
 // and there with no connection.
 const WAV = new URL('./keepalive.wav', SCOPE).href;
+const UA = self.navigator?.userAgent || '';
+const WEBKIT = /iPhone|iPad|iPod/.test(UA) || (/AppleWebKit/.test(UA) && !/Chrome|Chromium|Android|Edg\//.test(UA));
 
 async function cacheShell() {
   const res = await fetch(INDEX, { cache: 'no-store' });
@@ -49,7 +51,11 @@ async function cacheShell() {
   await c.put(INDEX, res);
   const want = new Set([INDEX, WAV, ...assets]);
   for (const k of await c.keys()) if (!want.has(k.url)) await c.delete(k);
-  if (!(await c.match(WAV))) await keepWav(c).catch(() => {});
+  // Up front only where the stand-in is needed (WebKit: every iPhone browser,
+  // Safari). Elsewhere it rarely plays, and fetched at install it shared a
+  // fresh phone's mobile data with the first song (lab, 10-31: 5.6 MB of it in
+  // the first 150 s at 480 kbit/s); keptWav() fetches it if it ever plays.
+  if (WEBKIT && !(await c.match(WAV))) await keepWav(c).catch(() => {});
 }
 async function keepWav(c) {
   const r = await fetch(WAV, { cache: 'no-store' });

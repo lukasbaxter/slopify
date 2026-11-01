@@ -16,10 +16,15 @@ export function createTrackCache(urlFor, { onReady } = {}) {
   const failed = new Set(); // gave up (404, or ~5 straight failures): no retry until re-requested
   let wanted = new Set();
   let held = false; // keep() asked to wait: nothing new starts until resume()
+  // pause(): the song playing is short of buffer, so the download running
+  // stops (its bytes kept) and none starts; resume() picks it up with a Range.
+  let paused = false;
+  let wakers = [];
+  let cutInner = null; // aborts the request in flight, not the download
 
   let order = [];
   const pump = () => {
-    if (held || loading.size) return;
+    if (held || paused || loading.size) return;
     const id = order.find((x) => wanted.has(x) && !ready.has(x) && !failed.has(x));
     if (!id) return;
     const ctrl = new AbortController();
@@ -36,14 +41,16 @@ export function createTrackCache(urlFor, { onReady } = {}) {
 
   const release = (id) => {
     const u = ready.get(id); if (u) { URL.revokeObjectURL(u); ready.delete(id); }
-    const l = loading.get(id); if (l) { l.abort(); loading.delete(id); pump(); }
+    const l = loading.get(id); if (l) { l.abort(); loading.delete(id); const w = wakers; wakers = []; for (const r of w) r(); pump(); }
   };
 
   async function download(id, signal) {
     const parts = []; let got = 0; let total = null; let tries = 0;
     while (!signal.aborted) {
+      if (paused) { await new Promise((r) => wakers.push(r)); if (signal.aborted) break; }
       const ctrl = new AbortController();
       const stop = () => ctrl.abort();
+      cutInner = stop;
       signal.addEventListener('abort', stop, { once: true });
       let idle = setTimeout(stop, IDLE_MS * 4); // the first bytes may wait on a transcode
       try {
@@ -65,7 +72,8 @@ export function createTrackCache(urlFor, { onReady } = {}) {
         if (total == null || got >= total) return new Blob(parts, { type: 'audio/mp4' });
       } catch (e) {
         if (signal.aborted) return null;
-      } finally { clearTimeout(idle); signal.removeEventListener('abort', stop); }
+        if (paused) continue; // stopped on purpose: not a failure, carry on from `got` later
+      } finally { clearTimeout(idle); signal.removeEventListener('abort', stop); if (cutInner === stop) cutInner = null; }
       tries += 1;
       // ~5 straight failures with no bytes in between: the server is saying
       // no, not the signal. Give up until the track is asked for again.
@@ -96,7 +104,15 @@ export function createTrackCache(urlFor, { onReady } = {}) {
       held = hold;
       pump();
     },
-    resume() { held = false; pump(); },
+    resume() {
+      held = false;
+      if (paused) { paused = false; const w = wakers; wakers = []; for (const r of w) r(); }
+      pump();
+    },
+    // Out of the way of the song playing: the download in flight stops where
+    // it is (resumed later with a Range request) and nothing new starts.
+    pause() { if (paused) return; paused = true; cutInner?.(); },
+    get paused() { return paused; },
     clear() { wanted = new Set(); order = []; failed.clear(); for (const id of [...ready.keys(), ...loading.keys()]) release(id); },
   };
 }

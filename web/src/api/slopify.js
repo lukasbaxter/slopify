@@ -1,5 +1,6 @@
 import { linkTier } from './linkSpeed.js';
 import { clientIdentity } from './deviceName.js';
+import { cappedProfile } from '../player/linkWatch.js';
 import { noteResponse, setOffline, isOffline } from '../offline/net.js';
 import { addPlay } from '../offline/store.js';
 import { clientLog } from './clientLog.js';
@@ -215,7 +216,13 @@ export class Slopify {
   //  'chunked' everything else: one progressive MP3 (no ranges), seeking by
   //            asking for a new stream that starts at `startAt`.
   streamMode() {
-    const hls = typeof document !== 'undefined' && !!document.createElement('audio').canPlayType('application/vnd.apple.mpegurl');
+    // Android's Chrome and WebView answer yes to HLS now, but their built-in
+    // player stalls on a weak link: half a minute with no request at all,
+    // segments fetched twice, readyState 4 with nothing buffered (lab, 480
+    // kbit/s; Henry's Pixel on 4G, 10-30). Android keeps the progressive
+    // transcode it used before: Chrome's own loader, honest buffering.
+    const android = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
+    const hls = !android && typeof document !== 'undefined' && !!document.createElement('audio').canPlayType('application/vnd.apple.mpegurl');
     if (this.quality === 'original') return hls && this.losslessHls ? 'hls' : 'file';
     if (!{ high: 320000, normal: 160000, low: 96000 }[this.quality]) return 'file';
     return hls ? 'hls' : 'chunked';
@@ -273,13 +280,15 @@ export class Slopify {
     // Adaptive: every start is on 96k (the first variant listed, the one
     // prewarm() puts in the cache) and iOS climbs to the chosen quality as
     // the link allows, back down on a weak signal instead of stopping.
-    if (mode === 'hls') return this._url(`/api/stream/${itemId}/hls/master.m3u8`, norm ? { max: this._profile(), norm } : { max: this._profile() });
-    return this.transcodeUrl(itemId, { codec: 'mp3', bitrate: { high: 320000, normal: 160000, low: 96000 }[this.quality], startAt });
+    // On mobile data after a stall, a rung lower for a while (linkWatch.js).
+    if (mode === 'hls') { const max = cappedProfile(this._profile()); return this._url(`/api/stream/${itemId}/hls/master.m3u8`, norm ? { max, norm } : { max }); }
+    const bitrate = { 'aac-320': 320000, 'aac-160': 160000, 'aac-96': 96000 }[cappedProfile(this._profile())] || 320000;
+    return this.transcodeUrl(itemId, { codec: 'mp3', bitrate, startAt });
   }
   streamUrl(itemId) { return this._url(`/api/stream/${itemId}`); }
   // The whole song as one AAC file at the phone's quality (HLS mode only):
   // what the player keeps in memory to ride out dead zones.
-  wholeUrl(itemId, norm = null) { return this._url(`/api/stream/${itemId}/whole/${this._profile()}`, norm ? { norm } : undefined); }
+  wholeUrl(itemId, norm = null) { return this._url(`/api/stream/${itemId}/whole/${cappedProfile(this._profile())}`, norm ? { norm } : undefined); }
   transcodeUrl(itemId, { bitrate = 320000, startAt = 0 } = {}) {
     const q = { bitrate: String(bitrate) };
     if (startAt > 0) q.startAt = String(Math.round(startAt * 1000) / 1000);

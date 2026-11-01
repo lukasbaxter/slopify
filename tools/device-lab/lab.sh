@@ -29,6 +29,7 @@ usage() {
   echo "  app-test                       the Android app (latest release; APP_APK=<file> for another) on the phone"
   echo "  apk-src                        build the Android app from this tree, pointed at the lab server"
   echo "  tv-test [tv30|gtv]...          the TV app on the TV emulators (default: those running)"
+  echo "  slow-link [album] [seconds]    the Android app on mobile data through a throttle (KBPS, LAB_MUSIC)"
   echo "  all                            everything above, then the emulators down"
   echo "  shot <phone|tv30|gtv> [file]   screenshot"
   echo "  logs                           where the logs and results are"
@@ -44,7 +45,7 @@ remote() {
   if [ -z "$rel" ] && [[ " $* " == *" app-test "* || " $* " == *" apk-app "* || " $* " == *" all "* ]] && command -v gh >/dev/null; then
     rel="$(gh variable get SLOPIFY_URL -R "$GH_REPO" 2>/dev/null || true)"
   fi
-  ssh -o BatchMode=yes "$LAB_HOST" "LAB_LOCAL=1 RELEASE_URL=$(printf %q "$rel") APP_APK=$(printf %q "${APP_APK:-}") bash \"\${LAB_DIR:-\$HOME/apps/slopify-lab}/slopify/tools/device-lab/lab.sh\"$q"
+  ssh -o BatchMode=yes "$LAB_HOST" "LAB_LOCAL=1 RELEASE_URL=$(printf %q "$rel") APP_APK=$(printf %q "${APP_APK:-}") LAB_MUSIC=$(printf %q "${LAB_MUSIC:-}") KBPS=$(printf %q "${KBPS:-}") bash \"\${LAB_DIR:-\$HOME/apps/slopify-lab}/slopify/tools/device-lab/lab.sh\"$q"
 }
 sync_tree() {
   [ -n "$LAB_HOST" ] || { echo "LAB_HOST is not set (lab.env)" >&2; exit 2; }
@@ -197,7 +198,7 @@ serve() {
   cd "$REPO"; rm -rf /tmp/slopify-lab-dev
   # 127.0.0.1 only: the emulators reach it through `adb reverse` (localhost on
   # the device), so nothing on the LAN sees the lab server.
-  NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR=fixtures/music DATA_DIR=/tmp/slopify-lab-dev HOST=127.0.0.1 PORT=$DEV_PORT \
+  NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR="${LAB_MUSIC:-fixtures/music}" DATA_DIR=/tmp/slopify-lab-dev HOST=127.0.0.1 PORT=$DEV_PORT \
     LOG_LEVEL=info LOGIN_RATE_MAX=1000 RATE_MAX=100000 setsid nohup "${NICE[@]}" node server/dist/index.js >"$LOGS/devserver.log" 2>&1 </dev/null &
   echo $! >"$LAB/devserver.pid"
   for _ in $(seq 1 60); do curl -sf "127.0.0.1:$DEV_PORT/healthz" >/dev/null && break; sleep 0.5; done
@@ -337,6 +338,15 @@ app_test() {
   local out="$RESULTS/app-$(date +%m%d-%H%M)"
   cd "$REPO" && node tools/device-lab/app-test.mjs "$(serial_of phone)" "$DEV_PORT" "$LAB_PASSWORD" "$out" "$apk"
 }
+# The Android app on a weak mobile link (slow-link.mjs). LAB_MUSIC: a
+# library of minute-long songs (the fixtures are a few seconds each).
+slow_link() {
+  [ -n "${LAB_MUSIC:-}" ] || { echo "set LAB_MUSIC to a folder of songs a minute or so long" >&2; return 2; }
+  serve; need_up phone
+  local apk; apk="${APP_APK:-$(apk_app | tail -1)}"
+  local out="$RESULTS/slow-$(date +%m%d-%H%M)"
+  cd "$REPO" && node tools/device-lab/slow-link.mjs "$(serial_of phone)" "$DEV_PORT" "$LAB_PASSWORD" "$out" "$apk" "$@"
+}
 tv_test() {
   ensure_server
   [ $# -gt 0 ] || set -- $(running | grep -v phone || true)
@@ -366,6 +376,7 @@ case "$cmd" in
   phone-test) phone_test ;;
   app-test) app_test ;;
   tv-test) tv_test "$@" ;;
+  slow-link) slow_link "$@" ;;
   shot) adb_up; "$ADB" -s "$(serial_of "${1:-phone}")" exec-out screencap -p >"${2:-$RESULTS/shot-${1:-phone}.png}"; echo "${2:-$RESULTS/shot-${1:-phone}.png}" ;;
   logs) echo "logs: $LOGS"; echo "device results: $RESULTS"; echo "browser lanes: $REPO/tools/device-lab/results"; ls -t "$RESULTS" | head ;;
   all)

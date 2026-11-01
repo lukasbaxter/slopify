@@ -41,6 +41,16 @@ const note = (m) => { log.push(`${Math.round(performance.now() / 1000)}s${typeof
 export const KEEPALIVE_SECONDS = 20 * 60;
 
 const SRC = () => new URL('keepalive.wav', document.baseURI).href;
+// Chromium (Android, desktop) keeps downloading a paused element's media in
+// the background: after the first tap's unlock (play, pause) the 9.6 MB of
+// silence came down at ~27 KB/s, twice (stand-in and face), on mobile data
+// alongside the song (lab, 10-31). There the stand-in drops its media when it
+// pauses (it is reloaded when it plays again), and the face, which only
+// WebKit's Now Playing needs, is not made at all.
+// Every iPhone / iPad browser is WebKit (Chrome there too); elsewhere Safari is.
+const UA = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+const WEBKIT = /iPhone|iPad|iPod/.test(UA) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (/AppleWebKit/.test(UA) && !/Chrome|Chromium|Android|Edg\//.test(UA));
+const idle = (a) => { if (!WEBKIT && a.paused && a.getAttribute('src')) { a.removeAttribute('src'); a.load(); ownPausePending = false; note('unloaded while idle'); } };
 
 function element() {
   if (el) return el;
@@ -87,7 +97,7 @@ function element() {
 // Loaded inside a tap (the load is the interaction that makes it a
 // candidate at all), metadata only, muted until a hold.
 function primeFace() {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined' || !WEBKIT) return;
   if (!faceEl) {
     faceEl = new Audio();
     faceEl.preload = 'metadata'; faceEl.muted = true; faceEl.setAttribute('playsinline', '');
@@ -154,13 +164,17 @@ function touchFace() {
   try { f.pause(); } catch { /* not ready */ }
 }
 
+// Only WebKit needs the unlock: Chromium lets a page play once it has had any
+// tap at all (sticky activation), and there each unlock's play() started the
+// 9.6 MB download again, which then kept running after the unload (lab, 10-31:
+// ~30 KB/s of silence beside the song on a 480 kbit/s link).
 function arm() {
-  if (armed || typeof document === 'undefined') return;
+  if (!WEBKIT || armed || typeof document === 'undefined') return;
   armed = true;
   const unlock = () => {
     const a = element();
     a.muted = false;
-    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) { a.muted = true; ownPause(a); } touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
+    a.play().then(() => { unlocked = true; note('unlocked'); if (!wanted && !bridged) { a.muted = true; ownPause(a); idle(a); } touchFace(); off(); }).catch((e) => { note(`unlock ${e?.name}`); });
     primeFace(); touchFace();
   };
   const off = () => { for (const t of ['pointerdown', 'touchend', 'keydown']) document.removeEventListener(t, unlock, true); armed = false; };
@@ -287,11 +301,11 @@ function applyStandIn(position) {
  * at once unless it is wanted by then. Only when not unlocked yet.
  */
 export function primeKeepAlive() {
-  if (unlocked || typeof document === 'undefined') return;
+  if (!WEBKIT || unlocked || typeof document === 'undefined') return;
   const a = element();
   if (!a.getAttribute('src')) a.src = SRC();
   a.muted = false;
-  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) { a.muted = true; ownPause(a); } touchFace(); }).catch((e) => note(`prime ${e?.name}`));
+  a.play().then(() => { unlocked = true; note('unlocked (primed)'); if (!wanted && !bridged) { a.muted = true; ownPause(a); idle(a); } touchFace(); }).catch((e) => note(`prime ${e?.name}`));
   primeFace(); touchFace();
 }
 

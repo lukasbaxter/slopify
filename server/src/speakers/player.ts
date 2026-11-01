@@ -4,6 +4,7 @@
 // moves on at the end of a track, and reports what it is doing into the
 // account's session exactly like a client would, so every phone and browser
 // mirrors it and can control it, from anywhere.
+import { brainNext } from '../brain.js';
 import type { DB } from '../db.js';
 import { mixFor, tracksByIds } from '../library.js';
 import type { Discovery, Speaker } from './discovery.js';
@@ -382,7 +383,7 @@ export class ServerPlayer {
   private async parkOnNext() {
     this.cancelLogPlay();
     let n = this.index + 1;
-    if (n >= this.queue.length) n = this.repeat === 'all' ? 0 : this.extend() ? n : this.index;
+    if (n >= this.queue.length) n = this.repeat === 'all' ? 0 : (await this.extend()) ? n : this.index;
     this.index = n;
     const t = this.current;
     if (t) this.duration = t.RunTimeTicks / 10000000;
@@ -522,16 +523,18 @@ export class ServerPlayer {
     // End of the queue: the music never stops (the web player's Autoplay).
     // Songs that go with the last one are appended and play on; only when
     // there is nothing to add does it park at the start of the last track.
-    if (this.extend()) return this.skipTo(n);
+    if (await this.extend()) return this.skipTo(n);
     if (auto && this.transport) { this.moveTo(0, false); this.report(); }
   }
-  private extend() {
+  private async extend() {
     const cur = this.current; if (!cur) return false;
     const have = new Set(this.queue.map((t) => t.Id));
     const prefs = this.d.db.prepare('SELECT json FROM prefs WHERE user_id = ?').get(this.uid) as any;
     let dislikes: Record<string, unknown> = {};
     try { dislikes = JSON.parse(prefs?.json || '{}').dislikes || {}; } catch { /* unreadable prefs: no dislikes */ }
-    const ids = (mixFor(this.d.db, cur.Id, 25) || []).map((t) => t.id).filter((id) => !have.has(id) && !dislikes[id]);
+    // The brain first (it knows the time, the room and the listener), its own mix otherwise.
+    const fromBrain = await brainNext(this.d.db, { user: this.uid, mode: this.shuffle === 'on' ? 'smart' : 'continue', seeds: [cur.Id], n: 25, exclude: [...have].slice(-500), client: this.device?.name || 'speaker' });
+    const ids = (fromBrain || (mixFor(this.d.db, cur.Id, 25) || []).map((t) => t.id)).filter((id) => !have.has(id) && !dislikes[id]);
     const rows = this.rowsFor(ids); if (!rows.length) return false;
     this.queue.push(...rows); this.original.push(...rows);
     this.d.reportQueue(this.queue);

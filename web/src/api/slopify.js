@@ -411,8 +411,9 @@ export class Slopify {
     const dis = this._dislikes || {};
     return (r.items || []).map(rowTrack).filter((t) => !dis[t.Id]);
   }
-  async instantMix(itemId, limit = 100) {
-    const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}`);
+  // mode (continue / smart / radio) tells the server's recommender why it is asked.
+  async instantMix(itemId, limit = 100, mode = '') {
+    const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}${mode ? `&mode=${mode}` : ''}`);
     const out = (r.items || []).map(rowTrack);
     const dis = this._dislikes || {};
     return out.filter((t) => !dis[t.Id]);

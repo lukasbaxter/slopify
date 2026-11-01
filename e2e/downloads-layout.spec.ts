@@ -4,6 +4,10 @@ import { login } from './helpers';
 // Each Downloads row keeps its status inside the row. The offline-download
 // counter once shared the class `.dl-status` (position: absolute), and every
 // row's reason and Retry button piled up on top of each other (11-01).
+// The mocked API has to reach the page itself: WebKit's service worker fetch
+// is not seen by page.route.
+test.use({ serviceWorkers: 'block' });
+
 test('downloads rows lay out one under another', async ({ page }) => {
   const items = Array.from({ length: 5 }, (_, i) => ({
     id: 100 + i, album_id: `rg-${i}`, artist: 'Some Artist', title: `Album ${i}`, rtype: 'Album', year: '2021', image: null,

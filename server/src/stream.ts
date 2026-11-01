@@ -477,6 +477,13 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     return sendRanged(req, reply, src.file, MIME[orig] || 'application/octet-stream', 'private, max-age=3600', src, chunkOf(req.query));
   });
 
+  // The brain (brain.ts) listens to each song once, by its key, not a user's sign-in.
+  if ((app as any).requireBrain) app.get('/api/brain/audio/:id', { preHandler: (app as any).requireBrain }, async (req, reply) => {
+    const src = srcOf((req.params as any).id);
+    if (!src) return reply.code(404).send({ error: 'no such track' });
+    return sendRanged(req, reply, src.file, MIME[path.extname(src.name).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src, chunkOf(req.query));
+  });
+
   // Save to disk: the original file with its real name, or a transcode.
   const DL: Record<string, { args: string[]; mime: string; ext: string }> = {
     flac: { args: ['-c:a', 'flac'], mime: 'audio/flac', ext: 'flac' },

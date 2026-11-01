@@ -1,0 +1,5 @@
+transformers==4.57.1
+numpy==2.3.4
+fastapi==0.121.0
+uvicorn==0.38.0
+httpx==0.28.1

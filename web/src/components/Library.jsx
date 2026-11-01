@@ -548,7 +548,7 @@ export default function Library({
 
   const startMix = async (it) => {
     try {
-      const items = await jf.instantMix(it.Id);
+      const items = await jf.instantMix(it.Id, 100, 'radio');
       if (items.length) player.playQueue(items, 0);
     } catch (e) { setErr(e.message); }
   };

@@ -12,6 +12,7 @@
 // other client is around.
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
+import { playTracker } from './playEvents.js';
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { userByToken } from './auth.js';
@@ -228,6 +229,11 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(uid) as any;
     if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid, trackId, Date.now(), client); (app as any).scrobbleStart?.(uid, trackId, Date.now()); }
   };
+  // How each song went (skips, play length): for the brain's learning.
+  const insEvent = db.prepare('INSERT INTO play_events (user_id, track_id, at, ms_played, end_ms, duration_ms, reason, shuffle, client) VALUES (@user_id, @track_id, @at, @ms_played, @end_ms, @duration_ms, @reason, @shuffle, @client)');
+  const durOf = db.prepare('SELECT duration_ms FROM tracks WHERE id = ?');
+  const plays = playTracker((e) => { try { insEvent.run(e); } catch (err: any) { app.log.warn(`play event: ${err.message}`); } });
+  const durationOf = (id: string) => (durOf.get(id) as any)?.duration_ms ?? null;
   app.decorate('sessionOf', (uid: string) => loadSession(db, uid));
   // Likes changed over HTTP reach the open clients too.
   // A token that was logged out, removed or outlived by a password change:
@@ -462,6 +468,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         // Stamped with the server clock at receipt: mirrors measure elapsed time from
         // this (with their pong-derived offset), so they all agree with each other.
         me.nowPlaying = np ? { ...np, serverAt: now } : null;
+        if (me.kind !== 'homeassistant') plays.report(me.id, me.uid, me.name, np, durationOf);
         // A play is logged once the same track has been reported playing for
         // 8 s: songs skipped past while hunting for one never enter history.
         if (me.kind !== 'server' && np?.playing && typeof np.itemId === 'string') {
@@ -640,6 +647,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       if (!self) return;
       if (clients.get(self.id) !== self) return; // replaced by a reconnect of the same client id
       clients.delete(self.id);
+      plays.close(self.id);
       const s = loadSession(db, self.uid);
       if (s.active === self.id) {
         // Another of the account's devices still making sound (it was playing

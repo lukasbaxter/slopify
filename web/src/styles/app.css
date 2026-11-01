@@ -1758,3 +1758,5 @@ button:disabled { cursor: default; }
   * { -webkit-tap-highlight-color: transparent; }
   :where(html, body, body *) { touch-action: manipulation; }
 }
+/* Smart shuffle's picks in the queue (usePlayer blendSmart). */
+.qrow-rec { color: var(--accent); margin-right: 5px; vertical-align: -1px; flex: none; }

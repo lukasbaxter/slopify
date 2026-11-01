@@ -13,6 +13,7 @@ import { similarInLibrary } from './discover.js';
 import { albumGenreMap } from './genres.js';
 import { AUDIO_EXT, COVER_EXT, COVER_NAMES, splitArtists } from './scanner.js';
 import { gainDb } from './loudness.js';
+import { brainNext } from './brain.js';
 
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
@@ -219,6 +220,16 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     // An artist seeds Home's Daily Mixes.
     const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
     if (artist) return { items: (await artistMix(db, artist, limit, (req as any).user?.id)).map(trackOut) };
+    // A song: the brain first (smart shuffle and autoplay land here when the
+    // queue runs out; ?mode=radio for a song's radio), its own mix otherwise.
+    const uid = (req as any).user?.id as string | undefined;
+    const seed = uid ? db.prepare(`${TRACK_SELECT} WHERE t.id = ?`).get(id) as TrackRow | undefined : undefined;
+    if (seed && uid) {
+      const mode = ['continue', 'smart', 'radio'].includes((req.query as any).mode) ? (req.query as any).mode : 'continue';
+      const queue = ((app as any).sessionOf?.(uid)?.queue || []) as string[];
+      const ids = await brainNext(db, { user: uid, mode, seeds: [id], n: limit - 1, exclude: [id, ...queue.slice(-500)], client: String((req.query as any).client || '') }, { log: (m) => app.log.info(m) });
+      if (ids) return { items: [trackOut(seed), ...tracksByIds(db, ids)], from: 'brain' };
+    }
     // A track, or an album's / playlist's page ("Go to radio").
     const items = mixFor(db, id, limit) || mixForSet(db, id, limit);
     if (!items) return reply.code(404).send({ error: 'no such track' });

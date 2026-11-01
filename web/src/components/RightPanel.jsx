@@ -68,7 +68,7 @@ function QueueRow({ track, jf, active, onPlay, onOpenArtist, onOpenAlbum, menuIt
         <span className="qrow-play"><PlayGlyph size={14} /></span>
       </button>
       <span className="qrow-text">
-        <span className="qrow-title" role="button" onClick={() => track.AlbumId && onOpenAlbum?.(track.AlbumId)}>{track.Name}</span>
+        <span className="qrow-title" role="button" onClick={() => track.AlbumId && onOpenAlbum?.(track.AlbumId)}>{track._rec && <svg className="qrow-rec" viewBox="0 0 16 16" width="12" height="12" aria-label={t('Smart shuffle')}><path fill="currentColor" d="M8 0l1.6 4.8L14.4 6.4 9.6 8 8 12.8 6.4 8 1.6 6.4l4.8-1.6zM13 10l.8 2.2L16 13l-2.2.8L13 16l-.8-2.2L10 13l2.2-.8z" /></svg>}{track.Name}</span>
         <span className="qrow-sub"><ArtistLinks artists={artists} fallback={track.AlbumArtist || ''} onOpen={onOpenArtist} className="rowlink" /></span>
       </span>
       {/* Phone rows open their sheet on a long-press (Spotify); the ⋯ is desktop only. */}

@@ -232,6 +232,17 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX reports_created ON reports(created);
   `,
+  // 27: how each song went (playEvents.ts): how long it played, how far it
+  // got and how it ended (ended / skipped / stopped). Plays only says that a
+  // song played; this is what tells a skip from a favourite.
+  `
+  CREATE TABLE play_events (
+    id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, track_id TEXT NOT NULL, at INTEGER NOT NULL,
+    ms_played INTEGER NOT NULL, end_ms INTEGER NOT NULL, duration_ms INTEGER, reason TEXT NOT NULL,
+    shuffle TEXT, client TEXT
+  );
+  CREATE INDEX play_events_user_at ON play_events(user_id, at);
+  `,
 ];
 
 export type DB = Database.Database;

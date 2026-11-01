@@ -12,6 +12,7 @@ import { openDb, type DB } from './db.js';
 import { ensureAdmin, registerAuth } from './auth.js';
 import { registerLibrary } from './library.js';
 import { registerStream } from './stream.js';
+import { registerBrain, registerBrainAuth } from './brain.js';
 import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
@@ -91,6 +92,8 @@ export async function buildServer(opts: BuildOptions = {}) {
   // A song the library lists on the NAS but the ingest has not copied yet is read from the SSD drop folder.
   const incoming = config.ingest.incomingDir ? path.resolve(config.ingest.incomingDir) : null;
   const altOf = incoming && incoming !== path.resolve(musicDir) ? (f: string) => (f.startsWith(path.resolve(musicDir) + path.sep) ? path.join(incoming, path.relative(path.resolve(musicDir), f)) : null) : undefined;
+  registerBrainAuth(app);
+  registerBrain(app, db);
   registerStream(app, db, cacheDir, songCache, altOf, config.headsEnabled);
   registerSocial(app, db, dataDir, cacheDir);
   const heads = config.headsEnabled ? { cacheDir, seconds: config.headSeconds } : undefined;
@@ -135,7 +138,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   app.addHook('onRoute', (r) => {
     if (!r.url.startsWith('/api/') || PUBLIC_API.has(r.url) || (r as any).websocket) return;
     const pre = r.preHandler; const hooks = Array.isArray(pre) ? pre : pre ? [pre] : [];
-    if (!hooks.includes((app as any).requireUser) && !hooks.includes((app as any).requireAdmin)) open.push(`${r.method} ${r.url}`);
+    if (!hooks.includes((app as any).requireUser) && !hooks.includes((app as any).requireAdmin) && !hooks.includes((app as any).requireBrain)) open.push(`${r.method} ${r.url}`);
   });
   app.addHook('onReady', async () => { if (open.length) throw new Error(`routes without a sign-in check: ${open.join(', ')}`); });
   // No version on the unauthenticated health checks (don't hand scanners a

@@ -126,6 +126,16 @@ export const config = {
   // database); these envs seed the interval defaults and cap how much the
   // background chores (discovery, backlog) put on Lidarr's wanted list,
   // so a person's own request never waits behind them.
+  // The brain (brain/ in this repo): a recommender on a GPU box. Slopify asks
+  // it what to play next (smart shuffle, autoplay, radio, Home) and falls
+  // back to its own mixes when it is unset, slow or down. BRAIN_KEY is the
+  // shared secret both ways: the brain reads the catalog, plays and audio
+  // with it (/api/brain/*), Slopify sends it to the brain.
+  brain: {
+    url: env('BRAIN_URL', '').replace(/\/+$/, ''),
+    key: env('BRAIN_KEY', ''),
+    timeoutMs: Number(env('BRAIN_TIMEOUT_MS', '1500')),
+  },
   tasks: {
     enrichEveryH: Number(env('ENRICH_EVERY_H', '1')),
     wantedTarget: Number(env('TASKS_WANTED_TARGET', '25')),

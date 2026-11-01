@@ -1,0 +1,16 @@
+services:
+  brain:
+    build: .
+    container_name: slopify-brain
+    restart: unless-stopped
+    environment:
+      SLOPIFY_URL: http://slopify.lan:8080
+      BRAIN_KEY: change-me-to-a-long-random-string
+      LAT: "0"
+      LON: "0"
+      TZ: Etc/UTC
+    devices:
+      - /dev/dri   # Intel GPU
+    ports: ["8097:8097"]
+    volumes:
+      - ./data:/data

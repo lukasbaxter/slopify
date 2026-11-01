@@ -973,7 +973,7 @@ export function usePlayer(jf) {
     try {
       const have = new Set(queueRef.current.map((t) => t.Id));
       // Never a track the user excluded from their taste profile.
-      const fresh = await jf.instantMix(cur.Id, 25);
+      const fresh = await jf.instantMix(cur.Id, 25, shuffleRef.current === 'smart' ? 'smart' : 'continue');
       let pick = fresh.filter((t) => !have.has(t.Id));
       if (!pick.length) pick = fresh.filter((t) => t.Id !== cur.Id);
       if (!pick.length) return giveUp();
@@ -986,6 +986,30 @@ export function usePlayer(jf) {
       await giveUp();
     }
   }, [jf, skipTo]);
+
+  // The queue's end, two songs early: what plays after it is fetched now and
+  // appended, so it is preloaded (and gapless) like any queued song instead of
+  // being looked up in the silence after the last one. Repeat, offline and an
+  // artist's page (more of the artist) keep their own endings.
+  const extendedForRef = useRef(null);
+  useEffect(() => {
+    const q = queue; const i = index;
+    if (!jf || !q.length || i < 0 || q.length - i > 2 || repeat !== 'off' || activePlayerRef.current || isOffline()) return;
+    const ctx = contextRef.current;
+    if (ctx && String(ctx).startsWith('artist:')) return;
+    const last = q[q.length - 1];
+    if (!last || extendedForRef.current === last.Id) return;
+    extendedForRef.current = last.Id;
+    jf.instantMix(last.Id, 25, shuffleRef.current === 'smart' ? 'smart' : 'continue').then((fresh) => {
+      if (queueRef.current[queueRef.current.length - 1]?.Id !== last.Id) return; // the queue changed meanwhile
+      const have = new Set(queueRef.current.map((t) => t.Id));
+      const pick = fresh.filter((t) => !have.has(t.Id));
+      if (!pick.length) return;
+      const merged = [...queueRef.current, ...(shuffleRef.current === 'smart' ? shuffled(pick) : pick)];
+      setQueue(merged); queueRef.current = merged;
+      mediaLog(`queue extended early: ${pick.length} songs after ${last.Id.slice(0, 6)}`);
+    }).catch(() => { extendedForRef.current = null; });
+  }, [jf, queue, index, repeat]);
 
   // Start the context over. With shuffle on, a fresh order (not the same
   // scramble again), never opening on the track that just played.
@@ -1274,9 +1298,29 @@ export function usePlayer(jf) {
     }
   }, []);
 
+  // Smart shuffle, Spotify's way: songs picked for this moment mixed into the
+  // shuffled queue, about one in four (marked _rec). Turning it off goes back
+  // to the remembered order, which never had them.
+  const blendSmart = useCallback(async () => {
+    const q = queueRef.current; const i = indexRef.current; const cur = q[i];
+    if (!jf || !cur || q.length - i < 4) return;
+    try {
+      const have = new Set(q.map((t) => t.Id));
+      const want = Math.min(40, Math.ceil((q.length - i - 1) / 3));
+      const recs = (await jf.instantMix(cur.Id, want + 1, 'smart')).filter((t) => !have.has(t.Id)).slice(0, want);
+      // Still smart, still on the same song, same queue: else the answer is stale.
+      if (!recs.length || shuffleRef.current !== 'smart' || queueRef.current !== q || queueRef.current[indexRef.current]?.Id !== cur.Id) return;
+      const out = q.slice(0, i + 1); let r = 0;
+      q.slice(i + 1).forEach((t, k) => { out.push(t); if ((k + 1) % 3 === 0 && r < recs.length) out.push({ ...recs[r++], _rec: true }); });
+      setQueue(out); queueRef.current = out;
+      mediaLog(`smart shuffle: ${r} picks mixed in`);
+    } catch { /* no picks: plain shuffle */ }
+  }, [jf]);
   const setShuffleMode = useCallback((mode) => {
+    const was = shuffleRef.current;
     applyShuffleOrder(mode); shuffleRef.current = mode; setShuffle(mode);
-  }, [applyShuffleOrder]);
+    if (mode === 'smart' && was !== 'smart') blendSmart();
+  }, [applyShuffleOrder, blendSmart]);
   const setRepeatMode = useCallback((mode) => { repeatRef.current = mode; setRepeat(mode); }, []);
 
   // Spotify-style cycling toggles. When another client owns the session, route

@@ -199,6 +199,18 @@ export function lidarrClient(opts: LidarrOptions) {
     return moved ?? artist;
   };
 
+  // Until no refresh of this artist is queued or running (at most waitMs).
+  const refreshDone = async (artistId: number, waitMs = 120000) => {
+    const until = Date.now() + waitMs;
+    for (;;) {
+      const cmds = ((await api('/command').catch(() => [])) || []) as any[];
+      const busy = cmds.some((c) => (c.status === 'queued' || c.status === 'started') && /Refresh/i.test(c.name || '')
+        && (c.body?.artistId === artistId || (c.body?.artistIds || []).includes(artistId) || (/RefreshArtist/i.test(c.name || '') && !c.body?.artistId && !(c.body?.artistIds || []).length)));
+      if (!busy || Date.now() > until) return;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  };
+
   // A fresh artist's albums arrive with its first metadata refresh: poll a bit.
   const artistAlbums = async (artistId: number, waitMs = 30000) => {
     const until = Date.now() + waitMs;
@@ -354,19 +366,29 @@ export function lidarrClient(opts: LidarrOptions) {
       }
       const out = { id: album.id as number, album_id: fid, artist: album.artist?.artistName || '', title: album.title as string };
       if ((album.statistics?.trackFileCount ?? 0) >= (album.statistics?.totalTrackCount || 1)) return { ...out, status: 'exists' };
-      // The wanted list only lists albums of monitored artists. The artist
-      // first: updating it afterwards reset the album's own flag (a first
-      // request for a new artist came back "queued" with nothing wanted).
-      if (!album.artist?.monitored) {
-        await api(`/artist/${album.artist.id}`, { method: 'PUT', body: JSON.stringify({ ...album.artist, monitored: true, monitorNewItems: 'none' }) });
-        cache.delete('artists');
-      }
-      // Then the album, read back until Lidarr says it stuck.
-      for (let i = 0; i < 3; i++) {
+      // The wanted list only lists albums of monitored artists, so both the
+      // artist and the album have to end up monitored. A brand-new artist is
+      // still being refreshed when its albums appear, and that refresh ends
+      // by saving the artist as it was added (unmonitored) and applying its
+      // "monitor none" to the albums: flags set before then were undone, and
+      // the album sat off the wanted list, never searched, while the
+      // Downloads page said it was waiting (200 of them, 10-31). So: wait for
+      // the artist's refresh, set the artist (from a fresh read, not the
+      // album's copy) before the album (updating it afterwards reset the
+      // album's flag), and read both back.
+      const artistId = album.artistId ?? album.artist?.id;
+      await refreshDone(artistId);
+      for (let i = 0; ; i++) {
+        const ar = await api(`/artist/${artistId}`);
+        if (!ar?.monitored) {
+          await api(`/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...ar, monitored: true, monitorNewItems: 'none' }) });
+          cache.delete('artists');
+        }
         await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [album.id], monitored: true }) });
-        const now = await api(`/album/${album.id}`).catch(() => null);
-        if (now?.monitored) break;
-        if (i === 2) { log(`lidarr: ${out.artist} - ${out.title} would not stay monitored`); throw new Error('Lidarr did not take the request, try again shortly'); }
+        await refreshDone(artistId);
+        const [a2, ar2] = await Promise.all([api(`/album/${album.id}`).catch(() => null), api(`/artist/${artistId}`).catch(() => null)]);
+        if (a2?.monitored && ar2?.monitored) break;
+        if (i === 2) { log(`lidarr: ${out.artist} - ${out.title} would not stay monitored (album ${a2?.monitored}, artist ${ar2?.monitored})`); throw new Error('Lidarr did not take the request, try again shortly'); }
         await new Promise((r) => setTimeout(r, 1500));
       }
       if (opts.searchOnRequest) await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [album.id] }) }).catch((e: any) => log(`lidarr search cmd: ${e.message}`));
@@ -426,8 +448,12 @@ export function lidarrClient(opts: LidarrOptions) {
     async retry(albumId: number) {
       const a = await api(`/album/${albumId}`);
       if (!a) throw new Error('no such album');
-      if (!a.monitored) await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: true }) });
-      if (!a.artist?.monitored) await api(`/artist/${a.artist.id}`, { method: 'PUT', body: JSON.stringify({ ...a.artist, monitored: true, monitorNewItems: 'none' }) });
+      // The artist first (updating it resets the album's flag), as request() does.
+      const artistId = a.artistId ?? a.artist?.id;
+      await refreshDone(artistId);
+      const ar = await api(`/artist/${artistId}`);
+      if (!ar?.monitored) await api(`/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...ar, monitored: true, monitorNewItems: 'none' }) });
+      await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: true }) });
       await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) });
       cache.delete('activity');
     },

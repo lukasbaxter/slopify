@@ -15,6 +15,7 @@ function fakeLidarr() {
     mb: [] as any[],                // MusicBrainz release-group search answer
     albumLookup: null as any[] | null, // overrides /album/lookup when set // albums a RefreshArtist of that artist adds
     nextId: 1,
+    commands: [] as any[],          // GET /command (what is queued / running)
   };
   // /queue and /wanted/missing page like the real thing.
   const paged = (all: any[], u: URL) => {
@@ -39,6 +40,7 @@ function fakeLidarr() {
       return json(a);
     }
     if (p.startsWith('/artist/lookup')) return json(state.lookup ?? [{ artistName: u.searchParams.get('term'), foreignArtistId: 'fa-1', images: [] }]);
+    if (/^\/artist\/\d+$/.test(p) && method === 'GET') return json(state.artists.find((x) => x.id === Number(p.split('/')[2])));
     if (p.startsWith('/artist/') && method === 'PUT') { const id = Number(p.split('/')[2]); const a = state.artists.find((x) => x.id === id); Object.assign(a, JSON.parse(init.body)); return json(a); }
     if (p === '/album' && method === 'GET') {
       const fid = u.searchParams.get('foreignAlbumId');
@@ -54,6 +56,7 @@ function fakeLidarr() {
     if (p === '/album/monitor') { const b = JSON.parse(init.body); for (const a of state.albums) if (b.albumIds.includes(a.id)) a.monitored = b.monitored; return json({}); }
     if (p === '/queue') return json(paged(state.queue, u));
     if (p === '/wanted/missing') return json(paged(state.albums.filter((a) => a.monitored && !a.statistics.trackFileCount).map((a) => ({ id: a.id, foreignAlbumId: a.foreignAlbumId })), u));
+    if (p === '/command' && method === 'GET') return json(state.commands);
     if (p === '/command') {
       const b = JSON.parse(init.body);
       // A refresh brings in what the artist's (new) profile allows.
@@ -167,6 +170,36 @@ describe('lidarr client', () => {
     expect(state.albums[0].monitored).toBe(true);
     expect(state.artists[0].monitored).toBe(true);
   });
+
+  it('a request for a brand-new artist survives the add\'s refresh, which saves the artist as added and unmonitors its albums (as Lidarr does)', async () => {
+    const { state, fetcher } = fakeLidarr();
+    // Lidarr: adding an artist queues its refresh; the albums show up while it
+    // runs, and when it ends it saves the artist it loaded at the start
+    // (unmonitored) and applies the add's "monitor none" to every album.
+    let finishAt = 0; let finish: (() => void) | null = null;
+    const settle = () => {
+      if (finish && Date.now() >= finishAt) { state.commands = state.commands.map((c) => ({ ...c, status: 'completed' })); finish(); finish = null; }
+    };
+    const racing: any = async (url: string, init?: any) => {
+      settle();
+      const p = new URL(url).pathname.replace('/api/v1', '');
+      if (p === '/artist' && init?.method === 'POST') {
+        const r = await fetcher(url, init);
+        const a = state.artists.at(-1); const added = { ...a };
+        state.commands = [{ name: 'RefreshArtist', status: 'started', body: { artistId: a.id } }];
+        finishAt = Date.now() + 1500;
+        finish = () => { Object.assign(a, { monitored: added.monitored }); for (const al of state.albums) al.monitored = false; };
+        return r;
+      }
+      return fetcher(url, init);
+    };
+    const l = client(racing);
+    const r = await l.request('mb-worlds'); // album lookup hands over a new artist
+    expect(r.status).toBe('queued');
+    await new Promise((res) => setTimeout(res, 1600)); settle(); // the refresh is over either way
+    expect(state.albums[0].monitored).toBe(true);
+    expect(state.artists[0].monitored).toBe(true);
+  }, 20000);
 
   it('retry fires AlbumSearch', async () => {
     const { state, fetcher } = fakeLidarr();

@@ -79,6 +79,16 @@ describe('brain', () => {
     const a = await app.inject({ method: 'GET', url: `/api/brain/audio/${ids()[0]}`, headers: { 'x-brain-key': 'test brain key', range: 'bytes=0-99' } });
     expect(a.statusCode).toBe(206); expect(a.rawPayload.length).toBe(100);
   });
+  it('the brain is not rate limited, a visitor is', async () => {
+    const saved = config.rateMax; config.rateMax = 5;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-brain-rl-'));
+    const small = await buildServer({ dataDir: dir, musicDir: MUSIC });
+    try {
+      const codes = async (headers: any) => { const out: number[] = []; for (let i = 0; i < 12; i++) out.push((await small.inject({ method: 'GET', url: '/api/brain/catalog?limit=1', headers })).statusCode); return out; };
+      expect(await codes({ 'x-brain-key': 'test brain key' })).not.toContain(429);
+      expect(await codes({ 'x-brain-key': 'wrong' })).toContain(429);
+    } finally { await small.close(); config.rateMax = saved; }
+  });
   it('a song\'s mix comes from the brain, in its order, with only songs that exist and the listener context sent along', async () => {
     const all = ids(); const want = [all[3], 'f'.repeat(32), all[1], all[2]];
     answer = () => ({ items: want });

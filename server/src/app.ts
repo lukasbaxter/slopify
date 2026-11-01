@@ -12,7 +12,7 @@ import { openDb, type DB } from './db.js';
 import { ensureAdmin, registerAuth } from './auth.js';
 import { registerLibrary } from './library.js';
 import { registerStream } from './stream.js';
-import { registerBrain, registerBrainAuth } from './brain.js';
+import { isBrain, registerBrain, registerBrainAuth } from './brain.js';
 import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
@@ -72,7 +72,10 @@ export async function buildServer(opts: BuildOptions = {}) {
   // sends when the app's own JS attaches them — no cookies, so a foreign
   // origin's request arrives unauthenticated, same as curl.
   await app.register(cors, { origin: true });
-  await app.register(rateLimit, { max: config.rateMax, timeWindow: '1 minute' });
+  // The brain (brain.ts) reads the whole library song by song: with the right
+  // key it is not one more visitor to throttle. Behind a router that NATs the
+  // house to one address it would otherwise use up everyone's allowance.
+  await app.register(rateLimit, { max: config.rateMax, timeWindow: '1 minute', allowList: (req) => isBrain(String(req.headers['x-brain-key'] || '')) });
   await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
   // Light security headers. CSP is deliberately skipped: the SPA relies on
   // inline scripts/styles and a workable policy would break it.

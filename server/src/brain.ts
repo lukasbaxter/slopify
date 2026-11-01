@@ -16,11 +16,13 @@ const same = (a: string, b: string) => {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
 
+export const isBrain = (got: string, key = config.brain.key) => !!key && !!got && same(got, key);
+
 // Before the routes that use it (stream.ts serves the audio).
 export function registerBrainAuth(app: FastifyInstance, key = config.brain.key) {
   app.decorate('requireBrain', async (req: FastifyRequest, reply: FastifyReply) => {
     const got = String(req.headers['x-brain-key'] || '');
-    if (!key || !got || !same(got, key)) return reply.code(401).send({ error: 'unauthorized' });
+    if (!isBrain(got, key)) return reply.code(401).send({ error: 'unauthorized' });
   });
 }
 

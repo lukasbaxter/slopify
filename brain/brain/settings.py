@@ -5,7 +5,10 @@ down, leaves the last rules read (the defaults at first)."""
 import time, httpx
 from . import config
 
-DEFAULTS = {"enabled": True, "power": "normal", "fromHour": 0, "toHour": 0, "pauseListening": False,
+# Until Slopify says otherwise (an older Slopify never does): work as before
+# the rules existed, without breaks. Slopify's own default for a new
+# install is Normal.
+DEFAULTS = {"enabled": True, "power": "full", "fromHour": 0, "toHour": 0, "pauseListening": False,
             "otherGb": 0, "pauseEncoding": False, "location": ""}
 _s = {"at": 0.0, "rules": dict(DEFAULTS), "tz": None, "listening": False, "from_slopify": False}
 

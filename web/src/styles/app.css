@@ -1742,7 +1742,7 @@ button:disabled { cursor: default; }
 .iconbtn.dlbtn.on { color: var(--accent, #1ed760); }
 .dlglyph.busy { animation: none; }
 .dlwrap { position: relative; display: inline-flex; }
-.dl-status { position: absolute; left: 50%; top: 100%; transform: translate(-50%, -2px); color: var(--text-dim, #b3b3b3); font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+.dlwrap-count { position: absolute; left: 50%; top: 100%; transform: translate(-50%, -2px); color: var(--text-dim, #b3b3b3); font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
 .dl-mark { color: var(--accent, #1ed760); vertical-align: -1px; margin-right: 5px; flex: none; }
 /* Offline: songs that are not downloaded cannot play (offline/net.js). */
 .trackrow.unavailable { opacity: 0.4; }

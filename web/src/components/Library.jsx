@@ -1304,7 +1304,7 @@ export default function Library({
                         <DownloadGlyph state={busy ? 'busy' : full ? 'done' : held ? 'part' : 'none'} progress={total ? have / total : 0} />
                       </button>
                       {/* Under the button, out of the row's flow: the buttons beside it never move. */}
-                      {(busy || (held && !full)) && <span className="dl-status">{busy ? `${have}/${total}` : `${have}/${tracks.length}`}</span>}
+                      {(busy || (held && !full)) && <span className="dlwrap-count">{busy ? `${have}/${total}` : `${have}/${tracks.length}`}</span>}
                       </span>
                     </>
                   );

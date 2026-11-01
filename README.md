@@ -101,6 +101,7 @@ In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 | **ListenBrainz** | Scrobbling and weekly discovery playlists, per person |
 | **LrcLib** | Lyrics, if you don't have your own `.lrc` files. Can also sync them on a GPU ([guide](docs/lyric-sync.md)) |
 | **Claude** | Optional: type a vibe, get a playlist from your library (`ANTHROPIC_API_KEY`) |
+| **Your GPU** | Optional: the [brain](brain/README.md) learns how your house listens and what each song sounds like, and picks what plays next. NVIDIA, Intel Arc or CPU, one extra container |
 
 Nothing phones home. [PRIVACY.md](docs/PRIVACY.md) lists every outside service it
 talks to and how to turn each one off.

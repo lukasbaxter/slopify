@@ -31,6 +31,7 @@ const TASK_ICONS = {
   discovery: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5 5-2z" /></svg>,
   backlog: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" /></svg>,
   flac: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9v6" /><path d="M7 6v12" /><path d="M11 10v4" /><path d="M18 19V7" /><path d="m14.5 10.5 3.5-3.5 3.5 3.5" /></svg>,
+  brain: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>,
   lyricsync: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>,
 };
 const DAYS = [N_('Sunday'), N_('Monday'), N_('Tuesday'), N_('Wednesday'), N_('Thursday'), N_('Friday'), N_('Saturday')];
@@ -48,6 +49,17 @@ function TaskSetting({ s, onSave }) {
       <label className="task-set task-set-toggle" htmlFor={id}>
         <span><b>{s.label}</b>{s.help && <small>{s.help}</small>}</span>
         <input id={id} type="checkbox" className="task-switch" checked={!!s.value} onChange={(e) => onSave(s.key, e.target.checked)} />
+      </label>
+    );
+  }
+  if (s.type === 'text') {
+    return (
+      <label className="task-set task-set-text" htmlFor={id}>
+        <span><b>{s.label}</b>{s.help && <small>{s.help}</small>}</span>
+        <input id={id} type="text" className="settings-input" maxLength={s.maxLength} placeholder={s.placeholder} value={draft ?? s.value ?? ''}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => { if (draft != null && draft.trim() !== (s.value ?? '')) onSave(s.key, draft.trim()); setDraft(null); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
       </label>
     );
   }
@@ -245,8 +257,9 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
               <li key={task.id} className={`task-row ${task.running ? 'running' : ''}`} title={task.description}>
                 <span className="task-ico" aria-hidden="true">{TASK_ICONS[task.id] || TASK_ICONS.scan}</span>
                 <b className="task-name">{task.name}</b>
-                <span className="task-meta" title={task.last?.summary || undefined}>
+                <span className="task-meta" title={task.info || task.last?.summary || undefined}>
                   {task.running ? `${task.running.step}${task.running.progress != null ? ` · ${Math.round(task.running.progress * 100)}%` : ''}`
+                    : task.info ? task.info
                     : task.last ? `${task.last.ok ? '' : `${t('failed')} · `}${ago(task.last.started)}${task.last.summary ? ` · ${task.last.summary}` : ''}${task.last.error ? ` · ${task.last.error}` : ''}`
                     : t('never run')}
                 </span>

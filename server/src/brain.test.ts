@@ -5,6 +5,7 @@ import { buildServer } from './app.js';
 import { scanLibrary } from './scanner.js';
 import { playTracker, type PlayEvent } from './playEvents.js';
 import { config } from './config.js';
+import { brainLine } from './brain.js';
 
 describe('play tracker', () => {
   const run = (steps: [number, any][], close = false) => {
@@ -45,12 +46,20 @@ const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-brain-'));
 let app: Awaited<ReturnType<typeof buildServer>>; let tok = '';
 let fake: http.Server; let answer: (body: any) => any = () => ({ items: [] }); let asked: any = null;
+let trainedAt = 1000; let trainAsked = 0;
 const saved = { ...config.brain };
 
 beforeAll(async () => {
   fake = http.createServer((req, res) => {
     let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
       if (req.headers['x-brain-key'] !== 'test brain key') { res.writeHead(401).end(); return; }
+      const json = (x: any) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(x));
+      if (req.url === '/train') { trainAsked++; setTimeout(() => { trainedAt += 1000; }, 200); json({ queued: true }); return; }
+      if (req.url === '/status') {
+        json({ phase: 'listening', songs: 10, heard: 4, left: 6, eta_s: 7200, undecodable: 0, paused: null,
+          last_train: { trained_at: trainedAt, metrics: { 'hit@10': 0.106 }, baselines: { old_mix: { 'hit@10': 0.006 } } } });
+        return;
+      }
       asked = JSON.parse(b); const out = answer(asked);
       if (out === 'hang') return; // never answers
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(out));
@@ -107,5 +116,56 @@ describe('brain', () => {
       expect(r.from).toBeUndefined(); expect(r.items[0].id).toBe(all[0]); expect(r.items.length).toBeGreaterThan(1);
       expect(Date.now() - t0).toBeLessThan(2000);
     }
+  });
+});
+
+describe('the Brain task', () => {
+  const admin = () => ({ authorization: `Bearer ${tok}` });
+  const brainKey = { 'x-brain-key': 'test brain key' };
+  it('holds the household\'s rules, which the brain reads with the time zone and whether anyone is listening', async () => {
+    const tasks = (await app.inject({ method: 'GET', url: '/api/admin/tasks', headers: admin() })).json().tasks;
+    const brain = tasks.find((t: any) => t.id === 'brain');
+    expect(brain.schedule).toEqual({ mode: 'daily', at: '04:00' });
+    expect(brain.settings.map((x: any) => x.key)).toEqual(['enabled', 'power', 'fromHour', 'toHour', 'pauseListening', 'otherGb', 'pauseEncoding', 'location']);
+    expect(brain.info).toBe('Connecting…');
+    const put = await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { power: 'light', location: '  Victoria, BC  ', otherGb: 999, fromHour: 1, toHour: 7 } } });
+    expect(put.statusCode).toBe(200);
+    expect((await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { power: 'turbo' } } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/brain/settings', headers: admin() })).statusCode).toBe(401);
+    const got = (await app.inject({ method: 'GET', url: '/api/brain/settings', headers: brainKey })).json();
+    expect(got.settings).toMatchObject({ enabled: true, power: 'light', location: 'Victoria, BC', otherGb: 256, fromHour: 1, toHour: 7, pauseListening: false });
+    expect(typeof got.tz).toBe('string'); expect(got.listening).toBe(false);
+    await app.inject({ method: 'GET', url: `/api/stream/${ids()[0]}`, headers: { ...admin(), range: 'bytes=0-9' } });
+    expect((await app.inject({ method: 'GET', url: '/api/brain/settings', headers: brainKey })).json().listening).toBe(true);
+  });
+  it('turned off, the brain is not asked and the mix is the server\'s own', async () => {
+    await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { enabled: false } } });
+    try {
+      answer = () => ({ items: [ids()[2]] }); asked = null;
+      const r = (await app.inject({ method: 'GET', url: `/api/tracks/${ids()[0]}/mix?limit=10`, headers: admin() })).json();
+      expect(r.from).toBeUndefined(); expect(asked).toBeNull();
+    } finally {
+      await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { enabled: true } } });
+    }
+  });
+  it('Run now retrains it and says how the new model did', async () => {
+    const before = trainAsked;
+    expect((await app.inject({ method: 'POST', url: '/api/admin/tasks/brain/run', headers: admin() })).statusCode).toBe(200);
+    let brain: any;
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      brain = (await app.inject({ method: 'GET', url: '/api/admin/tasks', headers: admin() })).json().tasks.find((t: any) => t.id === 'brain');
+      if (!brain.running && brain.last) break;
+    }
+    expect(trainAsked).toBe(before + 1);
+    expect(brain.last).toMatchObject({ ok: true, summary: 'next song in its top 10 10.6% of the time (old mix 0.6%)' });
+    expect(brain.info).toBe('Heard 4 of 10 songs, about 2 h to go · Next song in its top 10: 10.6% (old mix 0.6%)');
+  }, 30000);
+  it('its row says what the brain is doing in one line', () => {
+    expect(brainLine(null, 'ECONNREFUSED')).toBe("Can't reach it: ECONNREFUSED");
+    expect(brainLine({ songs: 143443, heard: 143425, left: 0, undecodable: 18, phase: 'idle', weather_now: 'raining, 9 C', place: 'Victoria, British Columbia, Canada' }, null))
+      .toBe('Heard all 143,425 songs · raining, 9 C in Victoria, British Columbia, Canada · 18 won\'t decode');
+    expect(brainLine({ songs: 100, heard: 10, left: 90, eta_s: 300, paused: 'paused while someone is listening', phase: 'paused' }, null))
+      .toBe('Heard 10 of 100 songs · Paused while someone is listening');
   });
 });

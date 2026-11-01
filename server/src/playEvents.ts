@@ -46,6 +46,8 @@ export function playTracker(save: (e: PlayEvent) => void, now: () => number = Da
       if (same) { same.pos = pos; same.playing = !!np!.playing; same.seen = t; same.dur = dur ?? same.dur; if (np!.shuffle) same.shuffle = String(np!.shuffle); return; }
       cur.set(key, { uid, client, id, at: t - pos, played: 0, pos, dur, playing: !!np!.playing, seen: t, shuffle: np!.shuffle ? String(np!.shuffle) : null });
     },
+    // Connections playing right now (reported within the gap).
+    live() { const t = now(); let n = 0; for (const c of cur.values()) if (c.playing && t - c.seen < MAX_GAP_MS) n++; return n; },
     close(key: string) {
       const c = cur.get(key);
       if (c && c.playing) c.played += Math.min(MAX_GAP_MS, Math.max(0, now() - c.seen));

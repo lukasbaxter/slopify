@@ -12,7 +12,7 @@ import { openDb, type DB } from './db.js';
 import { ensureAdmin, registerAuth } from './auth.js';
 import { registerLibrary } from './library.js';
 import { registerStream } from './stream.js';
-import { isBrain, registerBrain, registerBrainAuth } from './brain.js';
+import { brainTask, isBrain, registerBrain, registerBrainAuth } from './brain.js';
 import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
@@ -130,7 +130,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,
     python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
-  })]);
+  }), ...[brainTask(app)].filter((x) => x !== null)]);
   registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 
   // Every /api route must carry a sign-in check unless it is one of the few

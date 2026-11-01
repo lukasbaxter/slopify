@@ -1,16 +1,19 @@
+# The brain beside Slopify, both on host networking (see README.md).
+# .env next to this file: BRAIN_KEY=<openssl rand -hex 32>, also given to Slopify.
 services:
   brain:
-    build: .
+    image: ghcr.io/lukasbaxter/slopify-brain:nvidia   # or :intel, :cpu
     container_name: slopify-brain
     restart: unless-stopped
+    network_mode: host
     environment:
-      SLOPIFY_URL: http://slopify.lan:8080
-      BRAIN_KEY: change-me-to-a-long-random-string
-      LAT: "0"
-      LON: "0"
-      TZ: Etc/UTC
-    devices:
-      - /dev/dri   # Intel GPU
-    ports: ["8097:8097"]
+      BRAIN_KEY: ${BRAIN_KEY}
+      SLOPIFY_URL: http://127.0.0.1:8080
     volumes:
-      - ./data:/data
+      - ./brain:/data
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu, utility] }]
+    # Intel Arc: replace deploy with   devices: ["/dev/dri"]
+    # CPU only: remove deploy

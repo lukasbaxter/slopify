@@ -1,9 +1,25 @@
 """Context as numbers: local time, weather, device, how a play went."""
 import datetime as dt, math, re
 from zoneinfo import ZoneInfo
-from . import config, weather
+from . import config, weather, settings
 
-TZ = ZoneInfo(config.TZ)
+_tz = {"name": None, "zone": dt.timezone.utc}
+
+def tz():
+    """Local time where the listening happens: the Location's time zone,
+    else TZ from the environment, else Slopify's, else UTC. Read on every
+    context, so it is cached; the maintainer refreshes it (refresh_tz)."""
+    return _tz["zone"]
+
+def refresh_tz():
+    p = weather.place() or {}
+    name = p.get("timezone") or config.TZ or settings.refresh()["tz"] or "UTC"
+    if name != _tz["name"]:
+        try:
+            _tz.update(name=name, zone=ZoneInfo(name))
+        except Exception:  # noqa: BLE001 - an unknown name: keep the last one
+            pass
+    return _tz["name"]
 DEVICES = ["unknown", "phone", "computer", "speaker", "tv", "car"]
 MODES = ["history", "continue", "smart", "radio", "now"]
 N_CTX = 2 + 2 + 7 + 5 + len(DEVICES) + len(MODES)   # hour sin/cos, year-day sin/cos, weekday, weather, device, mode
@@ -23,7 +39,7 @@ def device_of(client):
     return "speaker"   # BluOS, Sonos, DLNA, AirPlay, Cast speakers, named rooms
 
 def context(ms, client=None, mode="history"):
-    t = dt.datetime.fromtimestamp(ms / 1000, TZ)
+    t = dt.datetime.fromtimestamp(ms / 1000, tz())
     h = (t.hour + t.minute / 60) / 24 * 2 * math.pi
     yd = t.timetuple().tm_yday / 366 * 2 * math.pi
     wk = [0.0] * 7; wk[t.weekday()] = 1.0

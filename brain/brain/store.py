@@ -37,6 +37,9 @@ def kv_set(k, v):
     db().execute("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", (k, json.dumps(v)))
     db().commit()
 
+def kv_delete(k):
+    db().execute("DELETE FROM kv WHERE k = ?", (k,)); db().commit()
+
 def embeddings():
     """(ids, float32 matrix) of every song heard so far."""
     rows = db().execute("SELECT track_id, vec FROM emb WHERE vec IS NOT NULL").fetchall()

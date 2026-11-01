@@ -132,7 +132,9 @@ export const config = {
   // shared secret both ways: the brain reads the catalog, plays and audio
   // with it (/api/brain/*), Slopify sends it to the brain.
   brain: {
-    url: env('BRAIN_URL', '').replace(/\/+$/, ''),
+    // With only the key set, the brain is next door: the README's compose
+    // runs both on host networking.
+    url: env('BRAIN_URL', env('BRAIN_KEY', '') ? 'http://127.0.0.1:8097' : '').replace(/\/+$/, ''),
     key: env('BRAIN_KEY', ''),
     timeoutMs: Number(env('BRAIN_TIMEOUT_MS', '1500')),
   },

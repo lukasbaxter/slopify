@@ -235,6 +235,9 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   const plays = playTracker((e) => { try { insEvent.run(e); } catch (err: any) { app.log.warn(`play event: ${err.message}`); } });
   const durationOf = (id: string) => (durOf.get(id) as any)?.duration_ms ?? null;
   app.decorate('sessionOf', (uid: string) => loadSession(db, uid));
+  // Anyone playing anything, any account: apps and browsers by their reports,
+  // speakers by the server's own players (the brain can pause for it).
+  app.decorate('listeningNow', () => plays.live() + [...clients.values()].filter((c) => c.kind === 'server' && c.player?.playing).length);
   // Likes changed over HTTP reach the open clients too.
   // A token that was logged out, removed or outlived by a password change:
   // the socket it signed in on is closed, so the account's session is not

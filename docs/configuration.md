@@ -43,7 +43,8 @@ environment values for them only seed the defaults.
 | `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under (`Slopify` on Docker's default network) |
 | `DEMO` | `0` | `1` makes a public try-it-out server: no sign-in form, every visitor gets a guest account of their own with a copy of the admin's playlists, likes and history. Guests can play, like and make playlists; settings, scans, accounts and uploads are refused. Idle guests are removed after a day |
 | `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
-| `BRAIN_URL` / `BRAIN_KEY` | (unset) | The brain ([brain/](../brain/README.md)): a recommender on a GPU box for smart shuffle, autoplay and radio. Same `BRAIN_KEY` on both. Unset or down = Slopify's own mixes |
+| `BRAIN_KEY` | (unset) | Turns on the [brain](../brain/README.md): a recommender on your GPU for smart shuffle, autoplay and radio. The same value on the brain. Its rules live in Settings › Admin › Tasks › Brain |
+| `BRAIN_URL` | `http://127.0.0.1:8097` when `BRAIN_KEY` is set | Where the brain is, when it isn't on this machine. Unset key or down brain = Slopify's own mixes |
 | `BRAIN_TIMEOUT_MS` | `1500` | How long to wait for the brain before using Slopify's own mix |
 | `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
 | `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |

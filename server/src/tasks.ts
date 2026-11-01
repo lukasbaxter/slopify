@@ -39,6 +39,7 @@ export type TaskSetting = { key: string; label: string; help?: string } & (
   | { type: 'select'; options: { value: string; label: string }[]; default: string }
   | { type: 'number'; min: number; max: number; unit?: string; default: number }
   | { type: 'toggle'; default: boolean }
+  | { type: 'text'; default: string; placeholder?: string; maxLength?: number }
 );
 export type TaskCtx = {
   step: (text: string, progress?: number | null) => void;
@@ -48,13 +49,16 @@ export type TaskCtx = {
 // alongside: runs on demand next to the scheduled chores and never holds them
 // up (Sync Lyrics: a song can wait a long time for GPU memory, and while it
 // waited no scan, enrich or upgrade ran).
-export type TaskDef = { id: string; name: string; description: string; schedule: Schedule; watchDir?: string; settings?: TaskSetting[]; alongside?: boolean; run: (ctx: TaskCtx) => Promise<string> };
+// info: a line about what the task's work looks like right now, shown in its
+// row while it is not running (the brain: how much of the library it has heard).
+export type TaskDef = { id: string; name: string; description: string; schedule: Schedule; watchDir?: string; settings?: TaskSetting[]; alongside?: boolean; info?: () => string | null; run: (ctx: TaskCtx) => Promise<string> };
 
 // A setting value from the wire: coerced to the setting's type and range, or
 // undefined when it is not a valid value for it.
 export function parseSettingValue(s: TaskSetting, v: unknown): string | number | boolean | undefined {
   if (s.type === 'toggle') return typeof v === 'boolean' ? v : undefined;
   if (s.type === 'select') return typeof v === 'string' && s.options.some((o) => o.value === v) ? v : undefined;
+  if (s.type === 'text') return typeof v === 'string' ? v.trim().slice(0, s.maxLength ?? 200) : undefined;
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(s.max, Math.max(s.min, Math.round(n))) : undefined;
 }
@@ -105,6 +109,16 @@ const nextRun = (s: Schedule, last: LastRun | null, now: number): number | null 
   return prevPoint(s, now)! + (s.mode === 'weekly' ? 7 : 1) * 86400000;
 };
 
+// A task's settings as saved, over its defaults (also read outside the task:
+// the brain's rules are served to the brain).
+export function taskSettings(db: DB, d: Pick<TaskDef, 'id' | 'settings'>): Record<string, any> {
+  let saved: Record<string, unknown> = {};
+  try { saved = JSON.parse(kvGet(db, `task:${d.id}:settings`) || '{}') || {}; } catch { /* corrupt row: defaults */ }
+  const out: Record<string, any> = {};
+  for (const s of d.settings || []) { const v = parseSettingValue(s, saved[s.key]); out[s.key] = v === undefined ? s.default : v; }
+  return out;
+}
+
 export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opts: { now?: () => number } = {}) {
   const admin = { preHandler: (app as any).requireAdmin };
   const now = opts.now ?? Date.now;
@@ -115,13 +129,7 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
   // hand edit) must degrade to "never ran" / "default schedule", not take the
   // whole tick - and the task list API - down with it.
   const last = (id: string): LastRun | null => { try { return JSON.parse(kvGet(db, `task:${id}`) || 'null'); } catch { return null; } };
-  const settingsOf = (d: TaskDef): Record<string, any> => {
-    let saved: Record<string, unknown> = {};
-    try { saved = JSON.parse(kvGet(db, `task:${d.id}:settings`) || '{}') || {}; } catch { /* corrupt row: defaults */ }
-    const out: Record<string, any> = {};
-    for (const s of d.settings || []) { const v = parseSettingValue(s, saved[s.key]); out[s.key] = v === undefined ? s.default : v; }
-    return out;
-  };
+  const settingsOf = (d: TaskDef) => taskSettings(db, d);
   const schedOf = (d: TaskDef): Schedule => {
     let raw: any = null;
     try { raw = JSON.parse(kvGet(db, `task:${d.id}:sched`) || 'null'); } catch { /* fall back to the default */ }
@@ -218,6 +226,7 @@ export function registerTasks(app: FastifyInstance, db: DB, defs: TaskDef[], opt
       schedule: s, canWatch: Boolean(d.watchDir), next: nextRun(s, last(d.id), now()),
       settings: (() => { const v = settingsOf(d); return (d.settings || []).map((x) => ({ ...x, value: v[x.key] })); })(),
       running: running.get(d.id) ?? null, last: last(d.id),
+      info: (() => { try { return d.info?.() ?? null; } catch { return null; } })(),
     };
   };
   app.get('/api/admin/tasks', admin, async () => ({ tasks: defs.map(taskOut) }));

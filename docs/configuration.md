@@ -46,6 +46,7 @@ environment values for them only seed the defaults.
 | `BRAIN_KEY` | (unset) | Turns on the [brain](../brain/README.md): a recommender on your GPU for smart shuffle, autoplay and radio. The same value on the brain. Its rules live in Settings › Admin › Tasks › Brain |
 | `BRAIN_URL` | `http://127.0.0.1:8097` when `BRAIN_KEY` is set | Where the brain is, when it isn't on this machine. Unset key or down brain = Slopify's own mixes |
 | `BRAIN_TIMEOUT_MS` | `1500` | How long to wait for the brain before using Slopify's own mix |
+| `BRAIN_DAILY_MIXES` | `0` | `1`: Home's Daily Mixes fill up with songs that *sound* like the artist's (the brain's CLAP audio embeddings) instead of similar artists and genres. Needs the brain on; any mix it can't answer in time is made the usual way |
 | `LIDARR_URL` / `LIDARR_API_KEY` | (unset) | Lidarr integration (discographies, requests, downloads page) |
 | `LIDARR_ROOT` | `/music` | The library as Lidarr's container sees it |
 | `LIDARR_QUALITY_PROFILE` / `LIDARR_METADATA_PROFILE` | (blank) | Profiles for artists Slopify adds; blank = Lidarr's first |

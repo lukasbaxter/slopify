@@ -258,6 +258,16 @@ const MIGRATIONS: string[] = [
   ALTER TABLE playlists ADD COLUMN ai_prompt TEXT;
   ALTER TABLE playlists ADD COLUMN ai_name TEXT;
   `,
+  // 30: Home's Daily Mixes, one per listener and artist, kept for the
+  // listener's local day (dailymix.ts): the same songs all day, through a
+  // restart, and new ones the next morning.
+  `
+  CREATE TABLE daily_mixes (
+    user_id TEXT NOT NULL, artist_id TEXT NOT NULL, day TEXT NOT NULL, tzo INTEGER NOT NULL,
+    track_ids TEXT NOT NULL, source TEXT NOT NULL, made INTEGER NOT NULL,
+    PRIMARY KEY (user_id, artist_id)
+  );
+  `,
 ];
 
 export type DB = Database.Database;

@@ -4,6 +4,7 @@ listener at this moment, then house rules shape the list:
   - smart (smart shuffle) mixes songs they know with new ones, 50/50;
   - radio follows the seed song closely;
   - now (Home's 'right now') is the moment alone: time, weather, device.
+Home's Daily Mixes (similar) skip the model: CLAP closeness to seed songs.
 Picks are sampled from the top, not the strict top, so the same moment does
 not always give the same list; at most two songs per artist and none of the
 odd versions (karaoke, sped up...) unless the seed is one."""
@@ -17,6 +18,46 @@ ODD = re.compile(r"\b(instrumental|karaoke|a ?cappella|sped[ -]?up|slowed|nightc
 SEED_PULL = {"continue": 0.6, "smart": 0.35, "radio": 1.2, "now": 0.0}
 SESSION_PULL = {"continue": 0.8, "smart": 0.6, "radio": 0.5, "now": 0.3}
 KNOWN_SHARE = {"continue": 0.6, "smart": 0.5, "radio": 0.3, "now": 0.7}
+
+def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None):
+    """Songs that sound like the seeds, by CLAP alone: the seeds' audio
+    averaged, every song heard so far ranked by cosine to it. Sampled from the
+    best, weighted by closeness (seed: the same draw for the same seed), then
+    closest first; no seed, nothing in skip, no odd versions unless a seed
+    is one, per_artist songs per artist at most."""
+    rows = [index[s] for s in seeds if s in index and np.abs(audio[index[s]]).sum() > 0]
+    if not rows:
+        return []
+    q = audio[rows].mean(0); q = q / (np.linalg.norm(q) + 1e-9)
+    sound = audio @ q
+    sound[np.abs(audio).sum(1) == 0] = -9; sound[0] = -9
+    seed_odd = any(ODD.search((info.get(s) or ("",))[0] or "") for s in seeds)
+    skip = set(skip) | set(seeds)
+    cand = []
+    for i in np.argsort(-sound)[:max(n * 20, 2000)]:
+        if sound[i] <= -9:
+            break
+        t = ids[i - 1]
+        if t in skip:
+            continue
+        title, artist, _ = info.get(t, ("", "", ""))
+        if not seed_odd and ODD.search(title or ""):
+            continue
+        cand.append((t, float(sound[i]), (artist or "").lower()))
+    if not cand:
+        return []
+    pool = cand[:max(n * 3, 60)]
+    w = np.maximum(np.exp((np.array([s for _, s, _ in pool]) - pool[0][1]) / 0.03), 1e-12)
+    order = np.random.default_rng(seed).choice(len(pool), size=len(pool), replace=False, p=w / w.sum())
+    out, per = [], {}
+    for j in list(order) + list(range(len(pool), len(cand))):   # a short pool: the rest, best first
+        t, sc, a = (pool[j] if j < len(pool) else cand[j])
+        if per.get(a, 0) >= per_artist:
+            continue
+        per[a] = per.get(a, 0) + 1; out.append((t, sc))
+        if len(out) >= n:
+            break
+    return [t for t, _ in sorted(out, key=lambda x: -x[1])]
 
 class Engine:
     def __init__(self):
@@ -139,6 +180,20 @@ class Engine:
                 if len(out) >= n:
                     break
         return {"items": [t for t, _, _ in out], "model": self.meta.get("trained_at")}
+
+    def similar(self, ask):
+        """Home's Daily Mixes, when Slopify opts in: songs that sound like the
+        artist's songs the listener plays most (see similar())."""
+        if not self.ready:
+            return None
+        with self.lock:
+            v, info = self.v, self.info
+        _, disliked = self._known(ask.get("user"))
+        n = max(1, min(200, int(ask.get("n", 100))))
+        seed = ask.get("seed")
+        items = similar(v["audio"], v["ids"], v["index"], info, [str(s) for s in (ask.get("seeds") or [])][:20], n,
+                        skip=set(ask.get("exclude") or []) | disliked, seed=int(seed) if isinstance(seed, (int, float)) else None)
+        return {"items": items}
 
     def search(self, ask):
         """Songs that sound like words ('rainy sunday morning, soft acoustic

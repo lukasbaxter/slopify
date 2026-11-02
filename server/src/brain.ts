@@ -234,6 +234,36 @@ export async function brainNext(db: DB, ask: BrainAsk, opts: { url?: string; key
   }
 }
 
+// Songs that sound like the seeds, by CLAP alone (Home's Daily Mixes with
+// BRAIN_DAILY_MIXES=1, dailymix.ts): closest first, only ones this library
+// has; null when there is no brain, it is off, it does not know /similar
+// (an older brain) or it did not answer in time.
+export async function brainSimilar(db: DB, ask: { user: string; seeds: string[]; n: number; exclude?: string[]; seed?: number },
+  opts: { url?: string; key?: string; timeoutMs?: number; fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<string[] | null> {
+  const url = opts.url ?? config.brain.url, key = opts.key ?? config.brain.key;
+  if (!url || !key || !brainRules(db).enabled || !ask.seeds.length) return null;
+  const f = opts.fetcher ?? fetch;
+  const t0 = Date.now();
+  try {
+    const r = await f(`${url}/similar`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Brain-Key': key },
+      body: JSON.stringify({ ...ask, exclude: [...new Set([...(ask.exclude || []), ...dislikedOf(db, ask.user)])] }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? config.brain.timeoutMs),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json() as { items?: unknown };
+    const ids = Array.isArray(j.items) ? j.items.filter((x): x is string => typeof x === 'string' && /^[0-9a-f]{32}$/.test(x)) : [];
+    if (!ids.length) return null;
+    const have = new Set((db.prepare(`SELECT id FROM tracks WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids) as any[]).map((x) => x.id));
+    const out = ids.filter((id) => have.has(id));
+    opts.log?.(`brain similar: ${out.length} in ${Date.now() - t0} ms`);
+    return out.length ? out : null;
+  } catch (e: any) {
+    opts.log?.(`brain similar: ${e.name === 'TimeoutError' ? 'timed out' : e.message}, own mix instead`);
+    return null;
+  }
+}
+
 // Songs that sound like the words, for generated playlists (ai.ts): the
 // brain compares them with every song's audio and leans toward the
 // listener's taste. [] when there is no brain or it does not answer; the

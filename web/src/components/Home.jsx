@@ -104,10 +104,11 @@ function Card({ title, subtitle, image, round, onOpen, onPlay }) {
  * Home. Structure follows Spotify's: greeting + 8 shortcuts, then Made For You,
  * Recently played, Jump back in, New releases, Your top artists.
  *
- * Daily Mixes are real: each is Jellyfin's Instant Mix seeded from one of your
+ * Daily Mixes are real: each is the server's mix seeded from one of your
  * most-played artists, which is functionally what Spotify's artist-clustered
- * mixes are. Discover Weekly and Release Radar need listening data we do not
- * have and are labelled placeholders.
+ * mixes are, kept for your local day (server: dailymix.ts). Discover Weekly
+ * and Release Radar need listening data we do not have and are labelled
+ * placeholders.
  */
 export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs }) {
   const [recent, setRecent] = useState(() => jf?.persisted('home.recent') || []);

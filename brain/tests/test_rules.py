@@ -132,3 +132,22 @@ def test_length_on_record_too_long_still_heard(tmp_path):
         assert len(clips) == 1 and len(clips[0]) > audio.SR * 10
     finally:
         srv.shutdown(); config.SLOPIFY_URL = "http://127.0.0.1:9"
+
+def test_similar_by_sound_skips_and_caps_artists():
+    """Home's Daily Mixes: closest by CLAP, no seed, skips, odd versions or
+    unheard songs, an artist cap, the same draw for the same seed."""
+    pytest.importorskip("torch")
+    import numpy as np
+    from brain.recommend import similar
+    ids = [f"{i:032x}" for i in range(1, 9)]; index = {t: i + 1 for i, t in enumerate(ids)}
+    audio = np.zeros((len(ids) + 1, 3), np.float32)
+    for k, v in enumerate([[1, 0, 0], [.9, .1, 0], [.8, .2, 0], [.7, .3, 0], [.6, .4, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]]):
+        audio[k + 1] = np.array(v) / (np.linalg.norm(v) or 1)
+    info = {t: ("Song", "A" if i < 4 else f"B{i}", "") for i, t in enumerate(ids)}
+    info[ids[4]] = ("Song (Karaoke)", "C", "")
+    out = similar(audio, ids, index, info, [ids[0]], 4, skip={ids[2]}, per_artist=2, seed=1)
+    assert out and out[0] == ids[1]                         # closest first
+    assert ids[0] not in out and ids[2] not in out          # the seed, a skipped song
+    assert ids[4] not in out and ids[7] not in out          # an odd version, one never heard
+    assert sum(1 for t in out if info[t][1] == "A") <= 2
+    assert out == similar(audio, ids, index, info, [ids[0]], 4, skip={ids[2]}, per_artist=2, seed=1)

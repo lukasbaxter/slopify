@@ -25,7 +25,7 @@
   .content:has(> .contentbar > .pills) .contentbar .pills { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .content:has(> .contentbar > .pills) .contentbar .pills::-webkit-scrollbar { display: none; }
   .content:has(> .contentbar > .pills) .contentbar .pill { flex: none; }
-  /* No "find in playlist / album" field on the phone (owner's call). */
+  /* No "find in playlist / album" field on the phone. */
   .within { display: none; }
 
   /* Back chevron: it sits in the fixed .mobile-topbar, which already pads

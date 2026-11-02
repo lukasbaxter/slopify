@@ -469,7 +469,7 @@ export class ServerPlayer {
   // A member that stopped answering (switched off, off the WiFi) leaves the
   // music. Kept, every call to it took ~3 s to fail (EHOSTUNREACH), so each
   // command and poll waited on it, and the leader, resumed with a member
-  // missing, played 5 s and stopped (Pulse, 2026-10-08). Two misses in a row,
+  // missing, played 5 s and stopped (a speaker that dropped off the network). Two misses in a row,
   // and only for "not there" errors: a busy BluOS hanging up is not one.
   private misses = new Map<string, number>();
   private down = new Map<string, { at: number; lost: boolean }>(); // dropped for not answering; lost = discovery lost it since

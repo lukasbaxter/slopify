@@ -15,11 +15,11 @@ beforeAll(async () => {
   port = (server.address() as AddressInfo).port;
 });
 afterAll(() => server.close());
-const speaker = () => new BluOSTransport({ id: 'bluos:x', kind: 'bluos', name: 'Node', model: 'BluOS', host: '127.0.0.1', port });
+const speaker = () => new BluOSTransport({ id: 'bluos:x', kind: 'bluos', name: 'Study', model: 'BluOS', host: '127.0.0.1', port });
 
 describe('BluOS volume', () => {
   it("a grouped speaker reports its own volume, not the group's 0", async () => {
-    unit.status = '<status><groupName>Towers + 3</groupName><state>stream</state><volume>0</volume><mute>0</mute><secs>5</secs></status>';
+    unit.status = '<status><groupName>Hall + 3</groupName><state>stream</state><volume>0</volume><mute>0</mute><secs>5</secs></status>';
     const t = speaker();
     expect((await t.status()).volume).toBe(11);
     const reads = unit.volumeReads;

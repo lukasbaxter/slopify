@@ -16,3 +16,9 @@ test-results
 playwright-report
 *.log
 .DS_Store
+# Local only: agent worktrees, lab settings, built apps, dev tools
+.claude
+**/*.env
+**/*.apk
+tools/device-lab
+tools/ios-sim/.state

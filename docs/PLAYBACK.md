@@ -208,5 +208,5 @@ is no use in the car or the shower. Smart shuffle is now only about
   receiver, no DLNA renderer since the PS4, no usable browser and no
   third-party app SDK. Spotify works there because Sony ships its app. The
   workable setup is music on the speakers with game audio in a headset, or
-  the Denon's Video Select showing PS5 video while the AVR plays another
+  an AV receiver's video select showing PS5 video while it plays another
   source.

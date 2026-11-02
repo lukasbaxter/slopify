@@ -47,7 +47,7 @@ services:
       - ./data:/data
     environment:
       PORT: "8080"
-      TZ: America/Vancouver
+      TZ: Europe/London
 ```
 
 ```

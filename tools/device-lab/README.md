@@ -111,21 +111,11 @@ CDP touches after a `blur()`.
 
 ## The Android app
 
-The release APK opens the server it was built with (`EXPO_PUBLIC_SLOPIFY_URL`
-from the repo's `SLOPIFY_URL` variable); there is no setting for it. `apk-app`
-makes a lab copy of the latest release:
-
-1. `patch-apk.py` replaces the URL inside the Hermes bundle in place. Hermes
-   strings overlap their neighbours, so the new one has the same length and
-   keeps the first four and the last character:
-   `http://localhost:8190/?lab=o`. The old URL comes from
-   `gh variable get SLOPIFY_URL` (or `RELEASE_URL=`).
-2. apktool adds `android:usesCleartextTraffic="true"` (the release refuses
-   http: `net::ERR_CLEARTEXT_NOT_PERMITTED`).
-3. zipalign + apksigner with the lab key. A lab copy cannot update a
-   release install (different key); `app-test` uninstalls first.
-
-The release WebView already has DevTools on, so no other change is needed.
+Release APKs carry no server address: they ask for one on first launch.
+`apk-app` (the same as `apk-src`) builds the app from this tree with
+`EXPO_PUBLIC_SLOPIFY_URL=http://localhost:8190`, which a self-built app opens
+straight away. It is signed with the debug key, so it cannot update a release
+install; `app-test` uninstalls first. The WebView has DevTools on.
 
 ## The TV app
 

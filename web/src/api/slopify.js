@@ -219,7 +219,7 @@ export class Slopify {
     // Android's Chrome and WebView answer yes to HLS now, but their built-in
     // player stalls on a weak link: half a minute with no request at all,
     // segments fetched twice, readyState 4 with nothing buffered (lab, 480
-    // kbit/s; Henry's Pixel on 4G, 10-30). Android keeps the progressive
+    // kbit/s; a Pixel on 4G). Android keeps the progressive
     // transcode it used before: Chrome's own loader, honest buffering.
     const android = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
     const hls = !android && typeof document !== 'undefined' && !!document.createElement('audio').canPlayType('application/vnd.apple.mpegurl');

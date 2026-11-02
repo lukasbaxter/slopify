@@ -1,5 +1,5 @@
 // The Slopify Android app (mobile/, an Expo WebView shell) on the phone
-// emulator, pointed at the lab server (see patch-apk.py), driven through the
+// emulator, pointed at the lab server (built from this tree: lab.sh apk-src), driven through the
 // WebView's DevTools socket (webview_devtools_remote_<pid>, open in release
 // builds). Launch, sign in, play, the hardware volume buttons (the phone's own
 // sound, then a session playing on another device: a headless Chromium

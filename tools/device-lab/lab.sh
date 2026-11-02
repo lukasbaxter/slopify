@@ -24,7 +24,7 @@ usage() {
   echo "  serve | serve-stop             fixture server for the emulators on 127.0.0.1:DEV_PORT (8190)"
   echo "  android-up <phone|tv30|gtv>... boot emulators headless;  android-down [names|all]"
   echo "  status                         emulators, servers, load"
-  echo "  apk-app | apk-tv               build the lab copies of the release APK / tv/slopify-tv.apk"
+  echo "  apk-app | apk-tv               build the lab copies of the phone app (from this tree) / tv/slopify-tv.apk"
   echo "  phone-test                     Chrome on the phone: play, media session, screen off, PWA"
   echo "  app-test                       the Android app (latest release; APP_APK=<file> for another) on the phone"
   echo "  apk-src                        build the Android app from this tree, pointed at the lab server"
@@ -39,13 +39,7 @@ usage() {
 remote() {
   [ -n "$LAB_HOST" ] || { echo "LAB_HOST is not set: copy lab.env.example to lab.env (or run on the lab host with LAB_LOCAL=1)" >&2; exit 2; }
   local q=""; for a in "$@"; do q+=" $(printf %q "$a")"; done
-  # RELEASE_URL: the server the release APK was built with (the repository's
-  # SLOPIFY_URL Actions variable), needed to repoint it; gh knows it here.
-  local rel="${RELEASE_URL:-}"
-  if [ -z "$rel" ] && [[ " $* " == *" app-test "* || " $* " == *" apk-app "* || " $* " == *" all "* ]] && command -v gh >/dev/null; then
-    rel="$(gh variable get SLOPIFY_URL -R "$GH_REPO" 2>/dev/null || true)"
-  fi
-  ssh -o BatchMode=yes "$LAB_HOST" "LAB_LOCAL=1 RELEASE_URL=$(printf %q "$rel") APP_APK=$(printf %q "${APP_APK:-}") LAB_MUSIC=$(printf %q "${LAB_MUSIC:-}") KBPS=$(printf %q "${KBPS:-}") bash \"\${LAB_DIR:-\$HOME/apps/slopify-lab}/slopify/tools/device-lab/lab.sh\"$q"
+  ssh -o BatchMode=yes "$LAB_HOST" "LAB_LOCAL=1 APP_APK=$(printf %q "${APP_APK:-}") LAB_MUSIC=$(printf %q "${LAB_MUSIC:-}") KBPS=$(printf %q "${KBPS:-}") bash \"\${LAB_DIR:-\$HOME/apps/slopify-lab}/slopify/tools/device-lab/lab.sh\"$q"
 }
 sync_tree() {
   [ -n "$LAB_HOST" ] || { echo "LAB_HOST is not set (lab.env)" >&2; exit 2; }
@@ -270,25 +264,10 @@ sign() { # in out
   "$BT/zipalign" -f -P 16 4 "$1" "$1.al" && "$BT/apksigner" sign --ks "$LAB/lab-debug.keystore" --ks-pass pass:android --out "$2" "$1.al" 2>&1 | grep -v WARNING || true
   rm -f "$1.al" "$2.idsig"
 }
-apk_app() {
-  cd "$LAB/apks"
-  # The latest release's APK (public GitHub API, no login).
-  local url name
-  url="$(curl -sSfL "https://api.github.com/repos/$GH_REPO/releases/latest" | python3 -c 'import sys,json;print([a["browser_download_url"] for a in json.load(sys.stdin)["assets"] if a["name"].endswith(".apk")][0])')"
-  name="$(basename "$url")"
-  [ -f "$name" ] || { echo "== download $name"; curl -sSfLo "$name" "$url"; }
-  [ -n "${RELEASE_URL:-}" ] || { echo "RELEASE_URL unset: the server $name was built with (gh variable get SLOPIFY_URL; lab.sh on the Mac passes it)" >&2; exit 2; }
-  local out="${name%.apk}-lab-$DEV_PORT.apk"
-  # 1) the server in the Hermes bundle, in place; 2) cleartext http allowed
-  #    (the release forbids it, and the lab server is http://localhost).
-  python3 -I "$HERE/patch-apk.py" "$name" u.apk "$RELEASE_URL" "http://localhost:$DEV_PORT"
-  rm -rf dec && java -jar "$LAB/tools/apktool.jar" d -s -f -o dec u.apk >/dev/null 2>&1
-  grep -q 'usesCleartextTraffic="true"' dec/AndroidManifest.xml || sed -i 's/ android:usesCleartextTraffic="false"//; s/<application /<application android:usesCleartextTraffic="true" /' dec/AndroidManifest.xml
-  rm -f "$out"
-  java -jar "$LAB/tools/apktool.jar" b -o b.apk dec >"$LOGS/apktool-app.log" 2>&1 || { tail -5 "$LOGS/apktool-app.log" >&2; return 1; }
-  sign b.apk "$out"; rm -rf u.apk b.apk dec
-  echo "$LAB/apks/$out"
-}
+# The phone app for the lab: release builds carry no server address (they
+# ask for one), so the lab builds the app from this tree with the lab
+# server's address in it, which a self-built app opens straight away.
+apk_app() { apk_src; }
 apk_tv() {
   cd "$LAB/apks"
   local out="slopify-tv-lab-$DEV_PORT.apk"

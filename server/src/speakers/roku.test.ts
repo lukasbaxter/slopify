@@ -19,7 +19,7 @@ beforeAll(async () => {
 });
 afterAll(() => server.close());
 beforeEach(() => { roku.calls = []; roku.state = 'play'; roku.position = 12345; roku.app = { id: PLAY_ON_ROKU, name: 'Play on Roku' }; });
-const tv = () => new RokuTransport({ id: 'roku:x', kind: 'roku', name: 'Den Roku', model: 'Roku Ultra', host: '127.0.0.1', port });
+const tv = () => new RokuTransport({ id: 'roku:x', kind: 'roku', name: 'Living Room Roku', model: 'Roku Ultra', host: '127.0.0.1', port });
 const URL0 = 'http://192.0.2.1:8090/api/stream/abc?token=t0k';
 
 describe('Roku', () => {

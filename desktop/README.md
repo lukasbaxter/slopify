@@ -2,8 +2,8 @@
 
 The web app in a window, plus Chromecast / BluOS speakers driven from this
 machine (for speakers away from home; at home the server drives them and
-the desktop lists those too). Log in with the server address
-(the release build fills in the repository's `SLOPIFY_URL` variable, if set).
+the desktop lists those too). Log in with your server's address (release builds carry none; a self-built
+app can suggest one with `VITE_SLOPIFY_SERVER`).
 
 ```
 npm run build -w web     # at the repo root

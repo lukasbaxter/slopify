@@ -270,6 +270,14 @@ export default function App() {
     // Closed from the UI: drop the history step so Back does not reopen it.
     try { if (window.history.state?.np) window.history.back(); } catch { /* ignore */ }
   };
+  // Leaving the player for a page (Go to artist / album): the player's
+  // history step becomes the page it was opened from, then the new page is
+  // pushed on top. history.back() here would land after the push and undo it.
+  const leaveFullScreenTo = (go) => (...args) => {
+    setFullScreen(false); fullScreenRef.current = false;
+    try { if (window.history.state?.np) window.history.replaceState({ conduit: histRef.current.idx }, ''); } catch { /* sandboxed */ }
+    go(...args);
+  };
   // Account settings: theme + playback quality. Loaded from Jellyfin, applied
   // to the CSS variables, kept in sync across clients over the relay.
   const [prefs, setPrefs] = useState({ theme: DEFAULT_THEME, quality: 'original' });
@@ -1678,7 +1686,7 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
         onFullScreen={openFullScreen}
       />
       <PlayingElsewhereBar player={player} />
-      {fullScreen && <FullScreen player={player} jf={jf} onClose={closeFullScreen} onOpenArtist={openArtistById} onOpenAlbum={openAlbumById} onLike={onLike} onAddTo={onAddTo} onNewPlaylist={onNewPlaylistWithTrack} playlists={playlists} prefs={prefs} onUpdatePrefs={updatePrefs} onPanel={setPanel} devices={[...devices, ...player.relayDevices, ...player.lanDevices]} sessionDevice={sessionDeviceOf(player, [...devices, ...player.relayDevices, ...player.lanDevices])} />}
+      {fullScreen && <FullScreen player={player} jf={jf} onClose={closeFullScreen} onOpenArtist={leaveFullScreenTo(openArtistById)} onOpenAlbum={leaveFullScreenTo(openAlbumById)} onLike={onLike} onAddTo={onAddTo} onNewPlaylist={onNewPlaylistWithTrack} playlists={playlists} prefs={prefs} onUpdatePrefs={updatePrefs} onPanel={setPanel} devices={[...devices, ...player.relayDevices, ...player.lanDevices]} sessionDevice={sessionDeviceOf(player, [...devices, ...player.relayDevices, ...player.lanDevices])} />}
     </div>
   );
 }

@@ -217,7 +217,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   const fullTrack = player.current?.Id === nowPlaying?.itemId ? player.current : asTrack;
   const npLyricJob = useLyricJob(nowPlaying?.itemId);
   const share = () => { if (nowPlaying?.itemId) shareItem({ kind: 'track', id: nowPlaying.itemId, title: nowPlaying.title, by: nowPlaying.artist }); };
-  const goArtist = (id) => { close(); onOpenArtist(id); };
+  const goArtist = (id) => onOpenArtist(id); // App closes the player and opens the page in one step
   const moreItems = asTrack ? [
     player.addToQueue ? { label: t('Add to queue'), icon: G16.queue, onClick: () => player.addToQueue([fullTrack]) } : null,
     onAddTo ? { label: t('Add to playlist'), icon: G.plus, sub: [
@@ -231,7 +231,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
     artistsOf.length > 1
       ? { label: t('Go to artist'), icon: G.artist, sub: artistsOf.map((a) => ({ key: a.Id, label: a.Name, onClick: () => goArtist(a.Id) })) }
       : (artistsOf[0] || nowPlaying?.artistId) ? { label: t('Go to artist'), icon: G.artist, onClick: () => goArtist(artistsOf[0]?.Id || nowPlaying.artistId) } : null,
-    nowPlaying?.albumId && onOpenAlbum ? { label: t('Go to album'), icon: G.album, onClick: () => { close(); onOpenAlbum(nowPlaying.albumId); } } : null,
+    nowPlaying?.albumId && onOpenAlbum ? { label: t('Go to album'), icon: G.album, onClick: () => onOpenAlbum(nowPlaying.albumId) } : null,
     { sep: true },
     nowPlaying?.itemId ? { label: npLyricJob ? t('Syncing Lyrics…') : t('Sync Lyrics'), icon: I.lyrics, disabled: Boolean(npLyricJob), onClick: () => syncLyrics(jf, { Id: nowPlaying.itemId, Name: nowPlaying.title }) } : null,
     { label: t('Share'), icon: G16.share, onClick: share },
@@ -327,7 +327,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
             {phone
               ? <Marquee className="fs-title" text={nowPlaying?.title || t('Nothing playing')} />
               : <div className="fs-title">{nowPlaying?.title || t('Nothing playing')}</div>}
-            <div className="fs-artist"><ArtistLinks artists={nowPlaying?.artists} fallback={nowPlaying?.artist || ''} onOpen={goArtist} className="linkish" /></div>
+            <div className="fs-artist"><ArtistLinks artists={nowPlaying?.artists} fallback={nowPlaying?.artistId ? <span className="linkish" role="button" tabIndex={0} onClick={() => goArtist(nowPlaying.artistId)}>{nowPlaying.artist}</span> : nowPlaying?.artist || ''} onOpen={goArtist} className="linkish" /></div>
             <QualityBadge quality={quality} />
           </div>
           {nowPlaying?.itemId && (

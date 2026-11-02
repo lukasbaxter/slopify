@@ -271,7 +271,6 @@
  "Delete \"{name}\"?": "「{name}」を削除しますか？",
  "Deleted {name}": "{name} を削除しました",
  "Describe it, get 25 songs from your library": "イメージを伝えると、ライブラリから 25 曲を選びます",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "聴きたい曲のイメージを入力してください。Claude があなたのライブラリから 25 曲を選びます：まだ再生していない曲 20 曲と、知っている曲 5 曲です。ぴったりなのにライブラリにない曲はリクエストされ、ダウンロードされると追加されます。",
  "Desktop": "デスクトップ",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "デスクトップとタブレット。次の曲から適用されます。スピーカーには常に元のファイルが送られます。",
  "different albums": "アルバム数",

@@ -57,7 +57,5 @@ environment values for them only seed the defaults.
 | `DISCOVERY_PER_RUN` | `10` | Albums per Discover run |
 | `BACKLOG_EVERY_H` / `BACKLOG_PER_RUN` / `BACKLOG_ARTISTS_PER_RUN` | `6` / `10` / `5` | Fill-in-discographies pace |
 | `FLAC_PER_RUN` | `40` | Upgrade-to-FLAC tracks per run |
-| `ANTHROPIC_API_KEY` | (unset) | Powers Generated playlists (Claude) |
-| `AI_MODEL` | `claude-opus-5` | Model for Generated playlists |
 | `ALIGN_MODEL` | `turbo` | Whisper model that lines lyrics up (gpu image) |
 | `ALIGN_PYTHON` / `ALIGN_SCRIPT` | gpu image paths | Where the aligner lives, if you run it outside the gpu image |

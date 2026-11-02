@@ -271,7 +271,6 @@
  "Delete \"{name}\"?": "\"{name}\"을(를) 삭제할까요?",
  "Deleted {name}": "{name} 삭제됨",
  "Describe it, get 25 songs from your library": "원하는 분위기를 설명하면 라이브러리에서 25곡을 골라 드려요",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "원하는 음악을 설명하세요. Claude가 라이브러리에서 25곡을 고릅니다. 아직 재생하지 않은 곡 20개와 아는 곡 5개입니다. 잘 어울리지만 아직 없는 곡은 요청되며 다운로드되면 추가됩니다.",
  "Desktop": "데스크톱",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "데스크톱 및 태블릿. 다음 곡부터 적용됩니다. 스피커에는 항상 원본 파일이 전송됩니다.",
  "different albums": "앨범 수",

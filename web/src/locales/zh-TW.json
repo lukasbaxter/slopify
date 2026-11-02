@@ -271,7 +271,6 @@
  "Delete \"{name}\"?": "要刪除「{name}」嗎？",
  "Deleted {name}": "已刪除 {name}",
  "Describe it, get 25 songs from your library": "描述一下，從你的音樂庫挑出 25 首歌",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "描述你想聽的內容。Claude 會從你的音樂庫挑出 25 首歌：20 首你還沒播過，5 首你聽過的。很適合但你還沒有的歌曲會送出要求，下載後再加入。",
  "Desktop": "桌機",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "桌機和平板。從下一首曲目起生效。喇叭一律取得原始檔案。",
  "different albums": "不同專輯",

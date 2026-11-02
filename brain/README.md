@@ -14,10 +14,8 @@ mixes whenever the brain is off, slow or busy.
 It listens to every song once, then to new ones as they arrive, and retrains
 every night. It also:
 
-- **makes generated playlists better**: type a vibe and it finds the songs
-  that *sound* like it (CLAP understands words and audio in one space);
-  Claude picks from those. Without an Anthropic key the brain makes the
-  playlist on its own.
+- **makes generated playlists**: type a vibe and it finds the songs that
+  *sound* like it (CLAP understands words and audio in one space).
 - **makes Daily Mixes by sound** (opt-in): set `BRAIN_DAILY_MIXES=1` on
   Slopify and each Daily Mix on Home is the artist plus the songs that sound
   most like the artist's songs you play most. Off: similar artists and

@@ -17,7 +17,6 @@ Every lookup can be turned off.
 | [TheAudioDB](https://www.theaudiodb.com) | Wide artist photos for artist page banners | Artist names | `THEAUDIODB_KEY=` (empty), or the **Fetch lyrics & artwork** task |
 | [MusicBrainz](https://musicbrainz.org) and [ListenBrainz](https://listenbrainz.org) | The **Popular** order on artist pages | Artist names | Not yet switchable; the page falls back to your own plays when they cannot be reached |
 | ListenBrainz (your account) | Scrobbling and weekly discovery playlists | **Your listening history**, sent to your own ListenBrainz account | Off unless a person adds their ListenBrainz token in Settings |
-| [Anthropic](https://www.anthropic.com) (Claude) | Generated playlists | The playlist request and song and artist names from your library | Off unless `ANTHROPIC_API_KEY` is set |
 | Soulseek (through your slskd), Lidarr | Downloads, Upgrade to FLAC, filling discographies | Search terms through your own slskd / Lidarr | Off unless `SLSKD_*` / `LIDARR_*` are set |
 
 On your local network only, never beyond it:

@@ -3,7 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { zipSync, strToU8 } from 'fflate';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { buildPool, finalize, generatePlaylist, Progress, type Ask } from './ai.js';
+import { buildPool, finalize, Progress } from './ai.js';
 import { parseExport, importSpotify, requestPending, fillPending, type Parsed } from './spotifyImport.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
@@ -40,25 +40,6 @@ describe('generated playlists', () => {
     expect(out.filter((c) => c.known).length).toBe(5);
     expect(out.slice(0, 3).map((c) => c.row.id)).toEqual(['k0', 'n1', 'n0']);
     expect(out.filter((c) => c.row.artist === 'Same').length).toBe(2);
-  });
-
-  it('runs plan -> pool -> pick and saves the playlist in the order picked', async () => {
-    const calls: string[] = [];
-    const ask: Ask = async (system: string, user: string, schema: any) => {
-      calls.push(system.slice(0, 20));
-      if (schema.properties.vibe) return { ...emptyPlan, yearFrom: 0, yearTo: 0, title: 'Plan Title' } as any;
-      if (schema.properties.songs) return { songs: tracks.slice(0, 6).map((t) => ({ artist: t.artist, title: t.title })) } as any;
-      const n = (user.match(/^\d+\. (NEW|KNOWN) /gm) || []).length;
-      return { title: 'Late Night Test', picks: Array.from({ length: n }, (_, i) => n - i), request: [] } as any;
-    };
-    const job: any = { state: 'running', step: '', progress: null };
-    const r = await generatePlaylist(db, ask, 'u1', 'something calm', job);
-    job.state = 'done';
-    expect(calls.length).toBe(4); // plan + 2 song lists + pick
-    expect(r.name).toBe('Late Night Test');
-    const ids = (db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(r.playlistId) as any[]).map((x) => x.track_id);
-    expect(ids.length).toBe(Math.min(25, r.poolSize));
-    expect(ids).toEqual(r.tracks.map((t: any) => t.id));
   });
 });
 

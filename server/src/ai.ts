@@ -1,37 +1,17 @@
 // Generated playlists: describe a playlist, get 25 songs from this library,
 // 20 of them songs the listener has never played and 5 they know.
 //
-// Claude (Opus 5, through the Anthropic API; ANTHROPIC_API_KEY) does the
-// judging:
-//   1. plan: request + listener profile -> the vibe in words, artists
-//      (mostly ones they do not play), genres, eras; beside it two calls
-//      for specific songs (one close to their taste, one beyond it);
-//   2. pick: those found in the library, plus Deezer's similar artists that
-//      the library has, genres at random (played/liked songs marked known),
-//      numbered -> Claude picks 20 new + 5 known in listening order, and
-//      which suggested songs the library lacks are worth fetching.
-// Whatever it gets wrong (a bad number, the wrong mix) is fixed from the
-// pool, so the answer is always 25 real tracks. Suggested songs the library
-// lacks are requested through Lidarr and join the playlist when they
-// download.
+// The brain (brain.ts) does it: CLAP compares the words with every song's
+// audio, leaning toward this listener's taste, and the closest songs make
+// the playlist, with the same new/known mix and per-artist caps as before.
+// Nothing leaves the server: no outside AI is asked.
 import type { FastifyInstance } from 'fastify';
-import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { playlistId } from './ids.js';
 import { matchTrack } from './explore.js';
-import { similarInLibrary } from './discover.js';
 import { startJob, jobOut, type Job } from './jobs.js';
-import { recordRequest } from './downloads.js';
-import type { Lidarr } from './lidarr.js';
 import { brainOn, brainSearch, type SoundHit } from './brain.js';
-
-export type AiOptions = {
-  apiKey?: string;
-  model: string;
-  lidarr?: Lidarr; // songs it suggests that the library lacks are requested here
-  log?: (m: string) => void;
-};
 
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const SIZE = 25;
@@ -42,108 +22,10 @@ const credits = (r: { artist: string; artists?: string }) => {
   return [...new Set((a.length ? a : [r.artist]).map(norm).filter(Boolean))];
 };
 
-// --- Claude ---------------------------------------------------------------------
-// One structured call: a system prompt, one user message, JSON back in the
-// given schema. Low effort (the judgement is easy for Opus, the wait is
-// not); a declined request is re-run on Anthropic's default fallback model.
-export type Ask = <T>(system: string, user: string, schema: object, maxTokens: number) => Promise<T>;
-
-export function claudeAsk(apiKey: string, model: string, log?: (m: string) => void): Ask {
-  const client = new Anthropic({ apiKey });
-  return async <T>(system: string, user: string, schema: object, maxTokens: number) => {
-    const t0 = Date.now();
-    const r = await client.beta.messages.create({
-      model, max_tokens: maxTokens, system,
-      messages: [{ role: 'user', content: user }],
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: schema as any } },
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-    });
-    const u = r.usage as any;
-    log?.(`claude ${model}: ${Date.now() - t0} ms, in ${u.input_tokens} (+${u.cache_read_input_tokens || 0} cached), out ${u.output_tokens}, stop ${r.stop_reason}`);
-    if (r.stop_reason === 'refusal') throw new Error('Claude declined this request');
-    if (r.stop_reason === 'max_tokens') throw new Error('Claude ran out of room for the answer');
-    const text = r.content.find((b) => b.type === 'text');
-    if (!text || text.type !== 'text') throw new Error('Claude sent no answer');
-    return JSON.parse(text.text) as T;
-  };
-}
-
-// --- what the listener is like ---------------------------------------------------
 type Row = { id: string; title: string; artist: string; artists: string; artist_ids: string; album: string; year: number | null; genres: string };
 
-export function tasteOf(db: DB, uid: string) {
-  const since = (days: number) => Date.now() - days * 86400000;
-  const topArtists = (from: number, n: number) => (db.prepare(`SELECT t.artist AS name, COUNT(*) AS n FROM plays p JOIN tracks t ON t.id = p.track_id
-      WHERE p.user_id = ? AND p.at >= ? GROUP BY t.artist ORDER BY n DESC LIMIT ?`).all(uid, from, n) as any[]);
-  const likedArtists = db.prepare(`SELECT t.artist AS name, COUNT(*) AS n FROM likes l JOIN tracks t ON t.id = l.track_id
-      WHERE l.user_id = ? GROUP BY t.artist ORDER BY n DESC LIMIT 30`).all(uid) as any[];
-  const genres = new Map<string, number>();
-  for (const r of db.prepare(`SELECT t.genres FROM plays p JOIN tracks t ON t.id = p.track_id WHERE p.user_id = ? AND p.at >= ?
-      UNION ALL SELECT t.genres FROM likes l JOIN tracks t ON t.id = l.track_id WHERE l.user_id = ?`).all(uid, since(365), uid) as any[]) {
-    for (const g of JSON.parse(r.genres || '[]') as string[]) if (g.trim()) genres.set(g, (genres.get(g) || 0) + 1);
-  }
-  const playlists = db.prepare(`SELECT id, name FROM playlists WHERE user_id = ? ORDER BY updated DESC LIMIT 80`).all(uid) as { id: string; name: string }[];
-  return {
-    allTime: topArtists(0, 40), lately: topArtists(since(30), 15), likedArtists,
-    genres: [...genres.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([g]) => g),
-    playlists,
-  };
-}
-
-function profileText(t: ReturnType<typeof tasteOf>) {
-  const list = (xs: any[]) => xs.map((x) => `${x.name} (${x.n})`).join(', ') || 'none yet';
-  return [
-    `Most played artists, all time: ${list(t.allTime)}`,
-    `Most played in the last 30 days: ${list(t.lately)}`,
-    `Artists with the most liked songs: ${list(t.likedArtists)}`,
-    `Genres they play most: ${t.genres.join(', ') || 'unknown'}`,
-    `Their playlists: ${t.playlists.map((p) => `"${p.name}"`).join(', ') || 'none'}`,
-  ].join('\n');
-}
-
 // --- plan -> pool -> pick ---------------------------------------------------------
-// Schemas in the subset structured outputs accept: every property required,
-// no extra properties, no numeric bounds (counts are enforced in code).
-const obj = (properties: Record<string, object>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
-const strs = { type: 'array', items: { type: 'string' } };
-const PlanSchema = obj({
-  title: { type: 'string' }, vibe: { type: 'string' }, artists: strs, genres: strs,
-  playlists: strs, useHistory: { type: 'boolean' },
-  yearFrom: { type: 'integer' }, yearTo: { type: 'integer' },
-});
-const SongsSchema = obj({ songs: { type: 'array', items: obj({ artist: { type: 'string' }, title: { type: 'string' } }) } });
 export type Plan = { title: string; vibe: string; artists: string[]; genres: string[]; songs: { artist: string; title: string }[]; playlists: string[]; useHistory: boolean; yearFrom: number | null; yearTo: number | null };
-
-const PLAN_SYSTEM = `You plan playlists for a personal music server. The playlist can only contain songs from the listener's own library, so your plan is used to search that library. Most of the playlist (80%) must be songs the listener has NOT played before: discovery that still fits their taste.
-Given the request and the listener's profile, answer with:
-- title: a short playlist name (2 to 5 words, no quotes, no emoji).
-- vibe: one or two sentences on exactly what the songs should feel like: mood, energy, tempo, setting, and what does NOT belong.
-- artists: up to 30 real artists whose music fits the vibe. At most a third from their profile (only ones that truly fit); the rest artists they do not play much but would likely enjoy.
-- genres: up to 8 genre names as music libraries tag them (e.g. "R&B", "Hip Hop", "Indie Pop", "House").
-- playlists: names of the listener's own playlists (exactly as listed) the request refers to; empty if none.
-- useHistory: true only when the request is about their own favourites (e.g. "my favourites", "what I have been playing").
-- yearFrom / yearTo: only when the request names an era (e.g. "90s" = 1990 and 1999), otherwise 0.
-If the request names artists, include them.`;
-
-// Specific songs come from two calls running beside the plan (three short
-// answers at once instead of one long one: Claude's writing speed is the
-// wait): one close to what they play, one from artists they do not.
-const SONGS_SYSTEM = (angle: string) => `You suggest songs for a playlist on a personal music server. Name up to 20 specific real songs (artist + exact title) that fit the request closely. Never repeat a title. ${angle}
-If the request names songs, include them.`;
-const SONG_ANGLES = [
-  'Use artists from the listener profile, or artists very close to them, favouring deeper cuts over the biggest hits.',
-  'Use artists who are NOT in the listener profile but whom this listener would likely enjoy.',
-];
-
-const PickSchema = obj({ title: { type: 'string' }, picks: { type: 'array', items: { type: 'integer' } }, request: { type: 'array', items: { type: 'integer' } } });
-const PICK_SYSTEM = (known: number) => `You build a playlist from songs the listener owns. Pick exactly ${SIZE} numbers from the Songs list: exactly ${SIZE - known} marked NEW (never played) and exactly ${known} marked KNOWN.
-Be strict about the vibe: mood, energy, tempo and setting. A song does not fit just because the artist or genre is related (a hype party song does not belong on a calm playlist, an instrumental does not belong on a sing-along one). Better a less famous song that fits than a famous one that does not.
-Unless the request is about one or two artists, use at most 2 songs by the same artist.
-Give the picks in listening order: an inviting opener, songs with a similar feel next to each other, energy that flows, a satisfying closer.
-"request": numbers from the Missing list (songs the library lacks) that fit the vibe clearly enough to download, best first, at most 8; empty if none fit well.
-title: a short playlist name (2 to 5 words, no quotes, no emoji).`;
 
 type Cand = { row: Row; known: boolean; src: number };
 
@@ -235,17 +117,11 @@ export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', si
     const t = norm(c.row.title); const keys = credits(c.row).map((a) => `${a}|${t}`);
     if (keys.some((k) => seen.has(k))) continue; keys.forEach((k) => seen.add(k)); out.push(c);
   }
-  // What Claude sees: up to 150 new and 50 known, best sources first.
+  // Up to 150 new and 50 known, best sources first.
   return Object.assign([...out.filter((c) => !c.known).slice(0, 150), ...out.filter((c) => c.known).slice(0, 50)], { missing });
 }
 
-const line = (r: Row) => {
-  const g = (JSON.parse(r.genres || '[]') as string[]).slice(0, 2).join('/');
-  const bits = [r.year, g].filter(Boolean).join(', ');
-  return `${r.artist} - ${r.title}${bits ? ` (${bits})` : ''}`;
-};
-
-// Claude's picks made valid: real numbers, no repeats, the 5/20 mix, at most
+// The picks made valid: real numbers, no repeats, the 5/20 mix, at most
 // 2 per artist among the new (3 overall) unless the plan is about one or two
 // artists; the rest filled from the pool's best sources. Order kept.
 export function finalize(pool: Cand[], picks: number[], plan: Pick<Plan, 'artists'>) {
@@ -331,50 +207,6 @@ export class Progress {
 }
 
 export type Search = (text: string, n: number) => Promise<SoundHit[]>;
-export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
-  requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>, search?: Search, into?: string) {
-  const pr = new Progress(job, db);
-  pr.start('plan', 'reading your listening');
-  const taste = tasteOf(db, uid);
-  pr.set(null, 'deciding on artists, genres and songs');
-  const user = `Listener profile:\n${profileText(taste)}\n\nRequest: ${prompt}`;
-  const songCalls = Promise.all(SONG_ANGLES.map((angle) => ask<{ songs: Plan['songs'] }>(SONGS_SYSTEM(angle), user, SongsSchema, 4000).catch(() => ({ songs: [] as Plan['songs'] }))));
-  const raw = await ask<Omit<Plan, 'songs'>>(PLAN_SYSTEM, user, PlanSchema, 4000);
-  pr.extra.title = raw.title; pr.extra.vibe = raw.vibe;
-  pr.set(null, 'choosing specific songs');
-  // Deezer's similar artists for the planned ones, while the song lists are
-  // still being written (buildPool then reads them from the cache).
-  const warm = similar ? Promise.all(seedArtists(db, raw.artists || []).slice(0, 10).map((a) => similar(a).catch(() => []))) : null;
-  const heard = search ? search(`${prompt}. ${raw.vibe || ''}`.trim(), 120).catch(() => [] as SoundHit[]) : Promise.resolve([] as SoundHit[]);
-  const [lists, , sound] = await Promise.all([songCalls, warm, heard]);
-  const plan: Plan = { ...raw, yearFrom: raw.yearFrom || null, yearTo: raw.yearTo || null, artists: (raw.artists || []).slice(0, 30), songs: lists.flatMap((l) => l.songs || []).slice(0, 40) };
-
-  pr.start('find');
-  const pool = await buildPool(db, uid, plan, prompt, similar, sound);
-  if (!pool.length) throw new Error('Nothing in the library matched');
-  pr.extra.found = pool.length; pr.extra.foundNew = pool.filter((c) => !c.known).length; pr.extra.bySound = sound.length;
-
-  pr.start('pick', `from ${pool.length} songs`);
-  const miss = requestMissing ? pool.missing.slice(0, 40) : [];
-  const wantKnown = Math.min(Math.round(SIZE * KNOWN_SHARE), pool.filter((c) => c.known).length);
-  const pick = await ask<{ title: string; picks: number[]; request: number[] }>(PICK_SYSTEM(wantKnown),
-    `Request: ${prompt}\nVibe: ${plan.vibe}\n\nSongs:\n${pool.map((c, j) => `${j + 1}. ${c.known ? 'KNOWN' : 'NEW'} ${line(c.row)}`).join('\n')}`
-    + (miss.length ? `\n\nMissing:\n${miss.map((m, j) => `${j + 1}. ${m.artist} - ${m.title}`).join('\n')}` : ''),
-    PickSchema, 8000);
-  const tracks = finalize(pool, pick.picks || [], plan);
-
-  const saved = savePlaylist(db, uid, (pick.title || plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist', tracks.map((t) => t.row.id), prompt, into);
-  const id = saved.id, name = saved.name;
-  // Missing songs it judged worth fetching: requested in the background, 2 per
-  // artist at most; the playlist does not wait for the downloads.
-  const per = new Map<string, number>();
-  const good = [...new Set(pick.request || [])].map((n) => miss[n - 1]).filter(Boolean)
-    .filter((m) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; }).slice(0, 8);
-  if (requestMissing && good.length) void requestMissing(id, good).catch(() => 0);
-  pr.finish();
-  return { playlistId: id, name, regenerated: !!into, count: tracks.length, poolSize: pool.length, requested: good.length, missing: pool.missing.length, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })) };
-}
-
 // A new playlist, or (Regenerate) new songs in one the person already has:
 // same id, cover and place in their library; the name too, unless it is
 // still the one the last generation gave it. Songs the last one sent for
@@ -401,10 +233,8 @@ export function savePlaylist(db: DB, uid: string, name: string, trackIds: string
   return { id, name };
 }
 
-// Without an Anthropic key, the brain alone: songs that sound like the
-// request, leaning toward the listener's taste, in that order, with the same
-// 20 new / 5 known mix and artist caps as Claude's playlists. No planning,
-// no song suggestions to fetch, the request itself as the name.
+// Songs that sound like the request, leaning toward the listener's taste,
+// in that order, 20 new / 5 known, the request itself as the name.
 export async function soundPlaylist(db: DB, search: Search, uid: string, prompt: string, job: Job, into?: string) {
   const pr = new Progress(job, db);
   pr.skip('plan');
@@ -424,34 +254,10 @@ export async function soundPlaylist(db: DB, search: Search, uid: string, prompt:
   return { playlistId: id, name, regenerated: !!into, count: tracks.length, poolSize: pool.length, requested: 0, missing: 0, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })), by: 'brain' };
 }
 
-export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
+export function registerAi(app: FastifyInstance, db: DB) {
   const auth = { preHandler: (app as any).requireUser };
-  const log = (m: string) => app.log.warn(m);
-  const similar = (a: { id: string; name: string }) => similarInLibrary(db, a, { log });
-  const ask = opts.apiKey ? claudeAsk(opts.apiKey, opts.model, (m) => app.log.info(m)) : null;
-
-  // Songs the model suggested that the library lacks: their releases are
-  // monitored in Lidarr (whatever watches its wanted list fetches them),
-  // remembered in ai_pending, and appended to the playlist by the scan that
-  // brings them in.
-  const lidarr = opts.lidarr?.enabled ? opts.lidarr : null;
-  const requestMissing = async (playlistId: string, songs: { artist: string; title: string }[]) => {
-    app.log.info(`ai request: ${songs.length} suggested songs to fetch${lidarr ? '' : ' (no LIDARR_URL)'}`);
-    if (!lidarr) return 0;
-    let n = 0;
-    const pl = db.prepare('SELECT user_id, name FROM playlists WHERE id = ?').get(playlistId) as { user_id: string; name: string } | undefined;
-    await Promise.all(songs.slice(0, 8).map(async (s) => {
-      try {
-        const release = await lidarr.releaseForTrack(s.artist, s.title);
-        if (!release) return;
-        const r = await lidarr.request(release.album_id);
-        db.prepare('INSERT OR IGNORE INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(playlistId, s.artist, s.title, `${release.artist} - ${release.title}`, Date.now());
-        if (pl) recordRequest(db, pl.user_id, r, 'ai', `"${s.title}" for ${pl.name}`);
-        n++; app.log.info(`ai request: ${s.artist} - ${s.title} -> ${release.artist} - ${release.title} (${r.status})`);
-      } catch (e: any) { log(`ai request ${s.artist} - ${s.title}: ${e.message}`); }
-    }));
-    return n;
-  };
+  // Songs an earlier (Claude) playlist sent for still join it when they
+  // download; nothing new is sent for.
   const fillPending = () => {
     db.prepare('DELETE FROM ai_pending WHERE requested < ?').run(Date.now() - 21 * 86400000);
     for (const p of db.prepare('SELECT * FROM ai_pending').all() as any[]) {
@@ -469,22 +275,17 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   };
   (app as any).afterScan?.(fillPending);
 
-  // The brain (brain.ts), when there is one: Claude's pool gets the songs
-  // that sound like the request; with no key it makes the playlist itself.
   const searchFor = (uid: string): Search => (text, n) => brainSearch(db, { user: uid, text, n }, { log: (m) => app.log.info(m) });
-  const NEED = 'Generated playlists need an Anthropic API key (ANTHROPIC_API_KEY) or the brain (BRAIN_KEY) on the server.';
-  app.get('/api/ai/status', auth, async () => (ask ? { ok: true, by: 'claude', brain: brainOn(db) } : brainOn(db) ? { ok: true, by: 'brain' } : { ok: false, reason: NEED }));
+  const NEED = 'Generated playlists need the brain (BRAIN_KEY) on the server.';
+  app.get('/api/ai/status', auth, async () => (brainOn(db) ? { ok: true, by: 'brain' } : { ok: false, reason: NEED }));
   app.post('/api/ai/playlists', auth, async (req: any, reply) => {
     const b = z.object({ prompt: z.string().trim().min(3).max(1000), playlistId: z.string().max(64).optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'Describe the playlist' });
     // Regenerate: new songs in this playlist, not a new one.
     const into = b.data.playlistId;
     if (into && !db.prepare('SELECT 1 FROM playlists WHERE id = ? AND user_id = ?').get(into, req.user.id)) return reply.code(404).send({ error: 'no such playlist' });
-    const search = brainOn(db) ? searchFor(req.user.id) : undefined;
-    if (!ask && !search) return reply.code(503).send({ error: NEED });
-    const job = startJob(req.user.id, 'ai-playlist', (j) => (ask
-      ? generatePlaylist(db, ask, req.user.id, b.data.prompt, j, similar, requestMissing, search, into)
-      : soundPlaylist(db, search!, req.user.id, b.data.prompt, j, into)));
+    if (!brainOn(db)) return reply.code(503).send({ error: NEED });
+    const job = startJob(req.user.id, 'ai-playlist', (j) => soundPlaylist(db, searchFor(req.user.id), req.user.id, b.data.prompt, j, into));
     app.log.info({ uid: req.user.id, prompt: b.data.prompt }, 'ai playlist');
     return jobOut(job);
   });

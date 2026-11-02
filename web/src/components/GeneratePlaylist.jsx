@@ -88,9 +88,7 @@ export default function GeneratePlaylist({ jf, onClose, onDone, regenerate = nul
         {off ? <p className="genpl-note">{status.reason || t('Generated playlists are not available on this server.')}</p> : (
           <>
             {!busy && regenerate && <p className="genpl-note">{t('Change the request or keep it. The songs in this playlist are replaced; a name or cover you gave it stays.')}</p>}
-            {!busy && !regenerate && <p className="genpl-note">{status?.by === 'brain'
-              ? t('Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.')
-              : t('Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.')}</p>}
+            {!busy && !regenerate && <p className="genpl-note">{t('Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.')}</p>}
             <textarea autoFocus rows={3} onFocus={(e) => { const n = e.target.value.length; e.target.setSelectionRange(n, n); }} maxLength={1000} value={prompt} disabled={!!busy} placeholder={t('e.g. rainy day indie, a bit melancholy')}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === 'Escape' && !busy) onClose(); }} />

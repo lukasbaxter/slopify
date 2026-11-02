@@ -7,7 +7,7 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 
 | License | Packages |
 | --- | --- |
-| MIT | 130 |
+| MIT | 124 |
 | BSD-3-Clause | 16 |
 | ISC | 9 |
 | Apache-2.0 | 5 |
@@ -15,14 +15,11 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | Apache-2.0 AND LGPL-3.0-or-later AND MIT | 1 |
 | AGPL-3.0-or-later | 1 |
 | (MIT OR WTFPL) | 1 |
-| Unlicense | 1 |
 | (BSD-2-Clause OR MIT OR Apache-2.0) | 1 |
 | 0BSD | 1 |
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
-| @anthropic-ai/sdk | 0.128.0 | MIT | github:anthropics/anthropic-sdk-typescript |
-| @babel/runtime | 7.29.7 | MIT | https://github.com/babel/babel |
 | @borewit/text-codec | 0.2.2 | MIT | https://github.com/Borewit/text-codec |
 | @emnapi/runtime | 1.11.3 | MIT | https://github.com/toyobayashi/emnapi |
 | @fastify/accept-negotiator | 2.1.0 | MIT | https://github.com/fastify/accept-negotiator |
@@ -51,7 +48,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | @protobufjs/path | 1.1.2 | BSD-3-Clause | https://github.com/dcodeIO/protobuf.js |
 | @protobufjs/pool | 1.1.0 | BSD-3-Clause | https://github.com/dcodeIO/protobuf.js |
 | @protobufjs/utf8 | 1.1.2 | BSD-3-Clause | https://github.com/protobufjs/protobuf.js |
-| @stablelib/base64 | 1.0.1 | MIT | https://github.com/StableLib/stablelib |
 | @tokenizer/inflate | 0.4.1 | MIT | https://github.com/Borewit/tokenizer-inflate |
 | @tokenizer/token | 0.3.0 | MIT | https://github.com/Borewit/tokenizer-token |
 | @types/long | 4.0.2 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
@@ -91,7 +87,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | fast-deep-equal | 3.1.3 | MIT | https://github.com/epoberezkin/fast-deep-equal |
 | fast-json-stringify | 7.0.1 | MIT | https://github.com/fastify/fast-json-stringify |
 | fast-querystring | 1.1.2 | MIT | https://github.com/anonrig/fast-querystring |
-| fast-sha256 | 1.3.0 | Unlicense | https://github.com/dchest/fast-sha256-js |
 | fast-uri | 3.1.8 | BSD-3-Clause | https://github.com/fastify/fast-uri |
 | fast-uri | 4.1.5 | BSD-3-Clause | https://github.com/fastify/fast-uri |
 | fastify | 5.12.5 | MIT | https://github.com/fastify/fastify |
@@ -113,7 +108,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | ini | 1.3.8 | ISC | git://github.com/isaacs/ini |
 | ipaddr.js | 2.5.0 | MIT | https://github.com/whitequark/ipaddr.js |
 | js-tokens | 4.0.0 | MIT | lydell/js-tokens |
-| json-schema-to-ts | 3.1.1 | MIT | https://github.com/ThomasAribart/json-schema-to-ts |
 | json-schema-traverse | 1.0.0 | MIT | https://github.com/epoberezkin/json-schema-traverse |
 | light-my-request | 6.6.0 | BSD-3-Clause | https://github.com/fastify/light-my-request |
 | long | 4.0.0 | Apache-2.0 | https://github.com/dcodeIO/long.js |
@@ -170,7 +164,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | simple-get | 4.0.1 | MIT | git://github.com/feross/simple-get |
 | sonic-boom | 4.2.1 | MIT | https://github.com/pinojs/sonic-boom |
 | split2 | 4.2.0 | ISC | https://github.com/mcollina/split2 |
-| standardwebhooks | 1.1.1 | MIT | https://github.com/standard-webhooks/standard-webhooks |
 | statuses | 2.0.2 | MIT | jshttp/statuses |
 | stream-shift | 1.0.3 | MIT | https://github.com/mafintosh/stream-shift |
 | string_decoder | 1.3.0 | MIT | git://github.com/nodejs/string_decoder |
@@ -182,7 +175,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | toad-cache | 3.7.4 | MIT | https://github.com/kibertoad/toad-cache |
 | toidentifier | 1.0.1 | MIT | component/toidentifier |
 | token-types | 6.1.2 | MIT | https://github.com/Borewit/token-types |
-| ts-algebra | 2.0.0 | MIT | https://github.com/ThomasAribart/ts-algebra |
 | tslib | 2.8.1 | 0BSD | https://github.com/Microsoft/tslib |
 | tunnel-agent | 0.6.0 | Apache-2.0 | https://github.com/mikeal/tunnel-agent |
 | uint8array-extras | 1.6.0 | MIT | sindresorhus/uint8array-extras |

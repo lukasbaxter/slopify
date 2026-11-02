@@ -105,8 +105,7 @@ In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 | **Spotify import** | Upload your Spotify data download: playlists, Liked Songs, saved albums and listening history come over. Anything you don't have gets requested |
 | **ListenBrainz** | Scrobbling and weekly discovery playlists, per person |
 | **LrcLib** | Lyrics, if you don't have your own `.lrc` files. Can also sync them on a GPU ([guide](docs/lyric-sync.md)) |
-| **Claude** | Optional: type a vibe, get a playlist from your library (`ANTHROPIC_API_KEY`; the brain can do it too, without a key) |
-| **Your GPU** | Optional: the [brain](brain/README.md) learns how your house listens and what each song sounds like, and picks what plays next. NVIDIA, Intel Arc or CPU, one extra container |
+| **Your GPU** | Optional: the [brain](brain/README.md) learns how your house listens and what each song sounds like, and picks what plays next. Type a vibe and it makes a playlist from your library. NVIDIA, Intel Arc or CPU, one extra container |
 
 Nothing phones home. [PRIVACY.md](docs/PRIVACY.md) lists every outside service it
 talks to and how to turn each one off.

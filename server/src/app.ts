@@ -120,7 +120,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerPlaylistReco(app, db, { log: (m) => app.log.info(m), warm: process.env.NODE_ENV !== 'test' });
   registerJobs(app);
   registerReports(app, db, { version: VERSION });
-  app.decorate('ai', registerAi(app, db, { ...config.ai, lidarr }));
+  app.decorate('ai', registerAi(app, db));
   registerSpotifyImport(app, db, dataDir, { lidarr });
   registerDownloads(app, db, { lidarr, soularr: soularrClient(config.soularr) });
   registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });

@@ -158,10 +158,5 @@ export const config = {
     script: env('ALIGN_SCRIPT', ''), // default: aligner/align.py in the app
     model: env('ALIGN_MODEL', 'turbo'),
   },
-  // Generated playlists: Claude through the Anthropic API.
-  ai: {
-    apiKey: env('ANTHROPIC_API_KEY', '') || undefined,
-    model: env('AI_MODEL', 'claude-opus-5'),
-  },
 };
 export type Config = typeof config;

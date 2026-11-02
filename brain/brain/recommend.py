@@ -118,7 +118,13 @@ class Engine:
         with torch.no_grad():
             q = m.query(vecs[hi.to(dev)], hf.to(dev), mask.to(dev), u.to(dev), ctx.to(dev))[0]
             if seeds and SEED_PULL.get(mode, 0):
-                q = torch.nn.functional.normalize(q + SEED_PULL[mode] * vecs[idx[seeds[0]]], dim=-1)
+                # Several seeds (an artist's or a playlist's radio): toward all of them.
+                if len(seeds) > 1:
+                    sv = vecs[torch.tensor([idx[s] for s in seeds[:50]], device=dev)]
+                    sv = torch.nn.functional.normalize(sv.mean(0), dim=-1) * sv.norm(dim=-1).mean()
+                else:
+                    sv = vecs[idx[seeds[0]]]
+                q = torch.nn.functional.normalize(q + SEED_PULL[mode] * sv, dim=-1)
             scores = (vecs @ q)
             # Stay with the session: closeness to the last few songs counts
             # too (a new song has to suit what is playing, not only the

@@ -4,7 +4,7 @@ import { login, PW } from './helpers';
 // A generated playlist's ⋯ menu has Regenerate: the prompt box opens with
 // what was asked, the request can change, and the same playlist is filled
 // again (the server side is server/src/brain.test.ts). The e2e server has no
-// brain or Anthropic key, so the AI status and job answers are stood in.
+// brain, so the AI status and job answers are stood in.
 test.use({ serviceWorkers: 'block' });
 test('Regenerate opens the prompt with the old request and refills the same playlist', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium', 'desktop menus');

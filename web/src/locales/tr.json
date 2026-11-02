@@ -178,7 +178,6 @@
  "Delete \"{name}\"?": "\"{name}\" silinsin mi?",
  "Deleted {name}": "Silindi: {name}",
  "Describe it, get 25 songs from your library": "Tarif et, kitaplığından 25 şarkı al",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Ne istediğini tarif et. Claude kitaplığından 25 şarkı seçer: henüz dinlemediğin 20, bildiğin 5 şarkı. Henüz sende olmayan uygun şarkılar istenir ve indiklerinde eklenir.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Ne istediğini anlat. Beyin, kitaplığında böyle duyulan 25 şarkı bulur: henüz dinlemediğin 20 ve bildiğin 5 şarkı.",
  "Desktop": "Masaüstü",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Masaüstü ve tablet. Bir sonraki parçadan itibaren geçerli olur. Hoparlörler her zaman orijinal dosyayı alır.",

@@ -178,7 +178,6 @@
  "Delete \"{name}\"?": "Slette «{name}»?",
  "Deleted {name}": "Slettet {name}",
  "Describe it, get 25 songs from your library": "Beskriv det, og få 25 sanger fra biblioteket ditt",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Beskriv hva du vil ha. Claude velger 25 sanger fra biblioteket ditt: 20 du ikke har spilt ennå, 5 du kjenner. Gode treff du ikke har ennå blir forespurt og lagt til når de er lastet ned.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Beskriv hva du vil ha. Hjernen finner 25 sanger i biblioteket ditt som høres slik ut: 20 du ikke har hørt ennå, og 5 du kjenner.",
  "Desktop": "Datamaskin",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Datamaskin og nettbrett. Gjelder fra neste spor. Høyttalere får alltid originalfilen.",

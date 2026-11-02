@@ -178,7 +178,6 @@
  "Delete \"{name}\"?": "Xóa \"{name}\"?",
  "Deleted {name}": "Đã xóa {name}",
  "Describe it, get 25 songs from your library": "Mô tả, nhận 25 bài hát từ thư viện của bạn",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Mô tả những gì bạn muốn. Claude chọn 25 bài hát từ thư viện của bạn: 20 bài bạn chưa nghe, 5 bài bạn đã biết. Những bài phù hợp mà bạn chưa có sẽ được yêu cầu và thêm vào khi tải xong.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Mô tả điều bạn muốn. Bộ não tìm 25 bài hát trong thư viện của bạn nghe giống như vậy: 20 bài bạn chưa nghe và 5 bài bạn đã biết.",
  "Desktop": "Máy tính",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Máy tính và máy tính bảng. Áp dụng từ bản nhạc tiếp theo. Loa luôn nhận tệp gốc.",

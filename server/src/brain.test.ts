@@ -175,7 +175,7 @@ describe('the Brain task', () => {
 
 describe('the brain and generated playlists', () => {
   const admin = () => ({ authorization: `Bearer ${tok}` });
-  it('with no Anthropic key the brain makes the playlist: songs that sound like the request, in its order', async () => {
+  it('the brain makes the playlist: songs that sound like the request, in its order', async () => {
     const st = (await app.inject({ method: 'GET', url: '/api/ai/status', headers: admin() })).json();
     expect(st).toMatchObject({ ok: true, by: 'brain' });
     const job = (await app.inject({ method: 'POST', url: '/api/ai/playlists', headers: admin(), payload: { prompt: 'rainy sunday morning, soft guitar' } })).json();

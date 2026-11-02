@@ -178,7 +178,6 @@
  "Delete \"{name}\"?": "Usunąć „{name}”?",
  "Deleted {name}": "Usunięto: {name}",
  "Describe it, get 25 songs from your library": "Opisz, a dostaniesz 25 utworów z biblioteki",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Opisz, czego chcesz. Claude wybierze 25 utworów z Twojej biblioteki: 20, których jeszcze nie słuchałeś, i 5 znanych. Pasujące utwory, których jeszcze nie masz, zostaną zamówione i dodane po pobraniu.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Opisz, czego chcesz. Mózg znajdzie w Twojej bibliotece 25 utworów, które tak brzmią: 20, których jeszcze nie słuchałeś, i 5, które znasz.",
  "Desktop": "Komputer",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Komputer i tablet. Działa od następnego utworu. Głośniki zawsze dostają oryginalny plik.",

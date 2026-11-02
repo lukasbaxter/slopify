@@ -271,7 +271,6 @@
  "Delete \"{name}\"?": "删除“{name}”？",
  "Deleted {name}": "已删除 {name}",
  "Describe it, get 25 songs from your library": "描述一下，从你的音乐库中挑选 25 首歌曲",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "描述你想听的内容。Claude 会从你的音乐库中挑选 25 首歌曲：20 首你还没播放过，5 首你熟悉的。合适但你还没有的歌曲会被请求，下载完成后添加。",
  "Desktop": "桌面设备",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "桌面设备和平板。从下一首曲目起生效。音箱始终获取原始文件。",
  "different albums": "不同专辑",

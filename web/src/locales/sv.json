@@ -178,7 +178,6 @@
  "Delete \"{name}\"?": "Radera \"{name}\"?",
  "Deleted {name}": "{name} raderad",
  "Describe it, get 25 songs from your library": "Beskriv den och få 25 låtar från ditt bibliotek",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Beskriv vad du vill ha. Claude väljer 25 låtar från ditt bibliotek: 20 som du inte har spelat än och 5 som du känner till. Passande låtar du inte har än efterfrågas och läggs till när de laddats ned.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Beskriv vad du vill ha. Hjärnan hittar 25 låtar i ditt bibliotek som låter så: 20 du inte har lyssnat på än och 5 du känner till.",
  "Desktop": "Dator",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Dator och surfplatta. Gäller från nästa spår. Högtalare får alltid originalfilen.",

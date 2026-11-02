@@ -178,7 +178,6 @@
  "Delete \"{name}\"?": "Удалить «{name}»?",
  "Deleted {name}": "{name}: удалено",
  "Describe it, get 25 songs from your library": "Опишите, что хотите, и получите 25 треков из медиатеки",
- "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Опишите, что хотите послушать. Claude выберет 25 треков из вашей медиатеки: 20 ещё не прослушанных и 5 знакомых. Подходящие треки, которых у вас пока нет, будут запрошены и добавлены после загрузки.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Опишите, что хотите. Мозг найдёт в вашей библиотеке 25 песен, которые так звучат: 20, которые вы ещё не слушали, и 5 знакомых.",
  "Desktop": "Компьютер",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Компьютер и планшет. Применяется со следующего трека. На колонки всегда идёт исходный файл.",

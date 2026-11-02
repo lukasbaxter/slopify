@@ -1,6 +1,7 @@
 // Accounts: argon2id passwords, opaque device tokens, two roles. The first
 // admin comes from the environment (default admin/admin, forced to change on
 // first login). Admins invite users by link and promote/demote them.
+import crypto from 'node:crypto';
 import argon2 from 'argon2';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -12,6 +13,12 @@ export type User = { id: string; name: string; role: 'admin' | 'user'; must_chan
 declare module 'fastify' { interface FastifyRequest { user?: User; tokenId?: string } }
 
 const INVITE_TTL = 7 * 86400000;
+
+// A temporary password an admin reads out or types into a message: three
+// groups of four from letters and digits nobody confuses (no 0/o, 1/l/i),
+// about 60 bits. Only good until the user picks their own.
+const READABLE = 'abcdefghjkmnpqrstuvwxyz23456789';
+export const tempPassword = () => Array.from({ length: 3 }, () => Array.from({ length: 4 }, () => READABLE[crypto.randomInt(READABLE.length)]).join('')).join('-');
 
 // Verified against when the username does not exist, so a login attempt costs
 // one argon2 either way and response time does not reveal which names exist.
@@ -149,6 +156,31 @@ export function registerAuth(app: FastifyInstance, db: DB) {
     if (!r.changes) return reply.code(404).send({ error: 'no such user' });
     revoke(gone);
     return { ok: true };
+  });
+  // Someone forgot their password: an admin gives them a temporary one (their
+  // own, or one made here and shown once), signs them out everywhere, and they
+  // choose a new one at their next sign-in (must_change_pw). Not for your own
+  // account: that is the normal change-password, which asks for the current
+  // one. Roles are untouched. The speakers' tokens stay, as with a change:
+  // they open nothing but streams.
+  const Reset = z.object({ password: z.string().min(8).max(256).optional() });
+  app.post('/api/users/:id/password', { preHandler: (app as any).requireAdmin, config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const body = Reset.safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'password must be at least 8 characters' });
+    const id = (req.params as any).id as string;
+    if (id === req.user!.id) return reply.code(400).send({ error: 'change your own password in Settings' });
+    if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) return reply.code(404).send({ error: 'no such user' });
+    const password = body.data.password ?? tempPassword();
+    const hash = await argon2.hash(password, { type: argon2.argon2id });
+    const gone = db.transaction(() => {
+      db.prepare('UPDATE users SET pass_hash = ?, must_change_pw = 1 WHERE id = ?').run(hash, id);
+      const g = (db.prepare("SELECT token FROM tokens WHERE user_id = ? AND kind != 'speaker'").all(id) as any[]).map((r) => r.token as string);
+      db.prepare("DELETE FROM tokens WHERE user_id = ? AND kind != 'speaker'").run(id);
+      return g;
+    })();
+    revoke(gone);
+    app.log.info(`password reset for ${id} by ${req.user!.id}`);
+    return { password };
   });
   // A household controller signed in as an admin (Home Assistant) follows every
   // account's session: it gets a sign-in per account, listed in that account's

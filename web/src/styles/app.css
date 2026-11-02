@@ -1584,6 +1584,10 @@ button:disabled { cursor: default; }
 .admin-list li > span { color: var(--fg-dim); }
 .admin-list-actions { margin-left: auto; display: flex; gap: 8px; }
 .admin-list-actions .btn-secondary { padding: 6px 12px; font-size: 13px; }
+.admin-reset { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.admin-reset .settings-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 0; width: 20ch; }
+.admin-reset .btn-secondary { padding: 6px 12px; font-size: 13px; }
+.admin-reset small { flex-basis: 100%; color: var(--fg-dim); }
 
 /* Tasks: one slim line per chore - icon in a circle, name, what happened
    last, its schedule, Run now. The accent color says "running". */

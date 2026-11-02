@@ -178,6 +178,8 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
   const [tasks, setTasks] = useState(null);
   const [users, setUsers] = useState(null);
   const [invite, setInvite] = useState(null);
+  const [reset, setReset] = useState(null); // { id, name, password }: shown once, until dismissed
+  const resetInput = useRef(null);
   const [busy, setBusy] = useState('');
   // Every accepted change bumps the seq; a poll that left before the change
   // is stale and must not revert what was just saved.
@@ -209,6 +211,18 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
       .catch((e) => { notify?.(t('Could not save that setting: {error}', { error: e.message })); taskSeq.current += 1; loadTasks(); });
   };
   const loadUsers = () => jf.users().then((r) => setUsers(r.users || [])).catch(() => setUsers([]));
+  // navigator.clipboard is missing on plain http (not a secure context):
+  // select the text and try the old copy command, else ask for a manual copy.
+  const copyReset = () => {
+    const fallback = () => {
+      resetInput.current?.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      notify?.(ok ? t('Copied') : t('Select the password and copy it'));
+    };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(reset.password).then(() => notify?.(t('Copied'))).catch(fallback);
+    else fallback();
+  };
   useEffect(() => { loadUsers(); }, [jf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The ref blocks the double-click that lands before the re-render disables
@@ -340,8 +354,17 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
                 {u.id !== me?.Id && (
                   <span className="admin-list-actions">
                     <button type="button" className="btn-secondary" disabled={!!busy} onClick={() => run(t('Could not change role'), () => jf.setRole(u.id, u.role === 'admin' ? 'user' : 'admin').then(loadUsers), u.role === 'admin' ? t('{name} is a user now', { name: u.name }) : t('{name} is an admin now', { name: u.name }))}>{u.role === 'admin' ? t('Make user') : t('Make admin')}</button>
+                    <button type="button" className="btn-secondary" disabled={!!busy} onClick={() => { if (window.confirm(t("Reset {name}'s password? They will be signed out everywhere and get a temporary password to sign in with.", { name: u.name }))) run(t('Could not reset the password'), async () => { const r = await jf.resetPassword(u.id); setReset({ id: u.id, name: u.name, password: r.password }); }); }}>{t('Reset password')}</button>
                     <button type="button" className="btn-secondary" disabled={!!busy} onClick={() => { if (window.confirm(t("Remove {name}'s account? Their likes, playlists and history go with it.", { name: u.name }))) run(t('Could not remove'), () => jf.deleteUser(u.id).then(loadUsers), t('{name} removed', { name: u.name })); }}>{t('Remove')}</button>
                   </span>
+                )}
+                {reset?.id === u.id && (
+                  <div className="admin-reset">
+                    <input ref={resetInput} className="settings-input" readOnly value={reset.password} aria-label={t('Temporary password for {name}', { name: u.name })} onFocus={(e) => e.target.select()} />
+                    <button type="button" className="btn-secondary" onClick={copyReset}>{t('Copy')}</button>
+                    <button type="button" className="btn-secondary" onClick={() => setReset(null)}>{t('Done')}</button>
+                    <small>{t('Give this to {name}. They will choose a new password when they sign in.', { name: u.name })}</small>
+                  </div>
                 )}
               </li>
             ))}

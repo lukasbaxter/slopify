@@ -585,6 +585,8 @@ export class Slopify {
   users() { return this._fetch('/api/users'); }
   setRole(userId, role) { return this._fetch(`/api/users/${userId}/role`, { method: 'POST', body: JSON.stringify({ role }) }); }
   deleteUser(userId) { return this._fetch(`/api/users/${userId}`, { method: 'DELETE' }); }
+  // Returns { password }: the temporary one, shown once; they choose their own at next sign-in.
+  resetPassword(userId) { return this._fetch(`/api/users/${userId}/password`, { method: 'POST', body: '{}' }); }
   createInvite() { return this._fetch('/api/invites', { method: 'POST', body: '{}' }); }
   changePassword(current, password) { return this._fetch('/api/auth/password', { method: 'POST', body: JSON.stringify({ current, password }) }); }
   devices() { return this._fetch('/api/auth/devices'); }

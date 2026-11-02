@@ -137,6 +137,10 @@ export const config = {
     url: env('BRAIN_URL', env('BRAIN_KEY', '') ? 'http://127.0.0.1:8097' : '').replace(/\/+$/, ''),
     key: env('BRAIN_KEY', ''),
     timeoutMs: Number(env('BRAIN_TIMEOUT_MS', '1500')),
+    // Home's Daily Mixes from how songs sound (the brain's CLAP audio
+    // embeddings) instead of Deezer's similar artists and genres. Opt-in;
+    // still needs the brain on (Settings > Admin > Tasks > Brain).
+    dailyMixes: env('BRAIN_DAILY_MIXES', '0') === '1',
   },
   tasks: {
     enrichEveryH: Number(env('ENRICH_EVERY_H', '1')),

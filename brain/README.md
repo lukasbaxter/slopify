@@ -18,6 +18,11 @@ every night. It also:
   that *sound* like it (CLAP understands words and audio in one space);
   Claude picks from those. Without an Anthropic key the brain makes the
   playlist on its own.
+- **makes Daily Mixes by sound** (opt-in): set `BRAIN_DAILY_MIXES=1` on
+  Slopify and each Daily Mix on Home is the artist plus the songs that sound
+  most like the artist's songs you play most. Off: similar artists and
+  genres, as before. Either way a Daily Mix stays the same all day and
+  changes at your midnight.
 - **finds damaged songs**: anything it can't hear gets decoded end to end by
   Slopify. A wrong length on record is fixed, a cut-off file or a saved
   preview gets replaced by Upgrade to FLAC, a stub is dropped.

@@ -412,8 +412,9 @@ export class Slopify {
     return (r.items || []).map(rowTrack).filter((t) => !dis[t.Id]);
   }
   // mode (continue / smart / radio) tells the server's recommender why it is asked.
+  // An artist's is their Daily Mix, kept for the listener's local day (tzo).
   async instantMix(itemId, limit = 100, mode = '') {
-    const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}${mode ? `&mode=${mode}` : ''}`);
+    const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}${mode ? `&mode=${mode}` : ''}&tzo=${new Date().getTimezoneOffset()}`);
     const out = (r.items || []).map(rowTrack);
     const dis = this._dislikes || {};
     return out.filter((t) => !dis[t.Id]);

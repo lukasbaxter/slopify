@@ -1,5 +1,6 @@
 """The brain's API and its maintainer loop.
   POST /recommend   what to play next (Slopify asks; X-Brain-Key)
+  POST /similar     songs that sound like seed songs (Home's Daily Mixes)
   POST /train       retrain now (Slopify's Brain task: Run now, its schedule)
   GET  /status      what it knows, how well it does, what it is doing
 The loop, all day: pull what is new from Slopify (5 min), the household's
@@ -38,6 +39,17 @@ async def recommend(req: Request, x_brain_key: str = Header(default="")):
     out["ms"] = round((time.time() - t0) * 1000)
     w = weather.words(weather.at(ask.get("now") or time.time() * 1000))
     log(f"{ask.get('mode')} for {str(ask.get('user'))[:6]} on {features.device_of(ask.get('client'))}{', ' + w if w else ''}: {len(out['items'])} in {out['ms']} ms")
+    return out
+
+@app.post("/similar")
+async def similar(req: Request, x_brain_key: str = Header(default="")):
+    """Songs that sound like the seeds (CLAP): Home's Daily Mixes."""
+    check(x_brain_key)
+    ask = await req.json(); t0 = time.time()
+    out = await asyncio.to_thread(engine.similar, ask)
+    if out is None:
+        raise HTTPException(503, "no model yet")
+    log(f"similar for {str(ask.get('user'))[:6]}: {len(out['items'])} in {round((time.time() - t0) * 1000)} ms")
     return out
 
 @app.post("/search")

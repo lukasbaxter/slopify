@@ -665,6 +665,7 @@
  "Sends what you write, the log above and this device's type to your Slopify server.": "작성한 내용, 위의 로그, 이 기기의 유형을 Slopify 서버로 보냅니다.",
  "Sent. Thanks.": "전송되었습니다. 감사합니다.",
  "Server": "서버",
+ "Server address": "서버 주소",
  "Settings": "설정",
  "Share": "공유하기",
  "show all": "모두 표시",

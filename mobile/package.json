@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.22",
     "expo-build-properties": "~57.0.22",
     "expo-device": "~57.0.2",

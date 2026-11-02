@@ -27,6 +27,5 @@ SideStore every few days (or add its refresh to a Shortcuts automation) so
 the signature is renewed before it runs out. A free Apple ID can have three
 sideloaded apps at a time; SideStore is one of them.
 
-To point the app at your own server, build it with
-`EXPO_PUBLIC_SLOPIFY_URL=https://music.example.com/ mobile/build-ipa.sh` and
-install that `.ipa` in SideStore from the Files app.
+The app asks for your server address the first time it opens (and takes an
+optional home address too). Change them later in Settings > Server address.

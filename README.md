@@ -80,6 +80,11 @@ an invite link.
 Every app shares one session per person, so any device can see and control
 what's playing on the others.
 
+The phone apps ask for your server address on first launch. You can also add
+a home address (like `http://192.168.1.10:8080`): the app uses it whenever it
+answers, so music streams straight over Wi-Fi at home, and switches to the
+main address when you're out. Change either one in Settings > Server address.
+
 In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 `pt-BR`), or let each person pick in Settings. Default follows the device.
 

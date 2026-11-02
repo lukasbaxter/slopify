@@ -21,6 +21,11 @@ import FittedTitle from './FittedTitle.jsx';
 import VirtualList from './VirtualList.jsx';
 import { ProgressiveImg } from './FullScreen.jsx';
 
+// The phone app (mobile/App.js) keeps the server address itself and opens
+// its own screen for it when asked.
+const SHELL_SERVERS = typeof window !== 'undefined' && !!window.slopifyShell?.servers && !!window.ReactNativeWebView;
+const openServers = () => { try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'servers' })); } catch { /* shell gone */ } };
+
 export const LIKED_ID = '__liked__';
 
 function Card({ title, subtitle, image, round, onOpen, onPlay }) {
@@ -823,6 +828,14 @@ export default function Library({
             <p className="settings-caption">{t('Saved to your account and applied to every Slopify you have open.')}</p>
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} phone />}
 
+            {SHELL_SERVERS && (<>
+              <h2>{t('Server')}</h2>
+              <button className="setrow" onClick={openServers}>
+                <span className="setrow-text"><b>{t('Server address')}</b><small>{window.location.host}</small></span>
+                <Chev />
+              </button>
+            </>)}
+
             <h2>{t('Help')}</h2>
             <button className="setrow" onClick={() => setLogsOpen(true)}>
               <span className="setrow-text"><b>{t('Logs')}</b><small>{t('See what the app logged, report a problem')}</small></span>
@@ -976,6 +989,14 @@ export default function Library({
             </section>
 
             {me?.Policy?.IsAdministrator && <AdminSettings jf={jf} me={me} notify={notify} />}
+
+            {SHELL_SERVERS && (
+              <section className="settings-section">
+                <h2>{t('Server')}</h2>
+                <div className="settings-hint" style={{ marginBottom: 12 }}>{window.location.host}</div>
+                <button className="btn-secondary" onClick={openServers}>{t('Server address')}</button>
+              </section>
+            )}
 
             <section className="settings-section">
               <h2>{t('Help')}</h2>

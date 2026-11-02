@@ -1133,9 +1133,10 @@ export default function App() {
   useEffect(() => {
     const rn = window.ReactNativeWebView;
     if (!rn) return undefined;
-    try { rn.postMessage(JSON.stringify({ type: 'session', remote: remoteSession, volume: Math.round(player.volume ?? 0), device: player.nowPlaying?.device?.name || null })); } catch { /* shell gone */ }
+    // playing: the shell only switches between home and away addresses (a reload) while nothing plays.
+    try { rn.postMessage(JSON.stringify({ type: 'session', remote: remoteSession, playing: !!player.playing, volume: Math.round(player.volume ?? 0), device: player.nowPlaying?.device?.name || null })); } catch { /* shell gone */ }
     return undefined;
-  }, [remoteSession, Math.round(player.volume ?? 0), player.nowPlaying?.device?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [remoteSession, !!player.playing, Math.round(player.volume ?? 0), player.nowPlaying?.device?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!window.ReactNativeWebView) return undefined;
     const onStep = (e) => {

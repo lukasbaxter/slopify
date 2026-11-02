@@ -665,6 +665,7 @@
  "Sends what you write, the log above and this device's type to your Slopify server.": "將你填寫的內容、上方的記錄及這部裝置的類型傳送到你的 Slopify 伺服器。",
  "Sent. Thanks.": "已傳送，謝謝。",
  "Server": "伺服器",
+ "Server address": "伺服器位址",
  "Settings": "設定",
  "Share": "分享",
  "show all": "顯示全部",

@@ -665,6 +665,7 @@
  "Sends what you write, the log above and this device's type to your Slopify server.": "入力した内容、上のログ、このデバイスの種類を Slopify サーバーに送信します。",
  "Sent. Thanks.": "送信しました。ありがとうございます。",
  "Server": "サーバー",
+ "Server address": "サーバーのアドレス",
  "Settings": "設定",
  "Share": "シェア",
  "show all": "すべて表示",

@@ -543,6 +543,7 @@
  "Sends what you write, the log above and this device's type to your Slopify server.": "Gửi nội dung bạn viết, nhật ký ở trên và loại thiết bị này tới máy chủ Slopify của bạn.",
  "Sent. Thanks.": "Đã gửi. Cảm ơn bạn.",
  "Server": "Máy chủ",
+ "Server address": "Địa chỉ máy chủ",
  "Settings": "Cài đặt",
  "Share": "Chia sẻ",
  "Show all": "Hiện tất cả",

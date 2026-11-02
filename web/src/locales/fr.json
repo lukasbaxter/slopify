@@ -543,6 +543,7 @@
  "Sends what you write, the log above and this device's type to your Slopify server.": "Envoie ton message, le journal ci-dessus et le type de cet appareil à ton serveur Slopify.",
  "Sent. Thanks.": "Envoyé. Merci.",
  "Server": "Serveur",
+ "Server address": "Adresse du serveur",
  "Settings": "Paramètres",
  "Share": "Partager",
  "Show all": "Tout afficher",

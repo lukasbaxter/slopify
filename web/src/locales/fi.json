@@ -543,6 +543,7 @@
  "Sends what you write, the log above and this device's type to your Slopify server.": "Lähettää kirjoittamasi tekstin, yllä olevan lokin ja tämän laitteen tyypin Slopify-palvelimellesi.",
  "Sent. Thanks.": "Lähetetty. Kiitos.",
  "Server": "Palvelin",
+ "Server address": "Palvelimen osoite",
  "Settings": "Asetukset",
  "Share": "Jaa",
  "Show all": "Näytä kaikki",

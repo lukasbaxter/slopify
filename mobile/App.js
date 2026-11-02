@@ -1,35 +1,66 @@
-// Slopify on the phone: the web build (EXPO_PUBLIC_SLOPIFY_URL) inside a native
+// Slopify on the phone: your Slopify server's web app inside a native
 // WebView. The web app's mobile layout (bottom tabs, compact player) does the
-// rest; this shell supplies media playback permissions, a retry screen, and
-// the one thing a web page cannot have: the hardware volume buttons. While
+// rest; this shell supplies media playback permissions, a retry screen, the
+// server address, and the one thing a web page cannot have: the hardware
+// volume buttons. While
 // the sound is on another device (the page says so over the bridge) a press
 // becomes a volume step for that device and the phone's own level is put
 // back, so it never drifts; while the phone itself plays, the buttons do
 // what they always do. It draws full-bleed and the page pads for the notch /
 // home indicator (viewport-fit=cover).
-import { useEffect, useRef, useState } from 'react';
+//
+// The server address is asked for on first launch (pre-filled with the one
+// the build was made with, EXPO_PUBLIC_SLOPIFY_URL, if any) and kept on the
+// phone; Settings > Server address in the page, or the retry screen, open it
+// again. An optional home address is used whenever it answers (/api/healthz),
+// so music streams straight over Wi-Fi at home; anywhere else the main one is.
+// The two are different origins, each with its own localStorage, so the
+// shell keeps a copy of the sign-in and hands it over: you sign in once.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
 import SlopifyMedia from './modules/slopify-media';
+import { cleanAddress, originOf } from './address';
 
-// The server this build opens, set when it is built (the release build
-// takes it from the repository's SLOPIFY_URL variable).
-const URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || '';
-const ORIGIN = (() => { try { return new globalThis.URL(URL).origin; } catch { return ''; } })();
-// The shell shows the server and nothing else: any other page (a link to the
-// source code, a song's page elsewhere) opens in the phone's browser, so no
-// other site ever runs where the bridge and the sign-in are.
-const stayIn = (req) => {
-  const u = req.url || '';
-  if (u.startsWith('about:') || u.startsWith('blob:') || u.startsWith('data:')) return true;
-  let o = ''; try { o = new globalThis.URL(u).origin; } catch { /* not a URL */ }
-  if (o === ORIGIN) return true;
-  if (/^https?:/i.test(u) && req.isTopFrame !== false) Linking.openURL(u).catch(() => {});
-  return false;
+// The address the build was made with (the release build takes it from the
+// repository's SLOPIFY_URL variable): only a suggestion on first launch.
+const BUILT_URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || '';
+const SERVERS_KEY = 'slopify.servers'; // { main, home }
+const SIGNIN_KEY = 'slopify.shellSession'; // { main, session }: the page's sign-in, for the other address
+
+// Does a Slopify server answer here? /api/healthz is public and says { ok: true }.
+const probe = async (base, ms) => {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const res = await fetch(`${base}/api/healthz`, { signal: ctl.signal, cache: 'no-store' });
+    if (!res.ok) return false;
+    const body = await res.json().catch(() => null);
+    return body?.ok === true;
+  } catch { return false; } finally { clearTimeout(timer); }
 };
+// The home address when it answers quickly, else the main one.
+const choose = async (servers) => (servers.home && await probe(servers.home, 1500) ? servers.home : servers.main);
+
+// Tells the shell which address is open and its sign-in, as the page starts
+// and whenever the page signs in or out (api/slopify.js persistSession /
+// clearSession). A removal carries the token it removed: a stale sign-in
+// cleared on one address must not wipe the good copy from the other.
+const SIGNIN_BRIDGE = `(function () {
+  if (!window.ReactNativeWebView) return;
+  var K = 'slopify.session', ls;
+  try { ls = window.localStorage; } catch (e) { return; }
+  var post = function (start, was) { try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'signin', start: start, origin: location.origin, session: ls.getItem(K), was: was || null })); } catch (e) {} };
+  var set = Storage.prototype.setItem, rem = Storage.prototype.removeItem;
+  Storage.prototype.setItem = function (k) { var r = set.apply(this, arguments); if (k === K && this === ls) post(false); return r; };
+  Storage.prototype.removeItem = function (k) { var was = k === K && this === ls ? ls.getItem(K) : null; var r = rem.apply(this, arguments); if (was) post(false, was); return r; };
+  post(true);
+})();`;
+const tokenOf = (raw) => { try { return (typeof raw === 'string' ? JSON.parse(raw) : raw)?.token || null; } catch { return null; } };
 
 // What the page shows other devices this phone as: its model ("iPhone 16",
 // "Pixel 8"). Android also knows the name the owner gave it; iOS keeps that
@@ -64,7 +95,8 @@ const MEDIA_SESSION = `(function () {
     if (fn) fn(d.action === 'seekto' ? { action: 'seekto', seekTime: d.seekTime } : { action: d.action });
   });
 })();`;
-const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev' })};${Platform.OS === 'android' && SlopifyMedia ? MEDIA_SESSION : ''} true;`;
+// servers: the page may offer Settings > Server address (it posts { type: 'servers' }).
+const SHELL = `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev', servers: true })};${SIGNIN_BRIDGE}${Platform.OS === 'android' && SlopifyMedia ? MEDIA_SESSION : ''} true;`;
 
 // iOS: a music player's audio session. The volume listener switches the
 // session to Ambient as the module starts (only then: VolumeManager init),
@@ -84,6 +116,87 @@ const musicSession = () => {
 export default function App() {
   const web = useRef(null);
   const [error, setError] = useState(null);
+  // { main, home } once known; false = none saved yet (first launch).
+  const [servers, setServers] = useState(null);
+  const serversRef = useRef(null);
+  // The address the WebView has open (servers.main or servers.home).
+  const [active, setActive] = useState(null);
+  const activeRef = useRef(null);
+  const [editing, setEditing] = useState(false);
+  // Is the page playing? (its 'session' message). null until it says:
+  // switching addresses reloads the page, so never mid-song.
+  const playing = useRef(null);
+  // The sign-in the page last had, on whichever address: { main, session }.
+  const signin = useRef(null);
+  // Origin + token already handed over this run, so a failing hand-over never loops.
+  const handed = useRef(new Set());
+
+  const open = useCallback((url) => { activeRef.current = url; setActive(url); setError(null); }, []);
+  const keepSignin = (session) => {
+    signin.current = session ? { main: serversRef.current?.main, session } : null;
+    AsyncStorage.setItem(SIGNIN_KEY, JSON.stringify(signin.current)).catch(() => {});
+  };
+
+  useEffect(() => {
+    (async () => {
+      let saved = null; let si = null;
+      try {
+        const [[, a], [, b]] = await AsyncStorage.multiGet([SERVERS_KEY, SIGNIN_KEY]);
+        saved = a ? JSON.parse(a) : null; si = b ? JSON.parse(b) : null;
+      } catch { /* nothing saved */ }
+      if (!saved?.main) { serversRef.current = false; setServers(false); setEditing(true); return; }
+      serversRef.current = saved; setServers(saved);
+      if (si?.main === saved.main && si.session) signin.current = si;
+      open(await choose(saved));
+    })();
+  }, [open]);
+
+  // At home or away? Checked when the app comes forward and when a load
+  // fails. Home stops answering: the main address. Home answers again: back
+  // to it, but only while nothing plays (it reloads the page).
+  const recheck = useCallback(async (why) => {
+    const s = serversRef.current;
+    if (!s?.home || !activeRef.current) return false;
+    const cur = activeRef.current;
+    const homeUp = await probe(s.home, 1500);
+    let next = cur;
+    if (cur === s.home && !homeUp) next = s.main;
+    else if (cur !== s.home && homeUp && (why === 'error' || playing.current === false)) next = s.home;
+    if (next === cur) return false;
+    open(next);
+    return true;
+  }, [open]);
+
+  const saveServers = async (next) => {
+    const prev = serversRef.current;
+    // Another server: the sign-in kept for the old one is no good there.
+    if (!prev || prev.main !== next.main) keepSignin(null);
+    serversRef.current = next; setServers(next);
+    AsyncStorage.setItem(SERVERS_KEY, JSON.stringify(next)).catch(() => {});
+    setEditing(false);
+    const url = await choose(next);
+    if (url === activeRef.current) { setError(null); web.current?.reload(); } else open(url);
+  };
+
+  // Android's back button closes the server screen when there is a page behind it.
+  useEffect(() => {
+    if (!editing || !servers) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { setEditing(false); return true; });
+    return () => sub.remove();
+  }, [editing, servers]);
+
+  // The shell shows your server and nothing else: any other page (a link to
+  // the source code, a song's page elsewhere) opens in the phone's browser,
+  // so no other site ever runs where the bridge and the sign-in are.
+  const stayIn = (req) => {
+    const u = req.url || '';
+    if (u.startsWith('about:') || u.startsWith('blob:') || u.startsWith('data:')) return true;
+    const s = serversRef.current;
+    const o = originOf(u);
+    if (o && s && (o === originOf(s.main) || (s.home && o === originOf(s.home)))) return true;
+    if (/^https?:/i.test(u) && req.isTopFrame !== false) Linking.openURL(u).catch(() => {});
+    return false;
+  };
   // What the page last told us: is the sound elsewhere?
   const remote = useRef(false);
   // The phone's own level while the sound is elsewhere; presses are measured
@@ -143,6 +256,8 @@ export default function App() {
       // The page holds lock-screen play/pause for other devices briefly and
       // drops it when the app is leaving (iOS pauses that session on close).
       web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent('slopify:appstate', { detail: { state: ${JSON.stringify(s)} } })); true;`);
+      // Back from somewhere: maybe left home, or got back.
+      if (s === 'active') recheck('foreground');
     });
     // Lock screen, notification and headset buttons, to the page's handlers.
     const media = SlopifyMedia?.addListener?.('onAction', (e) => {
@@ -158,7 +273,34 @@ export default function App() {
       try { if (msg.state === 'none') SlopifyMedia.stop(); else SlopifyMedia.update(msg); } catch { /* module gone */ }
       return;
     }
+    if (msg?.type === 'servers') { setEditing(true); return; }
+    if (msg?.type === 'signin') {
+      const mine = signin.current?.session || null;
+      const myTok = tokenOf(mine); const pageTok = tokenOf(msg.session);
+      if (msg.start) {
+        // This address has no sign-in, or an older one: give it the one the
+        // other address has (same server, same account) and start it again.
+        if (myTok && pageTok !== myTok && msg.origin) {
+          const key = `${msg.origin} ${myTok}`;
+          if (!handed.current.has(key)) {
+            handed.current.add(key);
+            let s = null; try { s = { ...JSON.parse(mine), baseUrl: msg.origin }; } catch { /* unreadable copy */ }
+            if (s) {
+              web.current?.injectJavaScript(`try { localStorage.setItem('slopify.session', ${JSON.stringify(JSON.stringify(s))}); location.reload(); } catch (e) {} true;`);
+              return;
+            }
+          }
+        }
+        if (pageTok && !myTok) keepSignin(msg.session);
+        return;
+      }
+      if (msg.session) keepSignin(msg.session);
+      // Signed out, or a dead sign-in cleared: forget it only if it is the one kept.
+      else if (myTok && tokenOf(msg.was) === myTok) keepSignin(null);
+      return;
+    }
     if (msg?.type === 'session') {
+      if (typeof msg.playing === 'boolean') playing.current = msg.playing;
       const was = remote.current; remote.current = !!msg.remote;
       if (remote.current && !was) {
         // A press at the top or bottom of the range produces no change to
@@ -180,26 +322,28 @@ export default function App() {
     }
   };
 
-  if (!URL) {
-    return (
-      <View style={[styles.root, styles.err]}>
-        <Text style={styles.errText}>This build has no server address.{'\n'}Build it with EXPO_PUBLIC_SLOPIFY_URL set to your Slopify server.</Text>
-      </View>
-    );
-  }
+  // A load failed: the other address may answer (left home with the home
+  // address open, or the main one is down at home). Else the retry screen.
+  const failed = (why) => { recheck('error').then((switched) => { if (!switched) setError(why); }); };
 
   return (
     <View style={styles.root}>
       <StatusBar style="light" translucent backgroundColor="transparent" />
+      {editing && servers !== null ? (
+        <ServerForm initial={servers || { main: BUILT_URL, home: '' }} onSave={saveServers} onCancel={servers ? () => setEditing(false) : null} />
+      ) : null}
+      {servers === null || (!active && !editing) ? <View style={styles.err}><ActivityIndicator color="#b3b3b3" /></View> : null}
       {error ? (
         <View style={styles.err}>
           <Text style={styles.errText}>Slopify could not load{'\n'}{error}</Text>
           <TouchableOpacity style={styles.btn} onPress={() => { setError(null); web.current?.reload(); }}><Text style={styles.btnText}>Retry</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.link} onPress={() => setEditing(true)}><Text style={styles.linkText}>Server address</Text></TouchableOpacity>
         </View>
       ) : null}
+      {active ? (
       <WebView
         ref={web}
-        source={{ uri: URL }}
+        source={{ uri: active }}
         originWhitelist={['*']}
         onShouldStartLoadWithRequest={stayIn}
         style={styles.web}
@@ -222,13 +366,56 @@ export default function App() {
         // Never leave the app for our own links; open anything else in the browser.
         setSupportMultipleWindows={false}
         pullToRefreshEnabled={Platform.OS === 'android'}
-        onError={(e) => setError(e.nativeEvent.description || 'network error')}
-        onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setError(`HTTP ${e.nativeEvent.statusCode}`); }}
+        onError={(e) => failed(e.nativeEvent.description || 'network error')}
+        onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500 && e.nativeEvent.isTopFrame !== false) failed(`HTTP ${e.nativeEvent.statusCode}`); }}
         backgroundColor="#000"
         overScrollMode="never"
         bounces={false}
       />
+      ) : null}
     </View>
+  );
+}
+
+// The server screen: first launch, Settings > Server address in the page,
+// or the retry screen. Saved once an address answers as a Slopify server.
+function ServerForm({ initial, onSave, onCancel }) {
+  const [main, setMain] = useState(initial.main || '');
+  const [home, setHome] = useState(initial.home || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    const m = cleanAddress(main); const h = cleanAddress(home);
+    if (!m) { setErr(m === null ? 'The server address is not a web address.' : 'Enter the address of your Slopify server.'); return; }
+    if (h === null) { setErr('The home address is not a web address.'); return; }
+    setBusy(true); setErr(null);
+    const [mOk, hOk] = await Promise.all([probe(m, 6000), h ? probe(h, 3000) : Promise.resolve(false)]);
+    setBusy(false);
+    // Either one is enough: set up at home, the main address may only
+    // answer from outside (and the other way round).
+    if (!mOk && !hOk) { setErr(`No Slopify server answered at ${m}${h ? ` or ${h}` : ''}.`); return; }
+    onSave({ main: m, home: h && h !== m ? h : '' });
+  };
+  return (
+    <KeyboardAvoidingView style={styles.form} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView contentContainerStyle={styles.formBody} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Your Slopify server</Text>
+        <Text style={styles.label}>Server address</Text>
+        <TextInput style={styles.input} value={main} onChangeText={setMain} placeholder="https://music.example.com" placeholderTextColor="#6a6a6a"
+          autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="go" onSubmitEditing={submit} editable={!busy} />
+        <Text style={styles.label}>Home network address (optional)</Text>
+        <TextInput style={styles.input} value={home} onChangeText={setHome} placeholder="http://192.168.1.10:8080" placeholderTextColor="#6a6a6a"
+          autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="go" onSubmitEditing={submit} editable={!busy} />
+        <Text style={styles.hint}>When the home address answers, the app uses it, so music comes straight over your Wi-Fi. Anywhere else it uses the server address. You sign in once for both.</Text>
+        {err ? <Text style={styles.formErr}>{err}</Text> : null}
+        <View style={styles.row}>
+          {onCancel ? <TouchableOpacity style={styles.link} onPress={onCancel} disabled={busy}><Text style={styles.linkText}>Cancel</Text></TouchableOpacity> : null}
+          <TouchableOpacity style={[styles.btn, busy && { opacity: 0.6 }]} onPress={submit} disabled={busy}>
+            {busy ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>Connect</Text>}
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -239,4 +426,14 @@ const styles = StyleSheet.create({
   errText: { color: '#b3b3b3', textAlign: 'center', fontSize: 15 },
   btn: { backgroundColor: '#1ed760', paddingHorizontal: 22, paddingVertical: 10, borderRadius: 500 },
   btnText: { color: '#000', fontWeight: '700' },
+  link: { paddingHorizontal: 16, paddingVertical: 10 },
+  linkText: { color: '#b3b3b3', fontWeight: '600' },
+  form: { position: 'absolute', zIndex: 3, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000' },
+  formBody: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 64, maxWidth: 480, width: '100%', alignSelf: 'center' },
+  title: { color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 24 },
+  label: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 8 },
+  input: { color: '#fff', backgroundColor: '#1f1f1f', borderRadius: 6, borderWidth: 1, borderColor: '#3e3e3e', paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, marginBottom: 20 },
+  hint: { color: '#b3b3b3', fontSize: 13, lineHeight: 18, marginBottom: 20 },
+  formErr: { color: '#f3727f', fontSize: 14, marginBottom: 16 },
+  row: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
 });

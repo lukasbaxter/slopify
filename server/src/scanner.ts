@@ -12,6 +12,7 @@ import { storeArtwork } from './artwork.js';
 import { buildHead, headOf, reconcileHeads } from './heads.js';
 import { dropGenreCache } from './genres.js';
 import { adoptGone, pruneGone, remapTrackId, retireTrack } from './remap.js';
+import { checkedLength } from './damage.js';
 
 export const AUDIO_EXT = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.aiff', '.aif', '.wma', '.ape', '.wv']);
 export const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'artwork'];
@@ -136,6 +137,8 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     }
     let meta;
     try { meta = await parseFile(file, { duration: true, skipCovers: false }); } catch (e: any) { log(`tags failed ${file}: ${e.message}`); return; }
+    // Under a second is not a song (a stub left by a broken download).
+    if ((meta.format.duration ?? 0) < 1) { log(`not a song (under a second): ${file}`); return; }
     let id: string;
     try { id = await audioContentId(file); } catch (e: any) { log(`hash failed ${file}: ${e.message}`); return; }
     const c = meta.common;
@@ -168,7 +171,7 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
       upsertTrack.run({
         id, path: rec, mtime: Math.floor(st.mtimeMs), size: st.size, title, artist: artists.join(', '), artists: JSON.stringify(artists), artist_ids: JSON.stringify(artIds),
         album_id: alId, album, album_artist: albumArtist, track_no: c.track?.no ?? null, disc_no: c.disk?.no ?? null, year: c.year ?? null,
-        genres: JSON.stringify(c.genre ?? []), duration_ms: Math.round((meta.format.duration ?? 0) * 1000), codec: meta.format.codec ?? null,
+        genres: JSON.stringify(c.genre ?? []), duration_ms: checkedLength(db, id) ?? Math.round((meta.format.duration ?? 0) * 1000), codec: meta.format.codec ?? null,
         bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate) : null, sample_rate: meta.format.sampleRate ?? null, bit_depth: meta.format.bitsPerSample ?? null, channels: meta.format.numberOfChannels ?? null,
         jf_id: jfId, added_at: prev ? (db.prepare('SELECT added_at FROM tracks WHERE id = ?').get(id) as any)?.added_at ?? now : now,
       });

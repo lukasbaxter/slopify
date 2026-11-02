@@ -28,5 +28,7 @@ COPY brain /app/brain
 WORKDIR /app
 ENV SLOPIFY_BRAIN_GPU=$GPU
 EXPOSE 8097
-HEALTHCHECK --interval=60s --timeout=5s --start-period=120s CMD curl -fs http://127.0.0.1:8097/healthz || exit 1
-CMD ["uvicorn", "brain.serve:app", "--host", "0.0.0.0", "--port", "8097"]
+HEALTHCHECK --interval=60s --timeout=5s --start-period=120s CMD curl -fs "http://127.0.0.1:$PORT/healthz" || exit 1
+# HOST=127.0.0.1 when Slopify runs on the same machine: nothing else needs it.
+ENV HOST=0.0.0.0 PORT=8097
+CMD ["sh", "-c", "exec uvicorn brain.serve:app --host \"$HOST\" --port \"$PORT\""]

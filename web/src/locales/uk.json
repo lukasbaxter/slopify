@@ -178,6 +178,7 @@
  "Deleted {name}": "Видалено {name}",
  "Describe it, get 25 songs from your library": "Опиши — отримай 25 пісень зі своєї бібліотеки",
  "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Опиши, що хочеш. Claude вибере 25 пісень із твоєї бібліотеки: 20, які ти ще не слухав, і 5 знайомих. Вдалі варіанти, яких у тебе ще немає, буде запитано й додано після завантаження.",
+ "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Опишіть, чого хочете. Мозок знайде у вашій бібліотеці 25 пісень, які так звучать: 20, які ви ще не слухали, і 5 знайомих.",
  "Desktop": "Комп'ютер",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Комп'ютер і планшет. Застосовується з наступного треку. Динаміки завжди отримують оригінальний файл.",
  "Disable shuffle": "Вимкнути перемішування",

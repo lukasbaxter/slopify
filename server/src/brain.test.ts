@@ -46,7 +46,7 @@ const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-brain-'));
 let app: Awaited<ReturnType<typeof buildServer>>; let tok = '';
 let fake: http.Server; let answer: (body: any) => any = () => ({ items: [] }); let asked: any = null;
-let trainedAt = 1000; let trainAsked = 0;
+let trainedAt = 1000; let trainAsked = 0; let searched: any = null; let retried: string[] = []; let undecodable: string[] = [];
 const saved = { ...config.brain };
 
 beforeAll(async () => {
@@ -55,8 +55,11 @@ beforeAll(async () => {
       if (req.headers['x-brain-key'] !== 'test brain key') { res.writeHead(401).end(); return; }
       const json = (x: any) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(x));
       if (req.url === '/train') { trainAsked++; setTimeout(() => { trainedAt += 1000; }, 200); json({ queued: true }); return; }
+      if (req.url === '/search') { searched = JSON.parse(b); json({ items: ids().slice(0, 6).reverse().map((id, i) => ({ id, sound: 0.5 - i / 100 })) }); return; }
+      if (req.url === '/undecodable') { json({ items: undecodable.map((id) => ({ id, artist: 'a', title: 't', error: 'no audio decoded' })) }); return; }
+      if (req.url === '/retry') { retried = JSON.parse(b).ids; json({ retrying: retried.length }); return; }
       if (req.url === '/status') {
-        json({ phase: 'listening', songs: 10, heard: 4, left: 6, eta_s: 7200, undecodable: 0, paused: null,
+        json({ phase: 'listening', songs: 10, heard: 4, left: 6, eta_s: 7200, undecodable: undecodable.length, paused: null,
           last_train: { trained_at: trainedAt, metrics: { 'hit@10': 0.106 }, baselines: { old_mix: { 'hit@10': 0.006 } } } });
         return;
       }
@@ -168,4 +171,31 @@ describe('the Brain task', () => {
     expect(brainLine({ songs: 100, heard: 10, left: 90, eta_s: 300, paused: 'paused while someone is listening', phase: 'paused' }, null))
       .toBe('Heard 10 of 100 songs · Paused while someone is listening');
   });
+});
+
+describe('the brain and generated playlists', () => {
+  const admin = () => ({ authorization: `Bearer ${tok}` });
+  it('with no Anthropic key the brain makes the playlist: songs that sound like the request, in its order', async () => {
+    const st = (await app.inject({ method: 'GET', url: '/api/ai/status', headers: admin() })).json();
+    expect(st).toMatchObject({ ok: true, by: 'brain' });
+    const job = (await app.inject({ method: 'POST', url: '/api/ai/playlists', headers: admin(), payload: { prompt: 'rainy sunday morning, soft guitar' } })).json();
+    let j: any;
+    for (let i = 0; i < 50; i++) { j = (await app.inject({ method: 'GET', url: `/api/jobs/${job.id}`, headers: admin() })).json(); if (j.state !== 'running') break; await new Promise((r) => setTimeout(r, 100)); }
+    expect(j.state).toBe('done');
+    expect(searched).toMatchObject({ text: 'rainy sunday morning, soft guitar' }); expect(Array.isArray(searched.recent)).toBe(true);
+    const tracks = (app as any).db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(j.result.playlistId).map((r: any) => r.track_id);
+    const want = ids().slice(0, 6).reverse();
+    expect(tracks.length).toBeGreaterThan(0);
+    expect(tracks[0]).toBe(want[0]);                                    // its best match leads
+    expect(tracks.every((id: string) => want.includes(id))).toBe(true); // nothing it did not offer
+    expect((app as any).db.prepare('SELECT name FROM playlists WHERE id = ?').get(j.result.playlistId).name).toBe('Rainy sunday morning, soft guitar');
+  });
+  it("songs the brain could not hear are checked by decoding them, and handed back", async () => {
+    undecodable = [ids()[1]]; retried = [];
+    await app.inject({ method: 'POST', url: '/api/admin/tasks/brain/run', headers: admin() });
+    for (let i = 0; i < 50 && !retried.length; i++) await new Promise((r) => setTimeout(r, 100));
+    expect((app as any).db.prepare('SELECT kind FROM song_checks WHERE track_id = ?').get(ids()[1])).toMatchObject({ kind: 'fine' });
+    expect(retried).toEqual([ids()[1]]);
+    undecodable = [];
+  }, 30000);
 });

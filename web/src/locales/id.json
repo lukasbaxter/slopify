@@ -178,6 +178,7 @@
  "Deleted {name}": "{name} dihapus",
  "Describe it, get 25 songs from your library": "Deskripsikan, dapatkan 25 lagu dari koleksimu",
  "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Deskripsikan yang kamu mau. Claude memilih 25 lagu dari koleksimu: 20 yang belum pernah kamu putar, 5 yang kamu kenal. Lagu yang cocok tetapi belum kamu punya akan diminta dan ditambahkan setelah diunduh.",
+ "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Jelaskan apa yang kamu mau. Otak mencari 25 lagu di perpustakaanmu yang terdengar seperti itu: 20 yang belum pernah kamu putar, 5 yang kamu kenal.",
  "Desktop": "Desktop",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Desktop dan tablet. Berlaku mulai lagu berikutnya. Speaker selalu mendapatkan file asli.",
  "Disable shuffle": "Nonaktifkan acak",

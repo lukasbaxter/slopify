@@ -178,6 +178,7 @@
  "Deleted {name}": "{name} verwijderd",
  "Describe it, get 25 songs from your library": "Beschrijf het en krijg 25 nummers uit je bibliotheek",
  "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Beschrijf wat je wilt. Claude kiest 25 nummers uit je bibliotheek: 20 die je nog niet hebt afgespeeld, 5 die je kent. Goede nummers die je nog niet hebt, worden aangevraagd en toegevoegd zodra ze zijn gedownload.",
+ "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Beschrijf wat je wilt. Het brein zoekt 25 nummers uit je bibliotheek die zo klinken: 20 die je nog niet hebt gehoord en 5 die je kent.",
  "Desktop": "Computer",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Computer en tablet. Geldt vanaf het volgende nummer. Speakers krijgen altijd het originele bestand.",
  "Disable shuffle": "Shuffle uitzetten",

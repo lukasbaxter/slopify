@@ -11,6 +11,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from './db.js';
 import { config } from './config.js';
 import { taskSettings, type TaskDef, type TaskSetting } from './tasks.js';
+import { checkSongs } from './damage.js';
 
 const same = (a: string, b: string) => {
   const x = Buffer.from(a), y = Buffer.from(b);
@@ -82,16 +83,42 @@ export function brainLine(st: any, err: string | null): string {
 
 // The Brain task: its row says what the brain is doing, Run now (and the
 // schedule, nightly by default) retrains, its menu holds the rules.
-export function brainTask(app: FastifyInstance, opts: { url?: string; key?: string; fetcher?: typeof fetch; pollMs?: number } = {}): TaskDef | null {
+export function brainTask(app: FastifyInstance, db?: DB, opts: { url?: string; key?: string; fetcher?: typeof fetch; pollMs?: number; cacheDir?: string } = {}): TaskDef | null {
   const url = opts.url ?? config.brain.url, key = opts.key ?? config.brain.key;
   if (!url || !key) return null;
   const f = opts.fetcher ?? fetch;
   let st: any = null, err: string | null = null;
+  // Songs the brain could not hear: each checked here once (damage.ts), the
+  // wrong lengths and false alarms handed back to it, the damaged ones to
+  // Upgrade to FLAC.
+  let reviewing = false, reviewedAt = -1;
+  const review = async () => {
+    if (!db || reviewing || !st?.undecodable || st.undecodable === reviewedAt) return;
+    reviewing = true;
+    try {
+      const r = await f(`${url}/undecodable`, { headers: { 'X-Brain-Key': key }, signal: AbortSignal.timeout(10_000) });
+      if (!r.ok) return;
+      const items = ((await r.json()) as any).items as { id: string }[] || [];
+      const done = new Set((db.prepare('SELECT track_id FROM song_checks').all() as any[]).map((x) => x.track_id));
+      const todo = items.map((x) => x.id).filter((id) => /^[0-9a-f]{32}$/.test(id) && !done.has(id));
+      if (todo.length) {
+        const c = await checkSongs(db, todo, { cacheDir: opts.cacheDir, log: (m) => app.log.info(m) });
+        app.log.info(`song checks: ${c.fine.length} fine, ${c.length.length} wrong length (fixed), ${c.damaged.length} damaged, ${c.empty.length} not songs (removed), ${c.missing.length} missing`);
+        // All of them: a damaged song's first seconds still say how it sounds.
+        const again = [...c.fine, ...c.length, ...c.damaged];
+        if (again.length) await f(`${url}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Brain-Key': key }, body: JSON.stringify({ ids: again }), signal: AbortSignal.timeout(10_000) }).catch(() => null);
+        if (c.damaged.length) (app as any).startTask?.('flac');
+      }
+      reviewedAt = st.undecodable;
+    } catch (e: any) { app.log.warn(`song checks: ${e.message}`); }
+    finally { reviewing = false; }
+  };
   const status = async () => {
     try {
       const r = await f(`${url}/status`, { headers: { 'X-Brain-Key': key }, signal: AbortSignal.timeout(5000) });
       if (!r.ok) throw new Error(r.status === 401 ? 'BRAIN_KEY is not the same on both' : `HTTP ${r.status}`);
       st = await r.json(); err = null;
+      void review();
     } catch (e: any) { err = e.name === 'TimeoutError' ? 'timed out' : e.cause?.code || e.message; }
     return st;
   };
@@ -206,3 +233,36 @@ export async function brainNext(db: DB, ask: BrainAsk, opts: { url?: string; key
     return null;
   }
 }
+
+// Songs that sound like the words, for generated playlists (ai.ts): the
+// brain compares them with every song's audio and leans toward the
+// listener's taste. [] when there is no brain or it does not answer; the
+// first search after a while loads the audio model, so it gets longer.
+export type SoundHit = { id: string; sound: number };
+export async function brainSearch(db: DB, ask: { user: string; text: string; n?: number; exclude?: string[] },
+  opts: { url?: string; key?: string; timeoutMs?: number; fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<SoundHit[]> {
+  const url = opts.url ?? config.brain.url, key = opts.key ?? config.brain.key;
+  if (!url || !key || !brainRules(db).enabled) return [];
+  const f = opts.fetcher ?? fetch;
+  const t0 = Date.now();
+  try {
+    const r = await f(`${url}/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Brain-Key': key },
+      body: JSON.stringify({ ...ask, exclude: [...new Set([...(ask.exclude || []), ...dislikedOf(db, ask.user)])], recent: recentOf(db, ask.user), now: Date.now() }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json() as { items?: any[] };
+    const hits = (Array.isArray(j.items) ? j.items : []).filter((x) => x && typeof x.id === 'string' && /^[0-9a-f]{32}$/.test(x.id))
+      .map((x) => ({ id: x.id as string, sound: Number(x.sound) || 0 }));
+    if (!hits.length) return [];
+    const have = new Set((db.prepare(`SELECT id FROM tracks WHERE id IN (${hits.map(() => '?').join(',')})`).all(...hits.map((h) => h.id)) as any[]).map((x) => x.id));
+    const out = hits.filter((h) => have.has(h.id));
+    opts.log?.(`brain search: ${out.length} in ${Date.now() - t0} ms`);
+    return out;
+  } catch (e: any) {
+    opts.log?.(`brain search: ${e.name === 'TimeoutError' ? 'timed out' : e.message}`);
+    return [];
+  }
+}
+export const brainOn = (db: DB) => Boolean(config.brain.url && config.brain.key && brainRules(db).enabled);

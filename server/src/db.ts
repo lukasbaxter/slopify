@@ -243,6 +243,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX play_events_user_at ON play_events(user_id, at);
   `,
+  // 28: songs checked by decoding the whole file (damage.ts): a length on
+  // record that was wrong, or damage Upgrade to FLAC should replace first.
+  `
+  CREATE TABLE song_checks (
+    track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL, stored_ms INTEGER, decoded_ms INTEGER, error TEXT, checked_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export type DB = Database.Database;

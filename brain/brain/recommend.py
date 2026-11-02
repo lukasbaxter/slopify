@@ -88,6 +88,8 @@ class Engine:
                 scores = scores + SESSION_PULL[mode] * (vecs @ c)
             scores = scores.float().cpu().numpy()
         scores[0] = -9
+        if ask.get("_scores"):
+            return scores
         known, disliked = self._known(ask.get("user"))
         skip = set(ask.get("exclude") or []) | disliked | {r["id"] for r in recent}
         seed_odd = any(ODD.search(info.get(s, ("", "", ""))[0] or "") for s in seeds)
@@ -137,3 +139,48 @@ class Engine:
                 if len(out) >= n:
                     break
         return {"items": [t for t, _, _ in out], "model": self.meta.get("trained_at")}
+
+    def search(self, ask):
+        """Songs that sound like words ('rainy sunday morning, soft acoustic
+        guitar'), for generated playlists: CLAP compares the words with each
+        song's audio, and the listener's taste right now (the 'now' scores)
+        breaks ties toward what they would like. Odd versions only when the
+        words ask for them; three per artist at most."""
+        if not self.ready:
+            return None
+        from . import audio
+        text = str(ask.get("text") or "").strip()[:500]
+        if not text:
+            return {"items": []}
+        with self.lock:
+            v, info = self.v, self.info
+        tv = audio.embed_text([text])[0]
+        A = v["audio"]
+        has = np.abs(A).sum(1) > 0
+        sound = A @ tv
+        sound[~has] = -9; sound[0] = -9
+        n = max(1, min(400, int(ask.get("n", 150))))
+        top = np.argsort(-sound)[:max(3000, n * 10)]
+        taste = self.recommend({**ask, "mode": "now", "n": 1, "_scores": True})
+        def z(x):
+            return (x - x.mean()) / (x.std() + 1e-6)
+        score = z(sound[top]) + (0.5 * z(taste[top]) if taste is not None else 0)
+        odd_ok = bool(ODD.search(text))
+        known, disliked = self._known(ask.get("user"))
+        skip = set(ask.get("exclude") or []) | disliked
+        out, per = [], {}
+        for j in np.argsort(-score):
+            t = v["ids"][top[j] - 1]
+            if t in skip:
+                continue
+            title, artist, _ = info.get(t, ("", "", ""))
+            if not odd_ok and ODD.search(title or ""):
+                continue
+            k = (artist or "").lower()
+            if per.get(k, 0) >= 3:
+                continue
+            per[k] = per.get(k, 0) + 1
+            out.append({"id": t, "sound": round(float(sound[top[j]]), 4), "known": t in known})
+            if len(out) >= n:
+                break
+        return {"items": out}

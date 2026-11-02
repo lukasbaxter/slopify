@@ -24,6 +24,7 @@ import { similarInLibrary } from './discover.js';
 import { startJob, jobOut, type Job } from './jobs.js';
 import { recordRequest } from './downloads.js';
 import type { Lidarr } from './lidarr.js';
+import { brainOn, brainSearch, type SoundHit } from './brain.js';
 
 export type AiOptions = {
   apiKey?: string;
@@ -157,7 +158,7 @@ function seedArtists(db: DB, names: string[]) {
   return names.map((n) => byNorm.get(norm(n))).filter(Boolean) as { id: string; name: string }[];
 }
 
-export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>) {
+export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>, sound: SoundHit[] = []) {
   const plays = new Map((db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]).map((r) => [r.track_id as string, r.n as number]));
   const liked = new Set((db.prepare('SELECT track_id FROM likes WHERE user_id = ?').all(uid) as any[]).map((r) => r.track_id as string));
   const prefs = JSON.parse((db.prepare('SELECT json FROM prefs WHERE user_id = ?').get(uid) as any)?.json ?? '{}');
@@ -210,6 +211,10 @@ export async function buildPool(db: DB, uid: string, plan: Plan, prompt = '', si
     const lists = await Promise.all(seeds.slice(0, 10).map((a) => similar(a).catch(() => [])));
     for (const list of lists) for (const a of list.slice(0, 6)) { if (seen.has(a.id)) continue; seen.add(a.id); artistTracks(a.id, 3, 1); }
   }
+
+  // 4b. songs that sound like the request (the brain: CLAP compares the
+  // words with each song's audio, leaning toward this listener's taste)
+  for (const h of sound) add(byId.get(h.id) as Row, 2);
 
   // 5. genres, at random
   const genreNames = (db.prepare(`SELECT DISTINCT j.value AS g FROM tracks, json_each(tracks.genres) j`).all() as any[]).map((r) => String(r.g));
@@ -295,6 +300,7 @@ export class Progress {
     this.cur = this.stages.findIndex((x) => x.key === key); const s = this.stages[this.cur];
     s.state = 'active'; s.detail = detail; this.t = Date.now(); this.frac = 0; this.publish();
   }
+  skip(key: StageKey) { const s = this.stages.find((x) => x.key === key); if (s && s.state === 'pending') { s.state = 'skipped'; this.publish(); } }
   set(frac: number | null, detail?: string | null) { if (frac != null) this.frac = Math.max(0, Math.min(1, frac)); if (detail !== undefined && this.cur >= 0) this.stages[this.cur].detail = detail; this.publish(); }
   private finishCurrent() {
     if (this.cur < 0) return; const s = this.stages[this.cur];
@@ -324,8 +330,9 @@ export class Progress {
   }
 }
 
+export type Search = (text: string, n: number) => Promise<SoundHit[]>;
 export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
-  requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>) {
+  requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>, search?: Search) {
   const pr = new Progress(job, db);
   pr.start('plan', 'reading your listening');
   const taste = tasteOf(db, uid);
@@ -338,13 +345,14 @@ export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: st
   // Deezer's similar artists for the planned ones, while the song lists are
   // still being written (buildPool then reads them from the cache).
   const warm = similar ? Promise.all(seedArtists(db, raw.artists || []).slice(0, 10).map((a) => similar(a).catch(() => []))) : null;
-  const [lists] = await Promise.all([songCalls, warm]);
+  const heard = search ? search(`${prompt}. ${raw.vibe || ''}`.trim(), 120).catch(() => [] as SoundHit[]) : Promise.resolve([] as SoundHit[]);
+  const [lists, , sound] = await Promise.all([songCalls, warm, heard]);
   const plan: Plan = { ...raw, yearFrom: raw.yearFrom || null, yearTo: raw.yearTo || null, artists: (raw.artists || []).slice(0, 30), songs: lists.flatMap((l) => l.songs || []).slice(0, 40) };
 
   pr.start('find');
-  const pool = await buildPool(db, uid, plan, prompt, similar);
+  const pool = await buildPool(db, uid, plan, prompt, similar, sound);
   if (!pool.length) throw new Error('Nothing in the library matched');
-  pr.extra.found = pool.length; pr.extra.foundNew = pool.filter((c) => !c.known).length;
+  pr.extra.found = pool.length; pr.extra.foundNew = pool.filter((c) => !c.known).length; pr.extra.bySound = sound.length;
 
   pr.start('pick', `from ${pool.length} songs`);
   const miss = requestMissing ? pool.missing.slice(0, 40) : [];
@@ -369,6 +377,33 @@ export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: st
   if (requestMissing && good.length) void requestMissing(id, good).catch(() => 0);
   pr.finish();
   return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested: good.length, missing: pool.missing.length, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })) };
+}
+
+// Without an Anthropic key, the brain alone: songs that sound like the
+// request, leaning toward the listener's taste, in that order, with the same
+// 20 new / 5 known mix and artist caps as Claude's playlists. No planning,
+// no song suggestions to fetch, the request itself as the name.
+export async function soundPlaylist(db: DB, search: Search, uid: string, prompt: string, job: Job) {
+  const pr = new Progress(job, db);
+  pr.skip('plan');
+  pr.start('find', 'listening for songs that sound like it');
+  const sound = await search(prompt, 300);
+  const plan: Plan = { title: '', vibe: prompt, artists: [], genres: [], songs: [], playlists: [], useHistory: false, yearFrom: null, yearTo: null };
+  const pool = await buildPool(db, uid, plan, prompt, undefined, sound);
+  if (!pool.length) throw new Error('Nothing in the library sounds like that yet');
+  pr.extra.found = pool.length; pr.extra.foundNew = pool.filter((c) => !c.known).length; pr.extra.bySound = sound.length;
+  pr.start('pick', `from ${pool.length} songs`);
+  const rank = new Map(sound.map((h, i) => [h.id, i]));
+  const picks = pool.map((c, i) => [i + 1, rank.get(c.row.id) ?? 1e9] as const).sort((a, b) => a[1] - b[1]).map(([n]) => n);
+  const tracks = finalize(pool, picks, plan);
+  const name = (prompt.charAt(0).toUpperCase() + prompt.slice(1)).replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
+  const id = playlistId(), now = Date.now();
+  db.transaction(() => {
+    db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
+    tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.row.id, now));
+  })();
+  pr.finish();
+  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested: 0, missing: 0, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })), by: 'brain' };
 }
 
 export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
@@ -416,12 +451,19 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   };
   (app as any).afterScan?.(fillPending);
 
-  app.get('/api/ai/status', auth, async () => (ask ? { ok: true } : { ok: false, reason: 'Generated playlists need an Anthropic API key on the server (ANTHROPIC_API_KEY).' }));
+  // The brain (brain.ts), when there is one: Claude's pool gets the songs
+  // that sound like the request; with no key it makes the playlist itself.
+  const searchFor = (uid: string): Search => (text, n) => brainSearch(db, { user: uid, text, n }, { log: (m) => app.log.info(m) });
+  const NEED = 'Generated playlists need an Anthropic API key (ANTHROPIC_API_KEY) or the brain (BRAIN_KEY) on the server.';
+  app.get('/api/ai/status', auth, async () => (ask ? { ok: true, by: 'claude', brain: brainOn(db) } : brainOn(db) ? { ok: true, by: 'brain' } : { ok: false, reason: NEED }));
   app.post('/api/ai/playlists', auth, async (req: any, reply) => {
     const b = z.object({ prompt: z.string().trim().min(3).max(1000) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'Describe the playlist' });
-    if (!ask) return reply.code(503).send({ error: 'Generated playlists need an Anthropic API key on the server (ANTHROPIC_API_KEY).' });
-    const job = startJob(req.user.id, 'ai-playlist', (j) => generatePlaylist(db, ask, req.user.id, b.data.prompt, j, similar, requestMissing));
+    const search = brainOn(db) ? searchFor(req.user.id) : undefined;
+    if (!ask && !search) return reply.code(503).send({ error: NEED });
+    const job = startJob(req.user.id, 'ai-playlist', (j) => (ask
+      ? generatePlaylist(db, ask, req.user.id, b.data.prompt, j, similar, requestMissing, search)
+      : soundPlaylist(db, search!, req.user.id, b.data.prompt, j)));
     app.log.info({ uid: req.user.id, prompt: b.data.prompt }, 'ai playlist');
     return jobOut(job);
   });

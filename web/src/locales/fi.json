@@ -178,6 +178,7 @@
  "Deleted {name}": "Poistettu: {name}",
  "Describe it, get 25 songs from your library": "Kuvaile, niin saat 25 kappaletta kirjastostasi",
  "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Kuvaile, mitä haluat. Claude valitsee kirjastostasi 25 kappaletta: 20, joita et ole vielä kuunnellut, ja 5 tuttua. Sopivat kappaleet, joita sinulla ei vielä ole, pyydetään ja lisätään latauduttuaan.",
+ "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Kuvaile, mitä haluat. Aivot etsivät kirjastostasi 25 kappaletta, jotka kuulostavat siltä: 20, joita et ole vielä kuunnellut, ja 5, jotka tunnet.",
  "Desktop": "Tietokone",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Tietokone ja tabletti. Käytössä seuraavasta kappaleesta alkaen. Kaiuttimet saavat aina alkuperäisen tiedoston.",
  "Disable shuffle": "Poista satunnaistoisto käytöstä",

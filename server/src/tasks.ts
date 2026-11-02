@@ -283,6 +283,7 @@ export type ChoreOptions = {
 // A file replaced is a new track id (ids are the audio's own hash): carry
 // the listener's traces over and drop what belonged to the old bytes.
 import { remapTrackId } from './remap.js';
+import { decodeLength } from './damage.js';
 export { remapTrackId };
 
 const ff = (args: string[]) => new Promise<boolean>((resolve) => {
@@ -294,14 +295,16 @@ const ff = (args: string[]) => new Promise<boolean>((resolve) => {
 });
 
 // A candidate FLAC is only a replacement once it IS a flac, runs the same
-// length as what it replaces, and decodes front to back without an error.
+// length as what it replaces, and decodes front to back without an error -
+// all the way: a 30 s preview whose header says 3:12 decodes cleanly too.
 export async function verifyFlac(file: string, durationMs: number): Promise<boolean> {
   try {
     const m = await parseFile(file, { duration: true });
     if (!/flac/i.test(m.format.codec || m.format.container || '')) return false;
     if (Math.abs((m.format.duration ?? 0) * 1000 - durationMs) > 3000) return false;
   } catch { return false; }
-  return ff(['-i', file, '-f', 'null', '-']);
+  const d = await decodeLength(file);
+  return d.errors === 0 && Math.abs(d.ms - durationMs) <= 3000;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -528,7 +531,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const flac: TaskDef = {
     id: 'flac', name: 'Upgrade to FLAC', schedule: { mode: 'interval', hours: 1 },
     settings: [{ key: 'perRun', label: 'Songs per run', type: 'number', min: 1, max: 200, default: o.flacPerRun }],
-    description: 'Replace lossy tracks with a verified FLAC from Soulseek, most played first',
+    description: 'Replace damaged songs, then lossy ones, with a verified FLAC from Soulseek, most played first',
     run: async (ctx) => {
       if (!o.slskdUrl || !o.slskdKey || !o.slskdDownloadsDir) return 'slskd is not configured (SLSKD_URL / SLSKD_API_KEY / SLSKD_DOWNLOADS_DIR)';
       const perRun = ctx.setting<number>('perRun');
@@ -582,9 +585,15 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         LEFT JOIN (SELECT track_id, COUNT(*) n FROM likes GROUP BY track_id) l ON l.track_id = t.id
         WHERE t.codec LIKE 'MPEG%' OR t.codec LIKE '%AAC%' OR t.codec LIKE '%Opus%'
         ORDER BY score DESC, t.added_at DESC LIMIT 3000`).all() as any[];
+      // Damaged songs (damage.ts: cut short, a preview, broken) go first,
+      // whatever their format: a FLAC is replaced where it stands.
+      const damaged = db.prepare(`SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.track_no, t.disc_no, t.year, t.duration_ms, 1e9 AS score
+        FROM tracks t JOIN song_checks c ON c.track_id = t.id AND c.kind = 'damaged' ORDER BY c.checked_at`).all() as any[];
+      const damagedIds = new Set(damaged.map((r) => r.id));
+      rows.splice(0, 0, ...damaged); for (let i = rows.length - 1; i >= damaged.length; i--) if (damagedIds.has(rows[i].id)) rows.splice(i, 1);
       const note = `${recovered ? `; ${recovered} recovered from the journal` : ''}${scanFailed ? `; ${scanFailed} folder scans failed, kept journaled for recovery` : ''}`;
       if (!rows.length) return `nothing lossy left${note}`;
-      let done = 0, failed = 0, tried = 0, blocked = 0;
+      let done = 0, failed = 0, tried = 0, blocked = 0, repaired = 0;
       const plannedDests = new Set<string>();
       for (const t of rows) {
         if (done >= perRun || tried >= perRun * 2) break;
@@ -646,8 +655,8 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
           await fsp.rename(tmp, dest);
           tmp = undefined;
           if (dest !== t.path) await fsp.rm(t.path, { force: true }); // the verified FLAC stands in its place
-          done++;
-          ctx.log(`${t.artist} - ${t.title}: FLAC from ${file.username}`);
+          done++; if (damagedIds.has(t.id)) repaired++;
+          ctx.log(`${t.artist} - ${t.title}: ${damagedIds.has(t.id) ? 'damaged file replaced with a ' : ''}FLAC from ${file.username}`);
           // Settle right away - scan the folder, remap the traces - so a
           // crash loses at most the one journaled replacement in flight,
           // not a whole run's worth deferred to the end.
@@ -660,7 +669,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         }
       }
       kvSet(db, 'task:flac:skip', JSON.stringify(skip));
-      return `${done} upgraded, ${failed} of ${tried} tried had no good FLAC${blocked ? `, ${blocked} blocked by an existing file` : ''}${recovered ? `, ${recovered} recovered from the journal` : ''}${scanFailed ? `, ${scanFailed} folder scans failed, kept journaled for recovery` : ''}`;
+      return `${done} upgraded${repaired ? ` (${repaired} of them damaged songs repaired)` : ''}, ${failed} of ${tried} tried had no good FLAC${blocked ? `, ${blocked} blocked by an existing file` : ''}${recovered ? `, ${recovered} recovered from the journal` : ''}${scanFailed ? `, ${scanFailed} folder scans failed, kept journaled for recovery` : ''}`;
     },
   };
 

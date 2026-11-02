@@ -110,3 +110,25 @@ def test_damaged_song_with_slopify_up_is_recorded():
         assert d.execute("SELECT err FROM emb WHERE track_id = ?", ("c" * 32,)).fetchone()[0]
     finally:
         srv.shutdown(); config.SLOPIFY_URL = "http://127.0.0.1:9"
+
+def test_length_on_record_too_long_still_heard(tmp_path):
+    """The Moby rips: 22 minutes on record, 4 of audio. The clips at 35% and
+    70% land past the end; the start is used instead."""
+    pytest.importorskip("torch")
+    import subprocess
+    from brain import audio
+    f = tmp_path / "s.mp3"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=20", str(f)], check=True)
+    body = f.read_bytes()
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            b = b"ok" if self.path == "/healthz" else body
+            self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+        def log_message(self, *a): pass
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        config.SLOPIFY_URL = f"http://127.0.0.1:{srv.server_address[1]}"
+        clips = audio.clips_for("d" * 32, 1_300_000)
+        assert len(clips) == 1 and len(clips[0]) > audio.SR * 10
+    finally:
+        srv.shutdown(); config.SLOPIFY_URL = "http://127.0.0.1:9"

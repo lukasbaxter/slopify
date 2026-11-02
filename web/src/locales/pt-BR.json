@@ -178,6 +178,7 @@
  "Deleted {name}": "{name} excluída",
  "Describe it, get 25 songs from your library": "Descreva e receba 25 músicas da sua biblioteca",
  "Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.": "Descreva o que você quer. O Claude escolhe 25 músicas da sua biblioteca: 20 que você ainda não ouviu e 5 que você conhece. Boas opções que você ainda não tem são pedidas e adicionadas quando forem baixadas.",
+ "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "Descreva o que você quer. O cérebro encontra 25 músicas da sua biblioteca que soam assim: 20 que você ainda não ouviu e 5 que você conhece.",
  "Desktop": "Computador",
  "Desktop and tablet. Applies from the next track. Speakers always get the original file.": "Computador e tablet. Vale a partir da próxima faixa. Os alto-falantes sempre recebem o arquivo original.",
  "Disable shuffle": "Desativar modo aleatório",

@@ -1,4 +1,5 @@
 {
+ "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "聴きたいものを説明してください。ブレインがライブラリからそれらしく聞こえる25曲を探します。まだ聴いていない20曲と、知っている5曲です。",
  "{app} is free software under the <a>GNU AGPL v3</a>.": "{app} は <a>GNU AGPL v3</a> のもとで提供されるフリーソフトウェアです。",
  "{done} of {total} songs": "{total} 曲中 {done} 曲",
  "{done} of 1 song": "1 曲中 {done} 曲",

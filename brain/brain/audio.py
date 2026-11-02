@@ -67,6 +67,10 @@ def clips_for(track_id, duration_ms):
     dur = (duration_ms or 0) / 1000
     starts = [max(0.0, dur * f - 5) for f in (0.35, 0.7)] if dur > 25 else [0.0]
     out = [c for c in (clip(track_id, s) for s in starts) if len(c) > SR]
+    if not out and starts != [0.0]:
+        # Nothing there: the length Slopify has is longer than the audio (an
+        # MP3 whose header lies, a file cut short). Whatever the start holds.
+        out = [c for c in [clip(track_id, 0.0, 20)] if len(c) > SR]
     if not out:
         raise RuntimeError("no audio decoded")
     return out

@@ -130,7 +130,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,
     python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
-  }), ...[brainTask(app)].filter((x) => x !== null)]);
+  }), ...[brainTask(app, db, { cacheDir })].filter((x) => x !== null)]);
   registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 
   // Every /api route must carry a sign-in check unless it is one of the few

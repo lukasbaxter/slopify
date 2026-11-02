@@ -7,7 +7,7 @@ rules (30 s), the weather (hourly), listen to songs it has not heard yet,
 and retrain when Slopify's schedule says (or nightly, with an older
 Slopify) and once the songs it can hear have grown by a fifth. Listening and
 training wait for the rules (gate.py); answering never does."""
-import datetime as dt, hmac, threading, time, traceback
+import asyncio, datetime as dt, hmac, threading, time, traceback
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from . import config, store, sync, weather, audio, train, features, settings, device
@@ -39,6 +39,26 @@ async def recommend(req: Request, x_brain_key: str = Header(default="")):
     w = weather.words(weather.at(ask.get("now") or time.time() * 1000))
     log(f"{ask.get('mode')} for {str(ask.get('user'))[:6]} on {features.device_of(ask.get('client'))}{', ' + w if w else ''}: {len(out['items'])} in {out['ms']} ms")
     return out
+
+@app.post("/search")
+async def search(req: Request, x_brain_key: str = Header(default="")):
+    """Songs that sound like the words: generated playlists."""
+    check(x_brain_key)
+    ask = await req.json(); t0 = time.time()
+    out = await asyncio.to_thread(engine.search, ask)
+    if out is None:
+        raise HTTPException(503, "no model yet")
+    log(f"search for {str(ask.get('user'))[:6]}: {str(ask.get('text'))[:60]!r}: {len(out['items'])} in {round((time.time() - t0) * 1000)} ms")
+    return out
+
+@app.post("/retry")
+async def retry(req: Request, x_brain_key: str = Header(default="")):
+    """Songs Slopify checked (a wrong length fixed, a file that decodes after
+    all): listen to them again."""
+    check(x_brain_key)
+    ids = [str(i) for i in ((await req.json()).get("ids") or [])][:5000]
+    d = store.db(); d.executemany("DELETE FROM emb WHERE track_id = ? AND vec IS NULL", [(i,) for i in ids]); d.commit()
+    return {"retrying": len(ids)}
 
 @app.get("/healthz")
 def healthz():

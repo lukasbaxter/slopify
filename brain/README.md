@@ -12,7 +12,15 @@ mixes whenever the brain is off, slow or busy.
 | The moment | local time, day, weather ([Open-Meteo](https://open-meteo.com), no key), device |
 
 It listens to every song once, then to new ones as they arrive, and retrains
-every night.
+every night. It also:
+
+- **makes generated playlists better**: type a vibe and it finds the songs
+  that *sound* like it (CLAP understands words and audio in one space);
+  Claude picks from those. Without an Anthropic key the brain makes the
+  playlist on its own.
+- **finds damaged songs**: anything it can't hear gets decoded end to end by
+  Slopify. A wrong length on record is fixed, a cut-off file or a saved
+  preview gets replaced by Upgrade to FLAC, a stub is dropped.
 
 ## Add it
 
@@ -94,6 +102,7 @@ Picking the next song takes milliseconds and is never held.
 | `SLOPIFY_URL` | `http://127.0.0.1:8080` | Slopify as this box reaches it |
 | `DEVICE` | `auto` | `auto` (Intel, then NVIDIA/AMD, then CPU), `xpu`, `cuda`, `cpu` |
 | `EMBED_WORKERS` | `3` | songs read at once |
+| `HOST` / `PORT` | `0.0.0.0` / `8097` | `HOST: 127.0.0.1` when Slopify is on the same machine |
 | `LAT` / `LON` | | instead of the Location setting |
 | `TZ` | Slopify's | local time, if the Location doesn't say |
 

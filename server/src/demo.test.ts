@@ -44,7 +44,7 @@ describe('demo mode', () => {
     const g = await guest();
     expect((await app.inject({ method: 'DELETE', url: '/api/likes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', headers: as(g.token) })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/playlists', payload: { name: 'Mine' }, headers: as(g.token) })).statusCode).toBe(200);
-    for (const [method, url] of [['POST', '/api/admin/scan'], ['POST', '/api/auth/password'], ['POST', '/api/invites'], ['DELETE', `/api/users/${g.user.id}`], ['PUT', '/api/admin/tasks/scan/schedule'], ['POST', '/api/import/spotify']] as const) {
+    for (const [method, url] of [['POST', '/api/admin/scan'], ['POST', '/api/auth/password'], ['POST', '/api/invites'], ['DELETE', `/api/users/${g.user.id}`], ['POST', '/api/users/someone/password'], ['PUT', '/api/admin/tasks/scan/schedule'], ['POST', '/api/import/spotify']] as const) {
       const r = await app.inject({ method, url, payload: {}, headers: as(g.token) });
       expect(r.statusCode, `${method} ${url}`).toBe(403);
       expect(r.json().error).toBe('Not available in the demo');

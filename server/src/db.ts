@@ -251,6 +251,13 @@ const MIGRATIONS: string[] = [
     kind TEXT NOT NULL, stored_ms INTEGER, decoded_ms INTEGER, error TEXT, checked_at INTEGER NOT NULL
   );
   `,
+  // 29: a generated playlist remembers what it was asked for (Regenerate
+  // starts from it) and the name it was given (a name the person chose
+  // instead is kept when it regenerates).
+  `
+  ALTER TABLE playlists ADD COLUMN ai_prompt TEXT;
+  ALTER TABLE playlists ADD COLUMN ai_name TEXT;
+  `,
 ];
 
 export type DB = Database.Database;

@@ -190,7 +190,7 @@ export default function Library({
   onLike, onAddTo, onNewPlaylist, onRemoveFromPlaylist, onReorder, onOpenPlaylist, onOpenLiked, likedCount,
   onOpenArtistById, onOpenAlbumById, onExclude, onDownload,
   seeAll, setSeeAll, onEditPlaylist, onDeletePlaylist, me, onView, onOpenProfile,
-  prefs, onUpdatePrefs, onUploadAvatar, avatarV, onFollowAlbum, onOpenSettings, notify,
+  prefs, onUpdatePrefs, onUploadAvatar, avatarV, onFollowAlbum, onOpenSettings, notify, onRegeneratePlaylist,
 }) {
   const [results, setResults] = useState(null);
   const phone = usePhone();
@@ -1261,6 +1261,7 @@ export default function Library({
               ] : []),
               isPlaylist && !isLiked && !item._mix && tracks.length ? { label: t('Download as zip'), icon: MI.down, onClick: () => downloadPlaylistZip(jf, item, notify) } : null,
               isPlaylist && !isLiked && !item._mix ? { sep: true } : null,
+              isPlaylist && !isLiked && !item._mix && item.AiPrompt ? { label: t('Regenerate'), icon: MI.sparkle, onClick: () => onRegeneratePlaylist?.(item) } : null,
               isPlaylist && !isLiked && !item._mix ? { label: t('Edit details'), icon: MI.edit, onClick: () => setEditPl({ name: item.Name, file: null, preview: null }) } : null,
               isPlaylist && !isLiked && !item._mix ? { label: t('Delete'), icon: MI.trash, danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: item.Name }))) onDeletePlaylist(item); } } : null,
             ];

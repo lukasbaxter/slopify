@@ -190,6 +190,30 @@ describe('the brain and generated playlists', () => {
     expect(tracks.every((id: string) => want.includes(id))).toBe(true); // nothing it did not offer
     expect((app as any).db.prepare('SELECT name FROM playlists WHERE id = ?').get(j.result.playlistId).name).toBe('Rainy sunday morning, soft guitar');
   });
+  it('Regenerate fills the same playlist again from a changed request; a name the person gave it stays', async () => {
+    const db = (app as any).db;
+    const run = async (payload: any) => {
+      const job = (await app.inject({ method: 'POST', url: '/api/ai/playlists', headers: admin(), payload })).json();
+      let j: any;
+      for (let i = 0; i < 50; i++) { j = (await app.inject({ method: 'GET', url: `/api/jobs/${job.id}`, headers: admin() })).json(); if (j.state !== 'running') break; await new Promise((r) => setTimeout(r, 100)); }
+      expect(j.state).toBe('done'); return j.result;
+    };
+    const first = await run({ prompt: 'warm dub techno' });
+    const pl = (await app.inject({ method: 'GET', url: `/api/playlists/${first.playlistId}`, headers: admin() })).json();
+    expect(pl.aiPrompt).toBe('warm dub techno');
+    const count = db.prepare('SELECT COUNT(*) n FROM playlists').get().n;
+    db.prepare('INSERT INTO ai_pending (playlist_id, artist, title, release, requested) VALUES (?, ?, ?, ?, ?)').run(first.playlistId, 'x', 'y', 'z', Date.now());
+    const again = await run({ prompt: 'colder dub techno', playlistId: first.playlistId });
+    expect(again).toMatchObject({ playlistId: first.playlistId, regenerated: true, name: 'Colder dub techno' });
+    expect(db.prepare('SELECT COUNT(*) n FROM playlists').get().n).toBe(count);     // not a new one
+    expect(searched.text).toBe('colder dub techno');
+    expect((await app.inject({ method: 'GET', url: `/api/playlists/${first.playlistId}`, headers: admin() })).json()).toMatchObject({ aiPrompt: 'colder dub techno', name: 'Colder dub techno' });
+    expect(db.prepare('SELECT COUNT(*) n FROM ai_pending WHERE playlist_id = ?').get(first.playlistId).n).toBe(0);
+    // Renamed by the person: the name is theirs from then on.
+    await app.inject({ method: 'PATCH', url: `/api/playlists/${first.playlistId}`, headers: admin(), payload: { name: 'Night bus' } });
+    expect((await run({ prompt: 'warmer again', playlistId: first.playlistId })).name).toBe('Night bus');
+    expect((await app.inject({ method: 'POST', url: '/api/ai/playlists', headers: admin(), payload: { prompt: 'whatever', playlistId: 'nope' } })).statusCode).toBe(404);
+  });
   it("songs the brain could not hear are checked by decoding them, and handed back", async () => {
     undecodable = [ids()[1]]; retried = [];
     await app.inject({ method: 'POST', url: '/api/admin/tasks/brain/run', headers: admin() });

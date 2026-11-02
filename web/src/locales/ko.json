@@ -1,5 +1,8 @@
 {
+ "Change the request or keep it. The songs in this playlist are replaced; a name or cover you gave it stays.": "요청을 바꾸거나 그대로 두세요. 이 플레이리스트의 곡이 바뀌며, 직접 정한 이름이나 커버는 유지됩니다.",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "원하는 것을 설명하세요. 브레인이 라이브러리에서 그렇게 들리는 25곡을 찾습니다. 아직 듣지 않은 20곡과 아는 5곡입니다.",
+ "Regenerate": "다시 생성",
+ "Regenerate playlist": "플레이리스트 다시 생성",
  "{app} is free software under the <a>GNU AGPL v3</a>.": "{app}은(는) <a>GNU AGPL v3</a>에 따른 자유 소프트웨어입니다.",
  "{done} of {total} songs": "{total}곡 중 {done}곡",
  "{done} of 1 song": "1곡 중 {done}곡",
@@ -11,6 +14,8 @@
  "{m} min {sec} sec": "{m}분 {sec}초",
  "{m}min {sec}sec": "{m}분 {sec}초",
  "{matched} of {total} different songs are in this library": "서로 다른 곡 {total}개 중 {matched}개가 이 라이브러리에 있습니다",
+ "{name} regenerated": "{name} 다시 생성됨",
+ "{name} regenerated. {more}": "{name} 다시 생성됨. {more}",
  "{n} adding to library": "라이브러리에 {n}개 추가하는 중",
  "{n} albums wanted": "요청한 앨범 {n}개",
  "{n} albums wanted, {per} searched per check": "요청한 앨범 {n}개, 확인마다 {per}개 검색",

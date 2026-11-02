@@ -85,7 +85,7 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   });
 
   // --- playlists ---
-  const plOut = (p: any) => ({ id: p.id, name: p.name, userId: p.user_id, created: p.created, updated: p.updated, trackCount: p.track_count ?? 0, cover: p.cover_hash ?? p.cover ?? null });
+  const plOut = (p: any) => ({ id: p.id, name: p.name, userId: p.user_id, created: p.created, updated: p.updated, trackCount: p.track_count ?? 0, cover: p.cover_hash ?? p.cover ?? null, aiPrompt: p.ai_prompt ?? null });
   const listPl = db.prepare(`SELECT p.*, (SELECT COUNT(*) FROM playlist_tracks x WHERE x.playlist_id = p.id) AS track_count,
       (SELECT a.cover_hash FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id JOIN albums a ON a.id = t.album_id WHERE x.playlist_id = p.id AND a.cover_hash IS NOT NULL ORDER BY x.pos LIMIT 1) AS cover
     FROM playlists p WHERE p.user_id = ? ORDER BY p.updated DESC`);

@@ -39,7 +39,7 @@ const Pin = () => (
 );
 
 export default function Sidebar({ view, onView, playlists, likedCount, onOpen, onOpenLiked, onCreate, jf, loading,
-  savedAlbums = [], followedArtists = [], onOpenAlbum, player, prefs, onUpdatePrefs, onEditPlaylist, onDeletePlaylist, onFollowAlbum, onOpenArtist, onGenerate }) {
+  savedAlbums = [], followedArtists = [], onOpenAlbum, player, prefs, onUpdatePrefs, onEditPlaylist, onDeletePlaylist, onFollowAlbum, onOpenArtist, onGenerate, onRegeneratePlaylist }) {
   const [menu, setMenu] = useState(null); // { x, y, entry }
   const [dragId, setDragId] = useState(null);
   const dragRef = useRef(null); // the drop handler must not depend on a re-render having happened
@@ -117,6 +117,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     { label: t('Play'), onClick: () => playEntry(e) },
     { sep: true },
     { label: pinned.has(e.id) ? t('Unpin playlist') : t('Pin playlist'), onClick: () => togglePin(e.id) },
+    ...(e.item.AiPrompt ? [{ label: t('Regenerate'), onClick: () => onRegeneratePlaylist?.(e.item) }] : []),
     { label: t('Edit details'), onClick: () => onEditPlaylist?.(e.item) },
     { label: t('Delete'), danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: e.item.Name }))) onDeletePlaylist?.(e.item); } },
   ];

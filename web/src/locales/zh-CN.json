@@ -1,5 +1,8 @@
 {
+ "Change the request or keep it. The songs in this playlist are replaced; a name or cover you gave it stays.": "修改需求或保持不变。这个歌单里的歌会被替换；你起的名字或封面会保留。",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "描述你想要的。大脑会在你的曲库中找出 25 首听起来像这样的歌：20 首你还没听过的，5 首你熟悉的。",
+ "Regenerate": "重新生成",
+ "Regenerate playlist": "重新生成歌单",
  "{app} is free software under the <a>GNU AGPL v3</a>.": "{app} 是基于 <a>GNU AGPL v3</a> 的自由软件。",
  "{done} of {total} songs": "{done}/{total} 首歌曲",
  "{done} of 1 song": "{done}/1 首歌曲",
@@ -11,6 +14,8 @@
  "{m} min {sec} sec": "{m} 分 {sec} 秒",
  "{m}min {sec}sec": "{m}分{sec}秒",
  "{matched} of {total} different songs are in this library": "{total} 首不同歌曲中有 {matched} 首在此音乐库中",
+ "{name} regenerated": "已重新生成 {name}",
+ "{name} regenerated. {more}": "已重新生成 {name}。{more}",
  "{n} adding to library": "{n} 个正在添加到音乐库",
  "{n} albums wanted": "想要 {n} 张专辑",
  "{n} albums wanted, {per} searched per check": "想要 {n} 张专辑，每次检查搜索 {per} 张",

@@ -61,7 +61,7 @@ export const rowAlbum = (a) => ({
   ImageTags: a.cover ? { Primary: a.cover } : {}, UserData: { IsFavorite: !!a.likedAt || savedAlbums.has(a.id) },
 });
 export const rowArtist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ChildCount: a.albumCount, ImageTags: a.image ? { Primary: a.image } : {}, BackdropImageTags: a.banner || a.image ? [a.banner || a.image] : [], UserData: { IsFavorite: !!a.followed || followedArtists.has(a.id) } });
-export const rowPlaylist = (p) => ({ Id: p.id, Name: p.name, Type: 'Playlist', ChildCount: p.trackCount, ImageTags: p.cover ? { Primary: p.cover } : {}, DateCreated: p.created ? new Date(p.created).toISOString() : undefined, UserData: {} });
+export const rowPlaylist = (p) => ({ Id: p.id, Name: p.name, Type: 'Playlist', AiPrompt: p.aiPrompt ?? null, ChildCount: p.trackCount, ImageTags: p.cover ? { Primary: p.cover } : {}, DateCreated: p.created ? new Date(p.created).toISOString() : undefined, UserData: {} });
 
 const isPlaylistId = (id) => /^pl_/.test(id || '');
 
@@ -432,7 +432,8 @@ export class Slopify {
 
   // --- generated playlists + Spotify import (server jobs, polled) -----------
   aiStatus() { return this._fetch('/api/ai/status'); }
-  generatePlaylist(prompt) { return this._fetch('/api/ai/playlists', { method: 'POST', body: JSON.stringify({ prompt }) }); }
+  // playlistId: Regenerate, new songs in that playlist instead of a new one.
+  generatePlaylist(prompt, playlistId) { if (playlistId) this._evict(`playlist:${playlistId}`); return this._fetch('/api/ai/playlists', { method: 'POST', body: JSON.stringify(playlistId ? { prompt, playlistId } : { prompt }) }); }
   job(id) { return this._fetch(`/api/jobs/${id}`, { retries: 2 }); }
   // Poll a job until it ends; onStep sees every state on the way.
   async waitJob(job, onStep, signal) {

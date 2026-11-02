@@ -332,7 +332,7 @@ export class Progress {
 
 export type Search = (text: string, n: number) => Promise<SoundHit[]>;
 export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: string, job: Job, similar?: (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>,
-  requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>, search?: Search) {
+  requestMissing?: (playlistId: string, songs: { artist: string; title: string }[]) => Promise<number>, search?: Search, into?: string) {
   const pr = new Progress(job, db);
   pr.start('plan', 'reading your listening');
   const taste = tasteOf(db, uid);
@@ -363,12 +363,8 @@ export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: st
     PickSchema, 8000);
   const tracks = finalize(pool, pick.picks || [], plan);
 
-  const name = (pick.title || plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
-  const id = playlistId(), now = Date.now();
-  db.transaction(() => {
-    db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
-    tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.row.id, now));
-  })();
+  const saved = savePlaylist(db, uid, (pick.title || plan.title || 'Generated playlist').replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist', tracks.map((t) => t.row.id), prompt, into);
+  const id = saved.id, name = saved.name;
   // Missing songs it judged worth fetching: requested in the background, 2 per
   // artist at most; the playlist does not wait for the downloads.
   const per = new Map<string, number>();
@@ -376,14 +372,40 @@ export async function generatePlaylist(db: DB, ask: Ask, uid: string, prompt: st
     .filter((m) => { const k = norm(m.artist); per.set(k, (per.get(k) || 0) + 1); return per.get(k)! <= 2; }).slice(0, 8);
   if (requestMissing && good.length) void requestMissing(id, good).catch(() => 0);
   pr.finish();
-  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested: good.length, missing: pool.missing.length, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })) };
+  return { playlistId: id, name, regenerated: !!into, count: tracks.length, poolSize: pool.length, requested: good.length, missing: pool.missing.length, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })) };
+}
+
+// A new playlist, or (Regenerate) new songs in one the person already has:
+// same id, cover and place in their library; the name too, unless it is
+// still the one the last generation gave it. Songs the last one sent for
+// stop being added to it.
+export function savePlaylist(db: DB, uid: string, name: string, trackIds: string[], prompt: string, into?: string) {
+  const now = Date.now();
+  if (into) {
+    const p = db.prepare('SELECT name, ai_name FROM playlists WHERE id = ? AND user_id = ?').get(into, uid) as { name: string; ai_name: string | null } | undefined;
+    if (!p) throw new Error('That playlist is gone');
+    const keepName = p.ai_name != null && p.name !== p.ai_name;
+    db.transaction(() => {
+      db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ?').run(into);
+      db.prepare('DELETE FROM ai_pending WHERE playlist_id = ?').run(into);
+      trackIds.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(into, i, t, now));
+      db.prepare('UPDATE playlists SET name = ?, ai_name = ?, ai_prompt = ?, updated = ? WHERE id = ?').run(keepName ? p.name : name, name, prompt, now, into);
+    })();
+    return { id: into, name: keepName ? p.name : name };
+  }
+  const id = playlistId();
+  db.transaction(() => {
+    db.prepare('INSERT INTO playlists (id, user_id, name, created, updated, ai_prompt, ai_name) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, uid, name, now, now, prompt, name);
+    trackIds.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t, now));
+  })();
+  return { id, name };
 }
 
 // Without an Anthropic key, the brain alone: songs that sound like the
 // request, leaning toward the listener's taste, in that order, with the same
 // 20 new / 5 known mix and artist caps as Claude's playlists. No planning,
 // no song suggestions to fetch, the request itself as the name.
-export async function soundPlaylist(db: DB, search: Search, uid: string, prompt: string, job: Job) {
+export async function soundPlaylist(db: DB, search: Search, uid: string, prompt: string, job: Job, into?: string) {
   const pr = new Progress(job, db);
   pr.skip('plan');
   pr.start('find', 'listening for songs that sound like it');
@@ -396,14 +418,10 @@ export async function soundPlaylist(db: DB, search: Search, uid: string, prompt:
   const rank = new Map(sound.map((h, i) => [h.id, i]));
   const picks = pool.map((c, i) => [i + 1, rank.get(c.row.id) ?? 1e9] as const).sort((a, b) => a[1] - b[1]).map(([n]) => n);
   const tracks = finalize(pool, picks, plan);
-  const name = (prompt.charAt(0).toUpperCase() + prompt.slice(1)).replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist';
-  const id = playlistId(), now = Date.now();
-  db.transaction(() => {
-    db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
-    tracks.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t.row.id, now));
-  })();
+  const saved = savePlaylist(db, uid, (prompt.charAt(0).toUpperCase() + prompt.slice(1)).replace(/["“”]/g, '').trim().slice(0, 60) || 'Generated playlist', tracks.map((t) => t.row.id), prompt, into);
+  const id = saved.id, name = saved.name;
   pr.finish();
-  return { playlistId: id, name, count: tracks.length, poolSize: pool.length, requested: 0, missing: 0, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })), by: 'brain' };
+  return { playlistId: id, name, regenerated: !!into, count: tracks.length, poolSize: pool.length, requested: 0, missing: 0, known: tracks.filter((t) => t.known).length, tracks: tracks.map((t) => ({ id: t.row.id, known: t.known })), by: 'brain' };
 }
 
 export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
@@ -457,13 +475,16 @@ export function registerAi(app: FastifyInstance, db: DB, opts: AiOptions) {
   const NEED = 'Generated playlists need an Anthropic API key (ANTHROPIC_API_KEY) or the brain (BRAIN_KEY) on the server.';
   app.get('/api/ai/status', auth, async () => (ask ? { ok: true, by: 'claude', brain: brainOn(db) } : brainOn(db) ? { ok: true, by: 'brain' } : { ok: false, reason: NEED }));
   app.post('/api/ai/playlists', auth, async (req: any, reply) => {
-    const b = z.object({ prompt: z.string().trim().min(3).max(1000) }).safeParse(req.body);
+    const b = z.object({ prompt: z.string().trim().min(3).max(1000), playlistId: z.string().max(64).optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'Describe the playlist' });
+    // Regenerate: new songs in this playlist, not a new one.
+    const into = b.data.playlistId;
+    if (into && !db.prepare('SELECT 1 FROM playlists WHERE id = ? AND user_id = ?').get(into, req.user.id)) return reply.code(404).send({ error: 'no such playlist' });
     const search = brainOn(db) ? searchFor(req.user.id) : undefined;
     if (!ask && !search) return reply.code(503).send({ error: NEED });
     const job = startJob(req.user.id, 'ai-playlist', (j) => (ask
-      ? generatePlaylist(db, ask, req.user.id, b.data.prompt, j, similar, requestMissing, search)
-      : soundPlaylist(db, search!, req.user.id, b.data.prompt, j)));
+      ? generatePlaylist(db, ask, req.user.id, b.data.prompt, j, similar, requestMissing, search, into)
+      : soundPlaylist(db, search!, req.user.id, b.data.prompt, j, into)));
     app.log.info({ uid: req.user.id, prompt: b.data.prompt }, 'ai playlist');
     return jobOut(job);
   });

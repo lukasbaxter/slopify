@@ -50,8 +50,10 @@ function Progress({ busy }) {
   );
 }
 
-export default function GeneratePlaylist({ jf, onClose, onDone }) {
-  const [prompt, setPrompt] = useState('');
+// regenerate: { playlistId, prompt }: the same box, with what was asked last
+// time to change or keep, filling that playlist again instead of a new one.
+export default function GeneratePlaylist({ jf, onClose, onDone, regenerate = null }) {
+  const [prompt, setPrompt] = useState(regenerate?.prompt || '');
   const [status, setStatus] = useState(null); // { ok, reason }
   const [busy, setBusy] = useState(null); // { step, progress, info, got } (got = when this update arrived, for the countdown)
   const [, tick] = useState(0);
@@ -68,7 +70,7 @@ export default function GeneratePlaylist({ jf, onClose, onDone }) {
     const p = prompt.trim(); if (!p || busy) return;
     setError(null); setBusy({ step: t('Starting'), progress: null });
     try {
-      const job = await jf.generatePlaylist(p);
+      const job = await jf.generatePlaylist(p, regenerate?.playlistId);
       const r = await jf.waitJob(job, (j) => { if (open.current) setBusy({ step: j.step, progress: j.progress, info: j.info, got: Date.now() }); });
       onDone?.(r, { hidden: !open.current });
     } catch (err) {
@@ -82,13 +84,14 @@ export default function GeneratePlaylist({ jf, onClose, onDone }) {
   return (
     <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
       <form className="modal genpl" onSubmit={submit}>
-        <h3>{t('Generated playlist')}</h3>
+        <h3>{regenerate ? t('Regenerate playlist') : t('Generated playlist')}</h3>
         {off ? <p className="genpl-note">{status.reason || t('Generated playlists are not available on this server.')}</p> : (
           <>
-            {!busy && <p className="genpl-note">{status?.by === 'brain'
+            {!busy && regenerate && <p className="genpl-note">{t('Change the request or keep it. The songs in this playlist are replaced; a name or cover you gave it stays.')}</p>}
+            {!busy && !regenerate && <p className="genpl-note">{status?.by === 'brain'
               ? t('Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.')
               : t('Describe what you want. Claude picks 25 songs from your library: 20 you have not played yet, 5 you know. Good fits you do not have yet are requested and added when they download.')}</p>}
-            <textarea autoFocus rows={3} maxLength={1000} value={prompt} disabled={!!busy} placeholder={t('e.g. rainy day indie, a bit melancholy')}
+            <textarea autoFocus rows={3} onFocus={(e) => { const n = e.target.value.length; e.target.setSelectionRange(n, n); }} maxLength={1000} value={prompt} disabled={!!busy} placeholder={t('e.g. rainy day indie, a bit melancholy')}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === 'Escape' && !busy) onClose(); }} />
             {!busy && !prompt && (
@@ -102,7 +105,7 @@ export default function GeneratePlaylist({ jf, onClose, onDone }) {
         )}
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>{busy ? t('Hide') : t('Cancel')}</button>
-          {!off && <button type="submit" className="primary" disabled={!prompt.trim() || !!busy || !status}>{t('Generate')}</button>}
+          {!off && <button type="submit" className="primary" disabled={!prompt.trim() || !!busy || !status}>{regenerate ? t('Regenerate') : t('Generate')}</button>}
         </div>
       </form>
     </div>

@@ -1,5 +1,8 @@
 {
+ "Change the request or keep it. The songs in this playlist are replaced; a name or cover you gave it stays.": "リクエストを変更するか、そのままにしてください。このプレイリストの曲は入れ替わります。付けた名前やカバーはそのままです。",
  "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "聴きたいものを説明してください。ブレインがライブラリからそれらしく聞こえる25曲を探します。まだ聴いていない20曲と、知っている5曲です。",
+ "Regenerate": "再生成",
+ "Regenerate playlist": "プレイリストを再生成",
  "{app} is free software under the <a>GNU AGPL v3</a>.": "{app} は <a>GNU AGPL v3</a> のもとで提供されるフリーソフトウェアです。",
  "{done} of {total} songs": "{total} 曲中 {done} 曲",
  "{done} of 1 song": "1 曲中 {done} 曲",
@@ -11,6 +14,8 @@
  "{m} min {sec} sec": "{m} 分 {sec} 秒",
  "{m}min {sec}sec": "{m}分{sec}秒",
  "{matched} of {total} different songs are in this library": "{total} 曲中 {matched} 曲がこのライブラリにあります",
+ "{name} regenerated": "{name} を再生成しました",
+ "{name} regenerated. {more}": "{name} を再生成しました。{more}",
  "{n} adding to library": "{n} 件をライブラリに追加中",
  "{n} albums wanted": "{n} 枚のアルバムをリクエスト中",
  "{n} albums wanted, {per} searched per check": "{n} 枚のアルバムをリクエスト中、1 回のチェックで {per} 枚を検索",

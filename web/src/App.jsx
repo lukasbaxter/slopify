@@ -1509,6 +1509,7 @@ export default function App() {
           onOpenLiked={openLiked}
           onCreate={(name) => onCreatePlaylist(name)}
           onGenerate={() => setGenerating(true)}
+          onRegeneratePlaylist={(pl) => setGenerating({ playlistId: pl.Id, prompt: pl.AiPrompt || '' })}
           jf={jf}
         />
         <div
@@ -1547,6 +1548,7 @@ export default function App() {
           setSeeAll={setSeeAll}
           onEditPlaylist={onEditPlaylist}
           onDeletePlaylist={onDeletePlaylist}
+          onRegeneratePlaylist={(pl) => setGenerating({ playlistId: pl.Id, prompt: pl.AiPrompt || '' })}
           me={me}
           onOpenProfile={openProfile}
           onOpenSettings={openSettings}
@@ -1586,14 +1588,22 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
       <LyricSyncStatus />
       {toast && <div className={`toast ${syncing.length ? 'lifted' : ''}`}>{toast}</div>}
       {generating && (
-        <GeneratePlaylist jf={jf} onClose={() => setGenerating(false)}
+        <GeneratePlaylist jf={jf} onClose={() => setGenerating(false)} regenerate={generating === true ? null : generating}
           onDone={async (r, { hidden, error } = {}) => {
             if (error) { notify(t('Could not generate the playlist: {error}', { error })); return; }
             setGenerating(false);
             await refreshPlaylists();
             player.relay?.sendPrefs?.({ _libraryChanged: Date.now() });
             const more = !r.requested ? '' : r.requested === 1 ? t('1 more song is downloading and will be added.') : t('{n} more songs are downloading and will be added.', { n: r.requested });
-            if (hidden) notify(more ? t('{name} is ready in Your Library. {more}', { name: r.name, more }) : t('{name} is ready in Your Library.', { name: r.name }));
+            // Regenerated: the same playlist with new songs. Reopened when it is
+            // on screen (or the box was still open), so the old list never lingers.
+            if (r.regenerated) {
+              if (!hidden || detail?.item?.Id === r.playlistId) {
+                const pl = (await jf.playlists().catch(() => ({ items: [] }))).items.find((x) => x.Id === r.playlistId);
+                openPlaylist(pl || { Id: r.playlistId, Name: r.name, Type: 'Playlist', ChildCount: r.count, ImageTags: {}, UserData: {} });
+              }
+              notify(more ? t('{name} regenerated. {more}', { name: r.name, more }) : t('{name} regenerated', { name: r.name }));
+            } else if (hidden) notify(more ? t('{name} is ready in Your Library. {more}', { name: r.name, more }) : t('{name} is ready in Your Library.', { name: r.name }));
             else if (more) notify(more);
             else openPlaylist({ Id: r.playlistId, Name: r.name, Type: 'Playlist', ChildCount: r.count, ImageTags: {}, UserData: {} });
           }} />

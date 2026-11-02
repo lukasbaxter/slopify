@@ -45,8 +45,8 @@ def test_power_works_in_bursts():
     assert l.blocked("light", 300) is not None and l.blocked("light", 300 + 899) is not None and l.blocked("light", 1200) is None
 
 def test_rules_from_slopify_typed_or_ignored():
-    m = settings.merge({"power": "light", "otherGb": "8", "location": "Victoria, BC", "nonsense": 1, "enabled": None})
-    assert m["power"] == "light" and m["otherGb"] == 0 and m["location"] == "Victoria, BC" and m["enabled"] is True and "nonsense" not in m
+    m = settings.merge({"power": "light", "otherGb": "8", "location": "London, ON", "nonsense": 1, "enabled": None})
+    assert m["power"] == "light" and m["otherGb"] == 0 and m["location"] == "London, ON" and m["enabled"] is True and "nonsense" not in m
 
 class R:
     def __init__(self, code, body=None): self.status_code, self._b = code, body
@@ -57,23 +57,25 @@ class R:
 
 def test_old_or_down_slopify_keeps_last_rules():
     settings._s.update(at=0, rules=dict(settings.DEFAULTS), from_slopify=False)
-    s = settings.refresh(force=True, get=lambda *a, **k: R(200, {"settings": {"power": "full"}, "tz": "America/Vancouver", "listening": True}))
-    assert s["rules"]["power"] == "full" and s["tz"] == "America/Vancouver" and s["listening"] and s["from_slopify"]
+    s = settings.refresh(force=True, get=lambda *a, **k: R(200, {"settings": {"power": "full"}, "tz": "America/Toronto", "listening": True}))
+    assert s["rules"]["power"] == "full" and s["tz"] == "America/Toronto" and s["listening"] and s["from_slopify"]
     def down(*a, **k): raise ConnectionError("refused")
     assert settings.refresh(force=True, get=down)["rules"]["power"] == "full"            # kept
     assert settings.refresh(force=True, get=lambda *a, **k: R(404))["from_slopify"] is False
 
 GEO = {"results": [
-    {"name": "Victoria", "latitude": 22.28, "longitude": 114.15, "country": "Hong Kong", "country_code": "HK", "admin1": "Central and Western", "timezone": "Asia/Hong_Kong"},
-    {"name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "country": "Canada", "country_code": "CA", "admin1": "British Columbia", "timezone": "America/Vancouver"},
+    {"name": "London", "latitude": 51.5085, "longitude": -0.1257, "country": "United Kingdom", "country_code": "GB", "admin1": "England", "timezone": "Europe/London"},
+    {"name": "London", "latitude": 42.9834, "longitude": -81.233, "country": "Canada", "country_code": "CA", "admin1": "Ontario", "timezone": "America/Toronto"},
 ]}
 
 def test_location_by_name():
     get = lambda *a, **k: R(200, GEO)
-    p = weather.lookup("Victoria, BC", get=get)
-    assert p == {"name": "Victoria, BC", "lat": 48.43, "lon": -123.37, "timezone": "America/Vancouver", "label": "Victoria, British Columbia, Canada"}
-    assert weather.lookup("Victoria", get=get)["timezone"] == "Asia/Hong_Kong"          # first hit without a hint
-    assert weather.lookup("Victoria, Narnia", get=get) == {"name": "Victoria, Narnia", "error": "not found"}
+    p = weather.lookup("London, ON", get=get)
+    assert p == {"name": "London, ON", "lat": 42.98, "lon": -81.23, "timezone": "America/Toronto", "label": "London, Ontario, Canada"}
+    assert weather.lookup("London, Canada", get=get)["timezone"] == "America/Toronto"
+    assert weather.lookup("London, UK", get=get)["timezone"] == "Europe/London"
+    assert weather.lookup("London", get=get)["timezone"] == "Europe/London"          # first hit without a hint
+    assert weather.lookup("London, Narnia", get=get) == {"name": "London, Narnia", "error": "not found"}
 
 def test_unreachable_slopify_is_not_damage():
     """Every fetch fails while Slopify restarts: nothing is recorded as

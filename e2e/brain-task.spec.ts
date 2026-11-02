@@ -7,7 +7,7 @@ import { login, waitForLibrary } from './helpers';
 // e2e server has no brain.
 test.use({ serviceWorkers: 'block' });
 test('the Brain row shows what it is doing and its rules save', async ({ page }, info) => {
-  const INFO = 'Heard 21,934 of 143,443 songs, about 8 h to go · Next song in its top 10: 9.2% (old mix 0.6%)';
+  const INFO = 'Heard 20,000 of 120,000 songs, about 8 h to go · Next song in its top 10: 9.2% (old mix 0.6%)';
   let location = '';
   const saved: any[] = [];
   await page.route('**/api/admin/tasks', async (route) => {
@@ -18,7 +18,7 @@ test('the Brain row shows what it is doing and its rules save', async ({ page },
       settings: [
         { key: 'power', label: 'GPU power', type: 'select', default: 'normal', value: 'normal', options: [{ value: 'full', label: 'Full: no breaks' }, { value: 'normal', label: 'Normal: 10 min on, 10 off' }, { value: 'cpu', label: "Don't use the GPU (slow)" }] },
         { key: 'pauseListening', label: 'Pause while anyone is listening', type: 'toggle', default: false, value: false },
-        { key: 'location', label: 'Where you listen', type: 'text', default: '', value: location, placeholder: 'Victoria, BC', maxLength: 100, help: 'A city, for the weather.' },
+        { key: 'location', label: 'Where you listen', type: 'text', default: '', value: location, placeholder: 'Lisbon, Portugal', maxLength: 100, help: 'A city, for the weather.' },
       ],
     });
     await route.fulfill({ json: j });
@@ -36,9 +36,9 @@ test('the Brain row shows what it is doing and its rules save', async ({ page },
   await expect(row.locator('.task-meta')).toHaveText(INFO);
   await row.locator('.task-dots').click();
   const pop = row.locator('.task-pop');
-  const box = pop.getByPlaceholder('Victoria, BC');
-  await box.fill('Victoria, BC'); await box.press('Enter');
-  await expect.poll(() => saved).toContainEqual({ location: 'Victoria, BC' });
+  const box = pop.getByPlaceholder('Lisbon, Portugal');
+  await box.fill('Lisbon, Portugal'); await box.press('Enter');
+  await expect.poll(() => saved).toContainEqual({ location: 'Lisbon, Portugal' });
   await pop.locator('select').selectOption('cpu');
   await expect.poll(() => saved).toContainEqual({ power: 'cpu' });
   if (info.project.name === 'phone') {

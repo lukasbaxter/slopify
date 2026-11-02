@@ -131,12 +131,12 @@ describe('the Brain task', () => {
     expect(brain.schedule).toEqual({ mode: 'daily', at: '04:00' });
     expect(brain.settings.map((x: any) => x.key)).toEqual(['enabled', 'power', 'fromHour', 'toHour', 'pauseListening', 'otherGb', 'pauseEncoding', 'location']);
     expect(brain.info).toBe('Connecting…');
-    const put = await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { power: 'light', location: '  Victoria, BC  ', otherGb: 999, fromHour: 1, toHour: 7 } } });
+    const put = await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { power: 'light', location: '  Lisbon, Portugal  ', otherGb: 999, fromHour: 1, toHour: 7 } } });
     expect(put.statusCode).toBe(200);
     expect((await app.inject({ method: 'PUT', url: '/api/admin/tasks/brain/settings', headers: admin(), payload: { values: { power: 'turbo' } } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/api/brain/settings', headers: admin() })).statusCode).toBe(401);
     const got = (await app.inject({ method: 'GET', url: '/api/brain/settings', headers: brainKey })).json();
-    expect(got.settings).toMatchObject({ enabled: true, power: 'light', location: 'Victoria, BC', otherGb: 256, fromHour: 1, toHour: 7, pauseListening: false });
+    expect(got.settings).toMatchObject({ enabled: true, power: 'light', location: 'Lisbon, Portugal', otherGb: 256, fromHour: 1, toHour: 7, pauseListening: false });
     expect(typeof got.tz).toBe('string'); expect(got.listening).toBe(false);
     await app.inject({ method: 'GET', url: `/api/stream/${ids()[0]}`, headers: { ...admin(), range: 'bytes=0-9' } });
     expect((await app.inject({ method: 'GET', url: '/api/brain/settings', headers: brainKey })).json().listening).toBe(true);
@@ -166,8 +166,8 @@ describe('the Brain task', () => {
   }, 30000);
   it('its row says what the brain is doing in one line', () => {
     expect(brainLine(null, 'ECONNREFUSED')).toBe("Can't reach it: ECONNREFUSED");
-    expect(brainLine({ songs: 143443, heard: 143425, left: 0, undecodable: 18, phase: 'idle', weather_now: 'raining, 9 C', place: 'Victoria, British Columbia, Canada' }, null))
-      .toBe('Heard all 143,425 songs · raining, 9 C in Victoria, British Columbia, Canada · 18 won\'t decode');
+    expect(brainLine({ songs: 120018, heard: 120000, left: 0, undecodable: 18, phase: 'idle', weather_now: 'raining, 9 C', place: 'Lisbon, Lisbon, Portugal' }, null))
+      .toBe('Heard all 120,000 songs · raining, 9 C in Lisbon, Lisbon, Portugal · 18 won\'t decode');
     expect(brainLine({ songs: 100, heard: 10, left: 90, eta_s: 300, paused: 'paused while someone is listening', phase: 'paused' }, null))
       .toBe('Heard 10 of 100 songs · Paused while someone is listening');
   });

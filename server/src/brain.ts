@@ -54,7 +54,7 @@ export const BRAIN_SETTINGS: TaskSetting[] = [
     help: '0: never. Games, Ollama, other AI apps.' },
   { key: 'pauseEncoding', label: 'Pause while the GPU encodes video', type: 'toggle', default: false,
     help: 'Jellyfin, Plex or Immich transcoding. NVIDIA cards only.' },
-  { key: 'location', label: 'Where you listen', type: 'text', default: '', placeholder: 'Victoria, BC', maxLength: 100,
+  { key: 'location', label: 'Where you listen', type: 'text', default: '', placeholder: 'Lisbon, Portugal', maxLength: 100,
     help: 'A city, for the weather. Looked up once on Open-Meteo. Empty: none.' },
 ];
 const BRAIN_DEF = { id: 'brain', settings: BRAIN_SETTINGS };

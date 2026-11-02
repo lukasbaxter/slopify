@@ -10,16 +10,22 @@ VARS = "temperature_2m,precipitation,cloud_cover,weather_code,is_day"
 GEO = "https://geocoding-api.open-meteo.com/v1/search"
 
 def lookup(name, get=None):
-    """'Victoria, BC' -> the best Open-Meteo match: the city, then whatever
-    follows the comma has to appear in its region or country."""
+    """'London, ON' -> the best Open-Meteo match: the city, then whatever
+    follows the comma has to name its region or country: the name, the
+    start of it ("Ont"), its initials ("BC", "NSW") or the country code."""
     city, _, rest = name.partition(",")
     j = (get or httpx.get)(GEO, params={"name": city.strip(), "count": 10, "format": "json"}, timeout=15).raise_for_status().json()
     hits = j.get("results") or []
     want = [w.strip().lower() for w in rest.split(",") if w.strip()]
     def fits(h):
         where = " ".join(str(h.get(k, "")) for k in ("admin1", "admin2", "country", "country_code")).lower()
-        abbrev = {"bc": "british columbia", "uk": "united kingdom", "usa": "united states", "us": "united states"}
-        return all(abbrev.get(w, w) in where or w == str(h.get("country_code", "")).lower() for w in want)
+        regions = [str(h.get(k) or "").lower() for k in ("admin1", "admin2", "country")]
+        initials = ["".join(p[0] for p in r.split() if p) for r in regions if " " in r]
+        abbrev = {"uk": "united kingdom", "usa": "united states", "us": "united states"}
+        def one(w):
+            return (abbrev.get(w, w) in where or w == str(h.get("country_code", "")).lower() or w in initials
+                    or (len(w) >= 2 and any(r.startswith(w) for r in regions)))
+        return all(one(w) for w in want)
     for h in hits:
         if fits(h):
             label = ", ".join(x for x in (h.get("name"), h.get("admin1"), h.get("country")) if x)

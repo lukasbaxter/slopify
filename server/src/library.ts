@@ -233,7 +233,9 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
     if (artist) {
       const me = (req as any).user?.id as string | undefined;
-      if (!me) return { items: (await artistMix(db, artist, limit)).map(trackOut) };
+      // Radio and "more like this" (a ?mode) want fresh songs every time;
+      // the Daily Mix (Home's tile, its page, a pinned artist) is the day's.
+      if (!me || (req.query as any).mode) return { items: (await artistMix(db, artist, limit, me)).map(trackOut) };
       const m = await dailyMix(db, artist.id, me, (sounds) => artistMix(db, artist, DAILY_SIZE, me, { sounds }), { tzo: (req.query as any).tzo, log: (m) => app.log.info(m) });
       return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day };
     }

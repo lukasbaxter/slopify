@@ -26,8 +26,8 @@ import { VolumeManager } from 'react-native-volume-manager';
 import SlopifyMedia from './modules/slopify-media';
 import { cleanAddress, originOf } from './address';
 
-// The address the build was made with (the release build takes it from the
-// repository's SLOPIFY_URL variable): only a suggestion on first launch.
+// An address a self-built app can suggest on first launch. Release builds
+// leave it empty: the public app never carries anyone's server.
 const BUILT_URL = process.env.EXPO_PUBLIC_SLOPIFY_URL || '';
 const SERVERS_KEY = 'slopify.servers'; // { main, home }
 const SIGNIN_KEY = 'slopify.shellSession'; // { main, session }: the page's sign-in, for the other address

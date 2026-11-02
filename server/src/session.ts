@@ -169,6 +169,9 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         // A client's own copy of such a TV (the desktop finds Cast devices itself) would be
         // played by that client as plain Cast: the server's copy is the one offered.
         if (c.kind !== 'server' && d.kind === 'cast' && discovery && isAgentTv(d)) continue;
+        // A desktop from before 0.1.148 on Linux also listed each BluOS player by its
+        // mDNS name ("bluos:NODE2i-98C1.local") next to its address: one player, twice.
+        if (c.kind !== 'server' && d.kind === 'bluos' && !/^bluos:\d+\.\d+\.\d+\.\d+$/.test(String(d.id))) continue;
         lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
       }
     }

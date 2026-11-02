@@ -15,6 +15,7 @@ const { Bonjour } = require('bonjour-service');
 const net = require('net');
 const os = require('os');
 const http = require('http');
+const dns = require('dns');
 
 const CAST_TYPE = 'googlecast';
 const BLUOS_TYPE = 'musc';
@@ -58,7 +59,7 @@ class Discovery {
       console.warn(`discovery: ${e?.message || e}`);
     });
     const cast = this.bonjour.find({ type: CAST_TYPE }, (s) => this._add(this._fromCast(s)));
-    const blu = this.bonjour.find({ type: BLUOS_TYPE }, (s) => this._add(this._fromBluOS(s)));
+    const blu = this.bonjour.find({ type: BLUOS_TYPE }, (s) => { this._fromBluOS(s).then((d) => this._add(d)).catch(() => {}); });
     this.browsers = [cast, blu];
     // Services that vanish (device powered off) should leave the picker.
     for (const b of this.browsers) b.on('down', (s) => this._remove(s));
@@ -102,15 +103,16 @@ class Discovery {
     };
   }
 
-  _fromBluOS(service) {
-    return {
-      id: `bluos:${this._address(service)}`,
-      kind: 'bluos',
-      name: service.name,
-      model: 'BluOS',
-      host: this._address(service),
-      port: BLUOS_PORT,
-    };
+  // A BluOS player is known by its IPv4 address, the id the sweep and the
+  // server give it too. Linux's mDNS often answers with no address at all
+  // (only the "NODE2i-98C1.local" name): that name is looked up, and if it
+  // does not resolve the player is left to the sweep. Keyed by the name, it
+  // was listed twice on every phone (once by name, once by address).
+  async _fromBluOS(service) {
+    let host = (service.addresses || []).find((a) => /^\d+\.\d+\.\d+\.\d+$/.test(a));
+    if (!host && service.host) host = await dns.promises.lookup(service.host, { family: 4 }).then((r) => r.address).catch(() => null);
+    if (!host) return null;
+    return { id: `bluos:${host}`, kind: 'bluos', name: service.name, model: 'BluOS', host, port: BLUOS_PORT };
   }
 
   _add(dev) {

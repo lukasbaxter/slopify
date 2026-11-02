@@ -146,6 +146,20 @@ describe('ws client ids across accounts', () => {
     expect(a.closed()).toBe(false);                 // and the holder was not evicted
     a.ws.terminate(); b.ws.terminate();
   });
+  it('a BluOS player a desktop reports by its mDNS name is not offered a second time', async () => {
+    const desk = await hello('tokA', 'c_blu_desk');
+    const phone = await hello('tokA', 'c_blu_phone');
+    const seen: any[] = []; phone.ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));
+    desk.ws.send(JSON.stringify({ type: 'devices', devices: [
+      { id: 'bluos:192.168.1.60', name: 'POWERNODE EDGE', kind: 'bluos' },
+      { id: 'bluos:POWERNODEEDGE-C878.local', name: 'POWERNODE EDGE', kind: 'bluos' },
+      { id: 'cast:abc', name: 'Den TV', kind: 'cast' },
+    ] }));
+    await new Promise((r) => setTimeout(r, 150));
+    const lan = seen.filter((m) => m.type === 'roster').at(-1)?.lanDevices.filter((d: any) => d.viaClient === 'c_blu_desk').map((d: any) => d.id);
+    expect(lan).toEqual(['bluos:192.168.1.60', 'cast:abc']);
+    desk.ws.terminate(); phone.ws.terminate();
+  });
   it('a device that closes while holding the session does not pause the one still playing', async () => {
     const laptop = await hello('tokA', 'c_laptop_1');
     const seen: any[] = []; laptop.ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));

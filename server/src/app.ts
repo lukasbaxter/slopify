@@ -31,6 +31,7 @@ import { lyricSyncTask, registerLyricSync } from './lyricsync.js';
 import { registerIngest } from './ingest.js';
 import { SongCache } from './songcache.js';
 import { defaultServerName, registerServerInfo } from './advertise.js';
+import { registerAddresses } from './addresses.js';
 import { registerDemo } from './demo.js';
 import { registerReports } from './reports.js';
 
@@ -103,6 +104,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));
   registerServerInfo(app, db, { name: config.serverName || defaultServerName(), version: VERSION, source: config.sourceUrl });
+  registerAddresses(app, db, { lanUrl: () => config.publicUrl });
   // The web build this server hands out (its entry script, assets/index-<hash>.js), told to every
   // app as it connects: a page running an older one reloads onto it once nobody is using it.
   let webBuild = '';
@@ -136,7 +138,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   // Every /api route must carry a sign-in check unless it is one of the few
   // public ones by design: a route registered without its `auth` options
   // used to come up open and nobody would know.
-  const PUBLIC_API = new Set(['/api/healthz', '/api/i18n', '/api/auth/login', '/api/auth/register', '/api/auth/demo', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
+  const PUBLIC_API = new Set(['/api/healthz', '/api/server/proof', '/api/i18n', '/api/auth/login', '/api/auth/register', '/api/auth/demo', '/api/hooks/lidarr', '/api/image/:id', '/api/art/:hash/:file', '/api/art/sizes', '/api/users/:id/avatar']);
   const open: string[] = [];
   app.addHook('onRoute', (r) => {
     if (!r.url.startsWith('/api/') || PUBLIC_API.has(r.url) || (r as any).websocket) return;

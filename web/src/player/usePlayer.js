@@ -468,6 +468,11 @@ export function usePlayer(jf) {
   // exactly this state if a stream is disturbed mid-setup: playing=true,
   // position frozen, silence. { since, restarted } while it lasts, else 0.
   const stalledRef = useRef(0);
+  // The phone app's server address that just went away (leaving home's
+  // Wi-Fi): a song streaming from it is restarted from the other address at
+  // once, not after the stall watchdog's wait. { base, until }.
+  const rehomeRef = useRef(null);
+  const rehome = useCallback((base) => { rehomeRef.current = base ? { base, until: Date.now() + 30000 } : null; }, []);
   // Set while the user is dragging the volume slider, so the device poll does
   // not yank the handle back to the last value it reported.
   const volumeHeldRef = useRef(0);
@@ -1739,8 +1744,13 @@ export function usePlayer(jf) {
       }
       if (recovering || deviceRef.current.kind !== 'local' || !playingRef.current || el !== audioRef.current || el.paused || el.ended
         || !el.getAttribute('src') || transitionRef.current || Date.now() < ownUntilRef.current || jfNowRef.current?.transcoded?.()) { stuckSince = 0; lastT = t; return; }
-      if (t !== lastT) { lastT = t; stuckSince = 0; return; }
-      if (!stuckSince) { stuckSince = Date.now(); return; }
+      const gone = rehomeRef.current;
+      if (gone && Date.now() > gone.until) rehomeRef.current = null;
+      const moved = !!gone && Date.now() <= gone.until && (el.getAttribute('src') || '').startsWith(gone.base);
+      if (!moved) {
+        if (t !== lastT) { lastT = t; stuckSince = 0; return; }
+        if (!stuckSince) { stuckSince = Date.now(); return; }
+      }
       const id = el.dataset.track; if (!id) return;
       // Stuck with data in hand is the decoder: reload (from memory it cannot
       // fail, so sooner). Stuck with nothing buffered is the network, and a
@@ -1748,9 +1758,9 @@ export function usePlayer(jf) {
       // came every few seconds and the song never got going (10-30). Only a
       // connection that stays dead that long is reloaded.
       const limit = wholeFor(id) ? 3000 : bufferedAhead(el) >= 1 ? 6000 : STUCK_NO_DATA_MS;
-      if (Date.now() - stuckSince < limit) return;
+      if (!moved && Date.now() - stuckSince < limit) return;
       stuckSince = 0; recovering = true;
-      mediaLog(`watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
+      mediaLog(moved ? `server moved: ${id.slice(0, 6)} at ${t.toFixed(1)}, reloading from the other address` : `watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
       if (document.hidden && !bridgeSinceRef.current) { bridgeKeepAlive(true, 'stalled'); bridgeSinceRef.current = Date.now(); }
       // The client as it is now: this effect can outlive the one it was set
       // up with (it was null before sign-in), and a throw here left
@@ -2939,12 +2949,13 @@ export function usePlayer(jf) {
       playQueue, toggle, next, previous, seek, setVolume, volumeStep, skipTo,
       sleep, setSleepTimer, applySleep,
       clearError: () => setError(null),
+      rehome,
     }),
     // eslint-disable-next-line
     [device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, clearQueued, webAudio,
      relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relayInstance, shownQueue, shownIndex, current, applyRemoteQueue, applySession, relayTarget,
      shownPlaying, shownPosition, shownDuration, shownVolume, error, shownRepeat, shownShuffle,
      cycleRepeat, cycleShuffle, setShuffleRouted, playQueue, toggle, next,
-     previous, seek, setVolume, volumeStep, skipTo, sleep, setSleepTimer, applySleep]
+     previous, seek, setVolume, volumeStep, skipTo, sleep, setSleepTimer, applySleep, rehome]
   );
 }

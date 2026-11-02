@@ -44,7 +44,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "./plugins/with-scene"
     ]
   }
 }

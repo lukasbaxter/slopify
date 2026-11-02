@@ -67,6 +67,11 @@ export class SessionLink {
 
   connect() {
     if (this.closed) return;
+    // One connection at a time: a reconnect already scheduled, or an older
+    // socket still around, would come in as a second copy of this page and
+    // the server replaces one with the other (4000) back and forth, forever.
+    clearTimeout(this._retryTimer); this._retryTimer = null;
+    if (this.ws) { const old = this.ws; old.onclose = null; old.onerror = null; old.onmessage = null; old.onopen = null; try { old.close(); } catch { /* gone */ } clearInterval(this._ping); }
     let ws;
     try { ws = new WebSocket(defaultUrl(this.baseUrl)); } catch { this._retry(); return; }
     this.ws = ws;
@@ -133,6 +138,7 @@ export class SessionLink {
       }
     };
     ws.onclose = (ev) => {
+      if (ws !== this.ws) return; // a socket this link has moved on from
       if (typeof window !== 'undefined') (window.__slopifyMediaLog ||= []).push(`${new Date().toISOString().slice(11, 19)}${document.hidden ? ' bg' : ''} socket closed${ev && ev.code ? ` ${ev.code}` : ''}`);
       clientLog(`socket closed${ev && ev.code ? ` ${ev.code}` : ''}`);
       this.connected = false; this.rosterSeen = false; clearInterval(this._ping);
@@ -148,9 +154,21 @@ export class SessionLink {
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
+  // The phone app moved to the server's other address (mobile/App.js, home
+  // Wi-Fi or the internet one): same server, same session. Reconnect there
+  // now rather than wait for this socket to die with the old address.
+  moveTo(baseUrl) {
+    if (!baseUrl || baseUrl === this.baseUrl || this.closed) return;
+    this.baseUrl = baseUrl;
+    this.connected = false; this.rosterSeen = false;
+    this._backoff = 1000;
+    this.connect();
+  }
+
   _retry() {
     if (this.closed) return;
-    setTimeout(() => this.connect(), this._backoff);
+    clearTimeout(this._retryTimer);
+    this._retryTimer = setTimeout(() => this.connect(), this._backoff);
     this._backoff = Math.min(this._backoff * 2, 20000);
   }
 
@@ -221,6 +239,7 @@ export class SessionLink {
 
   close() {
     this.closed = true;
+    clearTimeout(this._retryTimer);
     clearInterval(this._ping);
     try { this.ws && this.ws.close(); } catch {}
   }

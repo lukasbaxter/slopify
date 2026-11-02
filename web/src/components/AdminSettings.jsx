@@ -4,6 +4,7 @@
 // Same building blocks as the rest of Settings.
 import { useEffect, useRef, useState } from 'react';
 import { t, N_, language } from '../i18n.js';
+import { linkBase } from './TrackRow.jsx';
 
 const fmtN = (n) => (n ?? 0).toLocaleString(language());
 const ago = (at) => { if (!at) return t('never'); const s = Math.round((Date.now() - at) / 1000); if (s < 60) return t('just now'); if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) }); if (s < 86400) return t('{n} h ago', { n: Math.round(s / 3600) }); return t('{n} d ago', { n: Math.round(s / 86400) }); };
@@ -347,7 +348,7 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
           </ul>
         )}
         <div className="settings-actions">
-          <button type="button" className="primary" disabled={!!busy} onClick={() => run(t('Could not make invite'), async () => { const r = await jf.createInvite(); setInvite({ ...r, url: `${jf.baseUrl}/?invite=${encodeURIComponent(r.code)}` }); })}>{t('New invite link')}</button>
+          <button type="button" className="primary" disabled={!!busy} onClick={() => run(t('Could not make invite'), async () => { const r = await jf.createInvite(); setInvite({ ...r, url: `${window.slopifyShell?.main ? linkBase() : jf.baseUrl}/?invite=${encodeURIComponent(r.code)}` }); })}>{t('New invite link')}</button>
           {invite && (
             <>
               <input className="settings-input" readOnly value={invite.url} onFocus={(e) => e.target.select()} />

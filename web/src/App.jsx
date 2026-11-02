@@ -23,9 +23,9 @@ import { readLib, getActive as downloading } from './offline/store.js';
 import { clientLog } from './api/clientLog.js';
 
 // The browser build is same-origin. The desktop app has no server of its
-// own: its sign-in form starts at the address it was built with
-// (VITE_SLOPIFY_SERVER, set by the release build) and remembers the one
-// signed in to.
+// own: its sign-in form asks for yours (empty in release builds; a self-built
+// app can suggest one with VITE_SLOPIFY_SERVER) and remembers the one signed
+// in to.
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const DEFAULT_SERVER = IS_DESKTOP
   ? (import.meta.env.VITE_SLOPIFY_SERVER || '')
@@ -1137,6 +1137,32 @@ export default function App() {
     try { rn.postMessage(JSON.stringify({ type: 'session', remote: remoteSession, playing: !!player.playing, volume: Math.round(player.volume ?? 0), device: player.nowPlaying?.device?.name || null })); } catch { /* shell gone */ }
     return undefined;
   }, [remoteSession, !!player.playing, Math.round(player.volume ?? 0), player.nowPlaying?.device?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The phone app (mobile/App.js) moves this page to the server's other
+  // address without a reload when home Wi-Fi comes or goes. Same server, same
+  // sign-in: the API, the relay and, when the old address is gone, the song
+  // playing now carry on from the new one. The app hears 'moved' back; a page
+  // that cannot (signed out, an older build) is reloaded there instead.
+  const jfRef = useRef(jf); jfRef.current = jf;
+  useEffect(() => {
+    const rn = window.ReactNativeWebView;
+    if (!rn) return undefined;
+    try { rn.postMessage(JSON.stringify({ type: 'caps', move: 1 })); } catch { /* shell gone */ }
+    const onMove = (e) => {
+      const base = String(e.detail?.base || '').replace(/\/+$/, '');
+      const cur = jfRef.current;
+      if (!cur || !base) return;
+      const old = cur.baseUrl;
+      if (base !== old) {
+        cur.baseUrl = base;
+        playerRef.current.relay?.moveTo?.(base);
+        if (e.detail?.lost) playerRef.current.rehome?.(old);
+        clientLog(`server moved: ${old} -> ${base}${e.detail?.lost ? ' (the old one is gone)' : ''}`);
+      }
+      try { rn.postMessage(JSON.stringify({ type: 'moved', base })); } catch { /* shell gone */ }
+    };
+    window.addEventListener('slopify:server', onMove);
+    return () => window.removeEventListener('slopify:server', onMove);
+  }, []);
   useEffect(() => {
     if (!window.ReactNativeWebView) return undefined;
     const onStep = (e) => {

@@ -39,7 +39,10 @@ export function usePhone() {
 // with an account here (/?album=<id>, /?artist=<id>, /?track=<id>; App opens
 // it after sign-in). Phones get the system share sheet, desktops a copied
 // link and a toast. Playlists are not shareable: they would need permissions.
-export const shareUrl = (kind, id) => { const u = new URL('/', window.location.origin); u.searchParams.set(kind, id); return u.toString(); };
+// Links others open: in the phone app, the server's main address (the page
+// may be on its home-network one, which means nothing to anyone else).
+export const linkBase = () => String(window.slopifyShell?.main || window.location.origin).replace(/\/+$/, '');
+export const shareUrl = (kind, id) => { const u = new URL(`${linkBase()}/`); u.searchParams.set(kind, id); return u.toString(); };
 export async function shareItem({ kind, id, title, by }) {
   const url = shareUrl(kind, id);
   const toast = (m) => window.dispatchEvent(new CustomEvent('slopify:toast', { detail: m }));

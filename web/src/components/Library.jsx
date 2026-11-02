@@ -831,7 +831,7 @@ export default function Library({
             {SHELL_SERVERS && (<>
               <h2>{t('Server')}</h2>
               <button className="setrow" onClick={openServers}>
-                <span className="setrow-text"><b>{t('Server address')}</b><small>{window.location.host}</small></span>
+                <span className="setrow-text"><b>{t('Server address')}</b><small>{(jf?.baseUrl || window.location.origin).replace(/^https?:\/\//, '')}</small></span>
                 <Chev />
               </button>
             </>)}
@@ -993,7 +993,7 @@ export default function Library({
             {SHELL_SERVERS && (
               <section className="settings-section">
                 <h2>{t('Server')}</h2>
-                <div className="settings-hint" style={{ marginBottom: 12 }}>{window.location.host}</div>
+                <div className="settings-hint" style={{ marginBottom: 12 }}>{(jf?.baseUrl || window.location.origin).replace(/^https?:\/\//, '')}</div>
                 <button className="btn-secondary" onClick={openServers}>{t('Server address')}</button>
               </section>
             )}

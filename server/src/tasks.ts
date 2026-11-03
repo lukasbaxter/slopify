@@ -276,6 +276,7 @@ export type ChoreOptions = {
   discoveryPerRun: number;
   backlogEveryH: number; backlogPerRun: number; backlogArtistsPerRun: number;
   flacPerRun: number;
+  indexerFallback?: boolean;
   slskdUrl?: string; slskdKey?: string; slskdDownloadsDir?: string;
   soularr?: Soularr;
   fetcher?: typeof fetch;
@@ -713,6 +714,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     description: 'Give up on albums that never turn up or keep arriving as the wrong album, and clear spent files from the download folder',
     settings: [
       { key: 'giveUpH', label: 'Give up after', type: 'number', min: 1, max: 24 * 14, unit: 'hours', default: 12, help: 'With no new song in this long an album comes off the wanted list. Retry puts it back.' },
+      { key: 'fallback', label: "Try Lidarr's indexers first", type: 'toggle', default: o.indexerFallback ?? true, help: "Before giving up on an album Soulseek never found, search it once with the indexers set up in Lidarr (torrents, usenet). Off: Soulseek only." },
       { key: 'clean', label: 'Clear spent downloads', type: 'toggle', default: true },
     ],
     run: async (ctx) => {
@@ -723,8 +725,8 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         // "not found". Without its log, the clock runs from the queueing.
         const st = o.soularr?.enabled ? o.soularr.status() : null;
         const searchedAt = st ? (artist: string, title: string) => (st.searches.get(searchKey(artist, title)) ?? st.searches.get(searchKey('', title)))?.at ?? null : null;
-        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log, searchedAt });
-        out.push(`${r.watching} wanted${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
+        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log, searchedAt, fallback: ctx.setting<boolean>('fallback') });
+        out.push(`${r.watching} wanted${r.handedOver.length ? `, ${r.handedOver.length} handed to Lidarr's indexers` : ''}${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
       } else out.push('Lidarr is not configured');
       if (o.slskdDownloadsDir && ctx.setting('clean')) {
         // Never inside (or around) the library, the drop folder, the state or

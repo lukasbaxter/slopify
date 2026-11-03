@@ -458,6 +458,13 @@ export function lidarrClient(opts: LidarrOptions) {
       cache.delete('activity');
     },
 
+    // Ask Lidarr's own indexers (whatever the host set up: torrents,
+    // usenet) for an album, without touching its monitored state.
+    async searchIndexers(albumId: number) {
+      await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) });
+      cache.delete('activity');
+    },
+
     // Stop wanting an album (the watcher gave up on it): off the wanted
     // list, so the Soulseek watcher stops searching for it.
     async unmonitor(albumId: number) {

@@ -274,6 +274,11 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE download_watch ADD COLUMN searched_at INTEGER;
   `,
+  // 32: when the watcher handed an album Soulseek could not find to Lidarr's
+  // own indexers (torrents, usenet) instead of giving up on it.
+  `
+  ALTER TABLE download_watch ADD COLUMN fallback_at INTEGER;
+  `,
 ];
 
 export type DB = Database.Database;

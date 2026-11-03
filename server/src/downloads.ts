@@ -190,7 +190,9 @@ export const WRONG_ROUNDS = 2;
 // log), or null. Given, "nothing found" only counts from the first search
 // seen after the album was queued; an album still waiting its turn is never
 // given up. Without it (no Soularr log) the clock runs from the queueing.
-export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void; searchedAt?: ((artist: string, title: string) => number | null) | null }) {
+// fallback: an album Soulseek never found goes to Lidarr's own indexers
+// once (one more give-up period) before it is given up.
+export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void; searchedAt?: ((artist: string, title: string) => number | null) | null; fallback?: boolean }) {
   const now = opts.now ?? Date.now();
   const log = opts.log ?? (() => {});
   const rows = await lidarr.all();
@@ -199,6 +201,8 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
   const prog = db.prepare('UPDATE download_watch SET done = ?, progress_at = ? WHERE lidarr_id = ?');
   const quit = db.prepare('UPDATE download_watch SET gave_up = ?, reason = ? WHERE lidarr_id = ?');
   const markSearched = db.prepare('UPDATE download_watch SET searched_at = ? WHERE lidarr_id = ?');
+  const markFallback = db.prepare('UPDATE download_watch SET fallback_at = ? WHERE lidarr_id = ?');
+  const handedOver: string[] = [];
   // Albums someone is (or the watcher is) waiting on: imports into these
   // are expected, never "the wrong album".
   const wantedIds = new Set(rows.filter((a) => a.monitored).map((a) => a.id));
@@ -237,7 +241,20 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
         }
         since = s == null ? null : Math.max(s, w.progress_at);
       }
-      if (since != null && now - since > opts.giveUpMs) reason = `nothing matching found on Soulseek in ${hours(now - since)}`;
+      if (w.fallback_at != null) {
+        if (now - w.fallback_at > opts.giveUpMs) reason = `nothing found on Soulseek, nor by Lidarr's indexers in ${hours(now - w.fallback_at)}`;
+      } else if (since != null && now - since > opts.giveUpMs) {
+        if (opts.fallback && lidarr.searchIndexers) {
+          try {
+            await lidarr.searchIndexers(a.id);
+            markFallback.run(now, a.id);
+            handedOver.push(`${a.artist} - ${a.title}`);
+            log(`${a.artist} - ${a.title}: nothing on Soulseek in ${hours(now - since)}, asked Lidarr's indexers`);
+            continue;
+          } catch (e: any) { log(`${a.artist} - ${a.title}: indexer search failed: ${e.message}`); }
+        }
+        reason = `nothing matching found on Soulseek in ${hours(now - since)}`;
+      }
     }
     if (!reason) continue;
     try { await lidarr.unmonitor(a.id); } catch (e: any) { log(`${a.artist} - ${a.title}: could not unmonitor: ${e.message}`); continue; }
@@ -250,7 +267,7 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
   for (const r of db.prepare('SELECT lidarr_id FROM download_watch WHERE gave_up IS NULL').all() as any[]) {
     if (!keep.has(r.lidarr_id)) db.prepare('DELETE FROM download_watch WHERE lidarr_id = ?').run(r.lidarr_id);
   }
-  return { watching, gaveUp };
+  return { watching, gaveUp, handedOver };
 }
 
 // Release groups the watcher gave up on: the chores must not queue them again.

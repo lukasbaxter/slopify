@@ -150,6 +150,9 @@ export const config = {
     backlogPerRun: Number(env('BACKLOG_PER_RUN', '10')),
     backlogArtistsPerRun: Number(env('BACKLOG_ARTISTS_PER_RUN', '5')),
     flacPerRun: Number(env('FLAC_PER_RUN', '40')),
+    // Watch downloads: an album Soulseek never found is searched once with
+    // Lidarr's own indexers before it is given up (the task's toggle default).
+    indexerFallback: env('DOWNLOADS_INDEXER_FALLBACK', '1') !== '0',
   },
   // Lyric alignment on the GPU (the "Sync lyrics" task). Only the gpu image
   // ships the Python side; elsewhere the task says so and stands down.

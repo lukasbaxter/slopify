@@ -56,7 +56,8 @@ with their defaults: **Scan library** (daily 04:00; can also watch the
 folder and scan two minutes after files change), **Fetch lyrics & artwork**
 (hourly, `ENRICH_EVERY_H`), **Cut song heads** (daily 05:00, when
 `HEADS=1`), **Discover new music** (Sundays 06:00 — an album each from
-artists similar to your most played, via Deezer + Lidarr,
+artists similar to your most played, via Deezer + Lidarr, then from
+Deezer's genre charts, the genres your library has least of first,
 `DISCOVERY_PER_RUN`), and **Fill in discographies** (every 6 h,
 `BACKLOG_EVERY_H`/`BACKLOG_PER_RUN`/`BACKLOG_ARTISTS_PER_RUN` — missing
 studio albums and EPs of the artists you actually play). The background
@@ -69,7 +70,17 @@ Soularr retries every wanted album forever, and cannot tell when Lidarr
 filed what it fetched under a different album of the same artist. This task
 takes an album off the wanted list (unmonitors it in Lidarr) when its
 downloads keep landing in another album, or when no new song has arrived
-for the "Give up after" setting (12 h by default). The Downloads page shows
+for the "Give up after" setting (12 h by default). With `SOULARR_LOG` set,
+that clock starts at Soularr's first search for the album, not when it was
+queued, so a long wanted list never loses albums that were still waiting
+their turn. **Try Lidarr's indexers first** (on by default,
+`DOWNLOADS_INDEXER_FALLBACK=0` to start it off): an album Soulseek never
+found is searched once with the indexers you set up in Lidarr (torrents,
+usenet) and gets one more give-up period before it is dropped. Soulseek
+stays first, so the two never fetch the same album at once: an album
+Lidarr grabbed sits in its queue, and Soularr skips queued albums. With no
+indexers in Lidarr the search finds nothing and the album is given up as
+before. The Downloads page shows
 it under Failed with the reason; Retry or a new Request puts it back, and
 the discovery/backlog chores skip it. With `SLSKD_DOWNLOADS_DIR` set it also
 clears spent folders from slskd's download folder (empty ones after an
@@ -82,6 +93,25 @@ setting the three slskd envs (`SLSKD_URL`, `SLSKD_API_KEY`,
 lossy files in your library** with lossless ones as it finds them. If you
 want slskd for Weekly Exploration but not that, set the task to Off in the
 Tasks UI.
+
+## Using torrents safely
+
+Lidarr only imports audio files that match the release it wanted (track
+count, titles, lengths), so a mislabelled torrent fails the import instead
+of reaching your library. Junk can still land on your disk on the way, so
+set these up before you add torrent indexers:
+
+- **qBittorrent** (Options → Downloads → Excluded file names): never write
+  files that are not music. A good list: `*.exe, *.scr, *.bat, *.cmd, *.msi,
+  *.lnk, *.vbs, *.js, *.ps1, *.jar, *.apk, *.dll, *.com, *.pif, *.iso,
+  *.zip, *.zipx, *.rar, *.7z, *.r[0-9][0-9]`. Real music releases are loose
+  files; a "password protected archive" album is a classic lure.
+- **Lidarr, each indexer** (Settings → Indexers): Minimum Seeders around 5.
+  Fake uploads rarely have real seeders.
+- **Lidarr, Settings → Profiles → Release Profiles**: "Must not contain"
+  `transcode, upconvert, upsampled, lossy` keeps fake lossless out.
+- **Seeding limits** in qBittorrent (a ratio or a time), so finished
+  torrents stop instead of seeding forever.
 
 Every task's ⋯ menu holds its own settings (pace, how much per run, which
 parts to fetch, ...). They are saved in the database and apply from the

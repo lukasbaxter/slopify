@@ -211,6 +211,31 @@ describe('downloads', () => {
     expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 6').get() as any).reason).toBe('nothing matching found on Soulseek in 13 hours');
   });
 
+  it('watcher: with the fallback on, Soulseek misses go to Lidarr\'s indexers once before giving up', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw5-')));
+    const t0 = 1_800_000_000_000; const H = 3600e3;
+    let monitored = true; const searched: number[] = [];
+    const lidarr: any = {
+      enabled: true,
+      all: async () => (monitored ? [album({ id: 7, album_id: 'mb7', done: 0, total: 10 })] : []),
+      importsSince: async () => [],
+      searchIndexers: async (id: number) => { searched.push(id); },
+      unmonitor: async () => { monitored = false; },
+    };
+    const searchedAt = () => t0 + H;
+    const o = { giveUpMs: 12 * H, searchedAt, fallback: true };
+    await watchDownloads(db, lidarr, { ...o, now: t0 });
+    const r1 = await watchDownloads(db, lidarr, { ...o, now: t0 + 14 * H });
+    expect(r1).toMatchObject({ gaveUp: [], handedOver: ['A - T'] });
+    expect(searched).toEqual([7]);
+    // one more give-up period for the indexers, never a second search
+    expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 20 * H })).gaveUp).toEqual([]);
+    const r2 = await watchDownloads(db, lidarr, { ...o, now: t0 + 27 * H });
+    expect(r2.gaveUp).toEqual(['A - T']);
+    expect(searched).toEqual([7]);
+    expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 7').get() as any).reason).toBe("nothing found on Soulseek, nor by Lidarr's indexers in 13 hours");
+  });
+
   it('staging cleanup: spent and empty folders go, fresh downloads and failed imports stay', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-stg-'));
     const now = Date.now();

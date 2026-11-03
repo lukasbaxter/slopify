@@ -36,6 +36,14 @@ describe('play tracker', () => {
     const d = run([[0, { itemId: 'a', playing: true, position: 0, duration: 180 }], [4000, { itemId: 'a', playing: true, position: 4, duration: 180 }]], true);
     expect(d[0]).toMatchObject({ reason: 'stopped', track_id: 'a' });
   });
+  it('a paused song a parked tab reports on each reconnect is no event at all', () => {
+    const paused = { itemId: 'a', playing: false, position: 178.9, duration: 331 };
+    expect(run([[0, paused], [2000, paused]], true)).toEqual([]);
+    expect(run([[0, paused], [2000, { itemId: 'b', playing: false, position: 0, duration: 200 }]])).toEqual([]);
+    // paused, then played: a real listen
+    const e = run([[0, paused], [2000, { ...paused, playing: true }], [4000, { ...paused, playing: true, position: 180.9 }]], true);
+    expect(e[0]).toMatchObject({ reason: 'stopped', track_id: 'a', ms_played: 2000 });
+  });
   it('a long silence between reports (a sleeping phone) is not listening', () => {
     const e = run([[0, { itemId: 'a', playing: true, position: 0, duration: 600 }], [3600000, { itemId: 'b', playing: true, position: 0 }]]);
     expect(e[0].ms_played).toBeLessThanOrEqual(15000);

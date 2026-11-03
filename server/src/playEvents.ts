@@ -12,7 +12,7 @@ export type PlayEvent = {
   user_id: string; track_id: string; at: number; ms_played: number; end_ms: number;
   duration_ms: number | null; reason: 'ended' | 'skipped' | 'stopped'; shuffle: string | null; client: string;
 };
-type Cur = { uid: string; client: string; id: string; at: number; played: number; pos: number; dur: number | null; playing: boolean; seen: number; shuffle: string | null };
+type Cur = { uid: string; client: string; id: string; at: number; played: number; pos: number; dur: number | null; playing: boolean; seen: number; shuffle: string | null; started: boolean };
 
 // Near the end counts as ended: the last seconds are often a fade, and a
 // report lands every 2 s.
@@ -26,6 +26,9 @@ export function playTracker(save: (e: PlayEvent) => void, now: () => number = Da
   const finish = (key: string, why: 'next' | 'stop') => {
     const c = cur.get(key); if (!c) return;
     cur.delete(key);
+    // Never played on this connection: a paused song a parked tab reports
+    // each time it reconnects, not a listen that stopped.
+    if (!c.started) return;
     const nearEnd = c.dur != null && c.dur > 0 && c.pos >= c.dur - ENDED_WITHIN_MS;
     save({
       user_id: c.uid, track_id: c.id, at: c.at, ms_played: Math.round(c.played), end_ms: Math.round(c.pos),
@@ -43,8 +46,8 @@ export function playTracker(save: (e: PlayEvent) => void, now: () => number = Da
       const pos = Math.max(0, Number(np!.position) || 0) * 1000;
       const dur = Number(np!.duration) > 0 ? Number(np!.duration) * 1000 : durationOf?.(id) ?? null;
       const same = cur.get(key);
-      if (same) { same.pos = pos; same.playing = !!np!.playing; same.seen = t; same.dur = dur ?? same.dur; if (np!.shuffle) same.shuffle = String(np!.shuffle); return; }
-      cur.set(key, { uid, client, id, at: t - pos, played: 0, pos, dur, playing: !!np!.playing, seen: t, shuffle: np!.shuffle ? String(np!.shuffle) : null });
+      if (same) { same.pos = pos; same.playing = !!np!.playing; same.started ||= same.playing; same.seen = t; same.dur = dur ?? same.dur; if (np!.shuffle) same.shuffle = String(np!.shuffle); return; }
+      cur.set(key, { uid, client, id, at: t - pos, played: 0, pos, dur, playing: !!np!.playing, seen: t, shuffle: np!.shuffle ? String(np!.shuffle) : null, started: !!np!.playing });
     },
     // Connections playing right now (reported within the gap).
     live() { const t = now(); let n = 0; for (const c of cur.values()) if (c.playing && t - c.seen < MAX_GAP_MS) n++; return n; },

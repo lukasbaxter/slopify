@@ -2763,7 +2763,15 @@ export function usePlayer(jf) {
     const t = setTimeout(() => { mediaLog('lock screen hold: 2 h without music, letting go'); setStayTick((n) => n + 1); }, left + 100);
     return () => clearTimeout(t);
   }, [shownPlaying]);
-  const staying = (IN_PHONE_APP || IN_STANDALONE) && IS_IOS && (msLocal || msRemote) && Date.now() < stayUntilRef.current;
+  // Music another phone or tablet plays itself (not cast to a speaker): no
+  // stand-in here. That device is likely on the AirPods, and the stand-in
+  // starting on this one (its silence is "playing" to iOS) made the AirPods
+  // switch over to it, which paused the music on the other device: play on
+  // the iPhone, AirPods jump to the iPad, music stops, round and round
+  // (11-03). Apple's own players leave another device's music alone too.
+  const onOtherHandheld = !!activePlayer && activePlayer.kind !== 'server' && (activePlayer.form === 'phone' || activePlayer.form === 'tablet')
+    && (!relayTarget?.device || relayTarget.device.kind === 'local');
+  const staying = (IN_PHONE_APP || IN_STANDALONE) && IS_IOS && (msLocal || msRemote) && !onOtherHandheld && Date.now() < stayUntilRef.current;
   // The stand-in plays for a session playing elsewhere, and (phone app, within
   // the 2 hours) whenever this phone is not making the sound itself.
   // A download running (api/offline.js) on a phone: without sound iOS
@@ -2771,7 +2779,7 @@ export function usePlayer(jf) {
   // stand-in plays while this phone is not playing music itself.
   const downloading = useDownloadActive();
   const downloadHold = !!downloading && (IS_IOS || IS_ANDROID) && !(msLocal && shownPlaying);
-  const standIn = (msRemote && shownPlaying) || (staying && !(msLocal && shownPlaying)) || downloadHold;
+  const standIn = (msRemote && shownPlaying && !onOtherHandheld) ||(staying && !(msLocal && shownPlaying)) || downloadHold;
   // Held by the stand-in while paused (silent media keeps the lock screen).
   // Only its play button acts; a pause there just re-syncs the icon.
   const holding = standIn && !shownPlaying;

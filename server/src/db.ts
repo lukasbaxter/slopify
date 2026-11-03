@@ -268,6 +268,12 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, artist_id)
   );
   `,
+  // 31: when Soularr first searched a watched album. The give-up clock for
+  // "nothing found" starts there, not when the album was queued: a big batch
+  // sits in line for many hours before its first search.
+  `
+  ALTER TABLE download_watch ADD COLUMN searched_at INTEGER;
+  `,
 ];
 
 export type DB = Database.Database;

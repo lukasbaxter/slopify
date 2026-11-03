@@ -186,6 +186,31 @@ describe('downloads', () => {
     expect(givenUp(db).size).toBe(0);
   });
 
+  it('watcher: "nothing found" counts from the first Soulseek search, never while the album waits its turn', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw4-')));
+    const t0 = 1_800_000_000_000; const H = 3600e3;
+    let monitored = true;
+    const lidarr: any = {
+      enabled: true,
+      all: async () => (monitored ? [album({ id: 6, album_id: 'mb6', done: 0, total: 10 })] : []),
+      importsSince: async () => [],
+      unmonitor: async () => { monitored = false; },
+    };
+    let searched: number | null = t0 - 5 * H; // an old search from before it was queued does not count
+    const searchedAt = () => searched;
+    await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0, searchedAt });
+    // a day in line, never searched: still wanted
+    expect((await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 24 * H, searchedAt })).gaveUp).toEqual([]);
+    searched = t0 + 30 * H;
+    expect((await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 31 * H, searchedAt })).gaveUp).toEqual([]);
+    // the first search sticks even after it rotates out of the log
+    searched = null;
+    expect((await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 41 * H, searchedAt })).gaveUp).toEqual([]);
+    const r = await watchDownloads(db, lidarr, { giveUpMs: 12 * H, now: t0 + 43 * H, searchedAt });
+    expect(r.gaveUp).toEqual(['A - T']);
+    expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 6').get() as any).reason).toBe('nothing matching found on Soulseek in 13 hours');
+  });
+
   it('staging cleanup: spent and empty folders go, fresh downloads and failed imports stay', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-stg-'));
     const now = Date.now();

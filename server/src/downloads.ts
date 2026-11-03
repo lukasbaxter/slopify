@@ -186,7 +186,11 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?:
 // clears it (recordRequest), and the chores skip given-up albums.
 export const WRONG_ROUNDS = 2;
 
-export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void }) {
+// searchedAt: when the Soulseek watcher last searched an album (from its
+// log), or null. Given, "nothing found" only counts from the first search
+// seen after the album was queued; an album still waiting its turn is never
+// given up. Without it (no Soularr log) the clock runs from the queueing.
+export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void; searchedAt?: ((artist: string, title: string) => number | null) | null }) {
   const now = opts.now ?? Date.now();
   const log = opts.log ?? (() => {});
   const rows = await lidarr.all();
@@ -194,6 +198,7 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
   const ins = db.prepare('INSERT INTO download_watch (lidarr_id, album_id, first_seen, done, progress_at) VALUES (?, ?, ?, ?, ?)');
   const prog = db.prepare('UPDATE download_watch SET done = ?, progress_at = ? WHERE lidarr_id = ?');
   const quit = db.prepare('UPDATE download_watch SET gave_up = ?, reason = ? WHERE lidarr_id = ?');
+  const markSearched = db.prepare('UPDATE download_watch SET searched_at = ? WHERE lidarr_id = ?');
   // Albums someone is (or the watcher is) waiting on: imports into these
   // are expected, never "the wrong album".
   const wantedIds = new Set(rows.filter((a) => a.monitored).map((a) => a.id));
@@ -221,9 +226,19 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
       const worst = [...elsewhere.values()].sort((x, y) => y.rounds.size - x.rounds.size)[0];
       if (worst && worst.rounds.size >= WRONG_ROUNDS) reason = `downloads kept turning out to be a different album ("${worst.album}")`;
     }
-    if (!reason && now - w.progress_at > opts.giveUpMs) reason = a.done > 0
-      ? `stopped at ${a.done} of ${a.total} songs, nothing new for ${hours(now - w.progress_at)}`
-      : `nothing matching found on Soulseek in ${hours(now - w.progress_at)}`;
+    if (!reason && a.done > 0 && now - w.progress_at > opts.giveUpMs) reason = `stopped at ${a.done} of ${a.total} songs, nothing new for ${hours(now - w.progress_at)}`;
+    if (!reason && a.done === 0) {
+      let since: number | null = w.progress_at;
+      if (opts.searchedAt) {
+        let s: number | null = w.searched_at ?? null;
+        if (s == null) {
+          const at = opts.searchedAt(a.artist, a.title);
+          if (at != null && at >= w.first_seen) { s = at; markSearched.run(at, a.id); }
+        }
+        since = s == null ? null : Math.max(s, w.progress_at);
+      }
+      if (since != null && now - since > opts.giveUpMs) reason = `nothing matching found on Soulseek in ${hours(now - since)}`;
+    }
     if (!reason) continue;
     try { await lidarr.unmonitor(a.id); } catch (e: any) { log(`${a.artist} - ${a.title}: could not unmonitor: ${e.message}`); continue; }
     quit.run(now, reason, a.id);

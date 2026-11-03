@@ -122,12 +122,14 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerReports(app, db, { version: VERSION });
   app.decorate('ai', registerAi(app, db));
   registerSpotifyImport(app, db, dataDir, { lidarr });
-  registerDownloads(app, db, { lidarr, soularr: soularrClient(config.soularr) });
+  const soularr = soularrClient(config.soularr);
+  registerDownloads(app, db, { lidarr, soularr });
   registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
   registerTasks(app, db, [...builtinTasks(app, {
     db, lidarr, cacheDir, musicDir,
     headsEnabled: config.headsEnabled, headSeconds: config.headSeconds, pauseMs: config.scanPauseMs,
     slskdUrl: config.slskdUrl || undefined, slskdKey: config.slskdKey || undefined, slskdDownloadsDir: config.slskdDownloadsDir || undefined,
+    soularr,
     ...config.tasks,
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,

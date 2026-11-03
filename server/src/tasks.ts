@@ -277,11 +277,13 @@ export type ChoreOptions = {
   backlogEveryH: number; backlogPerRun: number; backlogArtistsPerRun: number;
   flacPerRun: number;
   slskdUrl?: string; slskdKey?: string; slskdDownloadsDir?: string;
+  soularr?: Soularr;
   fetcher?: typeof fetch;
 };
 
 // A file replaced is a new track id (ids are the audio's own hash): carry
 // the listener's traces over and drop what belonged to the old bytes.
+import { searchKey, type Soularr } from './soularr.js';
 import { remapTrackId } from './remap.js';
 import { decodeLength } from './damage.js';
 export { remapTrackId };
@@ -430,7 +432,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const discovery: TaskDef = {
     id: 'discovery', name: 'Discover new music', schedule: { mode: 'weekly', day: 0, at: '06:00' },
     settings: [{ key: 'perRun', label: 'Albums per run', type: 'number', min: 1, max: 50, default: o.discoveryPerRun }],
-    description: 'Queue an album each from artists similar to the most played ones that the library lacks',
+    description: 'Queue an album each from artists similar to the most played ones that the library lacks, then from the genre charts the library has least of',
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
@@ -440,38 +442,68 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       for (const [k, t] of seen) if (Date.now() - t > 90 * 86400000) seen.delete(k);
       const haveArtist = db.prepare('SELECT 1 FROM artists WHERE name = ? COLLATE NOCASE');
       let n = 0, full = false;
-      for (const top of topPlayedArtists(180 * 86400000, 30)) {
+      // One candidate artist: its best album, queued if Lidarr knows it.
+      const consider = async (cand: { id: number; name: string }, why: string) => {
+        if (haveArtist.get(cand.name) || seen.has(norm(cand.name))) return;
+        const albums = await deezer(`/artist/${cand.id}/albums?limit=15`);
+        const best = (albums.data || []).find((a: any) => a.record_type === 'album');
+        if (!best) { seen.set(norm(cand.name), Date.now()); return; }
+        const found = await lidarr.search(`${cand.name} ${best.title}`);
+        // Only now was the candidate really evaluated: marked seen any
+        // earlier, a thrown Deezer/Lidarr call would bury it for 90 days
+        // without it ever having had its chance.
+        seen.set(norm(cand.name), Date.now());
+        const hit = found.find((r) => norm(r.artist) === norm(cand.name) && norm(r.title) === norm(best.title)) || found.find((r) => norm(r.artist) === norm(cand.name));
+        if (!hit || releaseInLibrary(db, hit.artist, hit.title) || givenUp(db).has(hit.album_id)) return;
+        const req = await lidarr.request(hit.album_id);
+        if (req.status === 'queued') {
+          n++; ctx.log(`${hit.artist} - ${hit.title} (${why})`);
+          // See room(): a concurrent run may be filling the list too.
+          if (n % 5 === 0 && (await room(lidarr, o.wantedTarget)) <= 0) full = true;
+        }
+      };
+      const stop = (e: any, where: string) => {
+        if (e.deezer) { kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen))); throw new Error(`${e.message}; stopped after ${n} queued`); }
+        ctx.log(`${where}: ${e.message}`);
+      };
+      // Around what gets played: the most played artists of the last year
+      // and their related artists. A wide circle, or a library that already
+      // has the close neighbours runs dry within days.
+      for (const top of topPlayedArtists(365 * 86400000, 200)) {
         if (n >= cap || full) break;
         ctx.step(`Around ${top.name}`, n / cap);
         try {
           const s = await deezer(`/search/artist?q=${encodeURIComponent(top.name)}&limit=3`);
           const dz = (s.data || []).find((x: any) => norm(x.name) === norm(top.name));
           if (!dz) continue;
-          const rel = await deezer(`/artist/${dz.id}/related?limit=10`);
+          const rel = await deezer(`/artist/${dz.id}/related?limit=25`);
           for (const cand of rel.data || []) {
-            if (n >= cap) break;
-            if (haveArtist.get(cand.name) || seen.has(norm(cand.name))) continue;
-            const albums = await deezer(`/artist/${cand.id}/albums?limit=15`);
-            const best = (albums.data || []).find((a: any) => a.record_type === 'album');
-            if (!best) { seen.set(norm(cand.name), Date.now()); continue; }
-            const found = await lidarr.search(`${cand.name} ${best.title}`);
-            // Only now was the candidate really evaluated: marked seen any
-            // earlier, a thrown Deezer/Lidarr call would bury it for 90 days
-            // without it ever having had its chance.
-            seen.set(norm(cand.name), Date.now());
-            const hit = found.find((r) => norm(r.artist) === norm(cand.name) && norm(r.title) === norm(best.title)) || found.find((r) => norm(r.artist) === norm(cand.name));
-            if (!hit || releaseInLibrary(db, hit.artist, hit.title) || givenUp(db).has(hit.album_id)) continue;
-            const req = await lidarr.request(hit.album_id);
-            if (req.status === 'queued') {
-              n++; ctx.log(`${hit.artist} - ${hit.title} (similar to ${top.name})`);
-              // See room(): a concurrent run may be filling the list too.
-              if (n % 5 === 0 && (await room(lidarr, o.wantedTarget)) <= 0) { full = true; break; }
-            }
+            if (n >= cap || full) break;
+            await consider(cand, `similar to ${top.name}`);
           }
-        } catch (e: any) {
-          if (e.deezer) { kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen))); throw new Error(`${e.message}; stopped after ${n} queued`); }
-          ctx.log(`${top.name}: ${e.message}`);
-        }
+        } catch (e: any) { stop(e, top.name); }
+      }
+      // Then breadth: Deezer's chart artists per genre, the genres this
+      // library has least of first.
+      if (n < cap && !full) {
+        try {
+          const have = new Map((db.prepare('SELECT lower(genre) g, COUNT(*) c FROM albums WHERE genre IS NOT NULL GROUP BY 1').all() as any[]).map((r) => [r.g, r.c as number]));
+          const count = (name: string) => Math.min(...name.toLowerCase().split(/[\/&]| and /).map((w) => w.trim()).filter(Boolean)
+            .map((w) => [...have].filter(([g]) => g.includes(w) || w.includes(g)).reduce((a, [, c]) => a + c, 0)));
+          const genres = ((await deezer('/genre')).data || []).filter((g: any) => g.id > 0).sort((a: any, b: any) => count(a.name) - count(b.name));
+          for (const g of genres) {
+            if (n >= cap || full) break;
+            ctx.step(`${g.name} charts`, n / cap);
+            try {
+              const chart = await deezer(`/chart/${g.id}/artists?limit=50`);
+              let fromGenre = 0;
+              for (const cand of chart.data || []) {
+                if (n >= cap || full || fromGenre >= 3) break; // spread a run across genres
+                const before = n; await consider(cand, `${g.name} charts`); fromGenre += n - before;
+              }
+            } catch (e: any) { stop(e, g.name); }
+          }
+        } catch (e: any) { stop(e, 'genres'); }
       }
       kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen)));
       return n ? `${n} albums queued from artists similar to what gets played` : 'nothing new worth queueing';
@@ -687,7 +719,11 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       const out: string[] = [];
       if (o.lidarr?.enabled) {
         ctx.step('Checking the wanted list');
-        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log });
+        // Soularr's log says which albums it has searched: only those can be
+        // "not found". Without its log, the clock runs from the queueing.
+        const st = o.soularr?.enabled ? o.soularr.status() : null;
+        const searchedAt = st ? (artist: string, title: string) => (st.searches.get(searchKey(artist, title)) ?? st.searches.get(searchKey('', title)))?.at ?? null : null;
+        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log, searchedAt });
         out.push(`${r.watching} wanted${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
       } else out.push('Lidarr is not configured');
       if (o.slskdDownloadsDir && ctx.setting('clean')) {

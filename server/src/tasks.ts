@@ -489,7 +489,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       if (n < cap && !full) {
         try {
           const have = new Map((db.prepare('SELECT lower(genre) g, COUNT(*) c FROM albums WHERE genre IS NOT NULL GROUP BY 1').all() as any[]).map((r) => [r.g, r.c as number]));
-          const count = (name: string) => Math.min(...name.toLowerCase().split(/[\/&]| and /).map((w) => w.trim()).filter(Boolean)
+          const count = (name: string) => Math.min(...name.toLowerCase().split(/[/&]| and /).map((w) => w.trim()).filter(Boolean)
             .map((w) => [...have].filter(([g]) => g.includes(w) || w.includes(g)).reduce((a, [, c]) => a + c, 0)));
           const genres = ((await deezer('/genre')).data || []).filter((g: any) => g.id > 0).sort((a: any, b: any) => count(a.name) - count(b.name));
           for (const g of genres) {

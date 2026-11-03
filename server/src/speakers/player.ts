@@ -90,7 +90,13 @@ export class ServerPlayer {
   constructor(public uid: string, private d: PlayerDeps) {}
 
   get current() { return this.queue[this.index] ?? null; }
-  get position() { return this.playing ? this.anchor.pos + (Date.now() - this.anchor.at) / 1000 : this.anchor.pos; }
+  // Held: told to play from `anchor.pos` (a start, a seek, a resume) but not
+  // heard there yet. The clock stays put until the speaker's own counter
+  // moves on from that spot (tick), so the lyrics, the visualizer and every
+  // screen start with the sound instead of running ahead of a speaker that
+  // is still loading (11-03: BluOS lagged a seek by a second or more).
+  held = false;
+  get position() { return this.playing && !this.held ? this.anchor.pos + (Date.now() - this.anchor.at) / 1000 : this.anchor.pos; }
   private rowsFor(ids: string[]): Row[] {
     return tracksByIds(this.d.db, ids).map((t: any) => ({
       Id: t.id, Name: t.title, Artists: t.artists, AlbumArtist: t.albumArtist, Album: t.album, AlbumId: t.albumId, RunTimeTicks: t.durationMs * 10000,
@@ -122,13 +128,14 @@ export class ServerPlayer {
       itemId: t.Id, title: t.Name, artist: t.Artists?.join(', ') || t.AlbumArtist || '', album: t.Album || null, artUrl: this.url(`/api/image/${t.AlbumId || t.Id}?size=128`),
       albumId: t.AlbumId || null, artistId: t.ArtistItems?.[0]?.Id || null, artists: t.ArtistItems || [], liked: !!t.UserData?.IsFavorite,
       device: { id: this.device.id, kind: this.device.kind, name: [this.device, ...this.members].map((d) => d.name).join(' + '), members: this.members.map((d) => d.id) }, queueIndex: this.index,
-      playing: this.playing, position: Math.max(0, this.position), duration: this.duration || t.RunTimeTicks / 10000000, volume: this.volume ?? 100, repeat: this.repeat, shuffle: this.shuffle, at: Date.now(),
+      playing: this.playing, held: this.playing && this.held, position: Math.max(0, this.position), duration: this.duration || t.RunTimeTicks / 10000000, volume: this.volume ?? 100, repeat: this.repeat, shuffle: this.shuffle, at: Date.now(),
     };
   }
   private report() { this.d.report(this.nowPlaying()); }
-  private setPos(pos: number, playing = this.playing) { this.anchor = { pos: Math.max(0, pos), at: Date.now() }; this.playing = playing; this.lastRead = null; }
-  // A deliberate move (a track start, a seek): the furthest point starts over.
-  private moveTo(pos: number, playing = this.playing) { this.reached = Math.max(0, pos); this.setPos(pos, playing); }
+  private setPos(pos: number, playing = this.playing) { this.anchor = { pos: Math.max(0, pos), at: Date.now() }; this.playing = playing; this.held = false; this.lastRead = null; }
+  // A deliberate move (a track start, a seek): the furthest point starts
+  // over, and a playing clock is held until the speaker is heard there.
+  private moveTo(pos: number, playing = this.playing) { this.reached = Math.max(0, pos); this.setPos(pos, playing); this.held = playing; }
 
   // Commands arrive fire-and-forget: run them one at a time so a second
   // command never interleaves with a transfer or seek still mid-flight.
@@ -399,7 +406,7 @@ export class ServerPlayer {
     // still flipping state.
     this.busyUntil = Date.now() + 2000;
     if (this.playing) { await this.transport.pause(); this.setPos(this.position, false); }
-    else { await this.transport.resume(); this.setPos(this.position, true); }
+    else { await this.transport.resume(); this.setPos(this.position, true); this.held = true; }
     this.report();
   }
   async seek(pos: number) {
@@ -607,6 +614,24 @@ export class ServerPlayer {
       this.tick().catch(() => {}).finally(() => { this.ticking = false; });
     }, every);
   }
+  // Held (see `held`): let the clock go once the speaker's counter moves on
+  // from where it was sent. A whole-second counter stepping up by one between
+  // two readings pins that moment to half a poll; a sub-second one (Cast)
+  // is heard once it is past the spot. Never heard in 15 s: its reading wins.
+  private release(s: { playing: boolean; position: number; coarse?: boolean; duration?: number }, readAt: number) {
+    const target = this.anchor.pos;
+    const prev = this.lastRead;
+    this.lastRead = { pos: s.position, at: readAt };
+    if (s.duration && s.duration > 0) this.duration = s.duration;
+    let heard = false;
+    if (s.playing && s.coarse) {
+      if (prev && s.position === prev.pos + 1 && s.position >= Math.round(target) + 1 && readAt - prev.at < 1500) { this.anchor = { pos: s.position, at: (prev.at + readAt) / 2 }; heard = true; }
+      else if (s.position >= Math.round(target) + 2) { this.anchor = { pos: s.position + 0.5, at: readAt }; heard = true; }
+    } else if (s.playing && s.position > target + 0.2) { this.anchor = { pos: s.position, at: readAt }; heard = true; }
+    if (heard) this.held = false;
+    else if (Date.now() - this.anchor.at > 15000) { this.setPos(s.position, s.playing); heard = true; }
+    if (heard) { this.lastTick = Date.now(); this.report(); }
+  }
   private stopPolling() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   private async tick() {
     if (!this.transport || this.starting || !this.current) return;
@@ -657,6 +682,12 @@ export class ServerPlayer {
     if (s.state === 'IDLE' || s.state === 'stop') {
       // Stopped from the speaker itself (or the stream failed): show it paused where it was.
       if (this.playing) { this.d.log(`speaker ${this.device?.name || '?'}: stopped at ${Math.round(this.position)}s of ${Math.round(this.duration)}s (reached ${Math.round(this.reached)}s), not the end: paused`); this.setPos(this.position, false); this.report(); }
+      return;
+    }
+    if (this.held) {
+      this.release(s, readAt);
+      // Still waiting: the once-a-second report goes on (volume, duration).
+      if (this.held && Date.now() - this.lastTick >= 1000) { this.lastTick = Date.now(); this.report(); }
       return;
     }
     // Lyrics follow this clock, so it has to match what is coming out of

@@ -21,6 +21,12 @@ async function openAlbum(page: Page, name: string) {
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
 }
 
+// Devices other tests left open (and their sessions) would be the account's
+// active player here: gone before and after each test.
+const closeAll = async ({ browser }: { browser: import('@playwright/test').Browser }) => { for (const c of browser.contexts()) await c.close().catch(() => {}); };
+test.beforeEach(closeAll);
+test.afterEach(closeAll);
+
 test('the desktop picks songs for the phone that is playing', async ({ browser }, info) => {
   test.skip(info.project.name !== 'chromium', 'two devices of its own');
   // The phone is WebKit with its real autoplay rules (an iPhone, Safari):

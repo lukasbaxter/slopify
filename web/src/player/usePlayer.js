@@ -33,6 +33,9 @@ import { isOffline } from '../offline/net.js';
 // The local device is always present and is not discovered over mDNS. Named
 // for the runtime: the desktop app IS the computer, the PWA is one web player
 // among possibly several (the relay numbers those for the OTHER clients).
+// Seconds an anchored clock has run by `now`: none while it is held (the
+// sound is not out yet, see anchorAt) or paused.
+const ranFor = (a, now = Date.now()) => (a.playing && !a.held ? Math.max(0, now - a.at) / 1000 : 0);
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
 const IN_PHONE_APP = typeof window !== 'undefined' && !!window.slopifyShell;
 const IN_TV_APP = IN_PHONE_APP && window.slopifyShell.deviceForm === 'tv';
@@ -512,14 +515,22 @@ export function usePlayer(jf) {
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { indexRef.current = index; }, [index]);
 
+  // A moved or released playhead is reported at once (the periodic report is 2 s apart).
+  const reportSoonRef = useRef(() => {});
+  reportSoonRef.current = () => setTimeout(() => { if (!relayNowRef.current?.() && relayRef.current && nowPlayingReportRef.current) relayRef.current.reportNowPlaying(nowPlayingReportRef.current()); }, 0);
   // Re-anchor whenever we knowingly move the playhead, so the interpolated
   // clock does not drift back to a stale value before the next poll.
+  // A playing anchor starts HELD: the clock stays at `seconds` until the
+  // device making the sound is heard there (the element's 'playing' or a
+  // moving timeupdate; a speaker's counter ticking), then runs from that
+  // moment. Every screen (lyrics, visualizer, the bar, other devices) used
+  // to run from the tap while the phone or speaker was still loading, and
+  // stayed that far ahead of the sound (11-03).
   const anchorAt = useCallback((seconds, isPlaying = true) => {
-    anchorRef.current = { pos: seconds, at: Date.now(), playing: isPlaying };
+    anchorRef.current = { pos: seconds, at: Date.now(), playing: isPlaying, held: !!isPlaying };
     positionRef.current = seconds; coarseRef.current = seconds;
     setPosition(seconds);
-    // A moved playhead is reported at once (the periodic report is 2 s apart).
-    setTimeout(() => { if (!relayNowRef.current?.() && relayRef.current && nowPlayingReportRef.current) relayRef.current.reportNowPlaying(nowPlayingReportRef.current()); }, 0);
+    reportSoonRef.current();
   }, []);
   // Paused: the coarse state catches up with the live clock (it is what the
   // bar shows while nothing moves, and what the lock screen and a report use).
@@ -1451,7 +1462,7 @@ export function usePlayer(jf) {
             trackIds = q.map((t) => t.Id);
             queued = q.map((t) => Boolean(t._queued));
             index = indexRef.current;
-            pos = a.playing ? a.pos + (Date.now() - a.at) / 1000 : positionRef.current;
+            pos = a.playing ? a.pos + ranFor(a) : positionRef.current;
             wasPlaying = playing;
           }
         }
@@ -1516,7 +1527,7 @@ export function usePlayer(jf) {
       // Read the position off the interpolated clock rather than React state,
       // which can be a render behind at the instant of the click.
       const a = anchorRef.current;
-      const at = a.playing ? a.pos + (Date.now() - a.at) / 1000 : positionRef.current;
+      const at = a.playing ? a.pos + ranFor(a) : positionRef.current;
       const startedAt = Date.now();
 
       // Each switch gets a generation; a slow one (a Cast that never answers
@@ -1592,8 +1603,20 @@ export function usePlayer(jf) {
       // Writing that through would wipe the position we are carrying over.
       if (transitionRef.current) return;
       const pos = localBaseRef.current + el.currentTime;
+      const a = anchorRef.current;
+      if (a.held && a.playing) {
+        // Released once the sound is out at the new spot. A timeupdate from
+        // before the load or seek landed (the old song, the old spot) is not
+        // that; after 3 s any sounding reading is believed.
+        const heard = !el.paused && !el.seeking && el.readyState >= 3;
+        if (!heard || (Math.abs(pos - a.pos) > 3 && Date.now() - a.at < 3000)) return;
+        anchorRef.current = { pos, at: Date.now(), playing: true, held: false };
+        positionRef.current = pos;
+        reportSoonRef.current();
+        return;
+      }
       positionRef.current = pos;
-      anchorRef.current = { pos, at: Date.now(), playing: !el.paused };
+      anchorRef.current = { pos, at: Date.now(), playing: !el.paused, held: false };
       // The seek bar, the lyrics and the visualizer clock read positionNow();
       // the state is a coarse copy refreshed every few seconds. Setting it on
       // every timeupdate re-rendered the whole app four times a second, and
@@ -1680,6 +1703,16 @@ export function usePlayer(jf) {
       }
     };
     el.addEventListener('waiting', onWaiting);
+    // No sound for now (a seek loading, a rebuffer): the clock holds where
+    // the sound will pick up again.
+    const onHold = () => {
+      if (el !== audioRef.current || deviceRef.current.kind !== 'local' || transitionRef.current || el.paused) return;
+      if (anchorRef.current.held) return;
+      anchorRef.current = { pos: localBaseRef.current + el.currentTime, at: Date.now(), playing: true, held: true };
+      reportSoonRef.current();
+    };
+    el.addEventListener('waiting', onHold);
+    el.addEventListener('seeking', onHold);
     const onPlaying = () => {
       if (el === audioRef.current && bridgeSinceRef.current) { bridgeSinceRef.current = 0; bridgeKeepAlive(false, 'playing'); }
       const waited = waitingSince ? Date.now() - waitingSince : 0;
@@ -1693,6 +1726,7 @@ export function usePlayer(jf) {
       }
     };
     el.addEventListener('playing', onPlaying);
+    el.addEventListener('playing', onTime);
     // Breadcrumb for a debugger on the phone: every seek the element sees,
     // ours or the system's (window.__slopifyMediaLog).
     const onSeeked = () => mediaLog(`element seeked to ${el.currentTime.toFixed(1)} base=${localBaseRef.current}`);
@@ -1797,6 +1831,9 @@ export function usePlayer(jf) {
       for (const t of trail) el.removeEventListener(t, onTrail);
       el.removeEventListener('seeked', onSeeked);
       el.removeEventListener('timeupdate', onTime);
+      el.removeEventListener('waiting', onHold);
+      el.removeEventListener('seeking', onHold);
+      el.removeEventListener('playing', onTime);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('loadedmetadata', onDuration);
       el.removeEventListener('pause', onPause);
@@ -1832,6 +1869,24 @@ export function usePlayer(jf) {
     const apply = (s, arrivedAt, exact) => {
       if (cancelled || !s || transitionRef.current) return;
       const a = anchorRef.current;
+      // Held (a start or seek just sent): the clock waits for the speaker's
+      // counter to move on from where it was sent, so the screens start with
+      // the sound and not with the tap (anchorAt). 15 s at most.
+      if (a.held && a.playing) {
+        const going = !!s.playing && !/BUFFERING|connecting/i.test(s.state || '');
+        const pos = s.position || 0;
+        const moved = going && (exact || (s.coarsePosition ? pos >= Math.round(a.pos) + 1 : pos > a.pos + 0.2));
+        if (!moved && Date.now() - a.at < 15000) { if (s.duration) setDuration(s.duration); return; }
+        if (moved) {
+          anchorRef.current = { pos: exact || !s.coarsePosition ? pos : pos + 0.5, at: arrivedAt, playing: true, held: false };
+          disagreeRef.current = 0;
+          reportSoonRef.current();
+          if (s.duration) setDuration(s.duration);
+          return;
+        }
+        // Never heard in 15 s: let go, and the reading below decides.
+        anchorRef.current = { ...a, at: arrivedAt, held: false };
+      }
       // A rebuffer (Cast BUFFERING, BluOS "connecting") while we believe we
       // are playing is not a pause: the session used to flip to paused and
       // back on every one, and every mirror's playhead jumped with it (the
@@ -1845,10 +1900,10 @@ export function usePlayer(jf) {
         if (transient) { s = { ...s, playing: true }; notPlayingSinceRef.current = 0; }
         else {
           if (!notPlayingSinceRef.current) notPlayingSinceRef.current = arrivedAt;
-          if (arrivedAt - notPlayingSinceRef.current < 1500) s = { ...s, playing: true, rawPosition: s.position || 0, position: a.pos + (arrivedAt - a.at) / 1000 };
+          if (arrivedAt - notPlayingSinceRef.current < 1500) s = { ...s, playing: true, rawPosition: s.position || 0, position: a.pos + ranFor(a, arrivedAt) };
         }
       } else notPlayingSinceRef.current = 0;
-      const expected = a.playing ? a.pos + (Date.now() - a.at) / 1000 : a.pos;
+      const expected = a.playing ? a.pos + ranFor(a) : a.pos;
       const reported = s.position || 0;
 
       // Track finished: advance the queue. Two signatures, because devices
@@ -1951,7 +2006,7 @@ export function usePlayer(jf) {
             if (cancelled) return;
             if (!s.playing) { apply(s, (t0 + t1) / 2, false); prev = null; locked = false; hunting = 0; await new Promise((r) => setTimeout(r, 1000)); continue; }
             const a = anchorRef.current;
-            const expected = a.playing ? a.pos + (t1 - a.at) / 1000 : a.pos;
+            const expected = a.playing ? a.pos + ranFor(a, t1) : a.pos;
             const agrees = a.playing && expected >= s.position && expected < s.position + 1;
             if (locked && !agrees) { locked = false; hunting = 0; }
             if (!locked && prev && s.position === prev.secs + 1 && t0 - prev.t1 < 600) {
@@ -2254,7 +2309,7 @@ export function usePlayer(jf) {
     const tick = setInterval(() => {
       const a = anchorRef.current;
       if (!a.playing) return;
-      const next = a.pos + (Date.now() - a.at) / 1000;
+      const next = a.pos + ranFor(a);
       const pos = durationRef.current ? Math.min(next, durationRef.current) : next;
       positionRef.current = pos; coarseRef.current = pos; setPosition(pos);
     }, 5000);
@@ -2333,7 +2388,7 @@ export function usePlayer(jf) {
     const i = indexRef.current;
     if (!q.length || i < 0 || !q[i]) return;
     const a = anchorRef.current;
-    const pos = a.playing ? a.pos + (Date.now() - a.at) / 1000 : positionRef.current;
+    const pos = a.playing ? a.pos + ranFor(a) : positionRef.current;
     try {
       localStorage.setItem(`${jf._lsPrefix}playhead`, JSON.stringify({
         trackId: q[i].Id, index: i, position: Math.max(0, pos),
@@ -2652,7 +2707,9 @@ export function usePlayer(jf) {
       // on Node" when the session is on a speaker rather than on a client.
       device: { id: device.id, kind: device.kind, name: device.name },
       queueIndex: index,
-      playing, position: Math.max(0, (positionNowRef.current ? positionNowRef.current() : position) - (playing ? outputLagRef.current() : 0)), duration, volume, repeat, shuffle, at: Date.now(),
+      // held: playing, but not heard yet (loading, seeking, rebuffering):
+      // mirrors keep the playhead still until it is (session.js playheadOf).
+      playing, held: !!(playing && anchorRef.current.held), position: Math.max(0, (positionNowRef.current ? positionNowRef.current() : position) - (playing && !anchorRef.current.held ? outputLagRef.current() : 0)), duration, volume, repeat, shuffle, at: Date.now(),
     } : null;
   }
 
@@ -2681,9 +2738,18 @@ export function usePlayer(jf) {
     const rt = relayNow() || relayTargetRef.current;
     if (rt) return relayRef.current?.playheadOf ? relayRef.current.playheadOf(rt) : (Number(rt.position) || 0);
     const a = anchorRef.current;
-    return a.playing ? a.pos + Math.max(0, Date.now() - a.at) / 1000 : positionRef.current;
+    return a.playing ? a.pos + ranFor(a) : positionRef.current;
   }, []);
   positionNowRef.current = positionNow;
+  // Is that playhead moving right now: playing and heard (not held while a
+  // load, seek or rebuffer is still silent). The visualizer's shadow copy
+  // waits on this, so its bars start with the sound.
+  const ticking = useCallback(() => {
+    const rt = relayNow() || relayTargetRef.current;
+    if (rt) return !!rt.playing && !rt.held;
+    const a = anchorRef.current;
+    return !!a.playing && !a.held;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // How long the sound takes from the element to the speaker when this device
   // plays through its Web Audio graph: the TV's WebView reported 0.17 s base +
   // 0.78 s output latency (10-28), so its lyrics, bars and every mirror ran a
@@ -2952,7 +3018,7 @@ export function usePlayer(jf) {
       debugElement: () => (activeEl ? localBaseRef.current + activeEl.currentTime : null),
       outputLag,
       queue: shownQueue, index: shownIndex, current, applyRemoteQueue, applySession, mirroring: !!relayTarget,
-      playing: shownPlaying, position: shownPosition, positionNow, duration: shownDuration, volume: shownVolume, error,
+      playing: shownPlaying, position: shownPosition, positionNow, ticking, duration: shownDuration, volume: shownVolume, error,
       repeat: shownRepeat, shuffle: shownShuffle, cycleRepeat, cycleShuffle, setShuffle: setShuffleRouted,
       playQueue, toggle, next, previous, seek, setVolume, volumeStep, skipTo,
       sleep, setSleepTimer, applySleep,

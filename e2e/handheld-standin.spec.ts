@@ -25,6 +25,12 @@ async function playAlbum(page: Page) {
   await page.locator('.trackrow').nth(0).dblclick();
 }
 
+// Devices other tests left open (and their sessions) would be the account's
+// active player here: gone before and after each test.
+const closeAll = async ({ browser }: { browser: import('@playwright/test').Browser }) => { for (const c of browser.contexts()) await c.close().catch(() => {}); };
+test.beforeEach(closeAll);
+test.afterEach(closeAll);
+
 test('an iPad never stands in for music the iPhone plays itself; it does for a laptop', async ({ browser }, info) => {
   test.skip(info.project.name !== 'chromium', 'devices of its own');
   const ipad = await ios(browser, 'Test iPad', 'tablet');
@@ -44,4 +50,6 @@ test('an iPad never stands in for music the iPhone plays itself; it does for a l
   await expect.poll(() => nowTitle(ipad), { timeout: 20000 }).toContain('Playing on Test iPhone');
   await ipad.waitForTimeout(3000);
   expect(await standInPlaying(ipad)).toBe(false);
+  await phone.locator('.player button[title="Pause"]').first().click();
+  await phone.context().close(); await ipad.context().close();
 });

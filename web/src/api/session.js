@@ -209,7 +209,8 @@ export class SessionLink {
   playheadOf(np) {
     if (!np) return 0;
     const p = Number(np.position) || 0;
-    if (!np.playing) return p;
+    // held: playing but not heard yet (loading, seeking): still until it is.
+    if (!np.playing || np.held) return p;
     const since = typeof np.serverAt === 'number' && this.clockOffset != null ? this.serverNow() - np.serverAt : Date.now() - (np.rxAt || np.at || Date.now());
     return p + Math.max(0, since) / 1000;
   }

@@ -110,6 +110,7 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
   // the delay against this.
   const posNowRef = useRef(null); posNowRef.current = player.positionNow || null;
   const lagRef = useRef(null); lagRef.current = player.outputLag || null;
+  const tickingRef = useRef(null); tickingRef.current = player.ticking || null;
   const reported = (at = Date.now()) => {
     const lag = (c) => (c.playing && lagRef.current ? lagRef.current() : 0);
     if (posNowRef.current) return posNowRef.current() - lag(clockRef.current) + (at - Date.now()) / 1000;
@@ -144,7 +145,9 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
     });
     const tick = () => {
       const c = clockRef.current;
-      if (!c.playing) { if (!sh.paused) sh.stop(); return; }
+      // Not heard yet (the player still loading or seeking: held, see
+      // usePlayer's anchorAt): no bars until the sound is out.
+      if (!c.playing || tickingRef.current?.() === false) { if (!sh.paused) sh.stop(); return; }
       if (sh.ctx.state !== 'running') { sh.ctx.resume?.().catch(() => {}); return; } // never started before the unlock
       if (sh.id !== trackId || sh.paused) { load(); return; }
       if (sh.loading) return;

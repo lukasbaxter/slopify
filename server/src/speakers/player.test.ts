@@ -61,6 +61,30 @@ describe('ServerPlayer clock on a whole-second speaker', () => {
     expect(Math.abs(p.position - fake.truePos())).toBeLessThan(0.2);
     p.stopAll();
   });
+
+  // 11-03: the clock ran from the command while the speaker was still
+  // loading, so the lyrics and the visualizer on every screen ran ahead of
+  // the sound. Every screen waits for the speaker now.
+  it('holds the clock until the speaker is heard, after a start and after a seek', async () => {
+    const reports: any[] = [];
+    const p = player(); p.d.report = (np: any) => reports.push(np);
+    await p.start(row, 0, true);
+    for (const ms of [300, 600, 900]) {
+      await vi.advanceTimersByTimeAsync(300);
+      expect(p.position, `${ms} ms into a 1.2 s load`).toBe(0);
+    }
+    expect(reports.at(-1)).toMatchObject({ playing: true, held: true, position: 0 });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(reports.at(-1).held).toBe(false);
+    expect(Math.abs(p.position - fake.truePos())).toBeLessThan(0.2);
+    await p.seek(120);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(p.position).toBe(120);
+    expect(reports.at(-1)).toMatchObject({ held: true, position: 120 });
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(Math.abs(p.position - fake.truePos())).toBeLessThan(0.2);
+    p.stopAll();
+  });
 });
 
 // A Cast speaker as tick() sees it: a canned status, with the calls recorded.

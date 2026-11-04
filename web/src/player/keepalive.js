@@ -52,6 +52,54 @@ const UA = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
 const WEBKIT = /iPhone|iPad|iPod/.test(UA) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (/AppleWebKit/.test(UA) && !/Chrome|Chromium|Android|Edg\//.test(UA));
 const idle = (a) => { if (!WEBKIT && a.paused && a.getAttribute('src')) { a.removeAttribute('src'); a.load(); ownPausePending = false; note('unloaded while idle'); } };
 
+// The tone: what keeps this phone's app running while its own music is held
+// paused with the phone locked. WebKit lets go of a page 10 s after it stops
+// being audible (WebPageProxy audibleActivityClearDelay), and a muted element
+// is not audible (HTMLMediaElement::computeCanProduceAudio), so the muted
+// stand-in held nothing: 10 s after a pause iOS froze the page, the player left
+// the lock screen and the AirPods' play reached nobody until the app was opened
+// (11-04: 5 of 5 pauses, each exactly 10 s). Unmuting the stand-in puts it on
+// the lock screen as playing, so the sound comes from Web Audio instead, far
+// below hearing, which is audible to WebKit and no media element.
+// Web Audio stops in the background unless the page's audio session is
+// 'playback' as the app goes there (AudioContext::
+// shouldOverrideBackgroundPlaybackRestriction), but a running context under
+// 'playback' takes the lock screen's play and pause itself and the page never
+// hears them (isNowPlayingEligible). So: 'playback' with the context suspended
+// in the foreground, 'auto' once hidden, and it runs only then. Every step
+// checked in tools/ios-sim against WebKit's own ProcessSuspension log.
+const IOS_APP = typeof window !== 'undefined' && (/iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+  && (!!window.slopifyShell || navigator.standalone === true);
+const TONE_AFTER_HIDDEN_MS = 1000; // the app is in the background by then: 'auto' before that loses the exemption
+let toneCtx = null, toneWanted = false, toneTimer = null, hiddenAt = 0;
+const sessionType = (t) => { try { navigator.audioSession.type = t; } catch { /* no audioSession */ } };
+function primeTone() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!IOS_APP || toneCtx || !AC || !navigator.audioSession) return;
+  try {
+    sessionType('playback');
+    toneCtx = new AC();
+    const gain = toneCtx.createGain(), osc = toneCtx.createOscillator();
+    gain.gain.value = 1e-5; osc.frequency.value = 30;
+    osc.connect(gain); gain.connect(toneCtx.destination); osc.start();
+    toneCtx.addEventListener('statechange', () => note(`tone ${toneCtx.state}`));
+    toneCtx.suspend().catch(() => {});
+    document.addEventListener('visibilitychange', () => { hiddenAt = document.hidden ? Date.now() : 0; syncTone(); });
+    if (typeof window !== 'undefined') window.__slopifyTone = toneCtx; // diagnostics
+  } catch (e) { note(`tone ${e?.name}`); }
+}
+function syncTone() {
+  clearTimeout(toneTimer);
+  const c = toneCtx;
+  if (!c) return;
+  if (!document.hidden) { if (c.state !== 'suspended') c.suspend().catch(() => {}); sessionType('playback'); return; }
+  const wait = Math.max(0, (hiddenAt || 0) + TONE_AFTER_HIDDEN_MS - Date.now());
+  if (wait) { toneTimer = setTimeout(syncTone, wait); return; }
+  sessionType('auto');
+  if (toneWanted && c.state !== 'running') c.resume().catch((e) => note(`tone resume ${e?.name}`));
+  else if (!toneWanted && c.state === 'running') c.suspend().catch(() => {});
+}
+
 function element() {
   if (el) return el;
   el = new Audio(SRC());
@@ -98,6 +146,7 @@ function element() {
 // candidate at all), metadata only, muted until a hold.
 function primeFace() {
   if (typeof document === 'undefined' || !WEBKIT) return;
+  primeTone();
   if (!faceEl) {
     faceEl = new Audio();
     faceEl.preload = 'metadata'; faceEl.muted = true; faceEl.setAttribute('playsinline', '');
@@ -195,7 +244,11 @@ let lastPosition = 0;
 // nothing. A pause tap there quiets the stand-in instead: the button becomes
 // play, and the next tap is a real play. Ends with the next want-off or play.
 let quiet = false;
-export function keepAlive(on, position = 0, held = false) {
+// own: held for music this device itself paused. Only then the tone: on a
+// device mirroring another one it would count as that device starting to play,
+// and the AirPods would follow it (see onOtherHandheld in usePlayer).
+export function keepAlive(on, position = 0, held = false, own = false) {
+  if (toneWanted !== (!!on && !!own)) { toneWanted = !!on && !!own; note(`tone ${toneWanted ? 'wanted' : 'off'}`); syncTone(); }
   if (wanted !== !!on) note(`want ${on ? 'on' : 'off'} @${Math.round(position || 0)}`);
   if (!on && quiet) quiet = false;
   if (holdFace !== (!!on && !!held)) note(`face ${on && held ? 'on' : 'off'}`);
@@ -314,5 +367,5 @@ export function standInElement() { return el; }
 
 export function state() {
   const a = el;
-  return { wanted, bridged, quiet, unlocked, armed, frozen, face: faceEl ? (!faceEl.getAttribute('src') ? 'empty' : faceEl.muted ? 'muted' : 'held') : 'none', facePlayed, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
+  return { wanted, bridged, quiet, unlocked, armed, frozen, tone: toneCtx ? `${toneCtx.state}${toneWanted ? ' wanted' : ''}` : 'none', face: faceEl ? (!faceEl.getAttribute('src') ? 'empty' : faceEl.muted ? 'muted' : 'held') : 'none', facePlayed, paused: a ? a.paused : null, t: a ? +a.currentTime.toFixed(1) : null, ready: a?.readyState ?? null, err: a?.error?.code ?? null, log: log.slice(-8) };
 }

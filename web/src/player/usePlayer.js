@@ -2854,7 +2854,7 @@ export function usePlayer(jf) {
   // for the state we are already in re-syncs the sound and the icon instead.
   const msResync = () => {
     const ms = typeof navigator !== 'undefined' && navigator.mediaSession;
-    keepAlive(standIn, shownPosition, holding);
+    keepAlive(standIn, shownPosition, holding, holding && msLocal);
     if (ms) declarePlayback(ms, shownPlaying, audioRef.current);
     const el = audioRef.current;
     if (msLocal && el && el.getAttribute('src')) {
@@ -2962,7 +2962,7 @@ export function usePlayer(jf) {
     // The keep-alive stands in while the sound is elsewhere, and in the phone
     // app while nothing plays (the 2-hour hold); this device's own playback
     // carries the session by itself.
-    keepAlive(standIn, shownPosition, holding);
+    keepAlive(standIn, shownPosition, holding, holding && msLocal);
     if (!ms || (!msLocal && !msRemote)) return;
     declarePlayback(ms, shownPlaying, audioRef.current);
     // What the lock screen is told, each time it changes (not every second).

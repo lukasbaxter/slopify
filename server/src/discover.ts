@@ -252,14 +252,24 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   });
 
   // The library's most played artists; their releases from the last 90 days.
-  // Only the raw releases are cached: library presence and request state
-  // change by the minute, so they are flagged fresh on every look.
-  const radarRaw = async (): Promise<any[]> => {
-    const hit = cached('radar', 6 * 60 * 60 * 1000); if (hit) return hit;
+  // Building it takes a round trip through Lidarr per artist (minutes), so
+  // nobody waits for that: the list is kept in the database, a look answers
+  // from it at once, and it is rebuilt in the background when it gets old, and
+  // at start so a restart costs nothing. Only the raw releases are kept:
+  // library presence and request state change by the minute, so they are
+  // flagged fresh on every look.
+  const RADAR_TTL = 6 * 60 * 60 * 1000;
+  const radarSaved = (): { at: number; releases: any[] } | null => {
+    const row = db.prepare("SELECT v FROM kv WHERE k = 'radar'").get() as { v: string } | undefined;
+    try { return row ? JSON.parse(row.v) : null; } catch { return null; }
+  };
+  let radarBuild: Promise<any[]> | null = null;
+  const buildRadar = () => radarBuild ??= (async () => {
     const top = db.prepare(`SELECT a.id, a.name, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
       WHERE p.at > ? GROUP BY a.id ORDER BY n DESC LIMIT 40`).all(Date.now() - 180 * 86400000) as { id: string; name: string }[];
     const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
     const out: any[] = [];
+    let failed = 0;
     // A few at a time: each discography is a round trip through Lidarr.
     const queue = [...top];
     await Promise.all(Array.from({ length: 4 }, async () => {
@@ -267,19 +277,35 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
         const a = queue.shift()!;
         try {
           const d = await discography(a.id, a.name);
+          if (!d.artist) failed++; // discography() turns a Lidarr error into no artist
           for (const rel of d.releases) {
             if (!rel.album_id || !rel.date || rel.date < since) continue;
-            // cache only the raw release: the per-render flags are re-applied fresh on every GET
+            // keep only the raw release: the per-render flags are re-applied fresh on every GET
             const r: any = { ...rel, artistId: a.id, artistName: a.name };
             delete r.inLibrary; delete r.localName; delete r.requestStatus;
             out.push(r);
           }
-        } catch { /* one artist failing must not sink the radar */ }
+        } catch { failed++; /* one artist failing must not sink the radar */ }
       }
     }));
+    // Lidarr down: every artist failed, which is no news. The list stays.
+    if (failed && failed === top.length) return radarSaved()?.releases || [];
     out.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-    return remember('radar', out);
+    db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at: Date.now(), releases: out }));
+    return out;
+  })().finally(() => { radarBuild = null; });
+  const radarStale = (saved: { at: number } | null) => !saved || Date.now() - saved.at >= RADAR_TTL;
+  const refreshRadar = () => { if (radarStale(radarSaved())) buildRadar().catch((e) => log(`radar: ${e?.message || e}`)); };
+  const radarRaw = async (): Promise<any[]> => {
+    const saved = radarSaved();
+    if (!saved) return buildRadar();
+    refreshRadar();
+    return saved.releases;
   };
+  if (lidarr && process.env.NODE_ENV !== 'test') {
+    setTimeout(refreshRadar, 5000).unref();
+    setInterval(refreshRadar, 60 * 60 * 1000).unref();
+  }
   app.get('/api/radar', auth, async () => {
     if (!lidarr) return { releases: [] };
     const [raw, status] = await Promise.all([radarRaw(), requestStatuses()]);

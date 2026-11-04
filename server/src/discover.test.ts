@@ -51,7 +51,7 @@ describe('library matching for catalog releases', () => {
   });
 });
 
-// The radar's 6h cache holds only the raw releases: whether one is in the
+// The kept radar holds only the raw releases: whether one is in the
 // library or mid-request changes by the minute and is flagged per look.
 describe('release radar', () => {
   it('serves fresh inLibrary/requestStatus from the cached raw list, without refetching discographies', async () => {
@@ -80,6 +80,61 @@ describe('release radar', () => {
     const second = (await app.inject({ url: '/api/radar' })).json();
     expect(second.releases[0]).toMatchObject({ album_id: 'mb-ih', requestStatus: null, inLibrary: 'al-ih', localName: 'Infinite Health' });
     expect(discogCalls).toBe(1);
+    await app.close();
+  });
+  let radarRuns = 0; // discography() caches per artist: each test its own
+  const radarSetup = () => {
+    const id = `radar-artist-${++radarRuns}`;
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-')));
+    db.prepare("INSERT INTO artists (id, name, sort_name) VALUES (?, 'Tycho', 'tycho')").run(id);
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-dive', 'Dive', ?, 'Tycho', '/m/dive', 1, 0, 'dive')").run(id);
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES ('t-dive', '/m/dive/01.flac', 0, 0, 'A Walk', 'Tycho', '["Tycho"]', ?, 'al-dive', 'Dive', 'Tycho', 0)`).run(JSON.stringify([id]));
+    db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', 't-dive', Date.now());
+    const date = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    const release = (id: string) => ({ album_id: id, artist: 'Tycho', title: id, rtype: 'album', year: date.slice(0, 4), date, image: null, total_tracks: 1 });
+    const start = (lidarr: any) => { const app = Fastify(); app.decorate('requireUser', async () => {}); registerDiscover(app, db, { lidarr }); return app; };
+    const keep = (at: number, id: string) => db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at, releases: [{ ...release(id), artistId: id, artistName: 'Tycho' }] }));
+    const kept = () => JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'radar'").get() as any).v);
+    return { release, start, keep, kept };
+  };
+  const base = { enabled: true, statuses: async () => new Map() };
+
+  it('a restart costs nothing: the kept list answers without asking Lidarr', async () => {
+    const { start, keep } = radarSetup();
+    keep(Date.now(), 'kept');
+    let calls = 0;
+    const app = start({ ...base, discography: async () => { calls++; throw new Error('not needed'); } });
+    const r = (await app.inject({ url: '/api/radar' })).json();
+    expect(r.releases.map((x: any) => x.album_id)).toEqual(['kept']);
+    expect(calls).toBe(0);
+    await app.close();
+  });
+
+  it('an old list answers at once and is rebuilt behind the scenes, once', async () => {
+    const { start, keep, kept, release } = radarSetup();
+    keep(Date.now() - 7 * 3600e3, 'old');
+    let calls = 0; let finish: (v: any) => void = () => {};
+    const app = start({ ...base, discography: () => { calls++; return new Promise((res) => { finish = res; }); } });
+    const a = (await app.inject({ url: '/api/radar' })).json(); // Lidarr has not answered
+    const b = (await app.inject({ url: '/api/radar' })).json();
+    expect(a.releases[0].album_id).toBe('old');
+    expect(b.releases[0].album_id).toBe('old');
+    expect(calls).toBe(1);
+    finish({ artist: { name: 'Tycho', image: null }, releases: [release('new')] });
+    await expect.poll(() => kept().releases[0].album_id).toBe('new');
+    await app.close();
+  });
+
+  it('Lidarr down during a rebuild leaves the list as it was', async () => {
+    const { start, keep, kept } = radarSetup();
+    keep(Date.now() - 7 * 3600e3, 'old');
+    let calls = 0;
+    const app = start({ ...base, discography: async () => { calls++; throw new Error('lidarr down'); } });
+    await app.inject({ url: '/api/radar' });
+    await expect.poll(() => calls).toBe(1);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(kept().releases[0].album_id).toBe('old');
     await app.close();
   });
 });

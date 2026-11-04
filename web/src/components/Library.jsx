@@ -10,7 +10,7 @@ import { vibrantColor } from '../api/colors.js';
 import { LANGUAGES, userLanguage, t, N_ } from '../i18n.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
-import Home, { topSongsSub } from './Home.jsx';
+import Home, { topSongsSub, rankTopArtists } from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
@@ -308,6 +308,22 @@ export default function Library({
   }, [view, query, searchType]); // eslint-disable-line react-hooks/exhaustive-deps
   const [err, setErr] = useState(null);
   // An error belongs to the page it happened on, not the next one.
+  // Show all on top artists: Home is gone while it is up, so a newer answer
+  // (a slow link opens on the kept one, sw.js) is picked up here.
+  const [topRanking, setTopRanking] = useState(null);
+  useEffect(() => {
+    if (!jf || seeAll !== 'topArtists') return undefined;
+    let alive = true;
+    const load = () => jf.topTracks({ limit: 200 }).then((top) => {
+      if (!alive) return;
+      const ranked = rankTopArtists(top);
+      setTopRanking(ranked); jf._persist('home.topArtists', ranked);
+    }).catch(() => {});
+    const on = (e) => { if (/^\/api\/home/.test(e.detail)) { jf._evict('home'); load(); } };
+    load();
+    window.addEventListener('slopify:fresh', on);
+    return () => { alive = false; window.removeEventListener('slopify:fresh', on); };
+  }, [jf, seeAll]);
   useEffect(() => { setErr(null); }, [detail?.item?.Id, view, seeAll]);
   const [heroMenu, setHeroMenu] = useState(null);
   // The column header is see-through over the hero's colour band and turns
@@ -1608,7 +1624,7 @@ export default function Library({
     const topList = seeAll === 'topArtists';
     const artistList = topList || seeAll === 'artists';
     // Top artists: Home's ranking, in its order, not the library's A to Z.
-    const items = topList ? (jf.persisted('home.topArtists') || []).map((a) => ({ ...a, Type: 'MusicArtist' })) : seeAll === 'artists' ? artists : albums;
+    const items = topList ? (topRanking || jf.persisted('home.topArtists') || []).map((a) => ({ ...a, Type: 'MusicArtist' })) : seeAll === 'artists' ? artists : albums;
     return (
       <div className="content">
         <div className="contentbar">

@@ -107,9 +107,11 @@ test('crossfade: songs from different albums overlap, one fading out as the next
   const ids = [a.ids[4], b.ids[4]]; // 8 s songs: a 2 s fade fits
   await play(page, ids, null);
   // Mid-fade: both elements sounding, the outgoing one turned partly down.
+  // The first moment both sound the fade has barely moved, so wait for its middle.
   const seen = { both: false, gains: [] as number[] };
+  const midFade = (g: number) => g > 0.02 && g < 0.98;
   const t0 = Date.now();
-  while (Date.now() - t0 < 20000 && !seen.both) {
+  while (Date.now() - t0 < 20000 && !seen.gains.some(midFade)) {
     const s = await page.evaluate(() => {
       const w = window as any;
       const wa = w.__player.webAudio();
@@ -120,7 +122,7 @@ test('crossfade: songs from different albums overlap, one fading out as the next
     await page.waitForTimeout(100);
   }
   expect(seen.both).toBe(true);
-  expect(seen.gains.some((g) => g > 0.02 && g < 0.98)).toBe(true);
+  expect(seen.gains.some(midFade)).toBe(true);
   await expect.poll(() => page.evaluate(() => (window as any).__player.current?.Id), { timeout: 10000 }).toBe(ids[1]);
   // After the fade only the new song is left playing.
   await page.waitForTimeout(2600);

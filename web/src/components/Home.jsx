@@ -2,6 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PlayGlyph, Heart, LikedCover, usePhone } from './TrackRow.jsx';
 import { t } from '../i18n.js';
 
+// The whole ranking, most played first: Show all lists it, Home's shelf the first 16.
+export function rankTopArtists(tracks) {
+  const score = new Map();
+  for (const tr of tracks) {
+    for (const a of tr.ArtistItems || []) score.set(a.Id, { Id: a.Id, Name: a.Name, n: (score.get(a.Id)?.n || 0) + 1 + (tr.UserData?.PlayCount || 0) });
+  }
+  return [...score.values()].sort((a, b) => b.n - a.n);
+}
+
 // Cover art that fades in once it has loaded (no pop). A cached image can be
 // complete before onLoad is wired, so the ref checks too.
 export function FadeImg({ className = '', ...props }) {
@@ -126,15 +135,14 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
     jf.topSongYears().then((y) => { setTopYears(y); jf._persist('home.topYears', y); }).catch(() => {});
     jf.recentlyAddedAlbums({ limit: 16 }).then((r) => { setAdded(r.items); jf._persist('home.added', r.items); }).catch(() => {});
     jf.topTracks({ limit: 200 }).then((top) => {
-      const score = new Map(), last = new Map();
+      const last = new Map();
       for (const tr of top) {
         for (const a of tr.ArtistItems || []) {
-          score.set(a.Id, { Id: a.Id, Name: a.Name, n: (score.get(a.Id)?.n || 0) + 1 + (tr.UserData?.PlayCount || 0) });
           const lp = tr.UserData?.LastPlayedDate || '';
           if (lp > (last.get(a.Id)?.lp || '')) last.set(a.Id, { Id: a.Id, Name: a.Name, lp });
         }
       }
-      const ta = [...score.values()].sort((a, b) => b.n - a.n); // whole ranking: Show all lists it, the shelf shows the first 16
+      const ta = rankTopArtists(top);
       const ra = [...last.values()].sort((a, b) => b.lp.localeCompare(a.lp)).slice(0, 16);
       setTopArtists(ta); jf._persist('home.topArtists', ta);
       setRecentArtists(ra); jf._persist('home.recentArtists', ra);

@@ -43,7 +43,7 @@ export function usePlayingFrom(player, jf) {
       // artists (persisted per user); otherwise "<Artist> Mix".
       const seedId = id.slice(4);
       const top = jf?.persisted?.('home.topArtists');
-      const n = Array.isArray(top) ? top.findIndex((a) => a?.Id === seedId) : -1;
+      const n = Array.isArray(top) ? top.slice(0, 16).findIndex((a) => a?.Id === seedId) : -1; // the list runs on past the shelf (Show all)
       if (n >= 0) { set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Daily Mix {n}', { n: n + 1 }) }); return undefined; }
       jf.itemById(seedId).then((it) => set({ kind: t('PLAYING FROM PLAYLIST'), name: it?.Name ? t('{name} Mix', { name: it.Name }) : t('Daily Mix') })).catch(() => set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Daily Mix') }));
       return () => { alive = false; };

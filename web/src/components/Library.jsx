@@ -1605,18 +1605,21 @@ export default function Library({
 
   // --- see-all grid -------------------------------------------------------
   if (seeAll) {
-    const items = seeAll === 'artists' ? artists : albums;
+    const topList = seeAll === 'topArtists';
+    const artistList = topList || seeAll === 'artists';
+    // Top artists: Home's ranking, in its order, not the library's A to Z.
+    const items = topList ? (jf.persisted('home.topArtists') || []).map((a) => ({ ...a, Type: 'MusicArtist' })) : seeAll === 'artists' ? artists : albums;
     return (
       <div className="content">
         <div className="contentbar">
           <FilterPills where={seeAll} setSeeAll={setSeeAll} goHome={() => onView('home')} />
         </div>
         <div className="pad">
-          <h2 style={{ margin: '0 0 16px', fontSize: 24 }}>{seeAll === 'artists' ? t('Artists') : t('Albums')}</h2>
+          <h2 style={{ margin: '0 0 16px', fontSize: 24 }}>{topList ? t('Your top artists') : seeAll === 'artists' ? t('Artists') : t('Albums')}</h2>
           <div className="grid">
             {items.map((it) => (
-              <Card key={it.Id} title={it.Name} subtitle={seeAll === 'artists' ? t('Artist') : it.AlbumArtist}
-                image={jf.imageUrl(it.Id, { maxHeight: 320 })} round={seeAll === 'artists'}
+              <Card key={it.Id} title={it.Name} subtitle={artistList ? t('Artist') : it.AlbumArtist}
+                image={jf.imageUrl(it.Id, { maxHeight: 320 })} round={artistList}
                 onOpen={() => open(it)} onPlay={() => playItem(it)} />
             ))}
           </div>

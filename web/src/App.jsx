@@ -352,7 +352,7 @@ export default function App() {
   const [albums, setAlbums] = useState([]);
   const [artists, setArtists] = useState([]);
   const [detail, setDetailRaw] = useState(null);
-  const [seeAll, setSeeAllRaw] = useState(null); // 'albums' | 'artists' | null
+  const [seeAll, setSeeAllRaw] = useState(null); // 'albums' | 'artists' | 'topArtists' | null
   // Any navigation leaves the phone's Library tab, except a history walk that
   // lands back on it (applyEntry restores it and raises the flag).
   const restoringRef = useRef(false);
@@ -1417,7 +1417,7 @@ export default function App() {
   // Library headers); detail pages hide the bar and float a back chevron.
   const mobileDetail = isMobile && !mobileLib && (detail || seeAll);
   const mobileTitle = mobileLib ? t('Your Library') : view === 'search' ? t('Search') : '';
-  const detailTitle = detail?.item?.Name || (seeAll === 'albums' ? t('Albums') : seeAll === 'artists' ? t('Artists') : '');
+  const detailTitle = detail?.item?.Name || (seeAll === 'albums' ? t('Albums') : seeAll === 'artists' ? t('Artists') : seeAll === 'topArtists' ? t('Your top artists') : '');
   return (
     <div className={`app ${isMobile ? 'mobile' : ''} ${mobileDetail ? 'mobile-detail' : ''} ${isMobile ? (mobileLib ? 'tab-library' : mobileDetail ? 'tab-detail' : `tab-${view}`) : ''}`}>
       {offlineMode && <OfflinePill />}

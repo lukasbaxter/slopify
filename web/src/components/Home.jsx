@@ -134,7 +134,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           if (lp > (last.get(a.Id)?.lp || '')) last.set(a.Id, { Id: a.Id, Name: a.Name, lp });
         }
       }
-      const ta = [...score.values()].sort((a, b) => b.n - a.n).slice(0, 16);
+      const ta = [...score.values()].sort((a, b) => b.n - a.n); // whole ranking: Show all lists it, the shelf shows the first 16
       const ra = [...last.values()].sort((a, b) => b.lp.localeCompare(a.lp)).slice(0, 16);
       setTopArtists(ta); jf._persist('home.topArtists', ta);
       setRecentArtists(ra); jf._persist('home.recentArtists', ra);
@@ -287,8 +287,8 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
         )}
 
         {showArtists && topArtists.length > 0 && (
-          <Shelf title={t('Your top artists')} onSeeAll={() => onSeeAll('artists')}>
-            {topArtists.map((a) => (
+          <Shelf title={t('Your top artists')} onSeeAll={() => onSeeAll('topArtists')}>
+            {topArtists.slice(0, 16).map((a) => (
               <Card key={a.Id} title={a.Name} subtitle={t('Artist')} round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                 onOpen={() => onOpenArtist(a.Id)} onPlay={() => playMix(a)} />
             ))}

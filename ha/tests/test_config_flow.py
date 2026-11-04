@@ -50,6 +50,10 @@ async def test_errors_are_shown_on_the_form(hass: HomeAssistant, fake: FakeSlopi
     result = await hass.config_entries.flow.async_configure(flow, _form(fake, **{CONF_URL: "http://127.0.0.1:1"}))
     assert result["errors"] == {CONF_URL: "cannot_connect"}
 
+    # Nothing typed in front: http, then https, then the same answer.
+    result = await hass.config_entries.flow.async_configure(flow, _form(fake, **{CONF_URL: "127.0.0.1:1"}))
+    assert result["errors"] == {CONF_URL: "cannot_connect"}
+
     fake.health_ok = False
     result = await hass.config_entries.flow.async_configure(flow, _form(fake))
     assert result["errors"] == {CONF_URL: "not_slopify"}

@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "{synced} synkade · {plain} vanliga · {instrumental} instrumentala · {missing} saknas",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "{timed} tidsatta · {verified} verifierade · {corrected} korrigerade · {unsure} osäkra · {failed} misslyckades · {pending} att kontrollera",
  "{title} is back in line": "{title} är tillbaka i kön",
- "{value}. Not on iPhone yet": "{value}. Inte på iPhone än"
+ "{value}. Not on iPhone yet": "{value}. Inte på iPhone än",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Ingen Slopify-server svarade på {host}. Kontrollera adressen och att den här datorn kan nå den.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Serveradressen ser inte rätt ut. Prova något i stil med music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "Med eller utan https:// framför. Slopify listar ut det själv."
 }

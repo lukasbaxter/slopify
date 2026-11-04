@@ -3,6 +3,12 @@
 import path from 'node:path';
 
 const env = (k: string, d: string) => process.env[k] ?? d;
+// An address from the settings: http:// is added when it was left out (these
+// are services on your own network), a trailing slash goes.
+export const serviceUrl = (raw: string): string => {
+  const u = raw.trim().replace(/\/+$/, '');
+  return !u || /^https?:\/\//i.test(u) ? u : `http://${u}`;
+};
 
 export const config = {
   port: Number(env('PORT', '8080')),
@@ -53,7 +59,7 @@ export const config = {
   // hop count. Caveat: routes that come through Cloudflare see CF's edge IP
   // unless nginx forwards CF-Connecting-IP — out of scope here.
   trustProxy: ((v: string): boolean | number => v === 'true' ? true : v === 'false' ? false : Number.isInteger(Number(v)) && Number(v) >= 0 ? Number(v) : 1)(env('TRUST_PROXY', '1')),
-  publicUrl: env('PUBLIC_URL', '').replace(/\/+$/, ''),
+  publicUrl: serviceUrl(env('PUBLIC_URL', '')),
   adminUser: env('ADMIN_USER', 'admin'),
   adminPass: env('ADMIN_PASS', 'admin'),
   logLevel: env('LOG_LEVEL', 'info'),
@@ -87,7 +93,7 @@ export const config = {
   // also mounted into this container (SLSKD_DOWNLOADS_DIR), fetched tracks
   // are moved into the library and scanned right away; without it they stay
   // wherever slskd put them until something else brings them in.
-  slskdUrl: env('SLSKD_URL', '').replace(/\/+$/, ''),
+  slskdUrl: serviceUrl(env('SLSKD_URL', '')),
   slskdKey: env('SLSKD_API_KEY', ''),
   slskdDownloadsDir: env('SLSKD_DOWNLOADS_DIR', ''),
   // Lidarr runs acquisition: the artist page's full discography, "Request"
@@ -105,10 +111,10 @@ export const config = {
   // Retry can clear an album it skips after a failed import.
   soularr: {
     log: env('SOULARR_LOG', ''),
-    url: env('SOULARR_URL', '').replace(/\/+$/, ''),
+    url: serviceUrl(env('SOULARR_URL', '')),
   },
   lidarr: {
-    url: env('LIDARR_URL', '').replace(/\/+$/, ''),
+    url: serviceUrl(env('LIDARR_URL', '')),
     apiKey: env('LIDARR_API_KEY', ''),
     // the library's path as LIDARR's container sees it (webhook paths and
     // added artists are translated from/to this root)
@@ -134,7 +140,7 @@ export const config = {
   brain: {
     // With only the key set, the brain is next door: the README's compose
     // runs both on host networking.
-    url: env('BRAIN_URL', env('BRAIN_KEY', '') ? 'http://127.0.0.1:8097' : '').replace(/\/+$/, ''),
+    url: serviceUrl(env('BRAIN_URL', env('BRAIN_KEY', '') ? 'http://127.0.0.1:8097' : '')),
     key: env('BRAIN_KEY', ''),
     timeoutMs: Number(env('BRAIN_TIMEOUT_MS', '1500')),
     // Home's Daily Mixes from how songs sound (the brain's CLAP audio

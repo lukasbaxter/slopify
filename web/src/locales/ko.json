@@ -857,5 +857,8 @@
  "Your Top Songs {year}": "내 인기곡 {year}",
  "Your top tracks": "내 인기 트랙",
  "Your top tracks {range}": "내 인기 트랙 {range}",
- "Yours": "내 항목"
+ "Yours": "내 항목",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "{host}에서 응답한 Slopify 서버가 없습니다. 주소와 이 컴퓨터에서 접속할 수 있는지 확인하세요.",
+ "That server address doesn’t look right. Try something like music.example.com.": "서버 주소가 올바르지 않은 것 같습니다. music.example.com 같은 형식으로 입력해 보세요.",
+ "With or without https:// in front. Slopify works it out.": "앞에 https://를 붙여도 되고 안 붙여도 됩니다. Slopify가 알아서 찾습니다."
 }

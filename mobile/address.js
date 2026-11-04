@@ -20,6 +20,16 @@ export const cleanAddress = (s) => {
   return `${scheme}://${m[2].toLowerCase()}${port}${(m[4] || '').replace(/\/+$/, '')}`;
 };
 
+// The addresses to try for what was typed, best guess first: with no http://
+// or https:// typed, the other one too. A wrong guess was "no server" for a
+// server that was there. [] when it is not an address.
+export const addressTries = (s) => {
+  const u = cleanAddress(s);
+  if (!u) return [];
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(String(s).trim())) return [u];
+  return [u, u.startsWith('https:') ? `http:${u.slice(6)}` : `https:${u.slice(5)}`];
+};
+
 // scheme://host[:port] of an address or page URL; '' when it is neither.
 export const originOf = (u) => {
   const m = RE.exec(String(u || ''));

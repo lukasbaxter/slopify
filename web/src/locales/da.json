@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "{synced} synkroniseret · {plain} uden timing · {instrumental} instrumental · {missing} mangler",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "{timed} timet · {verified} bekræftet · {corrected} rettet · {unsure} usikker · {failed} mislykkedes · {pending} at tjekke",
  "{title} is back in line": "{title} er tilbage i køen",
- "{value}. Not on iPhone yet": "{value}. Ikke på iPhone endnu"
+ "{value}. Not on iPhone yet": "{value}. Ikke på iPhone endnu",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Ingen Slopify-server svarede på {host}. Tjek adressen, og at denne computer kan nå den.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Serveradressen ser forkert ud. Prøv noget i stil med music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "Med eller uden https:// foran. Slopify finder selv ud af det."
 }

@@ -857,5 +857,8 @@
  "Your Top Songs {year}": "你的 {year} 年热门歌曲",
  "Your top tracks": "你的热门曲目",
  "Your top tracks {range}": "你的热门曲目 {range}",
- "Yours": "你的"
+ "Yours": "你的",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "{host} 上没有 Slopify 服务器响应。请检查地址，以及这台电脑能否访问它。",
+ "That server address doesn’t look right. Try something like music.example.com.": "这个服务器地址好像不对。试试类似 music.example.com 的地址。",
+ "With or without https:// in front. Slopify works it out.": "前面加不加 https:// 都可以，Slopify 会自己判断。"
 }

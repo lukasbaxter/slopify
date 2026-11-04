@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "{synced} sincronizadas · {plain} sin sincronizar · {instrumental} instrumentales · {missing} sin letra",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "{timed} sincronizadas · {verified} verificadas · {corrected} corregidas · {unsure} dudosas · {failed} con error · {pending} por revisar",
  "{title} is back in line": "{title} vuelve a estar en cola",
- "{value}. Not on iPhone yet": "{value}. Aún no en iPhone"
+ "{value}. Not on iPhone yet": "{value}. Aún no en iPhone",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Ningún servidor de Slopify ha respondido en {host}. Comprueba la dirección y que este ordenador pueda llegar a ella.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Esa dirección de servidor no parece correcta. Prueba algo como music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "Con o sin https:// delante. Slopify lo averigua solo."
 }

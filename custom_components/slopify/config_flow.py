@@ -92,9 +92,17 @@ class SlopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         except ValueError:
             return {}, {CONF_URL: "invalid_url"}
         verify_ssl = bool(user_input.get(CONF_VERIFY_SSL, True))
-        api = SlopifyApi(async_get_clientsession(self.hass, verify_ssl=verify_ssl), url)
+        session = async_get_clientsession(self.hass, verify_ssl=verify_ssl)
+        api = SlopifyApi(session, url)
         try:
-            await api.health()
+            try:
+                await api.health()
+            except (CannotConnect, NotSlopify):
+                # No http:// or https:// typed: the other one may be the server.
+                if "://" in str(user_input[CONF_URL]):
+                    raise
+                api = SlopifyApi(session, url.replace("http://", "https://", 1))
+                await api.health()
             await api.login(user_input[CONF_USERNAME], user_input[CONF_PASSWORD], CLIENT_NAME)
             user = await api.me()
         except PasswordChangeRequired:

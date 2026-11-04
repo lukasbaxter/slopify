@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "{synced} senkronize · {plain} düz · {instrumental} enstrümantal · {missing} eksik",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "{timed} zamanlandı · {verified} doğrulandı · {corrected} düzeltildi · {unsure} emin değil · {failed} başarısız · {pending} kontrol edilecek",
  "{title} is back in line": "{title} yeniden sırada",
- "{value}. Not on iPhone yet": "{value}. iPhone'da henüz yok"
+ "{value}. Not on iPhone yet": "{value}. iPhone'da henüz yok",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "{host} adresinde hiçbir Slopify sunucusu yanıt vermedi. Adresi ve bu bilgisayarın ona ulaşabildiğini kontrol edin.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Bu sunucu adresi doğru görünmüyor. music.example.com gibi bir şey deneyin.",
+ "With or without https:// in front. Slopify works it out.": "Başında https:// olsun ya da olmasın. Slopify kendisi anlar."
 }

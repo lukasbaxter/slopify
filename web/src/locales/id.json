@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "{synced} tersinkron · {plain} biasa · {instrumental} instrumental · {missing} tidak ada",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "{timed} diberi waktu · {verified} terverifikasi · {corrected} dikoreksi · {unsure} tidak pasti · {failed} gagal · {pending} untuk diperiksa",
  "{title} is back in line": "{title} kembali dalam antrean",
- "{value}. Not on iPhone yet": "{value}. Belum ada di iPhone"
+ "{value}. Not on iPhone yet": "{value}. Belum ada di iPhone",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Tidak ada server Slopify yang menjawab di {host}. Periksa alamatnya, dan pastikan komputer ini bisa menjangkaunya.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Alamat server itu sepertinya salah. Coba seperti music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "Dengan atau tanpa https:// di depan. Slopify akan mencari tahu sendiri."
 }

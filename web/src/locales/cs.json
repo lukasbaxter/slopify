@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "synchronizované: {synced} · prosté: {plain} · instrumentální: {instrumental} · chybí: {missing}",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "načasované: {timed} · ověřené: {verified} · opravené: {corrected} · nejisté: {unsure} · nezdařené: {failed} · ke kontrole: {pending}",
  "{title} is back in line": "{title} je zpět ve frontě",
- "{value}. Not on iPhone yet": "{value}. Na iPhonu zatím ne"
+ "{value}. Not on iPhone yet": "{value}. Na iPhonu zatím ne",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Na adrese {host} neodpověděl žádný server Slopify. Zkontrolujte adresu a jestli se k němu tento počítač dostane.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Tato adresa serveru nevypadá správně. Zkuste něco jako music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "S https:// na začátku i bez něj. Slopify si to zjistí sám."
 }

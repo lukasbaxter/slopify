@@ -2849,6 +2849,27 @@ export function usePlayer(jf) {
   // Held by the stand-in while paused (silent media keeps the lock screen).
   // Only its play button acts; a pause there just re-syncs the icon.
   const holding = standIn && !shownPlaying;
+  // Signed out (the menu, or the server refusing the token): the music on
+  // this device ends with the account, and nothing is left to start again or
+  // to hold the lock screen. The queue stays saved for the next sign-in.
+  const signedInRef = useRef(false);
+  useEffect(() => {
+    if (jf) { signedInRef.current = true; return; }
+    if (!signedInRef.current) return;
+    signedInRef.current = false;
+    mediaLog('signed out: stop');
+    startGenRef.current++; // a start still on its way is dropped
+    playingRef.current = false;
+    endFadeRef.current();
+    for (const el of [audioRef.current, spareRef.current]) if (el) { ownPause(el); emptyEl(el); }
+    if (bridgeSinceRef.current) { bridgeSinceRef.current = 0; bridgeKeepAlive(false, 'signed out'); }
+    stayUntilRef.current = 0;
+    loadedRef.current = null;
+    anchorRef.current = { pos: 0, at: Date.now(), playing: false };
+    queueRef.current = []; indexRef.current = -1; positionRef.current = 0;
+    setQueue([]); setIndex(-1); setPlaying(false); setPosition(0); setDuration(0);
+    setExternal(null); setRoster({ players: [], lanDevices: [] }); setRemoteQueues({}); remoteQueuesRef.current = {};
+  }, [jf]);
   // Lock-screen play and pause ask for a state; they used to both toggle, so
   // once the app and the sound disagreed each tap went the wrong way. A tap
   // for the state we are already in re-syncs the sound and the icon instead.

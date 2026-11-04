@@ -29,7 +29,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
 import SlopifyMedia from './modules/slopify-media';
-import { cleanAddress, originOf } from './address';
+import { addressTries, cleanAddress, originOf } from './address';
 import { answers, askAddresses, canMoveLive, homeTryable, netKey, provesItself } from './servers';
 
 // An address a self-built app can suggest on first launch. Release builds
@@ -576,13 +576,19 @@ function ServerForm({ initial, hint, onSave, onCancel }) {
     if (h === null) { setErr('That home address doesn’t look right. Try something like 192.168.1.10:8080.'); return; }
     setBusy(true); setErr(null);
     const typedHome = h && h !== initial.home;
-    const [mOk, hOk] = await Promise.all([answers(m, 6000), typedHome ? answers(h, 3000) : Promise.resolve(false)]);
+    const found = async (typed, ms) => {
+      const tries = addressTries(typed);
+      const ok = await Promise.all(tries.map((u) => answers(u, ms)));
+      return tries[ok.indexOf(true)] || null;
+    };
+    const [mFound, hFound] = await Promise.all([found(main, 6000), typedHome ? found(home, 3000) : Promise.resolve(null)]);
     setBusy(false);
     // Either one is enough: set up at home, the main address may only
     // answer from outside (and the other way round).
-    if (!mOk && !hOk) { setErr(`No Slopify server answered at ${hostLabel(m)}. Check the address, and that the phone can reach it.`); return; }
-    const homeOut = h && h !== m ? h : '';
-    onSave({ main: m, home: homeOut, homeAuto: !!homeOut && homeOut === initial.home && !!initial.homeAuto, homeOff: !homeOut && !!initial.home });
+    if (!mFound && !hFound) { setErr(`No Slopify server answered at ${hostLabel(m)}. Check the address, and that the phone can reach it.`); return; }
+    const mainOut = mFound || m; const homeTyped = hFound || h;
+    const homeOut = homeTyped && homeTyped !== mainOut ? homeTyped : '';
+    onSave({ main: mainOut, home: homeOut, homeAuto: !!homeOut && homeOut === initial.home && !!initial.homeAuto, homeOff: !homeOut && !!initial.home });
   };
   return (
     <KeyboardAvoidingView style={styles.form} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -591,6 +597,7 @@ function ServerForm({ initial, hint, onSave, onCancel }) {
         <Text style={styles.label}>Server address</Text>
         <TextInput style={styles.input} value={main} onChangeText={setMain} placeholder="music.example.com" placeholderTextColor="#6a6a6a"
           autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="go" onSubmitEditing={submit} editable={!busy} autoFocus={!initial.main} />
+        <Text style={styles.hint}>With or without https:// in front. Slopify works it out.</Text>
         {away ? (
           <TouchableOpacity onPress={useAway} disabled={busy}><Text style={styles.suggest}>Away from home your server is at {hostLabel(away)}. <Text style={styles.suggestLink}>Use it</Text></Text></TouchableOpacity>
         ) : null}

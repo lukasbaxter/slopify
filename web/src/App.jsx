@@ -21,6 +21,7 @@ import { canSaveOffline, subscribeOffline, flushOfflinePlays, resumeOffline } fr
 import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
 import { readLib, getActive as downloading } from './offline/store.js';
 import { clientLog } from './api/clientLog.js';
+import { addressTries, hostLabel } from './api/address.js';
 
 // The browser build is same-origin. The desktop app has no server of its
 // own: its sign-in form asks for yours (empty in release builds; a self-built
@@ -69,6 +70,19 @@ function ChangePassword({ jf, onDone }) {
   );
 }
 
+// The desktop form's address as typed, made into the one that answers. A
+// probe, so no password goes anywhere before a Slopify server has answered.
+async function findServer(typed) {
+  const tries = addressTries(typed);
+  if (!tries.length) throw new Error(t('That server address doesn’t look right. Try something like music.example.com.'));
+  const probe = async (u) => {
+    try { return (await (await fetch(`${u}/api/healthz`, { signal: AbortSignal.timeout(6000) })).json())?.ok === true; } catch { return false; }
+  };
+  const ok = await Promise.all(tries.map(probe));
+  if (!ok.includes(true)) throw new Error(t('No Slopify server answered at {host}. Check the address, and that this computer can reach it.', { host: hostLabel(tries[0]) }));
+  return tries[ok.indexOf(true)];
+}
+
 function Login({ onConnected }) {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_SERVER);
   const [username, setUsername] = useState('');
@@ -94,12 +108,13 @@ function Login({ onConnected }) {
     setBusy(true);
     setErr(null);
     try {
+      const server = IS_DESKTOP ? await findServer(baseUrl) : baseUrl.trim().replace(/\/+$/, '');
       if (invite) {
-        const r = await fetch(`${baseUrl.trim().replace(/\/+$/, '')}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invite, username: username.trim(), password }) });
+        const r = await fetch(`${server}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invite, username: username.trim(), password }) });
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status}`);
         window.history.replaceState(null, '', window.location.pathname);
       }
-      const jf = await Slopify.login(baseUrl.trim(), username.trim(), password);
+      const jf = await Slopify.login(server, username.trim(), password);
       persistSession({ baseUrl: jf.baseUrl, token: jf.token, userId: jf.userId });
       // The first admin login (admin / admin) may do nothing else until a new
       // password is chosen: the server refuses every other request. Ask here.
@@ -123,7 +138,8 @@ function Login({ onConnected }) {
         {IS_DESKTOP && (
           <label>
             {t('Server')}
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} spellCheck="false" />
+            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="music.example.com" spellCheck="false" autoCapitalize="none" autoCorrect="off" />
+            <span className="login-hint">{t('With or without https:// in front. Slopify works it out.')}</span>
           </label>
         )}
         <label>

@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "{synced} synkronoitu · {plain} pelkkä teksti · {instrumental} instrumentaali · {missing} puuttuu",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "{timed} ajoitettu · {verified} vahvistettu · {corrected} korjattu · {unsure} epävarma · {failed} epäonnistui · {pending} tarkistettavana",
  "{title} is back in line": "{title} on taas jonossa",
- "{value}. Not on iPhone yet": "{value}. Ei vielä iPhonessa"
+ "{value}. Not on iPhone yet": "{value}. Ei vielä iPhonessa",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Osoitteessa {host} ei vastannut Slopify-palvelinta. Tarkista osoite ja että tämä tietokone yltää siihen.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Palvelimen osoite ei näytä oikealta. Kokeile jotain tällaista: music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "https:// alussa tai ilman. Slopify selvittää sen itse."
 }

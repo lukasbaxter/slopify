@@ -23,6 +23,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewCompat
+import java.net.HttpURLConnection
+import java.net.URL
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 
@@ -155,9 +157,29 @@ class MainActivity : Activity() {
             .put("deviceForm", "tv").put("platform", "androidtv").put("version", "1.0").toString()
         /** The setup form's answer; only taken while that form is up (no server yet). */
         @JavascriptInterface fun setServer(url: String) {
-            val u = url.trim().trimEnd('/')
-            if (!(u.startsWith("https://") || u.startsWith("http://"))) return
+            val u = findServer(url)
+            if (u == null) { runOnUiThread { web.evaluateJavascript("document.getElementById('e').textContent='No Slopify server answered there. Check the address.'", null) }; return }
             runOnUiThread { if (server().isEmpty()) { prefs.edit().putString("server", u).apply(); open() } }
+        }
+    }
+
+    /** What was typed, as the address that answers: https:// or http:// in front is optional, as in the phone app. */
+    private fun findServer(typed: String): String? {
+        val t = typed.trim().trimEnd('/')
+        if (t.isEmpty()) return null
+        val host = t.split('/', ':', '?', '#')[0]
+        val lan = Regex("\\d{1,3}(\\.\\d{1,3}){3}").matches(host) || host.endsWith(".local", true) || !host.contains('.')
+        val tries = when {
+            t.startsWith("https://", true) || t.startsWith("http://", true) -> listOf(t)
+            lan -> listOf("http://$t", "https://$t")
+            else -> listOf("https://$t", "http://$t")
+        }
+        return tries.firstOrNull { u ->
+            try {
+                val c = URL("$u/api/healthz").openConnection() as HttpURLConnection
+                c.connectTimeout = 5000; c.readTimeout = 5000
+                try { c.responseCode == 200 } finally { c.disconnect() }
+            } catch (e: Exception) { false }
         }
     }
 
@@ -189,7 +211,9 @@ class MainActivity : Activity() {
         val SETUP = """
             <!doctype html><html><body style="background:#000;color:#fff;font:28px sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;gap:24px">
             <div>Your Slopify server's address</div>
-            <input id="u" type="url" value="https://" style="font-size:28px;width:60%;padding:12px" autofocus>
+            <input id="u" type="url" placeholder="music.example.com" style="font-size:28px;width:60%;padding:12px" autofocus>
+            <div style="font-size:22px;color:#b3b3b3">With or without https:// in front. Slopify works it out.</div>
+            <div id="e" style="font-size:22px;color:#ff8a80"></div>
             <button style="font-size:28px;padding:10px 32px" onclick="SlopifyTV.setServer(document.getElementById('u').value)">Open</button>
             </body></html>
         """

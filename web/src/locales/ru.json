@@ -857,5 +857,8 @@
  "{synced} synced · {plain} plain · {instrumental} instrumental · {missing} missing": "Синхронизировано: {synced} · без синхронизации: {plain} · инструментальных: {instrumental} · нет текста: {missing}",
  "{timed} timed · {verified} verified · {corrected} corrected · {unsure} unsure · {failed} failed · {pending} to check": "С таймингом: {timed} · проверено: {verified} · исправлено: {corrected} · под вопросом: {unsure} · с ошибкой: {failed} · ожидают проверки: {pending}",
  "{title} is back in line": "{title} снова в очереди",
- "{value}. Not on iPhone yet": "{value}. Пока не на iPhone"
+ "{value}. Not on iPhone yet": "{value}. Пока не на iPhone",
+ "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "По адресу {host} не ответил ни один сервер Slopify. Проверьте адрес и доступен ли он с этого компьютера.",
+ "That server address doesn’t look right. Try something like music.example.com.": "Адрес сервера выглядит неверно. Попробуйте что-то вроде music.example.com.",
+ "With or without https:// in front. Slopify works it out.": "С https:// в начале или без него. Slopify разберётся сам."
 }

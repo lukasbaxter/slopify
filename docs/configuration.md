@@ -5,6 +5,8 @@ Everything is set in the environment (the `environment:` block in compose;
 Task schedules and per-task settings live in the app (Settings › Tasks); the
 environment values for them only seed the defaults.
 
+Addresses (`PUBLIC_URL`, `LIDARR_URL`, `SLSKD_URL`, `SOULARR_URL`, `BRAIN_URL`): `http://` in front is optional, Slopify adds it. Type `https://` yourself if the service really uses it.
+
 | Env | Default | What it does |
 | --- | --- | --- |
 | `PUID` / `PGID` | `1000` / `1000` | The user the server runs as. The container makes `/data` and `CACHE_DIR` belong to it on start; give it read access to your music (and write access if `SAVE_TO_LIBRARY=1`) |

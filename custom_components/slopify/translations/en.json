@@ -12,7 +12,7 @@
           "verify_ssl": "Verify the HTTPS certificate"
         },
         "data_description": {
-          "url": "The address you open Slopify at in your browser, with the port if it has one.",
+          "url": "The address you open Slopify at in your browser, with the port if it has one. http:// or https:// in front is optional.",
           "username": "Your Slopify username. Each account gets its own player in Home Assistant.",
           "password": "Your Slopify password.",
           "verify_ssl": "Turn off only for a server with a self-signed certificate."

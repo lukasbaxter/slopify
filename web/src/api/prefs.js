@@ -48,15 +48,19 @@ export function applyTheme(theme) {
   const light = isLight(t.bg);
   const fgDim = mix(t.fg, t.bg, light ? .28 : .3);
   const set = (k, v) => s.setProperty(k, v);
-  // The accent is also text (the playing song, links). On a light page it has
-  // to read on a hovered row too, so a pale one is taken darker until it does.
-  let accent = t.accent;
-  if (light) for (let i = 0; i < 12 && contrast(accent, mix(t.bg, t.fg, .2)) < 4.5; i++) accent = mix(accent, '#000000', .1);
-  set('--accent', accent);
-  set('--accent-hover', mix(accent, light ? '#000000' : '#ffffff', .12));
-  set('--accent-press', mix(accent, '#000000', .12));
-  set('--seek-accent', accent);
-  set('--on-accent', inkOn(accent));
+  // Fills keep the theme's own accent. As text (the playing song, links) it has
+  // to read on a light page's hovered row, so a pale one gets a darker ink, and
+  // a lighter one for the places that stay dark.
+  let ink = t.accent;
+  if (light) for (let i = 0; i < 12 && contrast(ink, mix(t.bg, t.fg, .2)) < 4.5; i++) ink = mix(ink, '#000000', .1);
+  set('--accent', t.accent);
+  set('--accent-rgb', hexToRgb(t.accent).join(','));
+  set('--accent-ink', ink);
+  set('--accent-on-dark', light ? mix(t.accent, '#ffffff', .45) : t.accent);
+  set('--accent-hover', mix(t.accent, light ? '#000000' : '#ffffff', .12));
+  set('--accent-press', mix(t.accent, '#000000', .12));
+  set('--seek-accent', t.accent);
+  set('--on-accent', inkOn(t.accent));
   set('--on-fg', inkOn(t.fg));
   set('--bg-base', t.bg);
   set('--bg-highlight', t.surface);
@@ -78,14 +82,14 @@ export function applyTheme(theme) {
   set('--theme-on-fg', inkOn(t.fg));
   set('--fg-sub', light ? fgDim : '#a7a7a7');
   set('--fg-faint', light ? fgDim : '#727272');
-  set('--black', light ? '#e6e3dc' : '#000');
+  set('--black', light ? mix(t.bg, t.fg, .05) : '#000');
   // Fixed greys from the dark design, as tokens: same values on a dark theme.
   set('--page', light ? t.bg : '#121212');
   set('--page-rgb', light ? hexToRgb(t.bg).join(',') : '18,18,18');
   set('--chip', light ? mix(t.surface, t.fg, .08) : '#2a2a2a');
   set('--field', light ? mix(t.surface, t.fg, .05) : '#1f1f1f');
   set('--sheet', light ? t.surface : '#282828');
-  set('--green', light ? accent : '#1ed760');
+  set('--green', light ? ink : '#1ed760');
   set('--danger', light ? '#b3261e' : '#f3727f');
   set('--danger-bg', light ? '#fbe4e2' : '#2a1618');
   s.colorScheme = light ? 'light' : 'dark';

@@ -9,7 +9,7 @@
   .shell.show-lib .libhead > span:first-child { display: none !important; } /* beats the inline flex the desktop title uses */
   .libhead-actions { display: flex; align-items: center; gap: 4px; }
   .libhead-actions .icon-btn { width: 40px; height: 40px; color: var(--fg); }
-  .libhead-actions .icon-btn.on { color: var(--accent); }
+  .libhead-actions .icon-btn.on { color: var(--accent-ink); }
   .libhead-actions .icon-btn svg { stroke-width: 1.7; }
   /* Header, chips and sort row stay put; only the list scrolls (the desktop
      grid gave the list an implicit auto row, so the whole tab scrolled). */
@@ -108,7 +108,7 @@
   .actions { padding: 8px 16px 8px; gap: 4px; flex-wrap: wrap; min-height: 64px; }
   .actions .iconbtn { width: 40px; height: 40px; color: var(--fg-sub); margin: 0; }
   .actions .iconbtn svg { width: 24px; height: 24px; }
-  .actions .iconbtn.on { color: var(--accent); }
+  .actions .iconbtn.on { color: var(--accent-ink); }
   .actions .iconbtn.on::after { display: none; }
   .actions .iconbtn.shuffle { order: 8; margin-left: auto; }
   .actions:has(.iconbtn.shuffle) .bigplay { margin-left: 4px; }
@@ -150,7 +150,7 @@
   .trackrow-name small { font-size: 13px; color: var(--fg-sub); margin-top: 2px; }
   .trackrow-name small .rowlink { color: var(--fg-sub); }
   .trackrow-more { width: 40px; height: 40px; margin-right: -12px; color: var(--fg-sub); }
-  .trackrow.active .trackrow-name > span { color: var(--accent); }
+  .trackrow.active .trackrow-name > span { color: var(--accent-ink); }
   .placeholder-note { padding: 16px; font-size: 13px; color: var(--fg-sub); }
 
   /* Recommended: 24/700 heading, plain rows, outlined Add pill. */
@@ -178,7 +178,7 @@
   .tracklist.popular .trackrow-n { display: block; width: 20px; height: 24px; flex: none; font-size: 16px; color: var(--fg-sub); }
   .tracklist.popular .trackrow-n .trackrow-playglyph { display: none !important; }
   .tracklist.popular .trackrow-n .trackrow-idx { opacity: 1 !important; }
-  .tracklist.popular .trackrow.active .trackrow-idx { color: var(--accent); }
+  .tracklist.popular .trackrow.active .trackrow-idx { color: var(--accent-ink); }
   .seemore { display: inline-flex; align-items: center; min-height: 32px; padding: 0 16px; margin: 8px 0 0; border: 1px solid #727272; border-radius: 500px; font-size: 13px; font-weight: 700; color: var(--fg); }
   /* "Popular releases": 76pt art rows, "2025 • Album" 13 grey, Request pill on the right. */
   .releases .release { display: flex; align-items: center; gap: 12px; width: 100%; padding: 6px 0; text-align: left; }

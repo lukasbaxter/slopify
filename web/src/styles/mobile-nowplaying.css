@@ -60,7 +60,7 @@
   .fs-controls > button:first-child { margin-left: -6px; }
   .fs-controls > button:last-child { margin-right: -6px; }
   .fs-controls .ctl-mode { color: var(--fg); }
-  .fs-controls .ctl-mode.on { color: var(--accent); }
+  .fs-controls .ctl-mode.on { color: var(--accent-ink); }
   .fs-controls .fs-play { width: 64px; height: 64px; border-radius: 50%; background: var(--fg); color: var(--on-fg) !important; }
   .fs-controls .fs-play svg { width: 28px; height: 28px; }
   .fs-controls .fs-play:hover { transform: none; }
@@ -68,12 +68,12 @@
   .fs-phone-row { order: 4; display: flex; align-items: center; gap: 0; margin: 0; padding: 0; color: var(--fg); }
   .fs-phone-row > button { flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: var(--fg); padding: 0; }
   .fs-phone-row > button:last-child { margin-right: -10px; }
-  .fs-phone-row > button.on { color: var(--accent); }
+  .fs-phone-row > button.on { color: var(--accent-ink); }
   .fs-phone-device { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; margin-left: -10px; }
   .fs-phone-device .devicebtn { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px; color: var(--fg); font-size: 12px; font-weight: 600; max-width: 100%; }
   .fs-phone-device .devicebtn svg { width: 24px; height: 24px; flex: none; }
   .fs-phone-device .devicebtn-name { display: none; }
-  .fs-phone-device .devicebtn.casting, .fs-phone-device .devicebtn.casting .devicebtn-name { color: var(--accent); }
+  .fs-phone-device .devicebtn.casting, .fs-phone-device .devicebtn.casting .devicebtn-name { color: var(--accent-ink); }
   .fs-phone-device .devicebtn.casting .devicebtn-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ---- Lyrics page: full bleed over the blurred cover (kept, darkened),
@@ -114,7 +114,7 @@
      a green check at the right, the smoothing slider drawn like the seek bar. ---- */
   .ctxmenu-fixed:not(:has(.ctx-ico > *)) .ctx-ico { display: none; }
   .ctxmenu-fixed:not(:has(.ctx-ico > *)) .ctxslider { padding-left: 12px; }
-  .ctxmenu-fixed .ctx-check { margin-left: auto; flex: none; color: var(--accent); }
+  .ctxmenu-fixed .ctx-check { margin-left: auto; flex: none; color: var(--accent-ink); }
   .ctxmenu-fixed .ctxslider { padding: 12px 12px 16px; gap: 10px; }
   .ctxmenu-fixed .ctxslider-head { font-size: 16px; }
   .ctxmenu-fixed .ctxslider-val { font-size: 13px; color: var(--fg-sub); }
@@ -149,7 +149,7 @@
   .player-right > *:not(.devicepicker) { display: none; }
   .player-right .devicebtn { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; color: var(--fg); }
   .player-right .devicebtn svg { width: 24px; height: 24px; }
-  .player-right .devicebtn.casting { color: var(--accent); }
+  .player-right .devicebtn.casting { color: var(--accent-ink); }
   .player-controls { width: auto; max-width: none; gap: 0; order: 3; }
   .player-buttons { gap: 0; }
   .player-buttons .ctl-mode, .player-buttons button[title="Previous"], .player-buttons button[title="Next"] { display: none; }
@@ -186,7 +186,7 @@
   .qrow-play { display: none; }
   .qrow-text { flex: 1 1 auto; min-width: 0; gap: 2px; }
   .qrow-title { font-size: 16px; line-height: 1.25; }
-  .qrow.active .qrow-title { color: var(--accent); }
+  .qrow.active .qrow-title { color: var(--accent-ink); }
   .qrow-sub, .qrow-sub .rowlink { font-size: 13px; color: var(--fg-sub); }
   .qrow-more { display: none; }
   .qrow-handle { display: grid; place-items: center; width: 44px; height: 44px; margin: 0 -12px 0 0; color: var(--fg-sub); flex: none; touch-action: none; cursor: grab; }
@@ -203,7 +203,7 @@
   .panel-transport-row > button { width: 44px; height: 44px; display: grid; place-items: center; color: var(--fg); padding: 0; }
   .panel-transport-row > button:first-child { margin-left: -6px; }
   .panel-transport-row > button:last-child { margin-right: -6px; }
-  .panel-transport-row .ctl-mode.on { color: var(--accent); }
+  .panel-transport-row .ctl-mode.on { color: var(--accent-ink); }
   .panel-transport-row .panel-play { width: 48px; height: 48px; border-radius: 50%; background: var(--fg); color: var(--on-fg); }
   .panel-progress { position: absolute; left: 0; right: 0; top: -2px; height: 2px; background: rgba(var(--fg-rgb),.2); }
   .panel-progress > span { display: block; height: 100%; background: var(--fg); }
@@ -224,11 +224,11 @@
   .devicemenu-head { display: block; padding: 12px 0 16px; }
   .devicemenu-head strong { display: block; font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
   .devicemenu-head span { display: block; font-size: 13px; color: var(--fg-sub); margin-top: 2px; }
-  .dm-current { display: flex; align-items: center; gap: 16px; padding: 12px 0 16px; color: var(--accent); border-bottom: 1px solid rgba(var(--fg-rgb),.1); margin-bottom: 8px; }
+  .dm-current { display: flex; align-items: center; gap: 16px; padding: 12px 0 16px; color: var(--accent-ink); border-bottom: 1px solid rgba(var(--fg-rgb),.1); margin-bottom: 8px; }
   .dm-current svg { width: 32px; height: 32px; flex: none; }
   .dm-current-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   .dm-current-label { font-size: 13px; font-weight: 700; color: var(--fg); }
-  .dm-current-name { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dm-current-name { font-size: 16px; font-weight: 700; color: var(--accent-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dm-current-sub { font-size: 13px; color: var(--fg-sub); }
   .dm-others { font-size: 16px; font-weight: 700; color: var(--fg); padding: 12px 0 4px; }
   .devicegroup-label { display: none; }

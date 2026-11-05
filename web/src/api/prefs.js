@@ -33,6 +33,10 @@ function hexToRgb(h) { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if (!m) ret
 function rgbToHex([r, g, b]) { return `#${[r, g, b].map((x) => clamp(x).toString(16).padStart(2, '0')).join('')}`; }
 function mix(a, b, t) { const A = hexToRgb(a), B = hexToRgb(b); return rgbToHex(A.map((x, i) => x + (B[i] - x) * t)); }
 function isLight(hex) { const [r, g, b] = hexToRgb(hex); return (r * 299 + g * 587 + b * 114) / 1000 > 140; }
+function luminance(hex) { const [r, g, b] = hexToRgb(hex).map((v) => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }); return .2126 * r + .7152 * g + .0722 * b; }
+function contrast(a, b) { const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (x + .05) / (y + .05); }
+// The label for something filled with this colour: whichever of black and white reads.
+const inkOn = (hex) => (contrast(hex, '#000000') >= contrast(hex, '#ffffff') ? '#000000' : '#ffffff');
 
 /** Push a theme into the CSS variables the whole app is painted from. */
 export function applyTheme(theme) {
@@ -42,12 +46,18 @@ export function applyTheme(theme) {
   for (const k of Object.keys(DEFAULT_THEME)) if (theme && hexToRgb(theme[k])) t[k] = theme[k];
   const s = document.documentElement.style;
   const light = isLight(t.bg);
-  const fgDim = mix(t.fg, t.bg, light ? .45 : .3);
+  const fgDim = mix(t.fg, t.bg, light ? .28 : .3);
   const set = (k, v) => s.setProperty(k, v);
-  set('--accent', t.accent);
-  set('--accent-hover', mix(t.accent, light ? '#000000' : '#ffffff', .12));
-  set('--accent-press', mix(t.accent, '#000000', .12));
-  set('--seek-accent', t.accent);
+  // The accent is also text (the playing song, links). On a light page it has
+  // to read on a hovered row too, so a pale one is taken darker until it does.
+  let accent = t.accent;
+  if (light) for (let i = 0; i < 12 && contrast(accent, mix(t.bg, t.fg, .2)) < 4.5; i++) accent = mix(accent, '#000000', .1);
+  set('--accent', accent);
+  set('--accent-hover', mix(accent, light ? '#000000' : '#ffffff', .12));
+  set('--accent-press', mix(accent, '#000000', .12));
+  set('--seek-accent', accent);
+  set('--on-accent', inkOn(accent));
+  set('--on-fg', inkOn(t.fg));
   set('--bg-base', t.bg);
   set('--bg-highlight', t.surface);
   set('--bg-elevated', t.surface);
@@ -60,7 +70,25 @@ export function applyTheme(theme) {
   set('--fg', t.fg);
   set('--fg-dim', fgDim);
   set('--fg-chrome', fgDim);
+  set('--fg-rgb', hexToRgb(t.fg).join(','));
+  // The theme's own ink, for a sheet that opens inside a dark place and has to get it back.
+  set('--theme-fg', t.fg);
+  set('--theme-fg-rgb', hexToRgb(t.fg).join(','));
+  set('--theme-fg-dim', fgDim);
+  set('--theme-on-fg', inkOn(t.fg));
+  set('--fg-sub', light ? fgDim : '#a7a7a7');
+  set('--fg-faint', light ? fgDim : '#727272');
   set('--black', light ? '#e6e3dc' : '#000');
+  // Fixed greys from the dark design, as tokens: same values on a dark theme.
+  set('--page', light ? t.bg : '#121212');
+  set('--page-rgb', light ? hexToRgb(t.bg).join(',') : '18,18,18');
+  set('--chip', light ? mix(t.surface, t.fg, .08) : '#2a2a2a');
+  set('--field', light ? mix(t.surface, t.fg, .05) : '#1f1f1f');
+  set('--sheet', light ? t.surface : '#282828');
+  set('--green', light ? accent : '#1ed760');
+  set('--danger', light ? '#b3261e' : '#f3727f');
+  set('--danger-bg', light ? '#fbe4e2' : '#2a1618');
+  s.colorScheme = light ? 'light' : 'dark';
   document.documentElement.dataset.light = light ? '1' : '';
 }
 

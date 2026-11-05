@@ -105,7 +105,9 @@ def last_speaker_key(remembered: dict[str, Any] | None) -> str | None:
 def position_now(now_playing: dict[str, Any], elapsed: float) -> float:
     """Playhead in seconds, `elapsed` seconds after the report was received."""
     pos = _num(now_playing.get("position"))
-    if now_playing.get("playing"):
+    # held: told to play but not heard yet (loading, seeking). The sender's clock
+    # waits for the sound; running ahead of it put lyrics and the bar seconds early.
+    if now_playing.get("playing") and not now_playing.get("held"):
         pos += max(0.0, elapsed)
     duration = _num(now_playing.get("duration"))
     return min(pos, duration) if duration > 0 else pos

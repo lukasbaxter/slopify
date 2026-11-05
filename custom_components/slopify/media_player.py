@@ -360,7 +360,8 @@ class _SlopifyMedia(MediaPlayerEntity):
         else:
             self._attr_volume_level = self._attr_is_volume_muted = None
             self._attr_shuffle = self._attr_repeat = None
-        self._clock.update(item, np if item else None, received, self._attr_state == MediaPlayerState.PLAYING)
+        running = self._attr_state == MediaPlayerState.PLAYING and not np.get("held")
+        self._clock.update(item, np if item else None, received, running)
         self._attr_media_position = self._clock.position
         self._attr_media_position_updated_at = self._clock.updated_at
 

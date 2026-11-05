@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { buildPlaylist, collectFetched, matchTrack, slskdFind, slskdWait } from './explore.js';
+import { brainPlaylist, buildPlaylist, collectFetched, exploreAll, matchTrack, slskdFind, slskdWait } from './explore.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-explore-'));
@@ -172,5 +172,67 @@ describe('rebuilds keep user edits; pruning only touches generated names', () =>
     expect(n).not.toContain('Weekly Exploration 2026-01-01');
     expect(n).toContain('Weekly Exploration 2026-01-02');
     expect(n).toContain('Weekly Exploration faves');
+  });
+});
+
+describe('the brain makes the mixes', () => {
+  const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-mixes-'));
+  const db = openDb(DIR);
+  const user = (id: string) => db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run(id, id, 'x', 'user', Date.now());
+  const play = (uid: string, n: number, at = Date.now()) => { for (let i = 0; i < n; i++) db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run(uid, ids[i % ids.length], at - i); };
+  let ids: string[] = [];
+  const lists = (uid: string) => (db.prepare('SELECT name FROM playlists WHERE user_id = ? ORDER BY name').all(uid) as any[]).map((p) => p.name);
+  const brainAnswers = (seen: any[]) => (async (_url: string, init: any) => { const ask = JSON.parse(init.body); seen.push(ask); return { ok: true, json: async () => ({ items: ids.filter((id) => !ask.exclude.includes(id)) }) }; }) as any;
+  const opts = (fetcher: any, more = {}) => ({ brain: true, brainUrl: 'http://brain', brainKey: 'k', fetcher, now: () => Date.parse('2026-11-05T12:00:00'), ...more });
+
+  beforeAll(async () => {
+    await scanLibrary(db, { musicDir: MUSIC, dataDir: DIR });
+    ids = (db.prepare('SELECT id FROM tracks').all() as any[]).map((r) => r.id);
+    for (const u of ['listener', 'idle', 'quiet']) user(u);
+    play('listener', 25); play('idle', 25, Date.now() - 90 * 86400000); play('quiet', 3);
+  }, 120000);
+
+  it('asks the brain, no ListenBrainz token needed, and names it so Home finds it', async () => {
+    const seen: any[] = [];
+    const r = await brainPlaylist(db, 'listener', 'weekly-jams', opts(brainAnswers(seen)));
+    expect(r?.name).toBe('Weekly Jams 2026-11-05');
+    expect(seen[0]).toMatchObject({ user: 'listener', mode: 'now' });
+    expect(lists('listener')).toContain('Weekly Jams 2026-11-05');
+  });
+
+  it('exploration leaves out everything the listener has played', async () => {
+    const seen: any[] = [];
+    await brainPlaylist(db, 'listener', 'weekly-exploration', opts(brainAnswers(seen)));
+    const played = (db.prepare('SELECT DISTINCT track_id id FROM plays WHERE user_id = ?').all('listener') as any[]).map((p) => p.id);
+    expect(seen[0].mode).toBe('radio');
+    expect([...seen[0].exclude].sort()).toEqual([...played].sort());
+  });
+
+  it('a second press replaces the mix, and one somebody edited is kept', async () => {
+    const f = brainAnswers([]);
+    await brainPlaylist(db, 'listener', 'daily-jams', opts(f));
+    await brainPlaylist(db, 'listener', 'daily-jams', opts(f));
+    expect(lists('listener').filter((n) => n.startsWith('Daily Jams'))).toHaveLength(1);
+    const mine = db.prepare("SELECT id FROM playlists WHERE user_id = 'listener' AND name LIKE 'Daily Jams%'").get() as any;
+    db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND pos = 0').run(mine.id);
+    await brainPlaylist(db, 'listener', 'daily-jams', opts(f));
+    expect(lists('listener').filter((n) => n.startsWith('Daily Jams'))).toHaveLength(2);
+  });
+
+  it('every account listening lately gets one; idle ones do not', async () => {
+    const r = await exploreAll(db, opts(brainAnswers([])), ['weekly-jams']);
+    expect(r.built.map((b: any) => b.user)).toEqual(['listener']);
+    expect(lists('idle')).toEqual([]); expect(lists('quiet')).toEqual([]);
+  });
+
+  it('a brain that does not answer counts as a failure, so the schedule tries again', async () => {
+    const r = await exploreAll(db, opts((async () => { throw new Error('down'); }) as any), ['weekly-jams']);
+    expect(r).toEqual({ built: [], failures: 1 });
+  });
+
+  it('never touches playback: a build writes playlists and nothing of any session', async () => {
+    db.prepare("INSERT INTO kv (k, v) VALUES ('session:listener', 'before') ON CONFLICT(k) DO UPDATE SET v = 'before'").run();
+    await exploreAll(db, opts(brainAnswers([])), ['daily-jams']);
+    expect((db.prepare("SELECT v FROM kv WHERE k = 'session:listener'").get() as any).v).toBe('before');
   });
 });

@@ -188,6 +188,37 @@ describe('BluOS end of track', () => {
     async status() { return { volume: 30, coarse: true, duration: 257, ...(seq.length > 1 ? seq.shift() : seq[0]) }; },
   });
 
+  it('the library says how long a song is, not a speaker guessing from the file size', async () => {
+    const p = custom();
+    p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };
+    p.queue = [row, row2]; p.index = 0; p.duration = 257;
+    p.playing = true; p.anchor = { pos: 100, at: Date.now() }; p.reached = 100;
+    p.transport = bluos([{ playing: true, state: 'stream', position: 100, duration: 590 }]);
+    await p.tick();
+    expect(p.duration).toBe(257);
+    await p.stopAll();
+  });
+  it('a song the speaker over-estimated still moves on at its real end, not paused', async () => {
+    const p = custom();
+    p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };
+    p.queue = [row, row2]; p.index = 0; p.duration = 257;
+    p.playing = true; p.anchor = { pos: 255.5, at: Date.now() }; p.reached = 255.5;
+    const calls: string[] = [];
+    p.transport = bluos([{ playing: true, state: 'stream', position: 255, duration: 590 }, { playing: false, state: 'stop', position: 0, duration: 590 }], calls);
+    await p.tick(); await vi.advanceTimersByTimeAsync(250); await p.tick();
+    expect(p.index).toBe(1);
+    await p.stopAll();
+  });
+  it('a song the library has no length for takes the speaker\'s', async () => {
+    const p = custom();
+    p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };
+    p.queue = [{ ...row, RunTimeTicks: 0 }, row2]; p.index = 0; p.duration = 0;
+    p.playing = true; p.anchor = { pos: 10, at: Date.now() }; p.reached = 10;
+    p.transport = bluos([{ playing: true, state: 'stream', position: 10, duration: 200 }]);
+    await p.tick();
+    expect(p.duration).toBe(200);
+    await p.stopAll();
+  });
   it('a track that ran out moves on, even when the speaker reset its counter before saying stop', async () => {
     const p = custom();
     p.device = { id: 'bluos:x', kind: 'bluos', name: 'NODE' };

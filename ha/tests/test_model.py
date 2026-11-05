@@ -59,6 +59,8 @@ def test_position_runs_on_while_playing_and_stops_at_the_end() -> None:
     assert position_now(now_playing(T1, position=10.0), 2.5) == 12.5
     assert position_now(now_playing(T1, position=10.0, playing=False), 60.0) == 10.0
     assert position_now(now_playing(T1, position=200.0), 60.0) == 201.0  # the song's length
+    # Told to play but not heard yet: the clock waits with the sender's.
+    assert position_now({**now_playing(T1, position=10.0), "held": True}, 5.0) == 10.0
 
 
 def test_handoff_carries_the_whole_queue_when_it_lines_up() -> None:

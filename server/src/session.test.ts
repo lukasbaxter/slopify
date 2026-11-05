@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
 import { applyEvent, emptySession, positionNow, registerSession, WS_MAX_PAYLOAD } from './session.js';
+import { Discovery } from './speakers/discovery.js';
 
 describe('session reconciliation', () => {
   it('newest event wins; older ones are rejected', () => {
@@ -214,5 +215,43 @@ describe('ws client ids across accounts', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(atPhone.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_phone_2');
     back.ws.terminate();
+  });
+});
+
+describe('who drives a speaker', () => {
+  // 11-04: the desktop connected before anyone else, its copy of the Node came
+  // first in the roster, and the phone's Node ran through the desktop's window.
+  const node = { id: 'bluos:192.168.1.77', kind: 'bluos', name: 'NODE', host: '192.168.1.77', port: 11000 };
+  const db = { prepare: (sql: string) => ({ get: (...args: any[]) => (sql.includes('FROM tokens t JOIN users') && args[0] === 'tok' ? { id: 'u', name: 'U', role: 'user' } : undefined), all: () => [], run: () => {} }) } as any;
+  let app: any; let port = 0;
+  beforeAll(async () => {
+    vi.spyOn(Discovery.prototype, 'list').mockReturnValue([node] as any);
+    vi.spyOn(Discovery.prototype, 'start').mockImplementation(() => {});
+    vi.spyOn(Discovery.prototype, 'stop').mockImplementation(() => {});
+    app = Fastify();
+    app.decorate('requireUser', (_req: any, _reply: any, done: any) => done());
+    await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
+    registerSession(app, db, { speakers: true } as any);
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    port = (app.server.address() as any).port;
+  });
+  afterAll(async () => { await app.close(); vi.restoreAllMocks(); });
+  const hello = async (clientId: string) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const seen: any[] = []; ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));
+    ws.send(JSON.stringify({ type: 'hello', token: 'tok', clientId, instance: 'i', kind: 'web' }));
+    await new Promise((r) => setTimeout(r, 100));
+    return { ws, seen };
+  };
+  it('a speaker the server sees is the server\'s, even with a desktop that connected first', async () => {
+    const desk = await hello('c_first_desk');
+    const phone = await hello('c_then_phone');
+    desk.ws.send(JSON.stringify({ type: 'devices', devices: [{ id: node.id, name: 'NODE', kind: 'bluos' }, { id: 'bluos:192.168.1.78', name: 'ONLY THE DESK SEES ME', kind: 'bluos' }] }));
+    await new Promise((r) => setTimeout(r, 150));
+    const lan = phone.seen.filter((m) => m.type === 'roster').at(-1)?.lanDevices ?? [];
+    expect(lan.filter((x: any) => x.id === node.id).map((x: any) => x.viaClient)).toEqual(['server:u']);
+    expect(lan.find((x: any) => x.id === 'bluos:192.168.1.78')?.viaClient).toBe('c_first_desk');
+    desk.ws.terminate(); phone.ws.terminate();
   });
 });

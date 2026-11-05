@@ -622,7 +622,7 @@ export class ServerPlayer {
     const target = this.anchor.pos;
     const prev = this.lastRead;
     this.lastRead = { pos: s.position, at: readAt };
-    if (s.duration && s.duration > 0) this.duration = s.duration;
+    this.lengthFrom(s.duration);
     let heard = false;
     if (s.playing && s.coarse) {
       if (prev && s.position === prev.pos + 1 && s.position >= Math.round(target) + 1 && readAt - prev.at < 1500) { this.anchor = { pos: s.position, at: (prev.at + readAt) / 2 }; heard = true; }
@@ -632,6 +632,10 @@ export class ServerPlayer {
     else if (Date.now() - this.anchor.at > 15000) { this.setPos(s.position, s.playing); heard = true; }
     if (heard) { this.lastTick = Date.now(); this.report(); }
   }
+  // The library knows how long a song is. A BluOS speaker only guesses from the
+  // file size (Daytime Level, 121 s: 4.49 MB at 128 kbps read as 280 s), and the
+  // end of the song then looked like a stop halfway through: paused, not next.
+  private lengthFrom(speaker: number | undefined) { if (!this.current?.RunTimeTicks && speaker && speaker > 0) this.duration = speaker; }
   private stopPolling() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   private async tick() {
     if (!this.transport || this.starting || !this.current) return;
@@ -706,7 +710,7 @@ export class ServerPlayer {
       else if (pos < s.position - 0.25 || pos >= s.position + 1.25) this.setPos(s.position + 0.5, true);
       this.lastRead = { pos: s.position, at: readAt };
     } else if (Math.abs(s.position - this.position) > 0.75) this.setPos(s.position, s.playing);
-    if (s.duration > 0) this.duration = s.duration;
+    this.lengthFrom(s.duration);
     // Reports every second while playing, like a client (mirrors follow the clock).
     const now = Date.now();
     if (now - this.lastTick >= 1000) { this.lastTick = now; this.report(); }

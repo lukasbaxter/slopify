@@ -1,3 +1,7 @@
+// With the brain on, these mixes are its own picks from the library, for every
+// account that has been listening (brainPlaylist); ListenBrainz's lists are
+// the way without a brain.
+//
 // ListenBrainz in the app: the listens go up (scrobbling), the playlists
 // come down. Every Monday each account with a ListenBrainz token gets its
 // "Weekly Exploration" (new music: whatever the library lacks is fetched
@@ -13,14 +17,23 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { ftsQuery, tracksByIds } from './library.js';
 import { playlistId } from './ids.js';
+import { brainNext, brainOn } from './brain.js';
 
 const LB = 'https://api.listenbrainz.org/1';
 const UA = 'slopify/0.1 (https://github.com/lukasbaxter/slopify)';
+// mode: what the brain is asked for (recommend.py): radio leans to the new,
+// now to what the listener already loves, smart in between.
 const KINDS = {
-  'weekly-exploration': { name: 'Weekly Exploration', download: true, weekly: true },
-  'weekly-jams': { name: 'Weekly Jams', download: false, weekly: true },
-  'daily-jams': { name: 'Daily Jams', download: false, weekly: false },
+  'weekly-exploration': { name: 'Weekly Exploration', download: true, weekly: true, mode: 'radio' },
+  'weekly-jams': { name: 'Weekly Jams', download: false, weekly: true, mode: 'now' },
+  'daily-jams': { name: 'Daily Jams', download: false, weekly: false, mode: 'smart' },
 } as const;
+const MIX_SIZE = 50;
+// Songs the brain may know that left the library are dropped: ask for spare.
+const MIX_ASK = 80;
+// Building a mix is no hurry, unlike the next song in a queue.
+const MIX_TIMEOUT_MS = 20000;
+const LISTENER_DAYS = 30, LISTENER_PLAYS = 20;
 type Kind = keyof typeof KINDS;
 
 export type ExploreOptions = {
@@ -32,6 +45,8 @@ export type ExploreOptions = {
   slskdDownloadsDir?: string; musicDir?: string;
   scanFolders?: (rels: string[]) => Promise<unknown>;
   log?: (m: string) => void; fetcher?: typeof fetch; runScan?: () => Promise<unknown>; now?: () => number;
+  // Stand-ins for the brain (tests).
+  brainUrl?: string; brainKey?: string; brain?: boolean;
 };
 type LbTrack = { title: string; artist: string; album?: string; mbid?: string };
 
@@ -261,6 +276,15 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
   }
   const trackIds = ids.filter((x): x is string => !!x);
   const name = `${KINDS[kind].name} ${latest.date}`;
+  savePlaylist(db, uid, kind, name, trackIds, { mbid: latest.mbid, date: latest.date, total: tracks.length });
+  log(`explore ${creds.user}: ${name}: ${trackIds.length}/${tracks.length} in the library (${fetched} fetched)`);
+  return { name, matched: trackIds.length, total: tracks.length, fetched };
+}
+
+// The playlist goes in, the one it follows goes out unless someone changed it.
+function savePlaylist(db: DB, uid: string, kind: Kind, name: string, trackIds: string[], from: { mbid: string; date: string; total: number }) {
+  const key = `explore:${uid}:${kind}`;
+  const prev = JSON.parse(kvGet(db, key) || 'null');
   const now = Date.now();
   db.transaction(() => {
     if (prev?.playlistId) {
@@ -275,7 +299,7 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
     const id = playlistId();
     db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run(id, uid, name, now, now);
     trackIds.forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run(id, i, t, now));
-    kvSet(db, key, JSON.stringify({ mbid: latest.mbid, playlistId: id, date: latest.date, built: now, matched: trackIds.length, total: tracks.length, trackIds }));
+    kvSet(db, key, JSON.stringify({ mbid: from.mbid, playlistId: id, date: from.date, built: now, matched: trackIds.length, total: from.total, trackIds }));
     // Keep the last four of each kind; older ones go. Only names matching the
     // exact generated pattern "<Name> YYYY-MM-DD" count — a user's own
     // "Weekly Exploration faves" must never be pruned by a LIKE match.
@@ -283,19 +307,44 @@ export async function buildPlaylist(db: DB, uid: string, kind: Kind, opts: Explo
     const old = (db.prepare('SELECT id, name FROM playlists WHERE user_id = ? AND name LIKE ? ORDER BY name DESC').all(uid, `${KINDS[kind].name} %`) as any[]).filter((o) => pat.test(o.name));
     for (const o of old.slice(4)) db.prepare('DELETE FROM playlists WHERE id = ?').run(o.id);
   })();
-  log(`explore ${creds.user}: ${name}: ${trackIds.length}/${tracks.length} in the library (${fetched} fetched)`);
-  return { name, matched: trackIds.length, total: tracks.length, fetched };
+}
+
+// The brain's mix for one account: a read of its picks and a playlist written.
+// Nobody's playback is touched, and a brain that is off or does not answer
+// (null) leaves the account to ListenBrainz. Exploration leaves out everything
+// the listener has played: that is what makes it new.
+export async function brainPlaylist(db: DB, uid: string, kind: Kind, opts: ExploreOptions) {
+  const exclude = KINDS[kind].mode === 'radio' ? (db.prepare('SELECT DISTINCT track_id id FROM plays WHERE user_id = ?').all(uid) as any[]).map((r) => r.id as string) : [];
+  const ids = await brainNext(db, { user: uid, mode: KINDS[kind].mode, seeds: [], n: MIX_ASK, exclude }, { url: opts.brainUrl, key: opts.brainKey, fetcher: opts.fetcher, timeoutMs: MIX_TIMEOUT_MS, log: opts.log });
+  if (!ids) return null;
+  const trackIds = ids.slice(0, MIX_SIZE);
+  const date = new Date((opts.now ?? Date.now)()).toLocaleDateString('en-CA');
+  const name = `${KINDS[kind].name} ${date}`;
+  savePlaylist(db, uid, kind, name, trackIds, { mbid: 'brain', date, total: trackIds.length });
+  (opts.log ?? (() => {}))(`explore ${uid.slice(0, 6)}: ${name}: ${trackIds.length} songs from the brain`);
+  return { name, matched: trackIds.length, total: trackIds.length, fetched: 0 };
+}
+
+// Who gets a mix: with the brain, everyone listening lately; else who has a token.
+function mixAccounts(db: DB, brain: boolean, now: number): string[] {
+  const all = (db.prepare('SELECT id FROM users').all() as any[]).map((u) => u.id as string);
+  if (!brain) return all.filter((id) => lbCreds(db, id));
+  const active = new Set((db.prepare('SELECT user_id id FROM plays WHERE at > ? GROUP BY user_id HAVING COUNT(*) >= ?').all(now - LISTENER_DAYS * 86400000, LISTENER_PLAYS) as any[]).map((r) => r.id as string));
+  return all.filter((id) => active.has(id) || lbCreds(db, id));
 }
 
 export async function exploreAll(db: DB, opts: ExploreOptions, kinds: Kind[]) {
-  const users = db.prepare('SELECT id FROM users').all() as any[];
+  const brain = opts.brain ?? brainOn(db);
   const built: any[] = [];
   let failures = 0; // throws, plus accounts whose ListenBrainz list has no such playlist yet
-  for (const u of users) {
-    if (!lbCreds(db, u.id)) continue;
+  for (const uid of mixAccounts(db, brain, (opts.now ?? Date.now)())) {
     for (const k of kinds) {
-      try { const r = await buildPlaylist(db, u.id, k, opts); if (r === 'no-playlist') failures++; else if (r) built.push({ user: u.id, ...r }); }
-      catch (e: any) { failures++; (opts.log ?? (() => {}))(`explore ${u.id} ${k}: ${e.message}`); }
+      try {
+        const mine = brain ? await brainPlaylist(db, uid, k, opts) : null;
+        if (mine) { built.push({ user: uid, ...mine }); continue; }
+        if (!lbCreds(db, uid)) { if (brain) failures++; continue; }
+        const r = await buildPlaylist(db, uid, k, opts); if (r === 'no-playlist') failures++; else if (r) built.push({ user: uid, ...r });
+      } catch (e: any) { failures++; (opts.log ?? (() => {}))(`explore ${uid} ${k}: ${e.message}`); }
     }
   }
   return { built, failures };
@@ -324,7 +373,8 @@ export function registerExplore(app: FastifyInstance, db: DB, opts: ExploreOptio
   app.decorate('exploreStatus', () => ({
     running,
     lastWeekly: Number(kvGet(db, 'explore:last:weekly') || 0) || null, lastDaily: Number(kvGet(db, 'explore:last:daily') || 0) || null,
-    users: (db.prepare('SELECT id, name FROM users').all() as any[]).filter((u) => lbCreds(db, u.id)).map((u) => ({ name: u.name, ...Object.fromEntries((Object.keys(KINDS) as Kind[]).map((k) => [k, JSON.parse(kvGet(db, `explore:${u.id}:${k}`) || 'null')])) })),
+    brain: brainOn(db),
+    users: (db.prepare('SELECT id, name FROM users').all() as any[]).filter((u) => mixAccounts(db, brainOn(db), Date.now()).includes(u.id)).map((u) => ({ name: u.name, ...Object.fromEntries((Object.keys(KINDS) as Kind[]).map((k) => [k, JSON.parse(kvGet(db, `explore:${u.id}:${k}`) || 'null')])) })),
     slskd: !!(opts.slskdUrl && opts.slskdKey),
   }));
   // Scrobble: the session tells us a play started; we confirm it after half the track.
@@ -365,8 +415,11 @@ export function registerExplore(app: FastifyInstance, db: DB, opts: ExploreOptio
   if (process.env.NODE_ENV !== 'test') setInterval(tick, 60000).unref();
   app.post('/api/admin/explore', { preHandler: (app as any).requireAdmin }, async (req) => {
     const kinds = ((req.body as any)?.kinds as Kind[] | undefined)?.filter((k) => k in KINDS) ?? (['weekly-exploration', 'weekly-jams', 'daily-jams'] as Kind[]);
-    void run(kinds);
-    return { started: true, kinds };
+    const job = run(kinds);
+    // The brain answers in seconds, so the button can say what happened; the
+    // ListenBrainz way can sit on Soulseek for half an hour, and just runs on.
+    const done: any = await Promise.race([job, new Promise((r) => { setTimeout(r, 15000, null); })]);
+    return { started: true, kinds, built: done?.built?.length ?? null, failures: done?.failures ?? null };
   });
   app.get('/api/admin/explore', { preHandler: (app as any).requireAdmin }, async () => (app as any).exploreStatus());
 }

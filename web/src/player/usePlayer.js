@@ -1,3 +1,4 @@
+import { looksStalled, stillFlipping } from './speakerReading.js';
 import { clientLog } from '../api/clientLog.js';
 import { t, N_ } from '../i18n.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1866,9 +1867,14 @@ export function usePlayer(jf) {
     // (caught by the BluOS loop below), so the position is the true one at
     // that instant; otherwise it is a reading of unknown phase, and it only
     // moves the anchor when the anchor no longer agrees with it.
+    // The library's length when it has one: a BluOS speaker guesses from the
+    // file size (a 121 s song read as 280 s), and the song's end then looked
+    // like a stop halfway through.
+    const lengthOf = (s) => ticksToSeconds(queueRef.current[indexRef.current]?.RunTimeTicks) || s.duration || 0;
     const apply = (s, arrivedAt, exact) => {
       if (cancelled || !s || transitionRef.current) return;
       const a = anchorRef.current;
+      if (stillFlipping(a, s, Date.now())) return;
       // Held (a start or seek just sent): the clock waits for the speaker's
       // counter to move on from where it was sent, so the screens start with
       // the sound and not with the tap (anchorAt). 15 s at most.
@@ -1876,12 +1882,12 @@ export function usePlayer(jf) {
         const going = !!s.playing && !/BUFFERING|connecting/i.test(s.state || '');
         const pos = s.position || 0;
         const moved = going && (exact || (s.coarsePosition ? pos >= Math.round(a.pos) + 1 : pos > a.pos + 0.2));
-        if (!moved && Date.now() - a.at < 15000) { if (s.duration) setDuration(s.duration); return; }
+        if (!moved && Date.now() - a.at < 15000) { if (lengthOf(s)) setDuration(lengthOf(s)); return; }
         if (moved) {
           anchorRef.current = { pos: exact || !s.coarsePosition ? pos : pos + 0.5, at: arrivedAt, playing: true, held: false };
           disagreeRef.current = 0;
           reportSoonRef.current();
-          if (s.duration) setDuration(s.duration);
+          if (lengthOf(s)) setDuration(lengthOf(s));
           return;
         }
         // Never heard in 15 s: let go, and the reading below decides.
@@ -1915,7 +1921,7 @@ export function usePlayer(jf) {
       // Crucially, clear the anchor's playing flag BEFORE advancing: skipping
       // that let a.playing stay true after the queue ended, so every later
       // poll re-fired "past the end" and stopped the device in a 2s loop.
-      const dur = s.duration || durationRef.current;
+      const dur = lengthOf(s) || durationRef.current;
       const rawReported = rawPlaying ? reported : (s.rawPosition ?? reported);
       const atEnd = a.playing && dur > 0
         && (rawReported >= dur - 1.5 || (rawReported === 0 && expected >= dur - 3));
@@ -1937,12 +1943,12 @@ export function usePlayer(jf) {
       const rewound = a.playing && reported < expected - 5;
       if (rewound) {
         if (!disagreeRef.current) disagreeRef.current = now;
-        if (now - disagreeRef.current < 4000) { if (s.duration) setDuration(s.duration); return; }
+        if (now - disagreeRef.current < 4000) { if (lengthOf(s)) setDuration(lengthOf(s)); return; }
       } else disagreeRef.current = 0;
 
       // A playing device whose position never advances is a dead stream, not
       // playback. Re-establish it once rather than showing a frozen 0.
-      if (s.playing && reported === 0 && a.pos <= 0.5) {
+      if (looksStalled(a, s, reported)) {
         if (!stalledRef.current) stalledRef.current = { since: now, restarted: false };
         const st = stalledRef.current;
         if (now - st.since > 6000 && !st.restarted) {
@@ -1970,7 +1976,7 @@ export function usePlayer(jf) {
         const debiased = exact ? reported : (s.coarsePosition && s.playing ? reported + 0.5 : reported);
         anchorRef.current = { pos: debiased, at: arrivedAt, playing: !!s.playing };
       }
-      if (s.duration) setDuration(s.duration);
+      if (lengthOf(s)) setDuration(lengthOf(s));
       setPlaying(Boolean(s.playing));
       // The ticker only runs while playing; once it stops nothing else would
       // move the displayed position, so pin it to what the device reports.

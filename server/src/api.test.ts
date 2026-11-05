@@ -232,7 +232,7 @@ describe('likes, playlists, plays, home, prefs', () => {
     expect((await send('POST', '/api/plays', { trackId: ids[0], at: 5500 })).json().dup).toBe(true);
     await send('POST', '/api/plays', { trackId: ids[2], at: Date.now() });
     const h = (await get('/api/home')).json();
-    expect(h.recentAlbums.length).toBe(1); expect(h.topTracks[0].id).toBe(ids[2]); expect(h.newestAlbums.length).toBe(5);
+    expect(h.recentAlbums.length).toBe(1); expect(h.topTracks[0].id).toBe(ids[2]); expect(h.topTracks[0].plays).toBe(1); expect(h.newestAlbums.length).toBe(5);
     expect((await get('/api/history')).json().items[0].track.id).toBe(ids[2]);
   });
   it('builds Top Songs per year from plays, in local time', async () => {

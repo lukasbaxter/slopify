@@ -11,10 +11,10 @@ test('Show all on top artists lists them by plays', async ({ page }) => {
   const { items: artists } = await (await page.request.get('/api/artists?limit=100', { headers })).json();
   expect(artists.length).toBeGreaterThan(1);
   // The names last in A to Z get the most plays, so the two orders differ.
-  const ranked: { name: string; track: string }[] = [];
+  const ranked: { id: string; name: string; track: string }[] = [];
   for (const a of [...artists].sort((x, y) => y.name.localeCompare(x.name))) {
     const { tracks } = await (await page.request.get(`/api/artists/${a.id}`, { headers })).json();
-    if (tracks?.length) ranked.push({ name: a.name, track: tracks[0].id });
+    if (tracks?.length) ranked.push({ id: a.id, name: a.name, track: tracks[0].id });
     if (ranked.length === 2) break;
   }
   expect(ranked.length).toBe(2);
@@ -32,7 +32,10 @@ test('Show all on top artists lists them by plays', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.endsWith('home.topArtists')))).toBe(true);
   // ...then the first artist passes it, and the next open is on a slow link:
   // Home opens with the kept answer and the new one lands after Show all is up.
-  await play(ranked[0].track, 40, 0);
+  // Every other test plays the second artist too, so count what it has, on all its songs.
+  const { topTracks } = await (await page.request.get('/api/home', { headers })).json();
+  const rival = topTracks.filter((t: any) => t.artistIds?.includes(ranked[1].id)).reduce((n: number, t: any) => n + 1 + t.plays, 0);
+  await play(ranked[0].track, rival + 5, 0);
   await page.context().route('**/api/home*', async (route) => {
     await new Promise((r) => setTimeout(r, 1500));
     await route.continue().catch(() => {});

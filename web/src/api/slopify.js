@@ -51,7 +51,7 @@ export const rowTrack = (t) => ({
   Album: t.album, AlbumId: t.albumId, AlbumArtist: t.albumArtist, AlbumArtists: t.albumArtistId ? [{ Name: t.albumArtist, Id: t.albumArtistId }] : people([t.albumArtist], [t.artistIds?.[0]]),
   ProductionYear: t.year, IndexNumber: t.trackNo, ParentIndexNumber: t.discNo, RunTimeTicks: ticks(t.durationMs),
   Genres: t.genres || [], Container: t.codec || null, DateCreated: t.addedAt ? new Date(t.addedAt).toISOString() : undefined,
-  ImageTags: t.cover ? { Primary: t.cover } : {}, UserData: { IsFavorite: false }, _identity: t.identity || null,
+  ImageTags: t.cover ? { Primary: t.cover } : {}, UserData: { IsFavorite: false, PlayCount: t.plays || 0 }, _identity: t.identity || null,
   // Volume normalization: dB to play it at as a track / within its album (null = not measured yet).
   _gain: t.gain || null,
 });

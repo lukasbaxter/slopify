@@ -174,10 +174,11 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     const recentAlbums = recentAlbumIds.length ? (db.prepare(`SELECT * FROM albums WHERE id IN (${recentAlbumIds.map(() => '?').join(',')})`).all(...recentAlbumIds) as any[]) : [];
     const byId = new Map(recentAlbums.map((a) => [a.id, a]));
     const since = Date.now() - 28 * 86400000;
-    const topIds = (db.prepare('SELECT track_id, COUNT(*) n, MAX(at) last FROM plays WHERE user_id = ? AND at > ? GROUP BY track_id ORDER BY n DESC, last DESC LIMIT 50').all(u, since) as any[]).map((r) => r.track_id);
+    const top = db.prepare('SELECT track_id, COUNT(*) n, MAX(at) last FROM plays WHERE user_id = ? AND at > ? GROUP BY track_id ORDER BY n DESC, last DESC LIMIT 50').all(u, since) as any[];
+    const plays = new Map(top.map((r) => [r.track_id, r.n]));
     const newest = db.prepare('SELECT * FROM albums ORDER BY added_at DESC, sort_name LIMIT 24').all() as any[];
     const out = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artistId: a.artist_id, year: a.year, trackCount: a.track_count, cover: a.cover_hash });
-    return { recentAlbums: recentAlbumIds.map((id) => byId.get(id)).filter(Boolean).map(out), topTracks: tracksByIds(db, topIds), newestAlbums: newest.map(out) };
+    return { recentAlbums: recentAlbumIds.map((id) => byId.get(id)).filter(Boolean).map(out), topTracks: tracksByIds(db, top.map((r) => r.track_id)).map((t) => ({ ...t, plays: plays.get(t.id) })), newestAlbums: newest.map(out) };
   });
   // Your Top Songs <year>: the most played songs of each calendar year, from
   // the account's own plays only (live and imported Spotify history alike),

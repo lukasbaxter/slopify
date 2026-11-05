@@ -12,6 +12,7 @@ test('log out stops the music on this device', async ({ page }, info) => {
   await page.locator('.trackrow').nth(0).dblclick();
   const sounding = () => page.evaluate(() => { const a = (window as any).__slopifyAudio(); return [a.active, a.spare].filter((e) => e && !e.paused).length; });
   await expect.poll(sounding, { timeout: 15000 }).toBeGreaterThan(0);
+  const token = await page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token);
   await page.locator('button.avatar').first().click();
   await page.getByRole('button', { name: 'Log out' }).first().click();
   await expect(page.locator('.login input').first()).toBeVisible();
@@ -20,6 +21,8 @@ test('log out stops the music on this device', async ({ page }, info) => {
   await page.waitForTimeout(1500);
   expect(await sounding()).toBe(0);
   expect(await page.evaluate(() => navigator.mediaSession.metadata)).toBeNull();
+  // The sign-in is over on the server too.
+  await expect.poll(async () => (await page.request.get('/api/auth/me', { headers: { authorization: `Bearer ${token}` } })).status()).toBe(401);
 });
 
 // The desktop form asks for the server: it is typed however people type it.

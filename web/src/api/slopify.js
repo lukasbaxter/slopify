@@ -172,6 +172,9 @@ export class Slopify {
     return client;
   }
 
+  // The token dies on the server too, not only on this device. Best effort: offline it stays until it is revoked in Settings.
+  logout() { return this._fetch('/api/auth/logout', { method: 'POST' }); }
+
   async me() {
     const u = await this._fetch('/api/auth/me');
     this.user = u;

@@ -699,6 +699,8 @@ export default function App() {
     setDetailRaw(null); setSeeAllRaw(null); likesLoad({});
   };
   const signOutRef = useRef(signOut); signOutRef.current = signOut;
+  // The Log out button; a token the server already refused has nothing left to end.
+  const logOut = () => { jf?.logout().catch(() => {}); signOut(); };
   // A 401 from any call, or the socket refusing the token: back to the form.
   useEffect(() => {
     const onLost = () => { if (jf) signOutRef.current(); };
@@ -1463,7 +1465,7 @@ export default function App() {
               <button onClick={() => { setAppMenu(false); openSettings(); }}>{t('Settings')}</button>
               <div className="ctxmenu-sep" />
               <button onClick={() => { setAppMenu(false); window.location.reload(); }}>{t('Reload')}</button>
-              <button onClick={signOut}>{t('Log out')}</button>
+              <button onClick={logOut}>{t('Log out')}</button>
             </div>
           )}
         </div>
@@ -1527,7 +1529,7 @@ export default function App() {
                     }}><MenuIco d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" />{t('Check for updates')}</button>
                   )
                 )}
-                <button onClick={signOut}><MenuIco d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />{t('Log out')}</button>
+                <button onClick={logOut}><MenuIco d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />{t('Log out')}</button>
               </div>
             )}
           </div>

@@ -128,7 +128,8 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       await expect.poll(() => libPlays(page), { timeout: 20000 }).toBe(0);
       const hist = await page.request.get('/api/history?limit=20', { headers: { authorization: `Bearer ${tok}` } });
       expect(JSON.stringify(await hist.json())).toContain('"client":"offline"');
-      expect(errors.filter((e) => !/ResizeObserver/.test(e))).toEqual([]);
+      // WebKit words a fetch to the stopped server as an access control error, when one lands in that window.
+      expect(errors.filter((e) => !/ResizeObserver|due to access control checks/.test(e))).toEqual([]);
     } finally { await browser.close(); await stop(server); }
   });
 }

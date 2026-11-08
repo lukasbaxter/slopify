@@ -81,8 +81,18 @@ const dupMemo = new Map<string, { mtime: number; size: number; id: string }>();
 
 export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult> {
   const t0 = Date.now();
-  const log = opts.log ?? (() => {});
   const scanId = Number(db.prepare('INSERT INTO scans (started) VALUES (?)').run(t0).lastInsertRowid);
+  // A scan that fails outright still closes its scans row, with the error:
+  // an unfinished row reads as a scan forever running.
+  try { return await scan(db, opts, t0, scanId); }
+  catch (e: any) {
+    try { db.prepare('UPDATE scans SET finished = ?, error = ? WHERE id = ? AND finished IS NULL').run(Date.now(), String(e?.message || e).slice(0, 500), scanId); } catch { /* the database itself is gone */ }
+    throw e;
+  }
+}
+
+async function scan(db: DB, opts: ScanOptions, t0: number, scanId: number): Promise<ScanResult> {
+  const log = opts.log ?? (() => {});
   const known = new Map<string, { id: string; mtime: number; size: number }>();
   for (const r of db.prepare('SELECT id, path, mtime, size FROM tracks').all() as any[]) known.set(r.path, r);
   const seen = new Set<string>();
@@ -132,7 +142,10 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     return there;
   };
   let cursor = 0;
-  const worker = async () => { for (;;) { const file = all[cursor++]; if (!file) return; await one(file); } };
+  // One file that fails (a database error writing it) is that file skipped
+  // and logged, never the whole scan: the rest are read and the removal
+  // pass runs. It is read again by the next scan (its row is unchanged).
+  const worker = async () => { for (;;) { const file = all[cursor++]; if (!file) return; try { await one(file); } catch (e: any) { log(`scan failed ${file}: ${e?.message || e}`); } } };
   const one = async (file: string) => {
     files++;
     if (files % 200 === 0) opts.onProgress?.(files);

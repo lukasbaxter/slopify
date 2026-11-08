@@ -9,6 +9,7 @@ sources are the household's accounts.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -84,6 +85,9 @@ class SlopifyData:
     listeners: list[Callable[[], None]] = field(default_factory=list)
     admin: bool = False
     household: bool = False
+    # One household check at a time: one slower than the interval would
+    # otherwise run beside the next and sign the same account in twice.
+    household_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
     def api(self) -> SlopifyApi:
@@ -188,10 +192,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SlopifyConfigEntry) -> b
     data.admin = user.get("role") == "admin"
     if data.admin and entry.options.get(CONF_HOUSEHOLD, True):
         data.household = True
-        await _sync_household(hass, entry, data, initial=True)
+        async with data.household_lock:
+            await _sync_household(hass, entry, data, initial=True)
 
         async def _tick(_now: object) -> None:
-            await _sync_household(hass, entry, data)
+            if data.household_lock.locked():
+                return  # the last check is still running; the next tick checks again
+            async with data.household_lock:
+                await _sync_household(hass, entry, data)
 
         entry.async_on_unload(async_track_time_interval(hass, _tick, HOUSEHOLD_EVERY))
 

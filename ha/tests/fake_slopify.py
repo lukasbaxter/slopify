@@ -187,6 +187,9 @@ class FakeSlopify:
         self.speaker_states: dict[str, dict[str, Any]] = {}
         self.speaker_calls: list[tuple[str, str, dict[str, Any]]] = []
         self.group_calls: list[tuple[str, dict[str, Any]]] = []
+        # Household sign-ins asked for (by account), and a gate that holds them.
+        self.token_requests: list[str] = []
+        self.token_gate: asyncio.Event | None = None
         self.url = ""
         self._runner: web.AppRunner | None = None
 
@@ -399,6 +402,9 @@ class FakeSlopify:
         if not uid or self._role(uid) != "admin":
             return web.json_response({"error": "admin only"}, status=403 if uid else 401)
         target = request.match_info["id"]
+        self.token_requests.append(target)
+        if self.token_gate is not None:
+            await self.token_gate.wait()
         if target not in self.users:
             return web.json_response({"error": "no such user"}, status=404)
         token = f"hh-{target[:6]}"

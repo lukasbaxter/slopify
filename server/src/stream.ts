@@ -245,6 +245,10 @@ async function ensureHls(dataDir: string, id: string, src: Src, profile: string,
       if (running.get(key) === p) running.delete(key);
       throw new Error('transcode did not start');
     })();
+    // A run that failed (Busy, the folder or the spawn throwing before ffmpeg
+    // ran, a failed encode) gives its entry up, so the next request retries
+    // instead of every later one getting this same rejection.
+    p.catch(() => { if (running.get(key) === p) running.delete(key); });
     running.set(key, p);
   }
   await running.get(key)!;

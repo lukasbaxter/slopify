@@ -22,7 +22,12 @@ async function ios(browser: Browser, name: string, form: 'phone' | 'tablet') {
 async function playAlbum(page: Page) {
   await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
-  await page.locator('.trackrow').nth(0).dblclick();
+  // A touch screen plays a row on one tap and a tap on the row now playing
+  // pauses it (TrackRow.jsx), so a double-tap there would play and pause.
+  // A mouse plays on double-click.
+  const touch = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+  if (touch) await page.locator('.trackrow').nth(0).click();
+  else await page.locator('.trackrow').nth(0).dblclick();
 }
 
 // Devices other tests left open (and their sessions) would be the account's

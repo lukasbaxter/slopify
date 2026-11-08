@@ -48,7 +48,7 @@ async function press(page: Page, button: number, { holdMs = 80, appCommand = fal
 const settled = async (page: Page) => { await page.waitForTimeout(900); return idx(page); };
 
 test.describe('mouse back / forward buttons', () => {
-  test.beforeEach(({}, info) => { test.skip(info.project.name !== 'chromium', 'a mouse: the desktop layout'); });
+  test.skip(({ isMobile }) => isMobile, 'a mouse: the desktop layout');
 
   test('desktop app: held back button (app-command at the press, release 800 ms later) goes back one page', async ({ page }) => {
     await setup(page, true);

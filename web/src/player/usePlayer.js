@@ -1150,7 +1150,11 @@ export function usePlayer(jf) {
     return skipTo(indexRef.current - 1);
   }, [skipTo, anchorAt]);
 
-  const toggle = useCallback(async () => {
+  // want (true / false): play or pause as asked, not a flip of what the
+  // last render showed (a caller that read the state between renders, see
+  // setPlayingTo). Without it, the opposite of the shown state.
+  const toggle = useCallback(async (want) => {
+    const isOn = typeof want === 'boolean' ? !want : playing;
     // As in playQueue: another device known to be playing gets the tap;
     // nobody known, the music plays here and the claim sorts it out.
     const off = isOffline();
@@ -1161,7 +1165,7 @@ export function usePlayer(jf) {
     // flips arriving together played and paused again (2026-10-08, Node).
     if (act && relayRef.current) {
       const shown = (rosterRef.current?.players || []).find((p) => p.id === act)?.nowPlaying;
-      relayRef.current.command(act, shown ? { action: 'setPlaying', playing: !shown.playing } : { action: 'toggle' });
+      relayRef.current.command(act, typeof want === 'boolean' ? { action: 'setPlaying', playing: want } : shown ? { action: 'setPlaying', playing: !shown.playing } : { action: 'toggle' });
       return;
     }
     if (!current && !external) return;
@@ -1172,7 +1176,7 @@ export function usePlayer(jf) {
       // (A speaker we switched to but never loaded -- a transfer whose fetch
       // failed -- counts too, whatever `playing` claims: resuming it would
       // poke a Cast media session that does not exist.)
-      if (current && loadedRef.current !== current.Id && (!playing || dev.kind !== 'local')) {
+      if (current && loadedRef.current !== current.Id && (!isOn || dev.kind !== 'local')) {
         relayRef.current?.claim();
         const from = livePos();
         anchorAt(from, true);
@@ -1181,10 +1185,10 @@ export function usePlayer(jf) {
         try { await startOn(dev, current, from, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
         return;
       }
-      if (!playing) relayRef.current?.claim();
+      if (!isOn) relayRef.current?.claim();
       if (dev.kind === 'local') {
         const el = audioRef.current;
-        if (playing) { mediaLog('toggle pause'); endFadeRef.current(); ownPause(el); }
+        if (isOn) { mediaLog('toggle pause'); endFadeRef.current(); ownPause(el); }
         else {
           anchorAt(positionRef.current, true);
           setPlaying(true); // from the tap (see playQueue)
@@ -1206,13 +1210,13 @@ export function usePlayer(jf) {
             try { await startOn(dev, current, positionRef.current, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
           }
         }
-      } else if (playing) {
+      } else if (isOn) {
         await remote.pause(dev);
       } else {
         await remote.resume(dev);
       }
-      anchorAt(positionRef.current, !playing);
-      setPlaying(!playing);
+      anchorAt(positionRef.current, !isOn);
+      setPlaying(!isOn);
     } catch (e) {
       setError(e.message);
     }
@@ -1297,7 +1301,7 @@ export function usePlayer(jf) {
   const setPlayingTo = useCallback((want) => {
     const act = activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'setPlaying', playing: !!want }); return; }
-    if (playingRef.current !== !!want) toggleRef.current();
+    if (playingRef.current !== !!want) toggleRef.current(!!want);
   }, []);
 
   // A hardware volume button press: the device playing works the level out
@@ -2646,7 +2650,7 @@ export function usePlayer(jf) {
     else if (cmd.action === 'toggle') { toggleRef.current(); }
     else if (cmd.action === 'setPlaying') {
       if (from === 'server' && !cmd.playing) quietOnStopRef.current = true; // the sleep timer's stop
-      if (playingRef.current !== !!cmd.playing) toggleRef.current();
+      if (playingRef.current !== !!cmd.playing) toggleRef.current(!!cmd.playing);
     }
     else if (cmd.action === 'volumeStep') { volumeStepRef.current(Number(cmd.step) || 0); }
     else if (cmd.action === 'seek') { seekRef.current(cmd.pos || 0); }

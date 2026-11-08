@@ -46,6 +46,12 @@
         "portable"
       ]
     },
+    "nsis": {
+      "artifactName": "${productName}.Setup.${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}.${version}.${ext}"
+    },
     "linux": {
       "target": [
         "AppImage",

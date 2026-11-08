@@ -4,8 +4,11 @@
 # then the compare link.
 # Usage: tools/release-notes.sh v0.1.112 [owner/repo]
 # ASSETS (newline-separated file names) limits the download links to the
-# files the release really has; unset, every file is linked.
+# files the release really has; unset, every file is linked. Spaces count as
+# dots: GitHub renames "Slopify Setup 0.1.1.exe" to Slopify.Setup.0.1.1.exe
+# on upload, and that is the name the link needs.
 set -euo pipefail
+if [ -n "${ASSETS+x}" ]; then ASSETS=${ASSETS// /.}; fi
 tag="$1"; repo="${2:-lukasbaxter/slopify}"; v="${tag#v}"
 prev=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)
 range="${prev:+$prev..}$tag"

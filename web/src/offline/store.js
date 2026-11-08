@@ -172,8 +172,10 @@ async function runJob(job) {
         if (!(await cache.match(cover))) { try { await fetchInto(cache, u.cover, cover); } catch { cover = null; } }
       }
       // The song's lyrics: fetched through the service worker, which keeps the
-      // answer like any API answer (sw.js), so they show offline too.
-      if (bytes && u.lyrics) await fetch(u.lyrics).catch(() => {});
+      // answer like any API answer (sw.js), so they show offline too. With the
+      // account it is kept for: a request without X-Slopify-User is not kept
+      // at all (sw.js, since v0.1.163), and these were not.
+      if (bytes && u.lyrics) await fetch(u.lyrics, { headers: { 'X-Slopify-User': uid() } }).catch(() => {});
       if (bytes) {
         await update((lib) => { const t = lib.tracks[id]; if (t) { t.file = songKey(id); t.bytes = bytes; t.cover = cover; } });
         done++;

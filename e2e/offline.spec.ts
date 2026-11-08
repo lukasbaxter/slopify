@@ -69,6 +69,17 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
       }
       // Every downloaded song's album cover is kept.
       expect(await page.evaluate(async () => { const r = await (await caches.open('slopify-offline')).match(`/offline/${JSON.parse(localStorage.getItem('slopify.session') || '{}').userId}/library.json`); const lib = await r!.json(); return Object.values(lib.tracks).every((t: any) => t.cover); })).toBe(true);
+      // And the lyrics of every downloaded song that has some, in this
+      // account's kept API answers (sw.js).
+      const lyr = await page.evaluate(async () => {
+        const uid = JSON.parse(localStorage.getItem('slopify.session') || '{}').userId;
+        const lib = await (await (await caches.open('slopify-offline')).match(`/offline/${uid}/library.json`))!.json();
+        const kept = new Set((await (await caches.open(`slopify-api-${uid}`)).keys()).map((k) => new URL(k.url).pathname));
+        return Object.keys(lib.tracks).map((id) => [id, kept.has(`/api/lyrics/${id}`)] as const);
+      });
+      const has = await Promise.all(lyr.map(async ([id]) => (await page.request.get(`/api/lyrics/${id}`, { headers: { authorization: `Bearer ${tok}` } })).ok()));
+      expect(has.filter(Boolean).length).toBeGreaterThan(0);
+      expect(lyr.filter(([, k], i) => has[i] && !k).map(([id]) => id)).toEqual([]);
       // A download cut short (one song gone) is finished on the next start.
       await page.evaluate(async () => {
         const c = await caches.open('slopify-offline'); const lib = await (await c.match(`/offline/${JSON.parse(localStorage.getItem('slopify.session') || '{}').userId}/library.json`))!.json();

@@ -94,10 +94,17 @@ export async function checkServerLanguage(baseUrl = '') {
   } catch { /* offline: keep what we had */ }
 }
 
-/** The person's pick ('' = automatic), from Settings or their synced prefs. Reloads when it changes what is shown. */
-export function setUserLanguage(code) {
+/**
+ * The person's pick ('' = automatic), from Settings or their synced prefs.
+ * Returns whether it changes what is shown; then it reloads, unless `reload`
+ * is false (a pick made on another device: the caller reloads when that
+ * interrupts nobody, else it shows from the next launch).
+ */
+export function setUserLanguage(code, { reload = true } = {}) {
   const before = resolve();
   write(USER_KEY, code || '');
+  const changed = resolve() !== before;
   // A moment first, so the pick that caused this has been saved to the account.
-  if (resolve() !== before) setTimeout(() => window.location.reload(), 800);
+  if (changed && reload) setTimeout(() => window.location.reload(), 800);
+  return changed;
 }

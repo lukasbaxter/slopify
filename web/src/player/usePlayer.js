@@ -350,6 +350,9 @@ export function usePlayer(jf) {
   useEffect(() => () => trackCache?.clear(), [trackCache]);
   // A downloaded song plays from the device (offline/local.js), in any mode.
   const wholeFor = (id) => localUrl(id) || (jf?.hasWhole?.() ? trackCache?.get(id) || null : null);
+  // The same, for effects that outlive a render (the element listeners are
+  // set up once per element, often before sign-in, when jf was still null).
+  const wholeForRef = useRef(wholeFor); wholeForRef.current = wholeFor;
 
   // --- volume normalization -------------------------------------------------
   // Spotify's: every song at -14 LUFS (the server measured it; track._gain
@@ -597,10 +600,12 @@ export function usePlayer(jf) {
     if (['off', 'on', 'smart'].includes(np.shuffle)) { shuffleRef.current = np.shuffle; setShuffle(np.shuffle); }
     const dur = np.duration || ticksToSeconds(q[i].RunTimeTicks);
     setDuration(dur);
-    // The session was live when the relay last heard it; it is not playing
-    // any more (its player is gone), so freeze the playhead where it got to.
-    let pos = np.position || 0;
-    if (np.playing && np.at) pos += (Math.min(Date.now(), (s.at || Date.now())) - np.at) / 1000;
+    // Shown paused where it got to. The server sends the playhead already
+    // brought up to date on its own clock (session.ts positionNow); np.at is
+    // the sending device's wall clock, and adding the time since it here
+    // mixed two clocks (session.js): a skewed device moved the song on by
+    // its skew.
+    const pos = np.position || 0;
     anchorAt(Math.max(0, Math.min(pos, dur || pos)), false);
     loadedRef.current = null;
     setPlaying(false);
@@ -746,7 +751,17 @@ export function usePlayer(jf) {
             setTimeout(settle, 3000);
           });
         }
-        await el.play();
+        // Bounded like the swap above: a play() iOS holds (hidden, see the
+        // top of this function) never settles, and the start then never got
+        // as far as marking the song loaded and reporting it. Past the wait
+        // the element keeps its src (the bridge and the reconcile look after
+        // it); a refusal is still thrown, as before.
+        const outcome = await Promise.race([
+          el.play().then(() => null, (e) => ({ e })),
+          new Promise((r) => setTimeout(() => r('timeout'), 4000)),
+        ]);
+        if (outcome && outcome.e) throw outcome.e;
+        if (outcome === 'timeout') mediaLog(`play ${track.Id.slice(0, 6)}: no answer in 4 s, carrying on`);
       } else {
         // The list fetch skipped MediaSources; get the container now so Cast
         // gets the right MIME. One tiny request, cached.
@@ -1122,7 +1137,12 @@ export function usePlayer(jf) {
     if (livePos() > 3) {
       // Same track: rewind in place rather than reloading the stream.
       const el = audioRef.current;
-      if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) { el.currentTime = 0; anchorAt(0, playingRef.current); return; }
+      if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) {
+        // A progressive transcode starts at its last seek point (localBaseRef):
+        // its own 0 is not the song's, so it is asked for again from 0:00.
+        if (localBaseRef.current > 0) { seekRef.current(0); return; }
+        el.currentTime = 0; anchorAt(0, playingRef.current); return;
+      }
       return skipTo(indexRef.current);
     }
     if (isOffline()) {
@@ -1135,7 +1155,11 @@ export function usePlayer(jf) {
     return skipTo(indexRef.current - 1);
   }, [skipTo, anchorAt]);
 
-  const toggle = useCallback(async () => {
+  // want (true / false): play or pause as asked, not a flip of what the
+  // last render showed (a caller that read the state between renders, see
+  // setPlayingTo). Without it, the opposite of the shown state.
+  const toggle = useCallback(async (want) => {
+    const isOn = typeof want === 'boolean' ? !want : playing;
     // As in playQueue: another device known to be playing gets the tap;
     // nobody known, the music plays here and the claim sorts it out.
     const off = isOffline();
@@ -1146,7 +1170,7 @@ export function usePlayer(jf) {
     // flips arriving together played and paused again (2026-10-08, Node).
     if (act && relayRef.current) {
       const shown = (rosterRef.current?.players || []).find((p) => p.id === act)?.nowPlaying;
-      relayRef.current.command(act, shown ? { action: 'setPlaying', playing: !shown.playing } : { action: 'toggle' });
+      relayRef.current.command(act, typeof want === 'boolean' ? { action: 'setPlaying', playing: want } : shown ? { action: 'setPlaying', playing: !shown.playing } : { action: 'toggle' });
       return;
     }
     if (!current && !external) return;
@@ -1157,7 +1181,7 @@ export function usePlayer(jf) {
       // (A speaker we switched to but never loaded -- a transfer whose fetch
       // failed -- counts too, whatever `playing` claims: resuming it would
       // poke a Cast media session that does not exist.)
-      if (current && loadedRef.current !== current.Id && (!playing || dev.kind !== 'local')) {
+      if (current && loadedRef.current !== current.Id && (!isOn || dev.kind !== 'local')) {
         relayRef.current?.claim();
         const from = livePos();
         anchorAt(from, true);
@@ -1166,10 +1190,10 @@ export function usePlayer(jf) {
         try { await startOn(dev, current, from, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
         return;
       }
-      if (!playing) relayRef.current?.claim();
+      if (!isOn) relayRef.current?.claim();
       if (dev.kind === 'local') {
         const el = audioRef.current;
-        if (playing) { mediaLog('toggle pause'); endFadeRef.current(); ownPause(el); }
+        if (isOn) { mediaLog('toggle pause'); endFadeRef.current(); ownPause(el); }
         else {
           anchorAt(positionRef.current, true);
           setPlaying(true); // from the tap (see playQueue)
@@ -1191,13 +1215,13 @@ export function usePlayer(jf) {
             try { await startOn(dev, current, positionRef.current, gen); } catch (e) { if (startGenRef.current !== gen) return; setPlaying(false); throw e; }
           }
         }
-      } else if (playing) {
+      } else if (isOn) {
         await remote.pause(dev);
       } else {
         await remote.resume(dev);
       }
-      anchorAt(positionRef.current, !playing);
-      setPlaying(!playing);
+      anchorAt(positionRef.current, !isOn);
+      setPlaying(!isOn);
     } catch (e) {
       setError(e.message);
     }
@@ -1216,7 +1240,9 @@ export function usePlayer(jf) {
 
       disagreeRef.current = 0;
       stalledRef.current = 0;
-      anchorAt(seconds, true);
+      // Playing or paused as it was: a paused seek anchored as playing (held
+      // until heard) let a speaker's clock run once the hold gave up.
+      anchorAt(seconds, playingRef.current);
 
       if (dev.kind === 'local') {
         if (jf?.transcoded?.()) {
@@ -1282,7 +1308,7 @@ export function usePlayer(jf) {
   const setPlayingTo = useCallback((want) => {
     const act = activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'setPlaying', playing: !!want }); return; }
-    if (playingRef.current !== !!want) toggleRef.current();
+    if (playingRef.current !== !!want) toggleRef.current(!!want);
   }, []);
 
   // A hardware volume button press: the device playing works the level out
@@ -1444,6 +1470,11 @@ export function usePlayer(jf) {
         let index = 0;
         let pos = 0;
         let wasPlaying = true;
+        // What the queue was played from (album normalization, more of an
+        // artist at the end) and, shuffled, its real order, so the receiver
+        // carries on as this client would have. Known only for our own queue.
+        let ctx;
+        let original;
         if (act) {
           // We are mirroring another session: hand off THAT session's queue.
           const np = (rosterRef.current.players || []).find((p) => p.id === act)?.nowPlaying;
@@ -1465,13 +1496,15 @@ export function usePlayer(jf) {
             index = indexRef.current;
             pos = a.playing ? a.pos + ranFor(a) : positionRef.current;
             wasPlaying = playing;
+            ctx = contextRef.current || null;
+            if (shuffleRef.current !== 'off' && originalQueueRef.current.length) original = originalQueueRef.current.map((t) => t.Id);
           }
         }
         // A speaker seen through another client: that client takes the
         // session and plays it on the named device.
         const target = nextDevice.kind === 'relay' ? nextDevice.relayClientId : nextDevice.viaClient;
         relayRef.current.command(target, {
-          action: 'transfer', trackIds, queued, index, position: pos, playing: wasPlaying,
+          action: 'transfer', trackIds, queued, index, position: pos, playing: wasPlaying, ctx, original,
           // Picking a client means ITS OWN output (Spotify: "This Computer"),
           // even if that client last drove a speaker; the speakers are listed
           // separately.
@@ -1502,21 +1535,28 @@ export function usePlayer(jf) {
         relayRef.current?.claim();
         activePlayerRef.current = null;
         if (np?.itemId && jf) {
+          // A start like any other: a tap made while the tracks load wins.
+          const gen = ++startGenRef.current;
           try {
             const rq = remoteQueuesRef.current[act] || [];
             const qi = typeof np.queueIndex === 'number' && rq[np.queueIndex]?.Id === np.itemId ? np.queueIndex : -1;
             const ids = qi >= 0 ? rq.map((t) => t.Id) : [np.itemId];
             const tracks = await fetchByIds(jf, ids, 'MediaSources,ArtistItems,AlbumArtists,UserData');
+            if (startGenRef.current !== gen) return;
             const at = qi >= 0 ? Math.max(0, tracks.findIndex((t) => t.Id === np.itemId)) : 0;
             const t = tracks[at];
             if (t) {
               setQueue(tracks); setIndex(at); queueRef.current = tracks; indexRef.current = at;
               setDuration(ticksToSeconds(t.RunTimeTicks));
-              anchorAt(np.position || 0, true);
-              await startOn(nextDevice, t, np.position || 0);
+              // Where the session is now (the last report, run on to now on
+              // the server's clock), not where that report was made.
+              const from = relayRef.current?.playheadOf ? relayRef.current.playheadOf(np) : (np.position || 0);
+              anchorAt(from, true);
+              await startOn(nextDevice, t, from, gen);
+              if (startGenRef.current !== gen) return;
               setPlaying(true);
             }
-          } catch (e) { setError(e.message); }
+          } catch (e) { if (startGenRef.current === gen) setError(e.message); }
         }
         return;
       }
@@ -1630,7 +1670,7 @@ export function usePlayer(jf) {
     const onDuration = () => {
       // A transcode's element duration is the REMAINDER from its start (or
       // unknown); the track's own length from Jellyfin stays authoritative.
-      if (deviceRef.current.kind === 'local' && Number.isFinite(el.duration) && !localBaseRef.current && !jf?.transcoded?.()) {
+      if (deviceRef.current.kind === 'local' && Number.isFinite(el.duration) && !localBaseRef.current && !jfNowRef.current?.transcoded?.()) {
         setDuration(el.duration);
       }
     };
@@ -1792,7 +1832,7 @@ export function usePlayer(jf) {
       // reload throws away what was on its way: on a weak link the reloads
       // came every few seconds and the song never got going (10-30). Only a
       // connection that stays dead that long is reloaded.
-      const limit = wholeFor(id) ? 3000 : bufferedAhead(el) >= 1 ? 6000 : STUCK_NO_DATA_MS;
+      const limit = wholeForRef.current(id) ? 3000 : bufferedAhead(el) >= 1 ? 6000 : STUCK_NO_DATA_MS;
       if (!moved && Date.now() - stuckSince < limit) return;
       stuckSince = 0; recovering = true;
       mediaLog(moved ? `server moved: ${id.slice(0, 6)} at ${t.toFixed(1)}, reloading from the other address` : `watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
@@ -1802,7 +1842,7 @@ export function usePlayer(jf) {
       // `recovering` set, which switched the watchdog off for the element.
       const api = jfNowRef.current;
       if (!api) { recovering = false; return; }
-      const url = wholeFor(id) || api.playbackUrl(id, { norm: bakeNormRef.current(id) });
+      const url = wholeForRef.current(id) || api.playbackUrl(id, { norm: bakeNormRef.current(id) });
       ownUntilRef.current = Date.now() + 10000;
       el.muted = false; el.src = url;
       // The wait below can outlive the song: a skip, a pause, an element swap
@@ -2148,6 +2188,9 @@ export function usePlayer(jf) {
       const fromMemory = !!wholeFor(current.Id);
       if (open) {
         if (!fromMemory && !el?.ended && !toEnd && (ahead < WHOLE_PAUSE_S || starvedWithin(10000))) { trackCache.pause(); open = false; mediaLog(`whole-song download paused: ${ahead.toFixed(1)} s buffered`); }
+        // Held again by a preload re-run (the queue changed, its retry, the
+        // end of a fade: keep() with hold): the gate is open, so let it go.
+        else if (trackCache.held) trackCache.resume();
       } else if (fromMemory || ahead >= WHOLE_AFTER_S || toEnd || el?.ended || (Date.now() - t0 > WHOLE_AFTER_MAX_MS && el && !el.paused && el.currentTime > 5 && !starvedWithin(30000))) {
         if (trackCache.paused) mediaLog(`whole-song download resumed: ${ahead.toFixed(1)} s buffered`);
         trackCache.resume(); open = true;
@@ -2232,6 +2275,8 @@ export function usePlayer(jf) {
     ownUntilRef.current = Date.now() + 3000;
     try { if (spare.currentTime) spare.currentTime = 0; } catch { /* not seekable yet */ }
     const calledAt = performance.now();
+    const baseBefore = localBaseRef.current;
+    const gen = ++startGenRef.current;
     spare.play().then(() => {
       // Learn how long a start takes on this machine, for the next gapless one.
       const took = (performance.now() - calledAt) / 1000;
@@ -2245,6 +2290,17 @@ export function usePlayer(jf) {
       fadeReset(old);
       audioRef.current = old; spareRef.current = spare; setActiveEl(old); wa.setActive?.(old);
       ownUntilRef.current = Date.now() + 1500;
+      // The queue position, the clock and what is loaded go back with it:
+      // moved on, the old song's end advanced one further and skipped a song.
+      // Not if anything started since (that advance already ran, or a skip).
+      if (startGenRef.current !== gen) return;
+      localBaseRef.current = baseBefore;
+      setIndex(plan.nextIndex - 1); indexRef.current = plan.nextIndex - 1;
+      setDuration(ticksToSeconds(plan.cur.RunTimeTicks));
+      loadedRef.current = plan.cur.Id;
+      anchorAt(baseBefore + old.currentTime, true);
+      // Already over (it had only a moment left): advance now, the ordinary way.
+      if (old.ended) advanceRef.current(true);
     });
     // The new song is the playing one from here: the element, the queue
     // position, the clock and the reports all move to it now.
@@ -2253,7 +2309,6 @@ export function usePlayer(jf) {
     const out = plan.fade > 0 ? plan.fade : left;
     fadeRef.current = { el: old, timer: setTimeout(() => endFadeRef.current(), out * 1000 + 400) };
     if (!plan.fade) old.addEventListener('ended', () => { if (fadeRef.current?.el === old) endFadeRef.current(); }, { once: true });
-    startGenRef.current += 1;
     setIndex(plan.nextIndex); indexRef.current = plan.nextIndex;
     setDuration(ticksToSeconds(plan.next.RunTimeTicks));
     anchorAt(0, true);
@@ -2513,12 +2568,15 @@ export function usePlayer(jf) {
   // a transfer arrives, THIS client is not yet the active player (the sender
   // still is), so playQueue would route the command straight back. We claim
   // first, then play here directly.
-  const startHere = useCallback(async (tracks, startIndex, position, shouldPlay) => {
+  const startHere = useCallback(async (tracks, startIndex, position, shouldPlay, ctx = null) => {
     relayRef.current?.claim();
     activePlayerRef.current = null;
     setError(null);
     setExternal(null);
-    setContextId(null);
+    // The sender's context (null if it had none): set now, the start below
+    // already normalizes by it.
+    setContextId(ctx); contextRef.current = ctx;
+    originalQueueRef.current = tracks;
     setQueue(tracks);
     setIndex(startIndex);
     queueRef.current = tracks;
@@ -2571,12 +2629,16 @@ export function usePlayer(jf) {
           const [first] = await fetchByIds(jf, [chosenId], fields);
           const rest = cmd.trackIds.length > 1 ? fetchByIds(jf, cmd.trackIds, fields).catch(() => null) : null;
           if (!first) throw new Error('track not found');
-          await startHereRef.current([first], 0, cmd.position || 0, cmd.playing !== false);
+          await startHereRef.current([first], 0, cmd.position || 0, cmd.playing !== false, typeof cmd.ctx === 'string' ? cmd.ctx : null);
           const tracks = markQueued(rest ? await rest : null, cmd.trackIds, cmd.queued);
           if (!tracks || !tracks.length || queueRef.current[indexRef.current]?.Id !== chosenId) return;
           const at = Math.max(0, tracks.findIndex((t) => t.Id === chosenId));
           setQueue(tracks); queueRef.current = tracks;
           setIndex(at); indexRef.current = at;
+          // Shuffled there: the real order, for shuffle off here.
+          const byId = new Map(tracks.map((t) => [t.Id, t]));
+          const orig = Array.isArray(cmd.original) ? cmd.original.map((x) => byId.get(x)).filter(Boolean) : [];
+          originalQueueRef.current = orig.length ? orig : tracks;
         } catch (e) { window.conduit?.debug?.(`transfer FAILED: ${e.message}`); setError(t('Could not take over playback: {error}', { error: e.message })); setPlaying(false); }
       } else {
         window.conduit?.debug?.('transfer carried no tracks: nothing to start');
@@ -2619,7 +2681,7 @@ export function usePlayer(jf) {
     else if (cmd.action === 'toggle') { toggleRef.current(); }
     else if (cmd.action === 'setPlaying') {
       if (from === 'server' && !cmd.playing) quietOnStopRef.current = true; // the sleep timer's stop
-      if (playingRef.current !== !!cmd.playing) toggleRef.current();
+      if (playingRef.current !== !!cmd.playing) toggleRef.current(!!cmd.playing);
     }
     else if (cmd.action === 'volumeStep') { volumeStepRef.current(Number(cmd.step) || 0); }
     else if (cmd.action === 'seek') { seekRef.current(cmd.pos || 0); }

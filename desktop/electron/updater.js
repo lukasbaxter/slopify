@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 
 const REPO = 'lukasbaxter/slopify';
@@ -57,32 +58,63 @@ function get(url, { json = false, to = null, redirects = 5 } = {}) {
   });
 }
 
-// The release asset for this machine, or null.
-function pickAsset(assets) {
+// The release asset for this machine, or null. A Mac gets only a build
+// that runs on its chip: the arm64 zip on an Intel Mac would install an app
+// that does not open. (electron-builder names an Intel zip -x64-mac.zip or
+// just -mac.zip; a universal one runs on both.)
+function pickAsset(assets, { platform = process.platform, arch = process.arch, env = process.env } = {}) {
   const find = (re) => assets.find((a) => re.test(a.name)) || null;
-  if (process.platform === 'darwin') return find(new RegExp(`-${process.arch === 'arm64' ? 'arm64' : 'x64'}-mac\\.zip$`)) || (process.arch === 'x64' ? find(/-mac\.zip$/) : null);
-  if (process.platform === 'win32') return process.env.PORTABLE_EXECUTABLE_FILE ? find(/^Slopify\.\d+\.\d+\.\d+\.exe$/) : find(/Setup\.\d+\.\d+\.\d+\.exe$/);
-  if (process.platform === 'linux' && process.env.APPIMAGE) return find(/\.AppImage$/);
+  if (platform === 'darwin') {
+    const own = arch === 'arm64' ? find(/-arm64-mac\.zip$/) : arch === 'x64' ? find(/-x64-mac\.zip$/) || find(/-\d+\.\d+\.\d+-mac\.zip$/) : null;
+    return own || find(/-universal-mac\.zip$/);
+  }
+  if (platform === 'win32') return env.PORTABLE_EXECUTABLE_FILE ? find(/^Slopify\.\d+\.\d+\.\d+\.exe$/) : find(/Setup\.\d+\.\d+\.\d+\.exe$/);
+  if (platform === 'linux' && env.APPIMAGE) return find(/\.AppImage$/);
   return null;
+}
+
+// The download against the sha256 GitHub lists for the asset ("sha256:<hex>"), when it lists one.
+function checkDigest(file, digest) {
+  const m = /^sha256:([0-9a-f]{64})$/i.exec(digest || '');
+  if (!m) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    fs.createReadStream(file).on('data', (c) => h.update(c)).on('error', reject).on('end', () => {
+      if (h.digest('hex') === m[1].toLowerCase()) resolve(); else reject(new Error('download damaged (checksum)'));
+    });
+  });
 }
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => execFile(cmd, args, { maxBuffer: 1 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
 }
 
+let busy = false;
+
 async function check() {
-  if (!app.isPackaged || ['checking', 'downloading', 'ready'].includes(state.status)) return state;
-  set({ status: 'checking', error: null });
+  if (!app.isPackaged || busy) return state;
+  busy = true;
+  // An update already waiting stays offered while this looks for a newer
+  // one (a release published after it was downloaded), and if this fails.
+  const waiting = ready;
+  if (!waiting) set({ status: 'checking', error: null });
   try {
     const rel = await get(`https://api.github.com/repos/${REPO}/releases/latest`, { json: true });
     const version = String(rel.tag_name || '').replace(/^v/, '');
-    if (!version || !newer(version, app.getVersion())) { set({ status: 'current', version: app.getVersion() }); return state; }
+    if (!version || !newer(version, waiting ? waiting.version : app.getVersion())) {
+      if (!waiting) set({ status: 'current', version: app.getVersion() });
+      return state;
+    }
     const asset = pickAsset(rel.assets || []);
-    if (!asset) { set({ status: 'current', version: app.getVersion(), error: `no ${process.platform} build in ${version}` }); return state; }
+    if (!asset) {
+      if (!waiting) set({ status: 'current', version: app.getVersion(), error: `no ${process.platform} ${process.arch} build in ${version}` });
+      return state;
+    }
     set({ status: 'downloading', version });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-update-'));
     const file = await get(asset.browser_download_url, { to: path.join(dir, asset.name) });
     if (asset.size && fs.statSync(file).size !== asset.size) throw new Error('download incomplete');
+    await checkDigest(file, asset.digest);
     if (process.platform === 'darwin') {
       await run('ditto', ['-x', '-k', file, path.join(dir, 'new')]);
       const bundle = fs.readdirSync(path.join(dir, 'new')).find((n) => n.endsWith('.app'));
@@ -93,7 +125,10 @@ async function check() {
     }
     set({ status: 'ready', version });
   } catch (e) {
-    set({ status: 'error', error: e.message });
+    if (waiting) set({ status: 'ready', version: waiting.version, error: e.message });
+    else set({ status: 'error', error: e.message });
+  } finally {
+    busy = false;
   }
   return state;
 }

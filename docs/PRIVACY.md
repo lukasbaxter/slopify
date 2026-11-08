@@ -18,12 +18,22 @@ Every lookup can be turned off.
 | [MusicBrainz](https://musicbrainz.org) and [ListenBrainz](https://listenbrainz.org) | The **Popular** order on artist pages | Artist names | Not yet switchable; the page falls back to your own plays when they cannot be reached |
 | ListenBrainz (your account) | Scrobbling and weekly discovery playlists | **Your listening history**, sent to your own ListenBrainz account | Off unless a person adds their ListenBrainz token in Settings |
 | Soulseek (through your slskd), Lidarr | Downloads, Upgrade to FLAC, filling discographies | Search terms through your own slskd / Lidarr | Off unless `SLSKD_*` / `LIDARR_*` are set |
+| [Open-Meteo](https://open-meteo.com) (from the [brain](../brain/README.md)) | Weather where you listen, for recommendations | The city name from the brain's **Where you listen** setting (once, to find it), then only its latitude and longitude and the hours wanted, every hour | Leave **Where you listen** empty and `LAT` / `LON` unset, or run without the brain |
+| [Hugging Face](https://huggingface.co) (from the brain) | The audio model (CLAP): downloaded on first start, and checked for a newer copy at each start | The model's name | Run without the brain |
+| Whisper and Demucs model downloads (GPU image only) | The lyric aligner's models, downloaded the first time someone presses **Sync Lyrics** | The model's name | Use the slim image, or do not press Sync Lyrics |
 
 On your local network only, never beyond it:
 
 - The server announces itself over mDNS (`_slopify._tcp`) so Home Assistant can
-  find it (`MDNS=0` to stop), and finds Chromecast and BluOS speakers
-  (`SPEAKERS=0` to stop).
+  find it (`MDNS=0` to stop).
+- It finds speakers (`SPEAKERS=0` to stop):
+
+  | How | Finds |
+  | --- | --- |
+  | mDNS | Chromecast and Google TV, BluOS, AirPlay (Apple TV, HomePod), DIY `slopify-speaker/1` bridges |
+  | SSDP (UPnP) | DLNA renderers (Sonos, HEOS, smart TVs, Kodi), Roku |
+  | A sweep of its own /24 every minute, ports 8009, 11000, 7780 and 7781 | Cast devices mDNS missed, BluOS, bridges, TVs running the Slopify TV agent |
+
 - Speakers fetch the audio they play from the server (`PUBLIC_URL`).
 
 The Home Assistant integration talks only to your Slopify server.

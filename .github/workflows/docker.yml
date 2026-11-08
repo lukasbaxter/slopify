@@ -47,10 +47,18 @@ jobs:
             type=raw,value=${{ matrix.latest }}
             type=ref,event=tag,suffix=${{ matrix.suffix }}
             type=sha,prefix=sha-,suffix=${{ matrix.suffix }}
+      # What the server reports as its version: the tag (v0.1.162 -> 0.1.162),
+      # or main-<commit> for a build off main.
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="main-${GITHUB_SHA::7}"; fi
+          echo "value=$v" >> "$GITHUB_OUTPUT"; echo "$v"
       - uses: docker/build-push-action@v6
         with:
           context: .
           target: ${{ matrix.target }}
+          build-args: SLOPIFY_VERSION=${{ steps.version.outputs.value }}
           platforms: ${{ matrix.platforms }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}

@@ -187,6 +187,11 @@ class FakeSlopify:
         self.speaker_states: dict[str, dict[str, Any]] = {}
         self.speaker_calls: list[tuple[str, str, dict[str, Any]]] = []
         self.group_calls: list[tuple[str, dict[str, Any]]] = []
+        # Household sign-ins asked for (by account), and a gate that holds them.
+        self.token_requests: list[str] = []
+        self.token_gate: asyncio.Event | None = None
+        # The session socket refused (the server away), the rest still answers.
+        self.ws_down = False
         self.url = ""
         self._runner: web.AppRunner | None = None
 
@@ -399,6 +404,9 @@ class FakeSlopify:
         if not uid or self._role(uid) != "admin":
             return web.json_response({"error": "admin only"}, status=403 if uid else 401)
         target = request.match_info["id"]
+        self.token_requests.append(target)
+        if self.token_gate is not None:
+            await self.token_gate.wait()
         if target not in self.users:
             return web.json_response({"error": "no such user"}, status=404)
         token = f"hh-{target[:6]}"
@@ -425,6 +433,8 @@ class FakeSlopify:
         return web.Response(body=b"\xff\xd8" + request.match_info["id"].encode(), content_type="image/jpeg")
 
     async def _ws(self, request: web.Request) -> web.StreamResponse:
+        if self.ws_down:
+            return web.json_response({"error": "unavailable"}, status=503)
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         first = await ws.receive()

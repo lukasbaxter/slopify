@@ -9,9 +9,11 @@ sources are the household's accounts.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,15 +21,14 @@ from typing import Any
 from homeassistant.components import websocket_api
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_URL, CONF_VERIFY_SSL, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
 from .api import (
@@ -84,6 +85,9 @@ class SlopifyData:
     listeners: list[Callable[[], None]] = field(default_factory=list)
     admin: bool = False
     household: bool = False
+    # One household check at a time: one slower than the interval would
+    # otherwise run beside the next and sign the same account in twice.
+    household_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
     def api(self) -> SlopifyApi:
@@ -143,11 +147,12 @@ async def _drop(data: SlopifyData, user_id: str) -> None:
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Serve and load the Slopify cards, and answer their lyrics requests."""
-    version = (await async_get_integration(hass, DOMAIN)).version
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARDS_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
-    )
-    add_extra_js_url(hass, f"{CARDS_URL}/slopify-cards.js?v={version}")
+    frontend = Path(__file__).parent / "frontend"
+    # The cache-buster is the card's own content: the manifest's version is
+    # not bumped with every release, so browsers kept the old card.
+    card = await hass.async_add_executor_job((frontend / "slopify-cards.js").read_bytes)
+    await hass.http.async_register_static_paths([StaticPathConfig(CARDS_URL, str(frontend), cache_headers=False)])
+    add_extra_js_url(hass, f"{CARDS_URL}/slopify-cards.js?v={hashlib.sha256(card).hexdigest()[:12]}")
     websocket_api.async_register_command(hass, ws_lyrics)
     return True
 
@@ -187,10 +192,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SlopifyConfigEntry) -> b
     data.admin = user.get("role") == "admin"
     if data.admin and entry.options.get(CONF_HOUSEHOLD, True):
         data.household = True
-        await _sync_household(hass, entry, data, initial=True)
+        async with data.household_lock:
+            await _sync_household(hass, entry, data, initial=True)
 
         async def _tick(_now: object) -> None:
-            await _sync_household(hass, entry, data)
+            if data.household_lock.locked():
+                return  # the last check is still running; the next tick checks again
+            async with data.household_lock:
+                await _sync_household(hass, entry, data)
 
         entry.async_on_unload(async_track_time_interval(hass, _tick, HOUSEHOLD_EVERY))
 
@@ -283,6 +292,37 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await api.logout()
     except SlopifyError as err:
         _LOGGER.debug("Could not sign out of Slopify (%s); the sign-in stays listed in the app", err)
+
+
+def server_key(entry: ConfigEntry) -> str:
+    """The server an entry signs in to, as its speakers' unique ids start with it."""
+    return str(entry.data.get("server_id") or entry.unique_id)
+
+
+@callback
+def owns_speakers(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Whether this entry has the server's speakers (players and the ungroup button).
+
+    Every entry on a server sees the same speakers, so only one may have
+    them: the one that already has them, while it is set up or on its way
+    (a reload or a restart keeps them where they were), else the first entry
+    on that server that is.
+    """
+    server = server_key(entry)
+    live = (ConfigEntryState.LOADED, ConfigEntryState.SETUP_IN_PROGRESS, ConfigEntryState.NOT_LOADED)
+    peers = [
+        e.entry_id
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if server_key(e) == server and (e.entry_id == entry.entry_id or (not e.disabled_by and e.state in live))
+    ]
+    ent_reg = er.async_get(hass)
+    for peer in peers:
+        if any(
+            ent.unique_id.startswith(f"{server}-speaker-") or ent.unique_id == f"{server}-ungroup-all"
+            for ent in er.async_entries_for_config_entry(ent_reg, peer)
+        ):
+            return peer == entry.entry_id
+    return peers[0] == entry.entry_id
 
 
 @callback

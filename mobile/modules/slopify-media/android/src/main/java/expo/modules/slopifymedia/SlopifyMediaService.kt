@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -40,6 +41,7 @@ class SlopifyMediaService : Service() {
     private const val NOTIFICATION_ID = 7781
     // A session paused this long lets go of the notification and the service.
     private const val PAUSED_LINGER_MS = 30 * 60 * 1000L
+    private const val ART_RETRY_MS = 30 * 1000L
 
     fun update(ctx: Context, s: MediaState) {
       latest = s
@@ -47,17 +49,31 @@ class SlopifyMediaService : Service() {
       if (svc != null) { svc.apply(s); return }
       // Only music starting brings the service up (a paused or empty session does not).
       if (s.state != "playing") return
-      ContextCompat.startForegroundService(ctx, Intent(ctx, SlopifyMediaService::class.java))
+      try {
+        ContextCompat.startForegroundService(ctx, Intent(ctx, SlopifyMediaService::class.java))
+      } catch (e: IllegalStateException) {
+        // Android 12+ refuses a foreground service started from the
+        // background (ForegroundServiceStartNotAllowedException; older ones
+        // throw this for any background start). The music goes on in the
+        // WebView; the next update with the app in front brings it up.
+        Log.w("SlopifyMedia", "playback service not started: ${e.message}")
+      }
     }
-    fun stop(ctx: Context) {
+    // Never stopService(): a start still on its way would then end before it
+    // called startForeground, which Android punishes by crashing the app
+    // ("did not then call startForeground"). With no instance there is no
+    // service yet; one on its way sees latest == null and stops itself once
+    // it is in the foreground.
+    fun stop(@Suppress("UNUSED_PARAMETER") ctx: Context) {
       latest = null
-      instance?.let { it.shutdown() } ?: ctx.stopService(Intent(ctx, SlopifyMediaService::class.java))
+      instance?.shutdown()
     }
   }
 
   private lateinit var session: MediaSessionCompat
   private val main = Handler(Looper.getMainLooper())
   private var art: Pair<String, Bitmap?>? = null
+  private var artFailed: Pair<String, Long>? = null // a cover that did not load, and when
   private var shown: MediaState? = null
   private val linger = Runnable { shutdown() }
 
@@ -91,8 +107,11 @@ class SlopifyMediaService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     // Foreground at once, whatever the intent: Android stops an app that
     // asked for a foreground service and did not become one within seconds.
-    val s = latest ?: MediaState("paused", "Slopify", "", "", null, null, null, 1.0, System.currentTimeMillis(), emptyList())
+    val wanted = latest
+    val s = wanted ?: MediaState("paused", "Slopify", "", "", null, null, null, 1.0, System.currentTimeMillis(), emptyList())
     goForeground(build(s))
+    // Started by update(), and stopped before it got here: done.
+    if (wanted == null && intent?.action == null) { shutdown(); return START_NOT_STICKY }
     when (intent?.action) {
       "slopify.play" -> send("play")
       "slopify.pause" -> send("pause")
@@ -162,10 +181,13 @@ class SlopifyMediaService : Service() {
   }
 
   // Covers come from the server by plain URL (public by id); fetched once
-  // each, off the main thread, then the notification is redrawn.
+  // each, off the main thread, then the notification is redrawn. One that
+  // did not load (the server away for a moment) is tried again at an update
+  // after ART_RETRY_MS, not kept as "no cover" for the rest of the song.
   private fun artFor(url: String?): Bitmap? {
     if (url.isNullOrEmpty()) return null
     art?.let { if (it.first == url) return it.second }
+    artFailed?.let { if (it.first == url && SystemClock.elapsedRealtime() - it.second < ART_RETRY_MS) return null }
     art = url to null
     Thread {
       val bmp = try {
@@ -174,7 +196,12 @@ class SlopifyMediaService : Service() {
           inputStream.use { BitmapFactory.decodeStream(it) }
         }
       } catch (_: Exception) { null }
-      main.post { if (art?.first == url) { art = url to bmp; shown?.let { if (instance === this) apply(it) } } }
+      main.post {
+        if (art?.first != url) return@post
+        if (bmp == null) { art = null; artFailed = url to SystemClock.elapsedRealtime(); return@post }
+        art = url to bmp; artFailed = null
+        shown?.let { if (instance === this) apply(it) }
+      }
     }.start()
     return null
   }

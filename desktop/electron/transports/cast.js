@@ -26,21 +26,29 @@ class CastTransport {
     const client = new Client();
     this.client = client;
 
-    await new Promise((resolve, reject) => {
-      const onError = (err) => { client.removeListener('error', onError); reject(err); };
-      client.once('error', onError);
-      client.connect(this.device.host, () => {
-        client.removeListener('error', onError);
-        resolve();
+    try {
+      await new Promise((resolve, reject) => {
+        const onError = (err) => { client.removeListener('error', onError); reject(err); };
+        client.once('error', onError);
+        client.connect(this.device.host, () => {
+          client.removeListener('error', onError);
+          resolve();
+        });
       });
-    });
 
-    // A dropped socket must clear cached state, otherwise the next play call
-    // writes into a dead connection and hangs instead of reconnecting.
-    client.on('error', () => this.close());
-    client.on('close', () => { this.player = null; });
+      // A dropped socket must clear cached state, otherwise the next play call
+      // writes into a dead connection and hangs instead of reconnecting.
+      client.on('error', () => this.close());
+      client.on('close', () => { this.player = null; });
 
-    this.player = await promisify(client.launch, client)(DefaultMediaReceiver);
+      this.player = await promisify(client.launch, client)(DefaultMediaReceiver);
+    } catch (e) {
+      // A connect or launch that failed: close this client, or the next
+      // _connect makes another and this one stays open.
+      if (this.client === client) this.close();
+      else { try { client.close(); } catch { /* socket already gone */ } }
+      throw e;
+    }
     return this.player;
   }
 

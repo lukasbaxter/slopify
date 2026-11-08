@@ -10,7 +10,8 @@
     "web": "node copy-web.js",
     "dist:mac": "npm run web && electron-builder -m",
     "dist:win": "npm run web && electron-builder -w",
-    "dist:linux": "npm run web && electron-builder -l"
+    "dist:linux": "npm run web && electron-builder -l",
+    "test": "node --test electron/"
   },
   "dependencies": {
     "bonjour-service": "^1.2.1",
@@ -25,6 +26,7 @@
     "productName": "Slopify",
     "files": [
       "electron/**/*",
+      "!electron/**/*.test.js",
       "dist/**/*",
       "package.json"
     ],
@@ -45,6 +47,12 @@
         "nsis",
         "portable"
       ]
+    },
+    "nsis": {
+      "artifactName": "${productName}.Setup.${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}.${version}.${ext}"
     },
     "linux": {
       "target": [

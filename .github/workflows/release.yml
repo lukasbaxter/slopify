@@ -117,6 +117,12 @@ jobs:
               }
           }
           EOG
+      # The bundled JS reports which build it is (window.slopifyShell.version,
+      # mobile/App.js), as the ipa does (build-ipa.sh); Gradle bundles the JS
+      # here, so the variable must be set for this step.
+      - name: Shell version
+        if: env.HAS_KEYSTORE == 'true'
+        run: echo "EXPO_PUBLIC_SLOPIFY_SHELL=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - run: ./gradlew assembleRelease --no-daemon
         if: env.HAS_KEYSTORE == 'true'
         working-directory: mobile/android
@@ -159,14 +165,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
       - run: ls -la out
-      # Uploads one file at a time with retries: GitHub's asset upload API
-      # dropped parallel uploads of these ~100 MB files ("other side closed",
-      # "Error creating asset temp dir") on the first two releases.
+      # Attaches the files one at a time with retries, then writes the notes
+      # from what the release really has, on every run (a re-run after a
+      # failed Android or iPhone job updates them too).
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --notes "$(ASSETS="$(ls out)" bash tools/release-notes.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY")"
-          for f in out/*; do
-            for i in 1 2 3 4 5; do gh release upload "$GITHUB_REF_NAME" "$f" -R "$GITHUB_REPOSITORY" --clobber && break || sleep 15; done
-          done
-          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name'
+        run: bash tools/publish-release.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" out

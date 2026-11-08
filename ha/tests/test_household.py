@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any
 
+import aiohttp
 from homeassistant.components.media_player import ATTR_INPUT_SOURCE, ATTR_INPUT_SOURCE_LIST, ATTR_MEDIA_TITLE
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant
@@ -202,3 +204,26 @@ async def test_removing_signs_the_household_out(
     assert await hass.config_entries.async_unload(household.entry_id)
     await hass.config_entries.async_remove(household.entry_id)
     assert set(fake.logged_out) >= {"tok-valid", f"hh-{BOB_ID[:6]}", f"hh-{CAROL_ID[:6]}"}
+
+
+async def test_a_slow_household_check_is_not_run_twice(
+    hass: HomeAssistant, household: MockConfigEntry, fake: FakeSlopify, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A check still waiting on the server when the next one is due: one sign-in, one player."""
+    # The held sign-in stands in for a check of several slow requests (each
+    # is capped at 20 s, a check is not): it must outlive the next tick.
+    monkeypatch.setattr("custom_components.slopify.api.REQUEST_TIMEOUT", aiohttp.ClientTimeout(total=600))
+    newcomer = "d" * 32
+    fake.users[newcomer] = "dave"
+    fake.token_gate = asyncio.Event()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    await fake.wait_for(lambda: newcomer in fake.token_requests)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=122))
+    await settle(hass, fake)
+    fake.token_gate.set()
+    await fake.wait_for(lambda: any(h["token"] == f"hh-{newcomer[:6]}" for h in fake.hellos))
+    await settle(hass, fake)
+    assert fake.token_requests.count(newcomer) == 1
+    assert sum(1 for h in fake.hellos if h["token"] == f"hh-{newcomer[:6]}") == 1
+    assert hass.states.get("media_player.slopify_dave") is not None
+    assert hass.states.get("media_player.slopify_dave_2") is None

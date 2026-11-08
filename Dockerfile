@@ -69,6 +69,16 @@ COPY aligner/requirements.txt /opt/align/requirements.txt
 RUN python3 -m venv /opt/align \
  && /opt/align/bin/pip install --no-cache-dir -U pip setuptools wheel \
  && /opt/align/bin/pip install --no-cache-dir -r /opt/align/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+# The release this image is, for /api/server and Settings › About: docker.yml
+# passes the version (0.1.162, or main-<commit> off main). Last, so a new
+# value rebuilds only this layer.
+ARG SLOPIFY_VERSION=
+ENV SLOPIFY_VERSION=$SLOPIFY_VERSION
 
 # The default target: the slim image.
 FROM base AS runtime
+# The release this image is, for /api/server and Settings › About: docker.yml
+# passes the version (0.1.162, or main-<commit> off main). Last, so a new
+# value rebuilds only this layer.
+ARG SLOPIFY_VERSION=
+ENV SLOPIFY_VERSION=$SLOPIFY_VERSION

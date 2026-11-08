@@ -169,4 +169,29 @@ describe('saving the remembered session', () => {
       ws.close();
     } finally { await again.app.close(); }
   }, 60000);
+
+  it('a shutdown never drops the last save: where it was playing is on disk when the server is gone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-sessclose-'));
+    const db0 = openDb(dir);
+    await scanLibrary(db0, { musicDir: MUSIC, dataDir: dir });
+    const track = (db0.prepare('SELECT id FROM tracks ORDER BY path LIMIT 1').get() as any).id;
+    db0.close();
+    vi.resetModules();
+    const { buildServer: build } = await import('./app.js');
+    const app = await build({ dataDir: dir, musicDir: MUSIC }); // owns its database and closes it
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const user = await signIn(app, 'closer');
+    const c = await connect((app.server.address() as any).port, user.token, 'c_closer_1');
+    await c.send({ type: 'queue', queue: [{ Id: track, Name: 'T' }] });
+    await c.send({ type: 'nowplaying', nowPlaying: { itemId: track, title: 'T', playing: true, position: 42 } });
+    await app.close(); // well inside the 1.5 s save debounce
+    const db = openDb(dir);
+    const row = db.prepare('SELECT v FROM kv WHERE k = ?').get(`session:${user.uid}`) as any;
+    expect(row).toBeTruthy();
+    const saved = JSON.parse(row.v);
+    expect(saved.trackId).toBe(track);
+    expect(saved.positionMs).toBeGreaterThanOrEqual(42000);
+    expect(saved.nowPlaying.playing).toBe(false);
+    db.close();
+  }, 60000);
 });

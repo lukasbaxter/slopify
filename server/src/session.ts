@@ -52,7 +52,7 @@ const clients = new Map<string, Client>();          // clientId -> client
 export type Sleep = { at: number | null; endOfTrack: boolean };
 const sleeps = new Map<string, Sleep & { timer?: NodeJS.Timeout }>();
 const sessions = new Map<string, Session>();        // uid -> session
-const saveTimers = new Map<string, NodeJS.Timeout>();
+const saveTimers = new Map<string, { timer: NodeJS.Timeout; run: () => void }>(); // uid -> a debounced save
 
 // A frame over the socket's limit closes the socket, and a client re-sends
 // its queue on every reconnect: with the limit at 1 MiB, a 2,607-song
@@ -96,11 +96,11 @@ function writeSession(db: DB, uid: string, s: Session, log: (m: string) => void)
 }
 function saveSession(db: DB, uid: string, s: Session, log: (m: string) => void) {
   if (saveTimers.has(uid)) return;
-  saveTimers.set(uid, setTimeout(() => {
-    saveTimers.delete(uid);
-    writeSession(db, uid, s, log);
-  }, 1500));
+  const run = () => { const p = saveTimers.get(uid); if (p) clearTimeout(p.timer); saveTimers.delete(uid); writeSession(db, uid, s, log); };
+  saveTimers.set(uid, { timer: setTimeout(run, 1500), run });
 }
+// Every save still waiting for its debounce, written now (shutdown).
+function flushSaves() { for (const p of [...saveTimers.values()]) p.run(); }
 
 export function applyEvent(s: Session, e: SessionEvent, from: string, now: number): { changed: boolean; reason?: string } {
   const pos = () => positionNow(s, now);
@@ -613,6 +613,20 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     }
   };
 
+  // Shutdown: the sockets are about to go, and with them the sound. Each
+  // session one of them holds is paused where it is (what its close would
+  // do, which may come after the database is closed), and every save still
+  // waiting for its debounce is written before the server is gone.
+  const sockets = new Set<Client>(); // this server's signed-in sockets
+  app.addHook('preClose', async () => {
+    for (const c of sockets) {
+      const s = sessions.get(c.uid);
+      if (!s || s.active !== c.id) continue;
+      s.positionMs = positionNow(s); s.anchorAt = Date.now(); s.playing = false; s.active = null; s.rev++; s.updatedAt = Date.now(); saveSession(db, c.uid, s, log);
+    }
+    flushSaves();
+  });
+
   // Message types a client may send; anything else is dropped unparsed into handle().
   const KNOWN = new Set(['ping', 'devices', 'queue', 'nowplaying', 'claim', 'command', 'like', 'offset', 'prefs', 'diag', 'sleep']);
   app.get('/api/ws', { websocket: true }, (ws, req) => {
@@ -674,7 +688,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         let name = base; for (let n = 2; used.has(name); n += 1) name = `${base} (${n})`;
         const form = ['desktop', 'laptop', 'phone', 'tablet', 'tv'].includes(msg.form) ? msg.form : null;
         self = { id, uid: who.id, net, name, kind, form, instance, ip: ipOf(req), token: msg.token, open: () => ws.readyState === 1, canPlay: msg.canPlay !== false, devices: [], nowPlaying: null, queue: null, lastSeen: Date.now(), send: wsSend(ws), close: () => ws.close(4000, 'replaced'), kick: (code, reason) => ws.close(code, reason) };
-        clients.set(id, self);
+        clients.set(id, self); sockets.add(self);
         serverClientFor(who.id);
         const s = loadSession(db, who.id);
         send(self, { type: 'hello-ok', clientId: id, userId: who.id, offsets: offsetsAll(), now: Date.now(), sleep: sleepOut(who.id), web: opts.webBuild || null });
@@ -691,6 +705,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
       clearTimeout(timeout);
       clearInterval(heartbeat); if (pongWait) clearTimeout(pongWait);
       if (!self) return;
+      sockets.delete(self);
       if (clients.get(self.id) !== self) return; // replaced by a reconnect of the same client id
       clients.delete(self.id);
       plays.close(self.id);

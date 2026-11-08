@@ -53,6 +53,7 @@ export type Sleep = { at: number | null; endOfTrack: boolean };
 const sleeps = new Map<string, Sleep & { timer?: NodeJS.Timeout }>();
 const sessions = new Map<string, Session>();        // uid -> session
 const saveTimers = new Map<string, { timer: NodeJS.Timeout; run: () => void }>(); // uid -> a debounced save
+const forgotten = new Set<string>(); // accounts deleted while this process runs (sessionForget)
 
 // A frame over the socket's limit closes the socket, and a client re-sends
 // its queue on every reconnect: with the limit at 1 MiB, a 2,607-song
@@ -95,7 +96,7 @@ function writeSession(db: DB, uid: string, s: Session, log: (m: string) => void)
   } catch (e: any) { log(`session save: ${e.message}`); }
 }
 function saveSession(db: DB, uid: string, s: Session, log: (m: string) => void) {
-  if (saveTimers.has(uid)) return;
+  if (saveTimers.has(uid) || forgotten.has(uid)) return; // a deleted account saves nothing more
   const run = () => { const p = saveTimers.get(uid); if (p) clearTimeout(p.timer); saveTimers.delete(uid); writeSession(db, uid, s, log); };
   saveTimers.set(uid, { timer: setTimeout(run, 1500), run });
 }
@@ -263,7 +264,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   // How each song went (skips, play length): for the brain's learning.
   const insEvent = db.prepare('INSERT INTO play_events (user_id, track_id, at, ms_played, end_ms, duration_ms, reason, shuffle, client) VALUES (@user_id, @track_id, @at, @ms_played, @end_ms, @duration_ms, @reason, @shuffle, @client)');
   const durOf = db.prepare('SELECT duration_ms FROM tracks WHERE id = ?');
-  const plays = playTracker((e) => { try { insEvent.run(e); } catch (err: any) { app.log.warn(`play event: ${err.message}`); } });
+  const plays = playTracker((e) => { if (forgotten.has(e.user_id)) return; try { insEvent.run(e); } catch (err: any) { app.log.warn(`play event: ${err.message}`); } });
   const durationOf = (id: string) => (durOf.get(id) as any)?.duration_ms ?? null;
   app.decorate('sessionOf', (uid: string) => loadSession(db, uid));
   // Anyone playing anything, any account: apps and browsers by their reports,
@@ -275,6 +276,21 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   // driven by a credential that no longer exists.
   app.decorate('sessionRevoke', (token: string) => {
     for (const c of [...clients.values()]) if (c.token === token) { try { c.kick?.(4003, 'signed out'); } catch { /* gone */ } }
+  });
+  // An account deleted (auth.ts): its sockets closed, its speakers stopped
+  // and its "Home speakers" client gone, its sleep timer and pending save
+  // dropped, and nothing saved or logged for it after (a socket's close
+  // comes later and would write its session and play events back).
+  app.decorate('sessionForget', (uid: string) => {
+    forgotten.add(uid);
+    for (const c of ofUser(uid)) {
+      clients.delete(c.id); plays.close(c.id);
+      if (c.player) void c.player.stopAll().catch(() => {});
+      try { c.kick?.(4003, 'account deleted'); } catch { /* gone */ }
+    }
+    const z = sleeps.get(uid); if (z?.timer) clearTimeout(z.timer); sleeps.delete(uid);
+    const p = saveTimers.get(uid); if (p) clearTimeout(p.timer); saveTimers.delete(uid);
+    sessions.delete(uid); savedQueue.delete(uid);
   });
   app.decorate('sessionLike', (uid: string, itemId: string, liked: boolean, at: number) => { for (const c of ofUser(uid)) send(c, { type: 'like', itemId, liked, at }); });
 

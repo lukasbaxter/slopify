@@ -145,12 +145,22 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   app.delete('/api/users/:id', { preHandler: (app as any).requireAdmin }, async (req, reply) => {
     const id = (req.params as any).id as string;
     if (id === req.user!.id) return reply.code(400).send({ error: 'you cannot delete yourself' });
+    if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) return reply.code(404).send({ error: 'no such user' });
     const gone = (db.prepare('SELECT token FROM tokens WHERE user_id = ?').all(id) as any[]).map((r) => r.token as string);
-    // Everything of theirs goes with them (nothing cascades but tokens).
+    // Their live session first (sockets, speakers, pending saves), so nothing
+    // of it is written back once the rows are gone.
+    (app as any).sessionForget?.(id);
+    // Everything of theirs goes with them (nothing cascades but tokens, and
+    // playlist rows with their playlists). Every table with a user_id
+    // (db.ts), and their kv rows. A song's lyric sync job and a problem
+    // report sent to the admin stay, without the account: the job is the
+    // song's, the report already carries the name it was sent under.
     const r = db.transaction(() => {
       const r = db.prepare('DELETE FROM users WHERE id = ?').run(id);
       if (!r.changes) return r;
-      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs', 'play_events', 'daily_mixes', 'spotify_pending', 'my_requests']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      for (const t of ['lyric_jobs', 'reports']) db.prepare(`UPDATE ${t} SET user_id = NULL WHERE user_id = ?`).run(id);
+      db.prepare('DELETE FROM kv WHERE k IN (?, ?, ?)').run(`session:${id}`, `session:${id}:queue`, `explore:${id}`);
       return r;
     })();
     if (!r.changes) return reply.code(404).send({ error: 'no such user' });

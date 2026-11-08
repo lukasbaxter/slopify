@@ -122,21 +122,29 @@ to get 96k starts that climb to 320k.
 
 ## Two audio elements
 
-`web/src/player/usePlayer.js` keeps a playing element and a spare. As soon as
-a track starts, the spare gets the next queue item's URL and `load()`. A skip
-to that track swaps the elements and calls `play()`.
+`web/src/player/usePlayer.js` keeps a playing element and a spare. What the
+spare does depends on where the sound goes.
 
-- No `src` teardown, so no gap and no "Not Playing" flash on the lock screen
-  (iOS ends an element's media session the moment its `src` changes).
-- iOS clamps `preload` to `metadata` and blocks playback until an element has
-  seen a user gesture, **per element**, and `load()` inside a gesture lifts
-  both restrictions. So the spare is `load()`ed once on the first
-  touch/click anywhere in the app; after that it buffers unprompted.
-- Each element has its own `MediaElementSource` (a source can only be made
-  once per element). `webAudio().setActive(el)` moves the visualizer's tap;
+- **Computers and Android (Web Audio).** Once the song playing has some
+  buffer in hand, the spare gets the next queue item's URL and `load()`. A
+  skip to that track swaps the elements and calls `play()`: no `src`
+  teardown, so no gap. A song that ends by itself hands over to the spare
+  just before its end, for gapless and crossfade (`ensureSpare()` loads it in
+  the last seconds if the early preload did not).
+- **iPhone and iPad.** The spare is never loaded. A paused element holding a
+  song is one WebKit may pick as the page's Now Playing, and it then tells
+  iOS "paused" while the music plays. The next song plays from memory when
+  it is in (the whole-song download, `trackCache.js`) and is loaded into the
+  playing element: in the foreground that element is stopped and emptied
+  first (otherwise the last second of the old song played after the new one
+  started); with the screen locked the element that just ended takes the
+  next `src`, which iOS always allows.
+- With Web Audio each element has its own `MediaElementSource` (a source can
+  only be made once per element). `webAudio().setActive(el)` moves the visualizer's tap;
   `Visualizer.jsx` already subscribed to `onSource(next, prev)`.
-- If the spare will not play (not unlocked, buffer evicted, bad stream) the
-  swap reverts and the normal load path runs.
+- If the spare will not play (a bad stream, a `play()` that is held) the
+  swap reverts and the normal load path runs. A `play()` that never answers
+  is waited on for 4 s at most, on either path.
 
 ## Rapid skipping
 
@@ -201,7 +209,9 @@ is no use in the car or the shower. Smart shuffle is now only about
   chosen quality) are held until the playing track has 12 s buffered ahead,
   plays from memory already, or has run 45 s, so on a weak link they never
   starve the start rung's segments. `keep(tracks, { hold: true })` settles
-  the wanted set at once; `resume()` opens the connection.
+  the wanted set at once; `resume()` opens the connection. A later `keep()`
+  with hold (the preload runs again when the queue changes) holds them again,
+  and the open gate lets go of that within 2 s.
 - Segments are 4 s, so the smallest first fetch is 4 s of audio. A shorter
   first segment on the 96k rung would be the next step if starts still lag.
 - Casting to a PS5 is impossible, not merely unbuilt: it has no Cast

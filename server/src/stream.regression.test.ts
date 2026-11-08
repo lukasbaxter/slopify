@@ -36,3 +36,22 @@ describe('a transcode that fails before ffmpeg runs', () => {
     expect(again.body).toMatch(/#EXTM3U/);
   }, 60000);
 });
+
+describe('a normalized variant after the loudness changed', () => {
+  it('a master playlist already handed out never points at a 404, and gains the server never chose still get none', async () => {
+    const id = trackIds()[4];
+    const album = (db().prepare('SELECT album_id FROM tracks WHERE id = ?').get(id) as any).album_id;
+    const setLoud = (lufs: number) => {
+      db().prepare('UPDATE tracks SET loudness = ?, true_peak = -6, loudness_at = ? WHERE id = ?').run(lufs, Date.now(), id);
+      db().prepare('UPDATE albums SET loudness = ?, true_peak = -6 WHERE id = ?').run(lufs, album);
+    };
+    setLoud(-10); // gain -4 dB
+    const master = await get(`/api/stream/${id}/hls/master.m3u8?norm=track`);
+    const variant = /^(aac-96g[^/]+)\/index\.m3u8/m.exec(master.body)![1];
+    expect(variant).toBe('aac-96g-4');
+    setLoud(-11); // re-measured (an album refresh): the server would pick -3 dB now
+    expect((await get(`/api/stream/${id}/hls/${variant}/index.m3u8?abr=1`)).statusCode).toBe(200);
+    // Still bounded: only what this server handed out (as it spelled it) or picks now.
+    for (const bad of ['aac-96g-4.0', 'aac-96g-5', 'aac-96g-25', 'aac-96g13', 'aac-96g04']) expect((await get(`/api/stream/${id}/hls/${bad}/index.m3u8?abr=1`)).statusCode).toBe(404);
+  }, 60000);
+});

@@ -423,14 +423,26 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     pumpWarm(dataDir, srcOf, log);
   };
   app.decorate('warmTracks', warm);
-  // A variant in a URL must be one the server itself would choose for that
-  // song (its track or album gain, or none): a client cannot fill the cache
-  // with arbitrary gains.
+  // A variant in a URL must be one the server itself chose for that song: a
+  // client cannot fill the cache with arbitrary gains. Chosen means the gain
+  // it would pick now (track or album), or one a master playlist already
+  // handed out, or one already in the cache: a phone playing a master from
+  // before the loudness was re-measured (an album refresh) must not get a 404.
+  const handedOut = new Map<string, Set<string>>(); // id -> variant names in masters given out
+  const HANDED_OUT_MAX = 5000;
+  const handOut = (id: string, names: string[]) => {
+    const have = handedOut.get(id) ?? new Set<string>();
+    handedOut.delete(id); // re-inserted: the oldest song is the one that goes
+    for (const n of names) have.add(n);
+    handedOut.set(id, have);
+    if (handedOut.size > HANDED_OUT_MAX) handedOut.delete(handedOut.keys().next().value!);
+  };
   const variantOk = (id: string, v: string) => {
     const p = parseVariant(v);
     if (!p) return false;
     if (!p.gain) return true;
-    return p.gain === gainFor(db, id, 'track') || p.gain === gainFor(db, id, 'album');
+    if (p.gain === gainFor(db, id, 'track') || p.gain === gainFor(db, id, 'album')) return true;
+    return !!handedOut.get(id)?.has(v) || fs.existsSync(path.join(transcodeDir(dataDir, id, v), 'done'));
   };
   // An encode may run three times the song's length past its first segment
   // (a minute at least) before it is taken for wedged and killed.
@@ -540,6 +552,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     lastProfile.set(req.user!.id, { profile: max, norm });
     const gain = norm ? gainFor(db, id, norm) : 0;
     if (norm && gain == null) measureSoon(id);
+    if (gain) handOut(id, LADDER.map(([p]) => variantName(p, gain)));
     const tok = q.token ? `token=${encodeURIComponent(q.token)}&` : '';
     reply.header('Cache-Control', 'no-store').type('application/vnd.apple.mpegurl');
     return masterPlaylist(max, gain, tok);

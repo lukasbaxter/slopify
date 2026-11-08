@@ -21,11 +21,11 @@ from typing import Any
 from homeassistant.components import websocket_api
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_URL, CONF_VERIFY_SSL, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
@@ -292,6 +292,37 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await api.logout()
     except SlopifyError as err:
         _LOGGER.debug("Could not sign out of Slopify (%s); the sign-in stays listed in the app", err)
+
+
+def server_key(entry: ConfigEntry) -> str:
+    """The server an entry signs in to, as its speakers' unique ids start with it."""
+    return str(entry.data.get("server_id") or entry.unique_id)
+
+
+@callback
+def owns_speakers(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Whether this entry has the server's speakers (players and the ungroup button).
+
+    Every entry on a server sees the same speakers, so only one may have
+    them: the one that already has them, while it is set up or on its way
+    (a reload or a restart keeps them where they were), else the first entry
+    on that server that is.
+    """
+    server = server_key(entry)
+    live = (ConfigEntryState.LOADED, ConfigEntryState.SETUP_IN_PROGRESS, ConfigEntryState.NOT_LOADED)
+    peers = [
+        e.entry_id
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if server_key(e) == server and (e.entry_id == entry.entry_id or (not e.disabled_by and e.state in live))
+    ]
+    ent_reg = er.async_get(hass)
+    for peer in peers:
+        if any(
+            ent.unique_id.startswith(f"{server}-speaker-") or ent.unique_id == f"{server}-ungroup-all"
+            for ent in er.async_entries_for_config_entry(ent_reg, peer)
+        ):
+            return peer == entry.entry_id
+    return peers[0] == entry.entry_id
 
 
 @callback

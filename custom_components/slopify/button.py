@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import SlopifyConfigEntry
+from . import SlopifyConfigEntry, owns_speakers, server_key
 from .api import NotFound, SlopifyError
 from .const import DOMAIN
 
@@ -20,15 +20,26 @@ async def async_setup_entry(
     entry: SlopifyConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add the ungroup-all button."""
-    async_add_entities([UngroupAll(entry)])
+    """Add the ungroup-all button, on the entry that has the server's speakers."""
+    data = entry.runtime_data
+    added = False
+
+    @callback
+    def maybe_add() -> None:
+        nonlocal added
+        if not added and owns_speakers(hass, entry):
+            added = True
+            async_add_entities([UngroupAll(entry)])
+
+    data.listeners.append(maybe_add)
+    entry.async_on_unload(lambda: data.listeners.remove(maybe_add))
+    maybe_add()
 
 
 def speakers_device(entry: SlopifyConfigEntry) -> DeviceInfo:
     """The server's speakers as a whole (the household's speaker settings)."""
-    server = entry.data.get("server_id") or entry.unique_id
     return DeviceInfo(
-        identifiers={(DOMAIN, f"{server}-speakers")},
+        identifiers={(DOMAIN, f"{server_key(entry)}-speakers")},
         name="Slopify speakers",
         manufacturer="Slopify",
         model="Speaker groups",
@@ -45,8 +56,7 @@ class UngroupAll(ButtonEntity):
     def __init__(self, entry: SlopifyConfigEntry) -> None:
         """Initialize the button."""
         self._entry = entry
-        server = entry.data.get("server_id") or entry.unique_id
-        self._attr_unique_id = f"{server}-ungroup-all"
+        self._attr_unique_id = f"{server_key(entry)}-ungroup-all"
         self._attr_device_info = speakers_device(entry)
 
     async def async_press(self) -> None:

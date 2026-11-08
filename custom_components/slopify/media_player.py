@@ -37,9 +37,10 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
-from . import PLAYERS, Account, SlopifyConfigEntry, SlopifyData, account_label
+from . import PLAYERS, Account, SlopifyConfigEntry, SlopifyData, account_label, owns_speakers, server_key
 from .api import CannotConnect, NotFound, SlopifyError
 from .const import BROWSE_IMAGE_SIZE, CONF_DEFAULT_SOURCE, DEFAULT_SOURCE_LAST, DOMAIN, PLAYER_IMAGE_SIZE
 from .library import Library, MediaNotFound, Playable, UnsupportedMedia, valid_image_id
@@ -51,6 +52,7 @@ PARALLEL_UPDATES = 0
 # A reported playhead within this many seconds of where the clock says it
 # should be is the same playback, not a jump: the card keeps its own clock.
 POSITION_SLACK = 1.5
+SPEAKER_CHECK_EVERY = timedelta(seconds=60)
 
 BROWSING = (
     MediaPlayerEntityFeature.PLAY_MEDIA
@@ -112,15 +114,20 @@ async def async_setup_entry(
     speakers: set[str] = set()
 
     @callback
-    def new_speakers() -> None:
-        found = [d for d in server_speakers(data) if d["id"] not in speakers]
+    def sync_speakers(_now: datetime | None = None) -> None:
+        # Another entry on the same server may have them (or take them over
+        # when that one is removed: this runs every minute too).
+        if not owns_speakers(hass, entry):
+            return
+        found = [d for d in server_speakers(data) if str(d["id"]) not in speakers]
         if found:
-            speakers.update(d["id"] for d in found)
+            speakers.update(str(d["id"]) for d in found)
             async_add_entities([SlopifySpeaker(entry, d) for d in found])
 
-    data.listeners.append(new_speakers)
-    entry.async_on_unload(lambda: data.listeners.remove(new_speakers))
-    new_speakers()
+    data.listeners.append(sync_speakers)
+    entry.async_on_unload(lambda: data.listeners.remove(sync_speakers))
+    entry.async_on_unload(async_track_time_interval(hass, sync_speakers, SPEAKER_CHECK_EVERY))
+    sync_speakers()
 
 
 def server_speakers(data: SlopifyData) -> list[dict[str, Any]]:
@@ -593,7 +600,7 @@ class SlopifySpeaker(_SlopifyMedia):
         self._inputs: list[str] = []
         self._native = False
         self._native_image: str | None = None
-        server = entry.data.get("server_id") or entry.unique_id
+        server = server_key(entry)
         self._attr_unique_id = f"{server}-speaker-{self._speaker_id}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{server}-speaker-{self._speaker_id}")},

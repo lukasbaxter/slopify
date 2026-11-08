@@ -90,3 +90,64 @@ describe('shuffle and queue edits', () => {
     await p.stopAll();
   });
 });
+
+describe('the poll moves on one command at a time', () => {
+  const ended = { playing: false, state: 'IDLE', position: 0, duration: 300, volume: 50, ended: true };
+  const playingAt = (position: number) => ({ playing: true, state: 'PLAYING', position, duration: 300, volume: 50 });
+  const atTheEnd = (p: any, list: string[]) => {
+    p.queue = list.map(row); p.original = [...p.queue]; p.index = 0;
+    p.duration = 300; p.playing = true; p.anchor = { pos: 299, at: Date.now() }; p.reached = 299;
+  };
+  const plays = (calls: string[]) => calls.filter((c) => c.startsWith('play'));
+
+  it('a next pressed while a reading of the old track is on its way is not undone by that reading', async () => {
+    let answer: (s: any) => void = () => {};
+    const calls: string[] = [];
+    let n = 0;
+    const p = player(calls, () => (n++ === 0 ? new Promise((r) => { answer = r; }) : Promise.resolve(playingAt(0))));
+    atTheEnd(p, ['a', 'b', 'c']);
+    const tick = p.tick();                       // asks the speaker...
+    const cmd = p.execute({ action: 'next' });   // ...the listener presses next meanwhile
+    await vi.advanceTimersByTimeAsync(0);
+    answer(ended);                               // the old track's end arrives after the press
+    await tick; await cmd;
+    expect(p.current.Id).toBe('b');
+    expect(p.transport).not.toBe(null);          // not released as an outside stop
+    expect(plays(calls)).toEqual(['play b']);    // one move, not two
+    await p.stopAll();
+  });
+
+  it('a next pressed while the end of the queue is waiting on the brain is that same move', async () => {
+    const calls: string[] = [];
+    let n = 0;
+    const p = player(calls, async () => (n++ === 0 ? ended : playingAt(1)));
+    atTheEnd(p, ['a']);
+    brain.next = ['x1', 'x2']; brain.delayMs = 1500;
+    const tick = p.tick();
+    await vi.advanceTimersByTimeAsync(500);      // the brain is still thinking
+    const cmd = p.execute({ action: 'next' });
+    await vi.advanceTimersByTimeAsync(3000);
+    await tick; await cmd;
+    expect(brain.asks).toBe(1);
+    expect(ids(p.queue)).toEqual(['a', 'x1', 'x2']);
+    expect(p.current.Id).toBe('x1');
+    expect(plays(calls)).toEqual(['play x1']);
+    await p.stopAll();
+  });
+
+  it('a command waits for the move the poll already started', async () => {
+    const calls: string[] = [];
+    let n = 0;
+    const p = player(calls, async () => (n++ === 0 ? ended : playingAt(1)));
+    atTheEnd(p, ['a', 'b', 'c']);
+    p.transport.play = async (url: string) => { calls.push(`play ${url.split('/api/stream/')[1]?.split('?')[0]}`); await new Promise((r) => setTimeout(r, 1000)); };
+    const tick = p.tick();
+    await vi.advanceTimersByTimeAsync(100);      // b is loading on the speaker
+    const cmd = p.execute({ action: 'seek', pos: 42 });
+    await vi.advanceTimersByTimeAsync(2000);
+    await tick; await cmd;
+    expect(p.current.Id).toBe('b');
+    expect(p.anchor.pos).toBe(42);               // the seek landed on b, after its start, not under it
+    await p.stopAll();
+  });
+});

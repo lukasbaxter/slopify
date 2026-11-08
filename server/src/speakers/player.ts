@@ -139,8 +139,30 @@ export class ServerPlayer {
 
   // Commands arrive fire-and-forget: run them one at a time so a second
   // command never interleaves with a transfer or seek still mid-flight.
+  // The poll's own moves (the next track at an end, letting go of a speaker
+  // that went away) go through the same line (see auto()).
   execute(cmd: any) {
-    this.ops = this.ops.then(() => this.run(cmd));
+    this.cmdSeq += 1;
+    // A next pressed while the track is already moving on by itself is that
+    // same move: taken as a second one, it skipped the song that was starting.
+    if (cmd?.action === 'next' && this.advancing) { this.d.log(`speaker ${this.device?.name || '?'}: next while moving on already: one move`); return this.ops; }
+    this.cmds += 1;
+    this.ops = this.ops.then(() => this.run(cmd)).finally(() => { this.cmds -= 1; });
+    return this.ops;
+  }
+  private cmdSeq = 0; // commands received
+  private cmds = 0; // commands received and not done yet
+  private advancing = false; // the poll's next-track move is running
+  // What the poll decided from a reading, run in the command line, and only
+  // if nothing was asked for since that reading and the speaker is the same
+  // one: a command that came in first already moved on (or away), and the
+  // stale reading must not move a second time or yield the new track.
+  private auto(seq: number, tr: Transport, fn: () => Promise<void>, advance = false) {
+    this.ops = this.ops.then(async () => {
+      if (seq !== this.cmdSeq || tr !== this.transport) return;
+      this.advancing = advance;
+      try { await fn(); } finally { this.advancing = false; }
+    }).catch((e: any) => this.d.log(`speaker ${this.device?.name || '?'}: ${e.message}`));
     return this.ops;
   }
   private async run(cmd: any) {
@@ -656,12 +678,14 @@ export class ServerPlayer {
   private lengthFrom(speaker: number | undefined) { if (!this.current?.RunTimeTicks && speaker && speaker > 0) this.duration = speaker; }
   private stopPolling() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   private async tick() {
-    if (!this.transport || this.starting || !this.current) return;
+    if (!this.transport || this.starting || !this.current || this.cmds) return;
     if (Date.now() < this.busyUntil) return;
     const t0 = Date.now();
+    const seq = this.cmdSeq, tr = this.transport;
     if (this.playing) this.reached = Math.max(this.reached, this.position);
-    const s = await this.transport.status();
+    const s = await tr.status();
     if (Date.now() < this.busyUntil) return; // a seek/toggle started while we read: stale
+    if (seq !== this.cmdSeq || this.cmds) return; // a command came in while we read: so is this
     const readAt = (t0 + Date.now()) / 2;
     // Mirror the speaker's own volume (someone used the dial or the BluOS
     // app), but never a muted reading and never right after we set it.
@@ -676,7 +700,7 @@ export class ServerPlayer {
     } else if (typeof s.volume === 'number' && !s.muted && Date.now() > this.volumeHeldUntil) this.volume = s.volume;
     // The transport lost the device under us (socket error, receiver hung
     // up): release the session cleanly, never relaunch on a dead connection.
-    if (s.gone) { await this.yield(); return; }
+    if (s.gone) { await this.auto(seq, tr, () => this.yield()); return; }
     // Another app took the speaker (Spotify, AirPlay, the BluOS app): what it
     // plays is no longer our stream. Twice in a row, so a reading from the
     // moment our own stream starts never counts.
@@ -686,7 +710,7 @@ export class ServerPlayer {
     const foreign = (s.state === 'play' || s.state === 'stream') && !!s.service && !/^(url)?$/i.test(s.service)
       && !!s.streamUrl && !s.streamUrl.includes('/api/stream');
     this.foreignReads = foreign ? this.foreignReads + 1 : 0;
-    if (this.foreignReads >= 2) { await this.lose(s.serviceName || s.service || 'another app'); return; }
+    if (this.foreignReads >= 2) { await this.auto(seq, tr, () => this.lose(s.serviceName || s.service || 'another app')); return; }
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
     // does not always know a stream's length).
@@ -699,8 +723,8 @@ export class ServerPlayer {
     // external stop too, and skipping ahead on that would relaunch a
     // speaker someone just silenced. Anything else is an external stop.
     const atEnd = this.duration > 0 && (got >= this.duration - 5 || got >= this.duration * 0.95);
-    if (s.ended && !atEnd) { await this.yield(); return; }
-    if (s.ended || (s.state === 'stop' && this.playing && nearEnd)) { await this.next(true); return; }
+    if (s.ended && !atEnd) { await this.auto(seq, tr, () => this.yield()); return; }
+    if (s.ended || (s.state === 'stop' && this.playing && nearEnd)) { await this.auto(seq, tr, () => this.next(true), true); return; }
     if (s.state === 'IDLE' || s.state === 'stop') {
       // Stopped from the speaker itself (or the stream failed): show it paused where it was.
       if (this.playing) { this.d.log(`speaker ${this.device?.name || '?'}: stopped at ${Math.round(this.position)}s of ${Math.round(this.duration)}s (reached ${Math.round(this.reached)}s), not the end: paused`); this.setPos(this.position, false); this.report(); }

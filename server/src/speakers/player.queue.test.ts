@@ -91,6 +91,62 @@ describe('shuffle and queue edits', () => {
   });
 });
 
+describe('two accounts and one speaker', () => {
+  const bluos = (id: string) => ({ id: `bluos:${id}`, kind: 'bluos', name: id, model: 'BluOS', host: id, port: 11000 });
+  const grouped = (uid: string, leader: any) => {
+    const p = new ServerPlayer(uid, { db: noopDb, discovery: { get: () => null } as any, publicUrl: 'http://x', token: () => 't', report: () => {}, reportQueue: () => {}, claim: () => {}, log: () => {} }) as any;
+    p.device = leader; p.transport = { ...speaker([]), removeSlave: async () => {} };
+    p.queue = [row('a')]; p.index = 0;
+    return p;
+  };
+  it('each taking a speaker of the other\'s group at the same moment does not lock both up', async () => {
+    const LA = bluos('10.0.0.1'), MA = bluos('10.0.0.2'), LB = bluos('10.0.0.3'), MB = bluos('10.0.0.4');
+    const A = grouped('ua', LA), B = grouped('ub', LB);
+    await A.claimDevice(LA); await A.claimDevice(MA); A.members = [MA];
+    await B.claimDevice(LB); await B.claimDevice(MB); B.members = [MB];
+    // Each claims the other's member from inside its own command line, the
+    // way a regroup that adds a speaker on purpose does.
+    A.ops = A.ops.then(() => A.claimDevice(MB));
+    B.ops = B.ops.then(() => B.claimDevice(MA));
+    let both = false;
+    void Promise.all([A.ops, B.ops]).then(() => { both = true; });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(both).toBe(true);
+    expect(A.members).toEqual([]); expect(B.members).toEqual([]);
+    // And the next command still runs.
+    let later = false;
+    void A.execute({ action: 'setRepeat', mode: 'all' }).then(() => { later = true; });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(later).toBe(true);
+    await A.stopAll(); await B.stopAll();
+  });
+  it('the speaker the music started on hands the music on, and the new owner does not wait behind the old one\'s commands', async () => {
+    const L = bluos('10.0.1.1'), M = bluos('10.0.1.2');
+    const calls: string[] = [];
+    const A = grouped('uc', L);
+    A.transport = { ...speaker(calls), removeSlave: async () => {} };
+    A.d.discovery = { get: (id: string) => (id === M.id ? M : null) };
+    await A.claimDevice(L); await A.claimDevice(M); A.members = [M];
+    // A's command line is busy (a slow command still running).
+    let release: () => void = () => {};
+    A.ops = A.ops.then(() => new Promise<void>((r) => { release = r; }));
+    const B = grouped('ud', bluos('10.0.1.9'));
+    let got = false;
+    void B.claimDevice(L).then(() => { got = true; });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(got).toBe(true);                     // B has L now, without waiting on A
+    expect(calls).toContain('stop');            // A stopped L before B got it
+    expect(A.device).toBe(null);
+    next.transport = { ...speaker(calls), removeSlave: async () => {} };
+    release();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(A.device?.id).toBe(M.id);            // A plays on, on the rest of its group
+    expect(plays(calls)).toEqual(['play a']);
+    await A.stopAll(); await B.stopAll();
+  });
+});
+const plays = (calls: string[]) => calls.filter((c) => c.startsWith('play'));
+
 describe('the poll moves on one command at a time', () => {
   const ended = { playing: false, state: 'IDLE', position: 0, duration: 300, volume: 50, ended: true };
   const playingAt = (position: number) => ({ playing: true, state: 'PLAYING', position, duration: 300, volume: 50 });
@@ -98,7 +154,6 @@ describe('the poll moves on one command at a time', () => {
     p.queue = list.map(row); p.original = [...p.queue]; p.index = 0;
     p.duration = 300; p.playing = true; p.anchor = { pos: 299, at: Date.now() }; p.reached = 299;
   };
-  const plays = (calls: string[]) => calls.filter((c) => c.startsWith('play'));
 
   it('a next pressed while a reading of the old track is on its way is not undone by that reading', async () => {
     let answer: (s: any) => void = () => {};

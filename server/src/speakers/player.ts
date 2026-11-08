@@ -366,24 +366,37 @@ export class ServerPlayer {
   // Another account took one of our speakers. A member just leaves the group;
   // the speaker the music started on hands the music to the next one in the
   // group, which carries on from the same place. Nothing left: let go.
+  // The speaker is let go of right away, never behind this player's own
+  // commands: the claimer waits on this from inside its own command line, and
+  // two accounts taking a speaker from each other at once waited on each
+  // other's line forever (and so did every command after). Only carrying the
+  // music on to the rest of the group waits its turn here.
   async giveUp(id: string) {
-    if (this.device?.id !== id) return this.dropMember(id);
+    if (this.device?.id !== id) {
+      const m = this.members.find((x) => x.id === id);
+      if (!m) return;
+      await this.unlink(m);
+      if (this.device) { if (this.members.length) linkedGroups.set(this.device.id, this.members.map((x) => x.id)); else linkedGroups.delete(this.device.id); }
+      this.report();
+      return;
+    }
     const rest = this.members.filter((m) => m.id !== id);
     if (!rest.length || !this.transport) return this.yield();
+    const pos = this.position, playing = this.playing, track = this.current;
+    this.excluded.add(id);
+    try {
+      this.stopPolling();
+      await this.dissolveGroup();
+      await this.transport?.stop().catch(() => {}); this.transport?.close(); this.transport = null;
+      if (owners.get(id) === this) owners.delete(id);
+      this.device = null;
+    } catch (e) { this.excluded.delete(id); throw e; }
     this.ops = this.ops.then(async () => {
-      const pos = this.position, playing = this.playing, track = this.current;
-      this.excluded.add(id);
       try {
-        this.stopPolling();
-        await this.dissolveGroup();
-        await this.transport?.stop().catch(() => {}); this.transport?.close(); this.transport = null;
-        if (owners.get(id) === this) owners.delete(id);
-        this.device = null;
         await this.switchDevice(rest[0]);
         if (track) await this.start(track, pos, playing);
       } finally { this.excluded.delete(id); }
     }).catch((e: any) => this.d.log(`group: hand-off failed: ${e.message}`));
-    return this.ops;
   }
   private releaseDevice() {
     if (this.device && owners.get(this.device.id) === this) owners.delete(this.device.id);

@@ -1528,21 +1528,28 @@ export function usePlayer(jf) {
         relayRef.current?.claim();
         activePlayerRef.current = null;
         if (np?.itemId && jf) {
+          // A start like any other: a tap made while the tracks load wins.
+          const gen = ++startGenRef.current;
           try {
             const rq = remoteQueuesRef.current[act] || [];
             const qi = typeof np.queueIndex === 'number' && rq[np.queueIndex]?.Id === np.itemId ? np.queueIndex : -1;
             const ids = qi >= 0 ? rq.map((t) => t.Id) : [np.itemId];
             const tracks = await fetchByIds(jf, ids, 'MediaSources,ArtistItems,AlbumArtists,UserData');
+            if (startGenRef.current !== gen) return;
             const at = qi >= 0 ? Math.max(0, tracks.findIndex((t) => t.Id === np.itemId)) : 0;
             const t = tracks[at];
             if (t) {
               setQueue(tracks); setIndex(at); queueRef.current = tracks; indexRef.current = at;
               setDuration(ticksToSeconds(t.RunTimeTicks));
-              anchorAt(np.position || 0, true);
-              await startOn(nextDevice, t, np.position || 0);
+              // Where the session is now (the last report, run on to now on
+              // the server's clock), not where that report was made.
+              const from = relayRef.current?.playheadOf ? relayRef.current.playheadOf(np) : (np.position || 0);
+              anchorAt(from, true);
+              await startOn(nextDevice, t, from, gen);
+              if (startGenRef.current !== gen) return;
               setPlaying(true);
             }
-          } catch (e) { setError(e.message); }
+          } catch (e) { if (startGenRef.current === gen) setError(e.message); }
         }
         return;
       }

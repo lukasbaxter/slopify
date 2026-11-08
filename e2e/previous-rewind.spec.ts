@@ -25,7 +25,7 @@ test('previous after a seek on a progressive transcode goes back to 0:00, not to
     expect(at).toBeLessThan(2.5);
     expect(await page.evaluate(() => (window as any).__player.positionNow())).toBeLessThan(2.5);
   } finally {
-    await page.evaluate(() => { const w = window as any; w.__player.playing && w.__player.toggle(); return w.__updatePrefs({ quality: 'original' }); }).catch(() => {});
+    await page.evaluate(() => { const w = window as any; if (w.__player.playing) w.__player.toggle(); return w.__updatePrefs({ quality: 'original' }); }).catch(() => {});
     await ctx.close();
   }
 });

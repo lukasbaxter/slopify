@@ -98,3 +98,75 @@ describe('plays and play events of a song played again', () => {
     b.ws.close();
   }, 60000);
 });
+
+// A bare server with just the session routes, on a real database whose kv
+// writes are recorded; a fresh copy of session.ts each time (its state is
+// per process), as a restart would have.
+async function bareSession(db: DB, writes?: string[]) {
+  vi.resetModules();
+  const Fastify = (await import('fastify')).default;
+  const websocket = (await import('@fastify/websocket')).default;
+  const { registerSession, WS_MAX_PAYLOAD } = await import('./session.js');
+  const spy: DB = writes ? new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'prepare') return (sql: string) => {
+        const st = target.prepare(sql);
+        if (!/INTO kv/.test(sql)) return st;
+        return new Proxy(st, { get(s, p) { if (p === 'run') return (...a: any[]) => { writes.push(a.map(String).join(' ')); return (s as any).run(...a); }; const v = (s as any)[p]; return typeof v === 'function' ? v.bind(s) : v; } });
+      };
+      const v = (target as any)[prop]; return typeof v === 'function' ? v.bind(target) : v;
+    },
+  }) : db;
+  const app = Fastify();
+  app.decorate('requireUser', (_req: any, _reply: any, done: any) => done());
+  await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
+  registerSession(app, spy);
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  return { app, port: (app.server.address() as any).port as number };
+}
+function bareDb() {
+  const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-sessbare-')));
+  db.prepare("INSERT INTO users (id, name, pass_hash, role, must_change_pw, created) VALUES ('u_q', 'q', 'x', 'user', 0, 0)").run();
+  db.prepare("INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES ('tok_q', 'u_q', 'web', 'web', 0, 0)").run();
+  return db;
+}
+const until = async (ok: () => boolean, ms = 5000) => { for (let i = 0; i < ms / 25 && !ok(); i++) await new Promise((r) => setTimeout(r, 25)); };
+
+describe('saving the remembered session', () => {
+  it('a now-playing report never rewrites the whole queue; only a changed queue does', async () => {
+    const db = bareDb();
+    const writes: string[] = [];
+    const { app, port } = await bareSession(db, writes);
+    try {
+      const c = await connect(port, 'tok_q', 'c_saver_1');
+      const queue = Array.from({ length: 3000 }, (_, i) => ({ Id: `t${i}`, Name: `QUEUE-MARKER ${i}` }));
+      await c.send({ type: 'queue', queue });
+      for (let i = 0; i < 3; i++) {
+        await c.send({ type: 'nowplaying', nowPlaying: { itemId: 't0', title: 'T', playing: true, position: i * 2 } });
+        await new Promise((r) => setTimeout(r, 1700)); // past the save debounce
+      }
+      const withQueue = writes.filter((w) => w.includes('QUEUE-MARKER'));
+      expect(writes.length).toBeGreaterThanOrEqual(3);
+      expect(withQueue.length).toBe(1);
+      // A new queue is written again.
+      await c.send({ type: 'queue', queue: queue.slice(0, 10) });
+      await c.send({ type: 'nowplaying', nowPlaying: { itemId: 't0', title: 'T', playing: true, position: 8 } });
+      await until(() => writes.filter((w) => w.includes('QUEUE-MARKER')).length === 2);
+      expect(writes.filter((w) => w.includes('QUEUE-MARKER')).length).toBe(2);
+      c.ws.close();
+    } finally { await app.close(); }
+    // What a restart brings back: the last queue and where it was.
+    const again = await bareSession(db);
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${again.port}/api/ws`);
+      await new Promise((r) => ws.on('open', r));
+      const got = new Promise<any>((resolve) => ws.on('message', (d: any) => { const m = JSON.parse(String(d)); if (m.type === 'session') resolve(m); }));
+      ws.send(JSON.stringify({ type: 'hello', token: 'tok_q', clientId: 'c_saver_2', instance: 'i2', kind: 'web' }));
+      const m = await got;
+      expect(m.queue.length).toBe(10);
+      expect(m.nowPlaying.itemId).toBe('t0');
+      expect(m.nowPlaying.position).toBeGreaterThanOrEqual(8);
+      ws.close();
+    } finally { await again.app.close(); }
+  }, 60000);
+});

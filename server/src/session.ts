@@ -66,21 +66,39 @@ export const emptySession = (): Session => ({ rev: 0, active: null, trackId: nul
 
 export function positionNow(s: Session, now = Date.now()) { return s.playing ? s.positionMs + (now - s.anchorAt) : s.positionMs; }
 
+// The remembered session is two rows: session:<uid> (the song, where it
+// was, the device: rewritten on every save, a few hundred bytes) and
+// session:<uid>:queue (up to 5,000 rows: rewritten only when the queue
+// changed; the active client reports every 2 s). A row from before the
+// split carries its queue itself.
+const queueKey = (uid: string) => `session:${uid}:queue`;
+const savedQueue = new Map<string, { queue: string[]; items: any[] }>(); // uid -> the arrays last written
 function loadSession(db: DB, uid: string): Session {
   const have = sessions.get(uid);
   if (have) return have;
   const row = db.prepare('SELECT v FROM kv WHERE k = ?').get(`session:${uid}`) as any;
-  const s: Session = row ? { ...emptySession(), ...JSON.parse(row.v), active: null, playing: false } : emptySession();
+  const q = db.prepare('SELECT v FROM kv WHERE k = ?').get(queueKey(uid)) as any;
+  const s: Session = row ? { ...emptySession(), ...JSON.parse(row.v), ...(q ? JSON.parse(q.v) : {}), active: null, playing: false } : emptySession();
   sessions.set(uid, s);
+  savedQueue.set(uid, { queue: s.queue, items: s.queueItems });
   return s;
+}
+function writeSession(db: DB, uid: string, s: Session, log: (m: string) => void) {
+  const np = s.nowPlaying ? { ...s.nowPlaying, playing: false, position: positionNow(s) / 1000 } : null;
+  const set = db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v');
+  const last = savedQueue.get(uid);
+  const queueChanged = !last || last.queue !== s.queue || last.items !== s.queueItems;
+  try {
+    // The queue first: a failed write leaves it marked changed for the next save.
+    if (queueChanged) { set.run(queueKey(uid), JSON.stringify({ queue: s.queue.slice(0, 5000), queueItems: s.queueItems.slice(0, 5000) })); savedQueue.set(uid, { queue: s.queue, items: s.queueItems }); }
+    set.run(`session:${uid}`, JSON.stringify({ trackId: s.trackId, index: s.index, positionMs: positionNow(s), device: s.device, nowPlaying: np, updatedAt: s.updatedAt }));
+  } catch (e: any) { log(`session save: ${e.message}`); }
 }
 function saveSession(db: DB, uid: string, s: Session, log: (m: string) => void) {
   if (saveTimers.has(uid)) return;
   saveTimers.set(uid, setTimeout(() => {
     saveTimers.delete(uid);
-    const np = s.nowPlaying ? { ...s.nowPlaying, playing: false, position: positionNow(s) / 1000 } : null;
-    try { db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(`session:${uid}`, JSON.stringify({ trackId: s.trackId, queue: s.queue.slice(0, 5000), index: s.index, positionMs: positionNow(s), device: s.device, nowPlaying: np, queueItems: s.queueItems.slice(0, 5000), updatedAt: s.updatedAt })); }
-    catch (e: any) { log(`session save: ${e.message}`); }
+    writeSession(db, uid, s, log);
   }, 1500));
 }
 
@@ -515,7 +533,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         if (np && s.active === me.id) {
           applyEvent(s, { type: 'progress', ts: now, positionMs: Math.max(0, Math.round((Number(np.position) || 0) * 1000)), playing: !!np.playing, trackId: typeof np.itemId === 'string' ? np.itemId : undefined }, me.id, now);
           s.nowPlaying = np; s.device = np.device && typeof np.device === 'object' ? { id: String(np.device.id ?? ''), name: String(np.device.name ?? ''), kind: String(np.device.kind ?? '') } : s.device;
-          if (me.queue) { s.queueItems = me.queue; s.queue = me.queue.map((t: any) => t?.Id).filter((x: any) => typeof x === 'string'); s.index = s.trackId ? s.queue.indexOf(s.trackId) : -1; }
+          if (me.queue) { if (s.queueItems !== me.queue) { s.queueItems = me.queue; s.queue = me.queue.map((t: any) => t?.Id).filter((x: any) => typeof x === 'string'); } s.index = s.trackId ? s.queue.indexOf(s.trackId) : -1; }
           s.updatedAt = now; saveSession(db, me.uid, s, log);
           if (np.itemId !== me._lastWarmFor) { me._lastWarmFor = np.itemId; warmAhead(me.uid, s.queue, s.index); }
         }

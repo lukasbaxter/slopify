@@ -350,6 +350,9 @@ export function usePlayer(jf) {
   useEffect(() => () => trackCache?.clear(), [trackCache]);
   // A downloaded song plays from the device (offline/local.js), in any mode.
   const wholeFor = (id) => localUrl(id) || (jf?.hasWhole?.() ? trackCache?.get(id) || null : null);
+  // The same, for effects that outlive a render (the element listeners are
+  // set up once per element, often before sign-in, when jf was still null).
+  const wholeForRef = useRef(wholeFor); wholeForRef.current = wholeFor;
 
   // --- volume normalization -------------------------------------------------
   // Spotify's: every song at -14 LUFS (the server measured it; track._gain
@@ -1649,7 +1652,7 @@ export function usePlayer(jf) {
     const onDuration = () => {
       // A transcode's element duration is the REMAINDER from its start (or
       // unknown); the track's own length from Jellyfin stays authoritative.
-      if (deviceRef.current.kind === 'local' && Number.isFinite(el.duration) && !localBaseRef.current && !jf?.transcoded?.()) {
+      if (deviceRef.current.kind === 'local' && Number.isFinite(el.duration) && !localBaseRef.current && !jfNowRef.current?.transcoded?.()) {
         setDuration(el.duration);
       }
     };
@@ -1811,7 +1814,7 @@ export function usePlayer(jf) {
       // reload throws away what was on its way: on a weak link the reloads
       // came every few seconds and the song never got going (10-30). Only a
       // connection that stays dead that long is reloaded.
-      const limit = wholeFor(id) ? 3000 : bufferedAhead(el) >= 1 ? 6000 : STUCK_NO_DATA_MS;
+      const limit = wholeForRef.current(id) ? 3000 : bufferedAhead(el) >= 1 ? 6000 : STUCK_NO_DATA_MS;
       if (!moved && Date.now() - stuckSince < limit) return;
       stuckSince = 0; recovering = true;
       mediaLog(moved ? `server moved: ${id.slice(0, 6)} at ${t.toFixed(1)}, reloading from the other address` : `watchdog: ${id.slice(0, 6)} stuck at ${t.toFixed(1)}, reloading`);
@@ -1821,7 +1824,7 @@ export function usePlayer(jf) {
       // `recovering` set, which switched the watchdog off for the element.
       const api = jfNowRef.current;
       if (!api) { recovering = false; return; }
-      const url = wholeFor(id) || api.playbackUrl(id, { norm: bakeNormRef.current(id) });
+      const url = wholeForRef.current(id) || api.playbackUrl(id, { norm: bakeNormRef.current(id) });
       ownUntilRef.current = Date.now() + 10000;
       el.muted = false; el.src = url;
       // The wait below can outlive the song: a skip, a pause, an element swap

@@ -10,8 +10,8 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | MIT | 124 |
 | BSD-3-Clause | 16 |
 | ISC | 9 |
-| Apache-2.0 | 5 |
 | BlueOak-1.0.0 | 5 |
+| Apache-2.0 | 4 |
 | Apache-2.0 AND LGPL-3.0-or-later AND MIT | 1 |
 | AGPL-3.0-or-later | 1 |
 | (MIT OR WTFPL) | 1 |
@@ -101,7 +101,6 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | fs-constants | 1.0.0 | MIT | https://github.com/mafintosh/fs-constants |
 | github-from-package | 0.0.0 | MIT | git://github.com/substack/github-from-package |
 | glob | 13.0.6 | BlueOak-1.0.0 | git@github.com:isaacs/node-glob |
-| hls.js | 1.7.3 | Apache-2.0 | https://github.com/video-dev/hls.js |
 | http-errors | 2.0.1 | MIT | jshttp/http-errors |
 | ieee754 | 1.2.1 | BSD-3-Clause | git://github.com/feross/ieee754 |
 | inherits | 2.0.4 | ISC | git://github.com/isaacs/inherits |

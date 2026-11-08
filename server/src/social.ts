@@ -29,6 +29,9 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   const hasTrack = db.prepare('SELECT 1 FROM tracks WHERE id = ?');
   const knownTracks = (ids: string[]) => ids.filter((t) => TRACK_ID.test(t) && hasTrack.get(t));
   const PLAYLIST_MAX = 10000;
+  // Gone from Your Library: its place there (and in a folder) goes too, so
+  // saving it again brings it back at the top, like anything new.
+  const forgetPlace = (u: string, id: string) => db.prepare('DELETE FROM library_order WHERE user_id = ? AND item_id = ?').run(u, id);
   // A like on a track, or on an album (saved to Your Library).
   const isAlbum = (id: string) => !!db.prepare('SELECT 1 FROM albums WHERE id = ?').get(id);
   // A "like" on an artist is a follow (the artist page's Follow button).
@@ -46,8 +49,8 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   });
   app.delete('/api/likes/:id', auth, async (req) => {
     const id = (req.params as any).id as string;
-    if (isAlbum(id)) { db.prepare('DELETE FROM album_likes WHERE user_id = ? AND album_id = ?').run(uid(req), id); return { ok: true, album: true }; }
-    if (isArtist(id)) { db.prepare('DELETE FROM artist_follows WHERE user_id = ? AND artist_id = ?').run(uid(req), id); return { ok: true, artist: true }; }
+    if (isAlbum(id)) { db.prepare('DELETE FROM album_likes WHERE user_id = ? AND album_id = ?').run(uid(req), id); forgetPlace(uid(req), id); return { ok: true, album: true }; }
+    if (isArtist(id)) { db.prepare('DELETE FROM artist_follows WHERE user_id = ? AND artist_id = ?').run(uid(req), id); forgetPlace(uid(req), id); return { ok: true, artist: true }; }
     db.prepare('DELETE FROM likes WHERE user_id = ? AND track_id = ?').run(uid(req), id); (app as any).sessionLike?.(uid(req), id, false, Date.now()); return { ok: true };
   });
   // Artists followed (Your Library shows them beside saved albums and playlists).
@@ -121,7 +124,7 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
   });
   app.delete('/api/playlists/:id', auth, async (req, reply) => {
     const p = own(req, (req.params as any).id); if (!p) return reply.code(404).send({ error: 'no such playlist' });
-    db.prepare('DELETE FROM playlists WHERE id = ?').run(p.id); return { ok: true };
+    db.transaction(() => { db.prepare('DELETE FROM playlists WHERE id = ?').run(p.id); forgetPlace(uid(req), p.id); })(); return { ok: true };
   });
   // Track edits: add (append), remove (by position), move (from -> to). Positions are renumbered after each.
   const renumber = db.prepare(`WITH o AS (SELECT rowid AS r, ROW_NUMBER() OVER (ORDER BY pos) - 1 AS n FROM playlist_tracks WHERE playlist_id = ?) UPDATE playlist_tracks SET pos = (SELECT n FROM o WHERE o.r = playlist_tracks.rowid) WHERE playlist_id = ?`);

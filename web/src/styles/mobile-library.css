@@ -41,8 +41,10 @@
   .liblist { padding: 0 16px calc(24px + env(safe-area-inset-bottom)); }
   .libitem { padding: 8px 0; gap: 16px; border-radius: 0; background: transparent; }
   .libitem:active { opacity: .7; }
+  .libitem.lib-lifted:active { opacity: 1; }
   .libitem img, .libitem .ph, .libitem .liked-art { width: 64px; height: 64px; border-radius: 3px; }
   .libitem.round img, .libitem.round .ph { border-radius: 50%; }
+  .libitem.infolder { padding-left: 20px; }
   .libitem-name { font-size: 16px; font-weight: 400; color: var(--fg); }
   .libitem-sub { font-size: 13px; color: var(--fg-sub); gap: 4px; }
   .libpin { width: 13px; height: 13px; }

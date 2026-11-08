@@ -14,6 +14,7 @@ import { registerLibrary } from './library.js';
 import { registerStream } from './stream.js';
 import { brainTask, isBrain, registerBrain, registerBrainAuth } from './brain.js';
 import { registerSocial } from './social.js';
+import { registerLibraryLayout } from './libraryLayout.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
 import { registerSession, WS_MAX_PAYLOAD } from './session.js';
@@ -101,6 +102,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerBrain(app, db);
   registerStream(app, db, cacheDir, songCache, altOf, config.headsEnabled);
   registerSocial(app, db, dataDir, cacheDir);
+  registerLibraryLayout(app, db);
   const heads = config.headsEnabled ? { cacheDir, seconds: config.headSeconds } : undefined;
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));

@@ -362,6 +362,13 @@ export class Slopify {
   async genreMix(name) { return ((await this._fetch(`/api/genres/${encodeURIComponent(name)}/mix`)).items || []).map(rowTrack); }
 
   async playlists() { const items = ((await this._fetch('/api/playlists')).items || []).map(rowPlaylist); return { items, total: items.length }; }
+  // Your Library's folders and order (server: libraryLayout.ts). rev marks
+  // this client's own change, so the ping about it can be told apart.
+  libraryLayout() { return this._fetch('/api/library/layout'); }
+  saveLibraryLayout(layout, rev) { return this._fetch('/api/library/layout', { method: 'PUT', body: JSON.stringify({ order: layout.order, folders: layout.folders }), headers: { 'X-Slopify-Rev': rev } }); }
+  createFolder(name, rev) { return this._fetch('/api/library/folders', { method: 'POST', body: JSON.stringify({ name }), headers: { 'X-Slopify-Rev': rev } }); }
+  renameFolder(id, name, rev) { return this._fetch(`/api/library/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ name }), headers: { 'X-Slopify-Rev': rev } }); }
+  deleteFolder(id, rev) { return this._fetch(`/api/library/folders/${id}`, { method: 'DELETE', headers: { 'X-Slopify-Rev': rev } }); }
   playlistTracks(playlistId, opts = {}) {
     if (opts.startIndex != null) return this._playlistTracks(playlistId, opts);
     return this._cached(`playlist:${playlistId}`, () => this._playlistTracks(playlistId, opts));

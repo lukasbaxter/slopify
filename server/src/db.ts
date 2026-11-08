@@ -279,6 +279,18 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE download_watch ADD COLUMN fallback_at INTEGER;
   `,
+  // 33: Your Library's folders and order, per account (libraryLayout.ts):
+  // the order people dragged into (it was prefs.libraryOrder) moves here.
+  `
+  CREATE TABLE library_folders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL);
+  CREATE INDEX library_folders_user ON library_folders(user_id);
+  -- folder_id NULL: at the top of Your Library. A folder's own place is its
+  -- row here (item_id = the folder's id, always at the top).
+  CREATE TABLE library_order (user_id TEXT NOT NULL, item_id TEXT NOT NULL, folder_id TEXT, pos INTEGER NOT NULL, PRIMARY KEY (user_id, item_id));
+  INSERT OR IGNORE INTO library_order (user_id, item_id, folder_id, pos)
+    SELECT p.user_id, j.value, NULL, CAST(j.key AS INTEGER) FROM prefs p, json_each(p.json, '$.libraryOrder') j
+    WHERE json_valid(p.json) AND json_type(p.json, '$.libraryOrder') = 'array' AND j.type = 'text';
+  `,
 ];
 
 export type DB = Database.Database;

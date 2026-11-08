@@ -298,6 +298,8 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     sessions.delete(uid); savedQueue.delete(uid);
   });
   app.decorate('sessionLike', (uid: string, itemId: string, liked: boolean, at: number) => { for (const c of ofUser(uid)) send(c, { type: 'like', itemId, liked, at }); });
+  // Your Library's folders or order changed (libraryLayout.ts): the account's clients read it again.
+  app.decorate('sessionLibraryLayout', (uid: string, rev: string) => { for (const c of ofUser(uid)) send(c, { type: 'prefs', prefs: { _libraryLayout: rev } }); });
 
   // --- the server's own speakers -----------------------------------------------
   // One virtual client per account ("Home speakers") carries the speakers the

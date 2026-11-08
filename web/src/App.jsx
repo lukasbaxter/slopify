@@ -480,21 +480,48 @@ export default function App() {
   // Mouse back / forward buttons (buttons 3 and 4) drive the in-app history in
   // the browser and on the desktop; the browser's own navigation is suppressed.
   // Electron on Windows and Linux also delivers them as app-command events via
-  // the main process (never on macOS); goBack/goForward take one per press.
+  // the main process (Linux: on the press, Windows: on the release, either
+  // possibly repeating while held). One physical press is one step, whatever
+  // arrives: a press runs from the DOM mousedown to its mouseup, and the step
+  // is taken by the first event of it; an app-command inside a press, or
+  // within NAV_SAME_MS of its end or of the last app-command (a repeat, or a
+  // platform with no DOM events), belongs to that press. navOnce's lock did
+  // not do this: the popstate of the first step reopens it at once, so a
+  // release after the press went a second page back.
   const navRef = useRef({ goBack, goForward }); navRef.current = { goBack, goForward };
   useEffect(() => {
-    const onMouse = (e) => {
-      if (e.button !== 3 && e.button !== 4) return;
-      e.preventDefault();
-      if (e.button === 3) navRef.current.goBack(); else navRef.current.goForward();
+    const NAV_SAME_MS = 600;
+    // { dir, down, last }: the press in progress, or the last one (last = when it was last heard from).
+    let press = null;
+    const step = (dir) => (dir === 'back' ? navRef.current.goBack() : navRef.current.goForward());
+    const dirOf = (e) => (e.button === 3 ? 'back' : e.button === 4 ? 'forward' : null);
+    const recent = (dir) => press && press.dir === dir && (press.down || Date.now() - press.last < NAV_SAME_MS);
+    const onDown = (e) => {
+      const dir = dirOf(e); if (!dir) return;
+      e.preventDefault(); // Chromium navigates the page itself on mousedown/auxclick
+      // An app-command that came just ahead of the DOM press is this press.
+      const ahead = recent(dir) && !press.down && press.byCommand;
+      press = { dir, down: true, last: Date.now() };
+      if (!ahead) step(dir);
     };
-    window.addEventListener('mouseup', onMouse);
-    // Chromium fires the page navigation on mousedown/auxclick too; swallow both.
-    const swallow = (e) => { if (e.button === 3 || e.button === 4) e.preventDefault(); };
-    window.addEventListener('mousedown', swallow);
+    const onUp = (e) => {
+      const dir = dirOf(e); if (!dir) return;
+      e.preventDefault();
+      if (press && press.dir === dir && press.down) { press.down = false; press.last = Date.now(); return; }
+      // A release whose press never reached the page (pressed outside the window).
+      if (!recent(dir)) step(dir);
+      press = { dir, down: false, last: Date.now() };
+    };
+    const swallow = (e) => { if (dirOf(e)) e.preventDefault(); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
     window.addEventListener('auxclick', swallow);
-    const off = window.conduit?.onNavigate?.((dir) => (dir === 'back' ? navRef.current.goBack() : navRef.current.goForward()));
-    return () => { window.removeEventListener('mouseup', onMouse); window.removeEventListener('mousedown', swallow); window.removeEventListener('auxclick', swallow); off?.(); };
+    const off = window.conduit?.onNavigate?.((dir) => {
+      if (recent(dir)) { if (!press.down) press.last = Date.now(); return; }
+      press = { dir, down: false, last: Date.now(), byCommand: true };
+      step(dir);
+    });
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('mouseup', onUp); window.removeEventListener('auxclick', swallow); off?.(); };
   }, []); // registered once; the ref always points at the current history
   const canForward = histRef.current.idx < histRef.current.stack.length - 1;
   // null | 'npv' | 'queue' | 'lyrics'

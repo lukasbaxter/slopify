@@ -1470,6 +1470,11 @@ export function usePlayer(jf) {
         let index = 0;
         let pos = 0;
         let wasPlaying = true;
+        // What the queue was played from (album normalization, more of an
+        // artist at the end) and, shuffled, its real order, so the receiver
+        // carries on as this client would have. Known only for our own queue.
+        let ctx;
+        let original;
         if (act) {
           // We are mirroring another session: hand off THAT session's queue.
           const np = (rosterRef.current.players || []).find((p) => p.id === act)?.nowPlaying;
@@ -1491,13 +1496,15 @@ export function usePlayer(jf) {
             index = indexRef.current;
             pos = a.playing ? a.pos + ranFor(a) : positionRef.current;
             wasPlaying = playing;
+            ctx = contextRef.current || null;
+            if (shuffleRef.current !== 'off' && originalQueueRef.current.length) original = originalQueueRef.current.map((t) => t.Id);
           }
         }
         // A speaker seen through another client: that client takes the
         // session and plays it on the named device.
         const target = nextDevice.kind === 'relay' ? nextDevice.relayClientId : nextDevice.viaClient;
         relayRef.current.command(target, {
-          action: 'transfer', trackIds, queued, index, position: pos, playing: wasPlaying,
+          action: 'transfer', trackIds, queued, index, position: pos, playing: wasPlaying, ctx, original,
           // Picking a client means ITS OWN output (Spotify: "This Computer"),
           // even if that client last drove a speaker; the speakers are listed
           // separately.
@@ -2561,12 +2568,15 @@ export function usePlayer(jf) {
   // a transfer arrives, THIS client is not yet the active player (the sender
   // still is), so playQueue would route the command straight back. We claim
   // first, then play here directly.
-  const startHere = useCallback(async (tracks, startIndex, position, shouldPlay) => {
+  const startHere = useCallback(async (tracks, startIndex, position, shouldPlay, ctx = null) => {
     relayRef.current?.claim();
     activePlayerRef.current = null;
     setError(null);
     setExternal(null);
-    setContextId(null);
+    // The sender's context (null if it had none): set now, the start below
+    // already normalizes by it.
+    setContextId(ctx); contextRef.current = ctx;
+    originalQueueRef.current = tracks;
     setQueue(tracks);
     setIndex(startIndex);
     queueRef.current = tracks;
@@ -2619,12 +2629,16 @@ export function usePlayer(jf) {
           const [first] = await fetchByIds(jf, [chosenId], fields);
           const rest = cmd.trackIds.length > 1 ? fetchByIds(jf, cmd.trackIds, fields).catch(() => null) : null;
           if (!first) throw new Error('track not found');
-          await startHereRef.current([first], 0, cmd.position || 0, cmd.playing !== false);
+          await startHereRef.current([first], 0, cmd.position || 0, cmd.playing !== false, typeof cmd.ctx === 'string' ? cmd.ctx : null);
           const tracks = markQueued(rest ? await rest : null, cmd.trackIds, cmd.queued);
           if (!tracks || !tracks.length || queueRef.current[indexRef.current]?.Id !== chosenId) return;
           const at = Math.max(0, tracks.findIndex((t) => t.Id === chosenId));
           setQueue(tracks); queueRef.current = tracks;
           setIndex(at); indexRef.current = at;
+          // Shuffled there: the real order, for shuffle off here.
+          const byId = new Map(tracks.map((t) => [t.Id, t]));
+          const orig = Array.isArray(cmd.original) ? cmd.original.map((x) => byId.get(x)).filter(Boolean) : [];
+          originalQueueRef.current = orig.length ? orig : tracks;
         } catch (e) { window.conduit?.debug?.(`transfer FAILED: ${e.message}`); setError(t('Could not take over playback: {error}', { error: e.message })); setPlaying(false); }
       } else {
         window.conduit?.debug?.('transfer carried no tracks: nothing to start');

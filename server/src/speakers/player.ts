@@ -198,7 +198,9 @@ export class ServerPlayer {
       if (at < 0) at = 0;
     }
     await this.switchDevice(dev);
-    if (!keep) { this.queue = rows; this.original = rows; }
+    // Two arrays, never one: extend() adds to both, and one array shared by
+    // both got every autoplay song twice.
+    if (!keep) { this.queue = rows; this.original = [...rows]; }
     this.index = at;
     this.d.claim();
     await this.start(this.queue[at], Number(cmd.position) || 0, cmd.playing !== false);
@@ -223,7 +225,7 @@ export class ServerPlayer {
     const idx = Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     let order = rows, start = idx;
     if (this.shuffle === 'on' && rows.length > 1) { order = [rows[idx], ...shuffled(rows.filter((_, i) => i !== idx))]; start = 0; }
-    this.original = rows; this.queue = order; this.index = start;
+    this.original = rows; this.queue = order === rows ? [...rows] : order; this.index = start;
     this.d.claim();
     await this.start(this.queue[start], Number(cmd.startAt) || 0, true);
     this.d.reportQueue(this.queue);

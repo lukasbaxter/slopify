@@ -24,7 +24,9 @@ test('a song picked on the laptop waits for the slow phone before its clock runs
   // The phone plays.
   await phone.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(phone.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
-  await phone.locator('.trackrow').nth(0).dblclick();
+  // A phone plays a song on one tap (TrackRow.jsx); a second tap on the row
+  // now playing pauses it, so a double-click here would play and pause.
+  await phone.locator('.trackrow').nth(0).click();
   await expect.poll(() => desk.locator('.player').textContent(), { timeout: 20000 }).toContain('Slow Phone');
   await expect.poll(() => phone.locator('.player button[title="Pause"]').count(), { timeout: 10000 }).toBeGreaterThan(0);
   // The phone's link slows down: its next song takes 4 s to arrive.

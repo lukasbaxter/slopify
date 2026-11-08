@@ -52,6 +52,9 @@ PARALLEL_UPDATES = 0
 # A reported playhead within this many seconds of where the clock says it
 # should be is the same playback, not a jump: the card keeps its own clock.
 POSITION_SLACK = 1.5
+# A speaker the server no longer lists keeps its player (unavailable) this
+# long, so one that drops off the network for a moment is not removed.
+SPEAKER_GONE_AFTER = timedelta(minutes=10)
 SPEAKER_CHECK_EVERY = timedelta(seconds=60)
 
 BROWSING = (
@@ -112,6 +115,9 @@ async def async_setup_entry(
     data.on_removed.append(removed)
 
     speakers: set[str] = set()
+    # Speakers this entry has that the server stopped listing, and since when.
+    missing: dict[str, datetime] = {}
+    server = server_key(entry)
 
     @callback
     def sync_speakers(_now: datetime | None = None) -> None:
@@ -119,10 +125,32 @@ async def async_setup_entry(
         # when that one is removed: this runs every minute too).
         if not owns_speakers(hass, entry):
             return
+        listed = {str(d["id"]) for d in server_speakers(data)}
         found = [d for d in server_speakers(data) if str(d["id"]) not in speakers]
         if found:
             speakers.update(str(d["id"]) for d in found)
             async_add_entities([SlopifySpeaker(entry, d) for d in found])
+        if not data.session.connected:
+            # Not connected (or not yet, as Home Assistant starts) says nothing
+            # about the speakers.
+            missing.clear()
+            return
+        now = dt_util.utcnow()
+        ent_reg, dev_reg = er.async_get(hass), dr.async_get(hass)
+        for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+            if ent.domain != "media_player" or not ent.unique_id.startswith(f"{server}-speaker-"):
+                continue
+            speaker_id = ent.unique_id.removeprefix(f"{server}-speaker-")
+            if speaker_id in listed:
+                missing.pop(speaker_id, None)
+            elif now - missing.setdefault(speaker_id, now) >= SPEAKER_GONE_AFTER:
+                # Gone for good (not a blip): the player goes; it comes back
+                # if the speaker does.
+                del missing[speaker_id]
+                speakers.discard(speaker_id)
+                ent_reg.async_remove(ent.entity_id)
+                if device := dev_reg.async_get_device(identifiers={(DOMAIN, ent.unique_id)}):
+                    dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
 
     data.listeners.append(sync_speakers)
     entry.async_on_unload(lambda: data.listeners.remove(sync_speakers))

@@ -190,6 +190,8 @@ class FakeSlopify:
         # Household sign-ins asked for (by account), and a gate that holds them.
         self.token_requests: list[str] = []
         self.token_gate: asyncio.Event | None = None
+        # The session socket refused (the server away), the rest still answers.
+        self.ws_down = False
         self.url = ""
         self._runner: web.AppRunner | None = None
 
@@ -431,6 +433,8 @@ class FakeSlopify:
         return web.Response(body=b"\xff\xd8" + request.match_info["id"].encode(), content_type="image/jpeg")
 
     async def _ws(self, request: web.Request) -> web.StreamResponse:
+        if self.ws_down:
+            return web.json_response({"error": "unavailable"}, status=503)
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         first = await ws.receive()

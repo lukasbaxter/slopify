@@ -1,10 +1,12 @@
-"""Each server's speakers have one player, however many entries sign in to it."""
+"""Each server's speakers have one player, however many entries sign in to it,
+and a speaker the server stops listing goes after a while (not on a blip)."""
 
 from __future__ import annotations
 
 from datetime import timedelta
 import logging
 
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_URL, CONF_USERNAME, CONF_VERIFY_SSL
 from homeassistant.core import HomeAssistant
@@ -110,3 +112,92 @@ async def test_another_entry_takes_the_speakers_when_theirs_is_removed(
     state = hass.states.get(KITCHEN)
     assert state.state != "unavailable"
     assert state.attributes["source_list"] == ["Slopify - bob"]
+
+
+async def test_a_speaker_the_server_drops_goes_after_a_while(
+    hass: HomeAssistant, entry: MockConfigEntry, fake: FakeSlopify, freezer: FrozenDateTimeFactory
+) -> None:
+    fake.admin = True
+    fake.lan = [SPEAKER_KITCHEN, SPEAKER_DEN]
+    await setup(hass, fake, entry)
+    assert hass.states.get(DEN) is not None
+
+    # Gone from the server's list: unavailable at first (a blip comes back)...
+    await fake.set_roster(lan=[SPEAKER_KITCHEN])
+    await settle(hass, fake)
+    assert hass.states.get(DEN).state == "unavailable"
+    freezer.tick(timedelta(minutes=2))
+    async_fire_time_changed(hass)
+    await settle(hass, fake)
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, DEN_UID) == DEN
+
+    # ...and gone for good once it stays away.
+    freezer.tick(timedelta(minutes=11))
+    async_fire_time_changed(hass)
+    await settle(hass, fake)
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, DEN_UID) is None
+    assert hass.states.get(DEN) is None
+    assert hass.states.get(KITCHEN).state != "unavailable"
+
+    # Back on the network later: a player again, under its old name.
+    await fake.set_roster(lan=[SPEAKER_KITCHEN, SPEAKER_DEN])
+    await settle(hass, fake)
+    assert hass.states.get(DEN) is not None
+
+
+async def test_a_blip_does_not_remove_a_speaker(
+    hass: HomeAssistant, entry: MockConfigEntry, fake: FakeSlopify, freezer: FrozenDateTimeFactory
+) -> None:
+    fake.admin = True
+    fake.lan = [SPEAKER_KITCHEN, SPEAKER_DEN]
+    await setup(hass, fake, entry)
+    await fake.set_roster(lan=[SPEAKER_KITCHEN])
+    await settle(hass, fake)
+    freezer.tick(timedelta(minutes=5))
+    async_fire_time_changed(hass)
+    await settle(hass, fake)
+    await fake.set_roster(lan=[SPEAKER_KITCHEN, SPEAKER_DEN])
+    await settle(hass, fake)
+    freezer.tick(timedelta(minutes=12))
+    async_fire_time_changed(hass)
+    await settle(hass, fake)
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, DEN_UID) == DEN
+    assert hass.states.get(DEN).state != "unavailable"
+
+
+async def test_speakers_stay_while_the_server_is_away(
+    hass: HomeAssistant, entry: MockConfigEntry, fake: FakeSlopify, freezer: FrozenDateTimeFactory
+) -> None:
+    """Not connected says nothing about the speakers: none are removed."""
+    fake.admin = True
+    fake.lan = [SPEAKER_KITCHEN, SPEAKER_DEN]
+    await setup(hass, fake, entry)
+    fake.ws_down = True
+    await fake.drop_sockets()
+    await settle(hass, fake)
+    assert hass.states.get(DEN).state == "unavailable"
+    freezer.tick(timedelta(minutes=30))
+    async_fire_time_changed(hass)
+    await settle(hass, fake)
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, DEN_UID) == DEN
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, KITCHEN_UID) == KITCHEN
+
+
+async def test_speakers_stay_when_home_assistant_starts_without_the_server(
+    hass: HomeAssistant, entry: MockConfigEntry, fake: FakeSlopify, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The players from last time stay while the session has not connected yet."""
+    monkeypatch.setattr("custom_components.slopify.FIRST_CONNECT_WAIT", 0.1)
+    # Gone at once, were they counted as gone: only "not connected" keeps them.
+    monkeypatch.setattr("custom_components.slopify.media_player.SPEAKER_GONE_AFTER", timedelta(0))
+    fake.admin = True
+    fake.lan = [SPEAKER_KITCHEN, SPEAKER_DEN]
+    fake.ws_down = True
+    entry.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create(
+        "media_player", DOMAIN, DEN_UID, config_entry=entry, suggested_object_id="den_slopify"
+    )
+    await setup(hass, fake, entry)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    await settle(hass, fake)
+    assert er.async_get(hass).async_get_entity_id("media_player", DOMAIN, DEN_UID) == DEN

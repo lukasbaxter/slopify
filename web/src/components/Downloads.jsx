@@ -109,12 +109,16 @@ export default function Downloads({ jf, notify, onPlay, onOpen }) {
   const reloadRef = useRef(() => Promise.resolve());
   useEffect(() => {
     let alive = true;
-    setData(null); setError(null);
+    // The page opens at once from the answer kept the last time (the server
+    // waits on Lidarr, which can take seconds); the live one replaces it. A
+    // failed or slow poll leaves what is shown.
+    const key = `downloads.${scope}`;
+    setData(jf.persisted(key)); setError(null);
     let busy = false; // a slow answer must not stack the next poll behind it
     const load = async () => {
       if (busy) return;
       busy = true;
-      try { const r = await jf.downloads(scope); if (alive) { setData(r); setError(null); } }
+      try { const r = await jf.downloads(scope); if (alive) { setData(r); setError(null); jf._persist(key, r); } }
       catch (e) { if (alive) setError(String(e.message || e).replace(/^\d+: /, '')); }
       finally { busy = false; }
     };

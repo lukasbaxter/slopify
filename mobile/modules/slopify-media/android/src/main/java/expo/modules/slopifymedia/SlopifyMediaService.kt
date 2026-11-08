@@ -41,6 +41,7 @@ class SlopifyMediaService : Service() {
     private const val NOTIFICATION_ID = 7781
     // A session paused this long lets go of the notification and the service.
     private const val PAUSED_LINGER_MS = 30 * 60 * 1000L
+    private const val ART_RETRY_MS = 30 * 1000L
 
     fun update(ctx: Context, s: MediaState) {
       latest = s
@@ -72,6 +73,7 @@ class SlopifyMediaService : Service() {
   private lateinit var session: MediaSessionCompat
   private val main = Handler(Looper.getMainLooper())
   private var art: Pair<String, Bitmap?>? = null
+  private var artFailed: Pair<String, Long>? = null // a cover that did not load, and when
   private var shown: MediaState? = null
   private val linger = Runnable { shutdown() }
 
@@ -179,10 +181,13 @@ class SlopifyMediaService : Service() {
   }
 
   // Covers come from the server by plain URL (public by id); fetched once
-  // each, off the main thread, then the notification is redrawn.
+  // each, off the main thread, then the notification is redrawn. One that
+  // did not load (the server away for a moment) is tried again at an update
+  // after ART_RETRY_MS, not kept as "no cover" for the rest of the song.
   private fun artFor(url: String?): Bitmap? {
     if (url.isNullOrEmpty()) return null
     art?.let { if (it.first == url) return it.second }
+    artFailed?.let { if (it.first == url && SystemClock.elapsedRealtime() - it.second < ART_RETRY_MS) return null }
     art = url to null
     Thread {
       val bmp = try {
@@ -191,7 +196,12 @@ class SlopifyMediaService : Service() {
           inputStream.use { BitmapFactory.decodeStream(it) }
         }
       } catch (_: Exception) { null }
-      main.post { if (art?.first == url) { art = url to bmp; shown?.let { if (instance === this) apply(it) } } }
+      main.post {
+        if (art?.first != url) return@post
+        if (bmp == null) { art = null; artFailed = url to SystemClock.elapsedRealtime(); return@post }
+        art = url to bmp; artFailed = null
+        shown?.let { if (instance === this) apply(it) }
+      }
     }.start()
     return null
   }

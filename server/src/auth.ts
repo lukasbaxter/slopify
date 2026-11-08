@@ -208,14 +208,26 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   app.post('/api/auth/register', { config: { rateLimit: { max: config.loginRateMax, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = Register.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message || 'bad request' });
-    const inv = db.prepare('SELECT v FROM kv WHERE k = ?').get(`invite:${body.data.invite}`) as any;
-    if (!inv || Number(inv.v) < Date.now()) return reply.code(400).send({ error: 'invite is invalid or expired' });
-    if (db.prepare('SELECT 1 FROM users WHERE name = ?').get(body.data.username)) return reply.code(409).send({ error: 'that name is taken' });
+    const inviteOk = () => { const inv = db.prepare('SELECT v FROM kv WHERE k = ?').get(`invite:${body.data.invite}`) as any; return !!inv && Number(inv.v) >= Date.now(); };
+    const nameTaken = () => !!db.prepare('SELECT 1 FROM users WHERE name = ?').get(body.data.username);
+    if (!inviteOk()) return reply.code(400).send({ error: 'invite is invalid or expired' });
+    if (nameTaken()) return reply.code(409).send({ error: 'that name is taken' });
+    const hash = await argon2.hash(body.data.password, { type: argon2.argon2id });
+    // Checked again after the hash (another registration may have used the
+    // invite or taken the name meanwhile), and the invite used up in the same
+    // transaction as the account is made: one invite, one account.
     const id = userId();
-    db.prepare('INSERT INTO users (id, name, pass_hash, role, must_change_pw, created) VALUES (?, ?, ?, ?, 0, ?)').run(id, body.data.username, await argon2.hash(body.data.password, { type: argon2.argon2id }), 'user', Date.now());
-    db.prepare('DELETE FROM kv WHERE k = ?').run(`invite:${body.data.invite}`);
     const t = newToken();
-    db.prepare('INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)').run(t, id, 'web', 'web', Date.now(), Date.now());
+    const made = db.transaction((): 'ok' | 'invite' | 'name' => {
+      if (!inviteOk()) return 'invite';
+      if (nameTaken()) return 'name';
+      db.prepare('INSERT INTO users (id, name, pass_hash, role, must_change_pw, created) VALUES (?, ?, ?, ?, 0, ?)').run(id, body.data.username, hash, 'user', Date.now());
+      db.prepare('DELETE FROM kv WHERE k = ?').run(`invite:${body.data.invite}`);
+      db.prepare('INSERT INTO tokens (token, user_id, device, kind, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)').run(t, id, 'web', 'web', Date.now(), Date.now());
+      return 'ok';
+    })();
+    if (made === 'invite') return reply.code(400).send({ error: 'invite is invalid or expired' });
+    if (made === 'name') return reply.code(409).send({ error: 'that name is taken' });
     return { token: t, user: { id, name: body.data.username, role: 'user', mustChangePassword: false } };
   });
 }

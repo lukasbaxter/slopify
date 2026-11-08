@@ -2170,6 +2170,9 @@ export function usePlayer(jf) {
       const fromMemory = !!wholeFor(current.Id);
       if (open) {
         if (!fromMemory && !el?.ended && !toEnd && (ahead < WHOLE_PAUSE_S || starvedWithin(10000))) { trackCache.pause(); open = false; mediaLog(`whole-song download paused: ${ahead.toFixed(1)} s buffered`); }
+        // Held again by a preload re-run (the queue changed, its retry, the
+        // end of a fade: keep() with hold): the gate is open, so let it go.
+        else if (trackCache.held) trackCache.resume();
       } else if (fromMemory || ahead >= WHOLE_AFTER_S || toEnd || el?.ended || (Date.now() - t0 > WHOLE_AFTER_MAX_MS && el && !el.paused && el.currentTime > 5 && !starvedWithin(30000))) {
         if (trackCache.paused) mediaLog(`whole-song download resumed: ${ahead.toFixed(1)} s buffered`);
         trackCache.resume(); open = true;

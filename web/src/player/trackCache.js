@@ -113,6 +113,8 @@ export function createTrackCache(urlFor, { onReady } = {}) {
     // it is (resumed later with a Range request) and nothing new starts.
     pause() { if (paused) return; paused = true; cutInner?.(); },
     get paused() { return paused; },
+    // keep(..., { hold: true }) waiting for resume().
+    get held() { return held; },
     clear() { wanted = new Set(); order = []; failed.clear(); for (const id of [...ready.keys(), ...loading.keys()]) release(id); },
   };
 }

@@ -24,7 +24,7 @@ const MAX_BYTES = 3.8e9;
 // eslint-disable-next-line no-control-regex -- control chars are not allowed in file names
 const safe = (s: string, n = 100) => String(s || '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, n);
 
-export function registerOffline(app: FastifyInstance, db: DB, cacheDir: string, srcOf: (id: string, want?: boolean) => Src | undefined) {
+export function registerOffline(app: FastifyInstance, db: DB, cacheDir: string, srcOf: (id: string, want?: boolean) => Promise<Src | undefined>) {
   const auth = { preHandler: (app as any).requireUser, config: { rateLimit: false } };
   app.get('/api/playlists/:id/zip', auth, async (req, reply) => {
     const pl = db.prepare('SELECT id, name FROM playlists WHERE id = ? AND user_id = ?').get((req.params as any).id, req.user!.id) as any;
@@ -63,7 +63,7 @@ export function registerOffline(app: FastifyInstance, db: DB, cacheDir: string, 
     // One song to a temp .m4a; resolves to its path, or null when it fails
     // (a missing or corrupt source is skipped, not the whole download).
     const encode = async (t: any, i: number): Promise<string | null> => {
-      const src = srcOf(t.id, false);
+      const src = await srcOf(t.id, false);
       if (!src) return null;
       const out = path.join(tmp, `${i}.m4a`);
       const cover = t.cover_hash ? await baselineCover(t.cover_hash) : null;

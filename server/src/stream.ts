@@ -112,11 +112,26 @@ export function syntheticPlaylist(durationMs: number, sampleRate: number, profil
   return lines.join('\n');
 }
 
-// A song as the stream routes see it: where the full file is, its size (from
-// the database: no stat of the NAS on the request path, where a wedged mount
-// would block the whole process) and its head on the SSD if it has one.
+// A song as the stream routes see it: where the full file is, its size (the
+// file's own, from an async stat with a time limit, see statNow and srcOf:
+// a wedged mount must not hold the request) and its head on the SSD if it has one.
 // name: the song's own path in the library (its type comes from that: a cached copy has no extension)
 export type Src = { file: string; name: string; size: number; head: { path: string; bytes: number } | null; alt?: string | null };
+
+// A stat that gives up: a wedged NAS mount must not hold a request (async,
+// so it never blocks the process; past STAT_MS the record is trusted). While
+// a stat is stuck past its time, no more are started: each would pin a
+// thread of the pool behind the same dead mount.
+const STAT_MS = 1500;
+let statsStuck = 0;
+function statNow(file: string): Promise<fs.Stats | null> {
+  if (statsStuck) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let late = false;
+    const t = setTimeout(() => { late = true; statsStuck++; resolve(null); }, STAT_MS);
+    fsp.stat(file).then(resolve, () => resolve(null)).finally(() => { clearTimeout(t); if (late) statsStuck--; });
+  });
+}
 
 // ffmpeg's input: the local copy when the head is the whole file (m4a & co),
 // the joined head + NAS stream on stdin otherwise, the file itself without a head.
@@ -263,14 +278,14 @@ const WARM_CONCURRENCY = 2;
 const WARM_QUEUE_MAX = 60;
 const warmQueue: { id: string; profile: string }[] = [];
 let warmActive = 0;
-function pumpWarm(dataDir: string, srcOf: (id: string) => Src | undefined, log: (m: string) => void) {
+function pumpWarm(dataDir: string, srcOf: (id: string) => Promise<Src | undefined>, log: (m: string) => void) {
   while (warmActive < WARM_CONCURRENCY && warmQueue.length) {
     const { id, profile } = warmQueue.shift()!;
-    const file = srcOf(id);
-    if (!file || fs.existsSync(path.join(transcodeDir(dataDir, id, profile), 'done'))) continue;
+    if (fs.existsSync(path.join(transcodeDir(dataDir, id, profile), 'done'))) continue;
     warmActive++;
     // The slot is held until ffmpeg exits, not just until the track is startable.
-    ensureHls(dataDir, id, file, profile, log, { nice: true }).then(() => finishing.get(`${id}:${profile}`)).catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
+    srcOf(id).then((file) => file && ensureHls(dataDir, id, file, profile, log, { nice: true }).then(() => finishing.get(`${id}:${profile}`)))
+      .catch((e) => log(`warm ${id}:${profile}: ${e.message}`))
       .finally(() => { warmActive--; pumpWarm(dataDir, srcOf, log); });
   }
 }
@@ -345,13 +360,34 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // into it in the background when it is not.
   // want: fetch it into the song cache too (anything about to play; not the
   // library-wide loudness pass, which would churn the cache through every song).
-  const srcOf = (id: string, want = true): Src | undefined => {
-    const t = db.prepare('SELECT path, size FROM tracks WHERE id = ?').get(id) as { path: string; size: number } | undefined;
+  // The file as it is on disk now: a file rewritten in place since the scan
+  // (Lidarr retagging: the tags grow, every offset moves) is served at its
+  // real size from the file itself, never with the head or song-cache copy
+  // cut from the old one, and its folder is rescanned. The size and mtime on
+  // record are trusted only when the stat cannot answer (a wedged mount).
+  const srcOf = async (id: string, want = true): Promise<Src | undefined> => {
+    const t = db.prepare('SELECT path, size, mtime FROM tracks WHERE id = ?').get(id) as { path: string; size: number; mtime: number } | undefined;
     if (!t) return undefined;
+    const alt = altOf?.(t.path) ?? null;
+    const st = (await statNow(t.path)) ?? (alt ? await statNow(alt) : null);
+    if (st && (st.size !== t.size || Math.floor(st.mtimeMs / 1000) !== Math.floor(t.mtime / 1000))) {
+      rescanSoon(t.path);
+      return { file: t.path, name: t.path, size: st.size, head: null, alt };
+    }
     const local = songs?.get(id, t.size);
     if (local) return { file: local, name: t.path, size: t.size, head: null };
     if (want) songs?.want(id, t.path, t.size);
-    return { file: t.path, name: t.path, size: t.size, head: headsEnabled ? headOf(db, cacheDir, id, t.size) : null, alt: altOf?.(t.path) ?? null };
+    return { file: t.path, name: t.path, size: t.size, head: headsEnabled ? headOf(db, cacheDir, id, t.size) : null, alt };
+  };
+  const rescanned = new Map<string, number>(); // folder -> when its rescan was asked for
+  const rescanSoon = (file: string) => {
+    const dir = path.dirname(file);
+    const now = Date.now();
+    if (now - (rescanned.get(dir) ?? 0) < 10 * 60000) return;
+    if (rescanned.size > 1000) rescanned.clear();
+    rescanned.set(dir, now);
+    log(`stream: ${file} changed on disk since the scan; rescanning its folder`);
+    Promise.resolve((app as any).scanFolders?.([dir])).catch((e: any) => log(`rescan ${dir}: ${e?.message || e}`));
   };
   app.get('/api/admin/cache', { preHandler: (app as any).requireAdmin }, async () => ({
     songs: songs?.stats() ?? null,
@@ -364,7 +400,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // by the time one comes up its gain is known. The library-wide pass is the
   // 'loudness' task, through the same measureTrack.
   const measureTrack = async (id: string, nice = true): Promise<boolean> => {
-    const src = srcOf(id, false);
+    const src = await srcOf(id, false);
     if (!src) return false;
     let l = null;
     try { l = await measure((pre, post) => spawnFf(pre, src, post, 'ignore', nice) as any); }
@@ -452,7 +488,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // Original file, byte ranges honoured by @fastify/static-free code (ranges by hand: it is 20 lines).
   app.get('/api/stream/:id', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     return sendRanged(req, reply, src.file, MIME[path.extname(src.name).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src, chunkOf(req.query));
   });
@@ -462,7 +498,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // stream), and what the visualizer decodes on a device that is mirroring.
   const mp3 = async (req: any, reply: any) => {
     const id = (req.params as any).id as string;
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const q = req.query as any;
     const kbps = Math.min(320, Math.max(64, Math.round((Number(q.bitrate) || 320000) / 1000)));
@@ -486,7 +522,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   app.get('/api/stream/:id/track.:ext', auth, async (req, reply) => {
     const { id, ext } = req.params as any;
     const q = req.query as any;
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const orig = path.extname(src.name).toLowerCase();
     if (ext === 'mp3' && (q.bitrate != null || q.startAt != null || orig !== '.mp3')) return mp3(req, reply);
@@ -495,7 +531,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
 
   // The brain (brain.ts) listens to each song once, by its key, not a user's sign-in.
   if ((app as any).requireBrain) app.get('/api/brain/audio/:id', { preHandler: (app as any).requireBrain }, async (req, reply) => {
-    const src = srcOf((req.params as any).id);
+    const src = await srcOf((req.params as any).id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     return sendRanged(req, reply, src.file, MIME[path.extname(src.name).toLowerCase()] || 'application/octet-stream', 'private, max-age=3600', src, chunkOf(req.query));
   });
@@ -510,7 +546,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   app.get('/api/download/:id', auth, async (req, reply) => {
     const id = (req.params as any).id as string;
     const t = db.prepare('SELECT path, title, artist FROM tracks WHERE id = ?').get(id) as any;
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!t || !src) return reply.code(404).send({ error: 'no such track' });
     const q = req.query as any;
     const safe = (x: string) => String(x || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -542,7 +578,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   // the quality climbs to `max` as the link allows.
   app.get('/api/stream/:id/hls/master.m3u8', hls, async (req, reply) => {
     const { id } = req.params as any; const q = req.query as any;
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const max = knownProfile(q.max) ? q.max : 'aac-320';
     // norm=track|album: the gain is baked into the transcode (a phone cannot
@@ -569,7 +605,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     if (!variantOk(id, profile)) return reply.code(404).send({ error: 'no such profile' });
     // Lossless is fMP4 segments; the one-file join is for the AAC rungs.
     if (isLossless(profile)) return reply.code(404).send({ error: 'no whole file for lossless' });
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const dir = transcodeDir(dataDir, id, profile);
     let out = path.join(dir, 'whole.m4a');
@@ -588,7 +624,7 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
   app.get('/api/stream/:id/hls/:profile/index.m3u8', hls, async (req, reply) => {
     const { id, profile } = req.params as any;
     if (!variantOk(id, profile)) return reply.code(404).send({ error: 'no such profile' });
-    const src = srcOf(id);
+    const src = await srcOf(id);
     if (!src) return reply.code(404).send({ error: 'no such track' });
     const q = req.query as any;
     // A step down inside an adaptive stream is not the quality they chose.

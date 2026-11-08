@@ -79,3 +79,36 @@ describe('the cache trim removing a transcode while its playlist is asked for', 
     } finally { spy.mockRestore(); }
   }, 60000);
 });
+
+describe('a file rewritten in place (Lidarr retagging) before the next scan', () => {
+  const pick = (n: number) => db().prepare("SELECT t.id, t.path FROM tracks t JOIN heads h ON h.track_id = t.id WHERE t.path LIKE '%.mp3' ORDER BY t.path LIMIT 1 OFFSET ?").get(n) as { id: string; path: string };
+  const range = (id: string, r: string) => get(`/api/stream/${id}`, { range: r });
+  it('is served at its real size, never the size or head from before the rewrite', async () => {
+    const t = pick(0);
+    const old = fs.readFileSync(t.path);
+    const now = Buffer.concat([Buffer.alloc(3000, 0x41), old]); // a bigger tag in front
+    fs.writeFileSync(t.path, now);
+    const full = await get(`/api/stream/${t.id}`);
+    expect(full.statusCode).toBe(200);
+    expect(full.headers['content-length']).toBe(String(now.length));
+    expect(full.rawPayload.equals(now)).toBe(true);
+    const head = await range(t.id, 'bytes=0-99');
+    expect(head.headers['content-range']).toBe(`bytes 0-99/${now.length}`);
+    expect(head.rawPayload.equals(now.subarray(0, 100))).toBe(true);
+    const tail = await range(t.id, `bytes=${now.length - 100}-`);
+    expect(tail.statusCode).toBe(206);
+    expect(tail.rawPayload.equals(now.subarray(now.length - 100))).toBe(true);
+    const dl = await get(`/api/download/${t.id}`);
+    expect(dl.headers['content-length']).toBe(String(now.length));
+    expect(dl.rawPayload.equals(now)).toBe(true);
+  }, 60000);
+  it('a rewrite that kept the size (new mtime) never serves the old head', async () => {
+    const t = pick(1);
+    const old = fs.readFileSync(t.path);
+    const now = Buffer.from(old); now.fill(0x42, 0, 200); // tag bytes changed, same length
+    fs.writeFileSync(t.path, now);
+    const later = new Date(Date.now() + 60000); fs.utimesSync(t.path, later, later);
+    const head = await range(t.id, 'bytes=0-199');
+    expect(head.rawPayload.equals(now.subarray(0, 200))).toBe(true);
+  }, 60000);
+});

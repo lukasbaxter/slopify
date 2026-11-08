@@ -172,7 +172,14 @@ for (const [name, sw, port] of [['web app', 'allow', 8095], ['phone app, no serv
       const album = (await (await page.request.get('/api/albums', { headers: h })).json()).items.find((a: any) => a.name === 'First Light');
       const ids = (await (await page.request.get(`/api/albums/${album.id}`, { headers: h })).json()).tracks.map((t: any) => t.id).slice(0, 3);
       for (const id of ids) await page.request.put(`/api/likes/${id}`, { headers: h });
+      await page.request.put(`/api/likes/${album.id}`, { headers: h }); // saved to Your Library
       await page.reload(); await waitForLibrary(page);
+      await expect(page.locator('.sidebar .libitem', { hasText: 'First Light' })).toBeVisible({ timeout: 15000 });
+      // An album page, seen once.
+      await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
+      await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
+      const albumRows = await page.locator('.trackrow').count();
+      await page.goBack();
       const liked = page.locator('.shortcut, .libitem', { hasText: 'Liked Songs' }).first();
       await liked.click();
       await expect(page.locator('.trackrow')).toHaveCount(3, { timeout: 15000 });
@@ -191,6 +198,10 @@ for (const [name, sw, port] of [['web app', 'allow', 8095], ['phone app, no serv
       await expect(page.locator('.trackrow'), `writes at start: ${writes.join(', ')}`).toHaveCount(3, { timeout: 5000 });
       await page.waitForTimeout(20000); // past every request's timeout: still there
       await expect(page.locator('.trackrow')).toHaveCount(3);
+      // Your Library and the album page seen before, too.
+      await expect(page.locator('.sidebar .libitem', { hasText: 'First Light' })).toBeVisible();
+      await page.locator('.sidebar .libitem', { hasText: 'First Light' }).first().click();
+      await expect(page.locator('.trackrow')).toHaveCount(albumRows, { timeout: 5000 });
     } finally {
       await browser.close(); await proxy.close();
       await Promise.race([stop(server), new Promise((r) => setTimeout(r, 5000))]); server.kill('SIGKILL');

@@ -815,13 +815,24 @@ export default function App() {
   // Navigation is instant: the page opens in its loading state on the click
   // and fills in as data lands, instead of the click doing nothing for the
   // seconds Jellyfin takes.
+  // Album and artist pages kept on the device, the last 40 opened (localStorage
+  // is a few MB and the sign-in lives there too).
+  const keepPage = (key, v) => {
+    const idx = (jf.persisted('pages') || []).filter((k) => k !== key); idx.push(key);
+    while (idx.length > 40) { const old = idx.shift(); try { localStorage.removeItem(jf._lsPrefix + old); } catch { /* gone */ } }
+    jf._persist('pages', idx); jf._persist(key, v);
+  };
   const openAlbumById = async (albumId, known = null) => {
     setView('home');
-    setDetail({ item: known || { Id: albumId, Name: '' }, tracks: [], kind: 'Album', loading: true });
+    // Paint from the copy kept the last time it opened (a dead connection
+    // must not turn a page seen before into an empty one), then refresh.
+    const kept = jf.persisted(`al.${albumId}`);
+    setDetail({ item: known || kept?.item || { Id: albumId, Name: '' }, tracks: kept?.tracks || [], kind: 'Album', loading: !kept });
     try {
       const [meta, trackList] = await Promise.all([jf.itemById(albumId), jf.tracks({ albumId })]);
       setDetail((d) => (d && d.item?.Id === albumId ? { ...d, item: meta || d.item, tracks: trackList.items, loading: false } : d));
-    } catch { setDetail((d) => (d && d.item?.Id === albumId ? { ...d, loading: false, loadFailed: true } : d)); }
+      keepPage(`al.${albumId}`, { item: meta || known || null, tracks: trackList.items });
+    } catch { setDetail((d) => (d && d.item?.Id === albumId ? { ...d, loading: false, loadFailed: !kept } : d)); }
   };
 
   // A shared link (/?album=…, /?artist=…, /?track=…) opens once signed in;
@@ -848,17 +859,21 @@ export default function App() {
 
   const openArtistById = async (artistId, known = null) => {
     setView('home');
-    setDetail({ item: known || { Id: artistId, Name: '' }, tracks: [], albums: [], kind: 'Artist', loading: true });
+    // Painted from the copy kept the last time, like an album (above).
+    const kept = jf.persisted(`ar.${artistId}`);
+    setDetail({ item: known || kept?.item || { Id: artistId, Name: '' }, tracks: kept?.tracks || [], albums: kept?.albums || [], appearsOn: kept?.appearsOn, kind: 'Artist', loading: !kept });
+    const keep = (patch) => keepPage(`ar.${artistId}`, { ...(jf.persisted(`ar.${artistId}`) || {}), ...patch });
     const alive = () => true;
     // Jellyfin's ArtistIds join takes ~1.7 s here; the search index answers the
     // same question (this artist's tracks, most played first) in ~20 ms.
     const fast = relaySearch(jf, '', { filter: `artistIds = "${artistId}"`, limit: 150 }).then((r) => r.tracks).catch(() => null);
-    const metaP = jf.itemById(artistId).then((meta) => { if (alive() && meta) setDetail((d) => (d && d.item?.Id === artistId ? { ...d, item: meta } : d)); return meta; }).catch(() => null);
-    jf.artistAlbums(artistId).then((a) => setDetail((d) => (d && d.item?.Id === artistId ? { ...d, albums: a.items, appearsOn: a.appearsOn } : d))).catch(() => {});
+    const metaP = jf.itemById(artistId).then((meta) => { if (alive() && meta) { setDetail((d) => (d && d.item?.Id === artistId ? { ...d, item: meta } : d)); keep({ item: meta }); } return meta; }).catch(() => null);
+    jf.artistAlbums(artistId).then((a) => { setDetail((d) => (d && d.item?.Id === artistId ? { ...d, albums: a.items, appearsOn: a.appearsOn } : d)); keep({ albums: a.items, appearsOn: a.appearsOn }); }).catch(() => {});
     try {
       let tracks = await fast;
       if (!tracks || !tracks.length) tracks = (await jf.tracks({ artistId, limit: 200 })).items;
       setDetail((d) => (d && d.item?.Id === artistId ? { ...d, tracks, loading: false } : d));
+      keep({ tracks });
       // Popular = real-world order (Deezer top tracks matched to the library),
       // one row per title; the rest of the artist's tracks follow by plays.
       const name = known?.Name || (await metaP)?.Name;

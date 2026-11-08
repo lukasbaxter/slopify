@@ -544,6 +544,10 @@ export default function App() {
       const pls = client.persisted('playlists'); if (pls) setPlaylists(pls);
       const sal = client.persisted('savedAlbums'); if (sal) setSavedAlbums(sal);
       const lk = client.persisted('liked'); if (Array.isArray(lk)) likedCacheRef.current = new Map(lk.map((t) => [t.Id, t]));
+      // Which songs are liked, as last known: Liked Songs is built from it,
+      // and it used to live only in memory, so an app opened again on a
+      // dead connection showed an empty Liked Songs until /api/likes answered.
+      const lks = client.persisted('likes'); if (lks && typeof lks === 'object' && !Array.isArray(lks)) likesLoad(lks);
       if (alb) setLibLoading(false);
     }
     setBooting(false);
@@ -568,10 +572,23 @@ export default function App() {
   useEffect(() => {
     if (!jf) return;
     const seed = prefs.likedAt && Object.keys(prefs.likedAt).length ? prefs.likedAt : null;
-    relayLikes(jf, seed).then((m) => { likesLoad(m); jf.likedAt = m; }).catch(() => {});
+    // No answer (a dead or crawling connection): the kept copy stays and the
+    // server is asked again, sooner at first, until it answers.
+    let alive = true; let timer = null; let wait = 5000;
+    const load = () => relayLikes(jf, seed).then((m) => { if (!alive) return; likesLoad(m); jf.likedAt = m; })
+      .catch(() => { if (!alive) return; clearTimeout(timer); timer = setTimeout(load, wait); wait = Math.min(wait * 2, 120000); });
+    load();
+    // The service worker answered from its kept copy and the server's turned out different.
+    const onFresh = (e) => { if (e.detail === '/api/likes') { clearTimeout(timer); load(); } };
+    window.addEventListener('slopify:fresh', onFresh);
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener('slopify:fresh', onFresh); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jf, prefs.likedAt ? 1 : 0]);
-  useEffect(() => { if (jf) jf.likedAt = likesSnapshot(); }, [jf, likesVersion]);
+  useEffect(() => {
+    if (!jf) return;
+    jf.likedAt = likesSnapshot();
+    if (likesReady()) jf._persist('likes', jf.likedAt); // for the next start (above)
+  }, [jf, likesVersion]);
 
   // Change a setting: apply here, save to the account, nudge the other clients.
   const updatePrefs = async (patch) => {
@@ -932,6 +949,7 @@ export default function App() {
     const ids = likedIds();
     setDetail({ item, tracks: likedRows(ids), kind: 'Playlist', loading: ids.some((id) => !likedCacheRef.current.has(id)) });
     let missing = ids.filter((id) => !likedCacheRef.current.has(id));
+    const fetched = missing.length > 0; // rows came from the server this time: keep them (below)
     try {
       // One relay call fills nearly everything (the index has every track);
       // Jellyfin is asked by id only for what the index lacks.
@@ -952,8 +970,11 @@ export default function App() {
       // Cache every row (slimmed: blurhashes and media sources are dead weight
       // here) so the next open needs no fetch at all; a 1,500-row cap meant a
       // bigger library refetched the tail on every open. Serialised off the
-      // tap so a phone does not stall on the JSON.
-      if (missing.length) setTimeout(() => {
+      // tap so a phone does not stall on the JSON. Whichever path filled
+      // them: the one-call path above leaves `missing` empty, and testing
+      // that kept nothing at all (an app opened again with no connection
+      // had the songs' ids but no rows to show).
+      if (fetched) setTimeout(() => {
         const slim = ({ ImageBlurHashes, MediaSources, MediaStreams, Chapters, People, ...t }) => t; // eslint-disable-line no-unused-vars
         jf._persist('liked', likedRows(likedIds()).slice(0, 6000).map(slim));
       }, 250);

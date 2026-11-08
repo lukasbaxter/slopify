@@ -133,3 +133,67 @@ for (const [name, engine, port] of [['webkit', webkit, 8093], ['chromium', chrom
     } finally { await browser.close(); await stop(server); }
   });
 }
+
+// The car (11-08): playing on a phone, the connection drops to almost
+// nothing, the app is killed and opened again. What it showed a minute ago
+// (Liked Songs, Home, Your Library) must open from what the device kept,
+// never an empty page because the server does not answer. The proxy in
+// front of the server hangs every API request (the page itself still
+// arrives, as a 1 KB answer does on a link too weak for anything bigger).
+// Run with the service worker (the home-screen web app) and without it (the
+// iPhone app's WebView, which has none).
+import http from 'node:http';
+function hangingProxy(port: number, target: number) {
+  const st = { hang: false, held: [] as { destroy: () => void }[] };
+  const srv = http.createServer((req, res) => {
+    if (st.hang && req.url?.startsWith('/api/')) { st.held.push(res); return; } // never answered
+    const up = http.request({ host: 'localhost', port: target, path: req.url, method: req.method, headers: req.headers, agent: false }, (r) => { res.writeHead(r.statusCode || 502, r.headers); r.pipe(res); });
+    up.on('error', () => { try { res.destroy(); } catch { /* gone */ } });
+    req.pipe(up);
+  });
+  srv.on('upgrade', (req, sock) => { if (st.hang) st.held.push(sock); else sock.destroy(); }); // no live socket either way
+  return new Promise<{ st: typeof st; close: () => Promise<void> }>((r) => srv.listen(port, () => r({ st, close: () => new Promise((c) => { for (const h of st.held) h.destroy(); srv.closeAllConnections(); srv.close(() => c()); setTimeout(c, 2000); }) })));
+}
+for (const [name, sw, port] of [['web app', 'allow', 8095], ['phone app, no service worker', 'block', 8097]] as const) {
+  test(`car: Liked Songs and the library open from the kept copy when the server hangs (${name})`, async ({ isMobile }) => {
+    test.skip(!!isMobile, 'its own context');
+    test.setTimeout(180000);
+    const dataDir = `/tmp/slopify-e2e-car-${port}`;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    const server = await startServer(port + 1, dataDir);
+    const proxy = await hangingProxy(port, port + 1);
+    const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+    const context = await browser.newContext({ baseURL: `http://localhost:${port}`, viewport: { width: 1280, height: 800 }, serviceWorkers: sw });
+    try {
+      let page = await context.newPage();
+      await login(page); await waitForLibrary(page);
+      const tok = await page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token || '');
+      const h = { authorization: `Bearer ${tok}` };
+      const album = (await (await page.request.get('/api/albums', { headers: h })).json()).items.find((a: any) => a.name === 'First Light');
+      const ids = (await (await page.request.get(`/api/albums/${album.id}`, { headers: h })).json()).tracks.map((t: any) => t.id).slice(0, 3);
+      for (const id of ids) await page.request.put(`/api/likes/${id}`, { headers: h });
+      await page.reload(); await waitForLibrary(page);
+      const liked = page.locator('.shortcut, .libitem', { hasText: 'Liked Songs' }).first();
+      await liked.click();
+      await expect(page.locator('.trackrow')).toHaveCount(3, { timeout: 15000 });
+      if (sw === 'allow') await expect.poll(() => page.evaluate(async () => (await caches.keys()).some((k) => k.startsWith('slopify-api-'))), { timeout: 15000 }).toBe(true);
+      await page.waitForTimeout(1500); // the rows are kept a moment after they show
+
+      // The connection goes; the app is killed and opened again.
+      proxy.st.hang = true;
+      await page.close();
+      page = await context.newPage();
+      const writes: string[] = []; page.on('request', (r) => { if (r.method() !== 'GET' && r.url().includes('/api/')) writes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
+      await page.goto('/');
+      await waitForLibrary(page);
+      await page.locator('.shortcut, .libitem', { hasText: 'Liked Songs' }).first().click();
+      // From the kept copy, at once: not after a timeout, and never empty.
+      await expect(page.locator('.trackrow'), `writes at start: ${writes.join(', ')}`).toHaveCount(3, { timeout: 5000 });
+      await page.waitForTimeout(20000); // past every request's timeout: still there
+      await expect(page.locator('.trackrow')).toHaveCount(3);
+    } finally {
+      await browser.close(); await proxy.close();
+      await Promise.race([stop(server), new Promise((r) => setTimeout(r, 5000))]); server.kill('SIGKILL');
+    }
+  });
+}

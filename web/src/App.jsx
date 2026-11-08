@@ -297,8 +297,16 @@ export default function App() {
   // Account settings: theme + playback quality. Loaded from Jellyfin, applied
   // to the CSS variables, kept in sync across clients over the relay.
   const [prefs, setPrefs] = useState({ theme: DEFAULT_THEME, quality: 'original' });
-  // The language follows the account: a pick on one device reaches the others (and reloads them).
-  useEffect(() => { if (typeof prefs.language === 'string') setUserLanguage(prefs.language); }, [prefs.language]);
+  // The language follows the account. The device it was picked on reloads
+  // into it (updatePrefs); one that hears of it over the session takes it
+  // for its next launch and reloads only when that interrupts nobody
+  // (langPendingRef, applied with the same rule as a new build, below).
+  const langPendingRef = useRef(false);
+  const langApplyRef = useRef(() => {});
+  useEffect(() => {
+    if (typeof prefs.language !== 'string') return;
+    if (setUserLanguage(prefs.language, { reload: false })) { langPendingRef.current = true; langApplyRef.current(true); }
+  }, [prefs.language]);
   // What THIS device streams at: the phone has its own setting (default 320
   // kbps MP3: a third of the data of the FLACs, starts faster on cellular),
   // everything else uses the account's quality.
@@ -543,6 +551,8 @@ export default function App() {
     // Only the PATCH travels (to Jellyfin and over the relay); every client
     // merges it. Broadcasting whole prefs objects let a stale client overwrite
     // what another had just saved.
+    // A language picked here: shown here at once (a reload).
+    if (typeof patch.language === 'string') setUserLanguage(patch.language);
     setPrefs((cur) => { const next = { ...cur, ...patch }; applyTheme(next.theme); applyPlayback(next); jf._persist('prefs', next); return next; });
     player.relay?.sendPrefs?.(patch);
     try { await jf.setPrefs(patch); } catch (e) { notify(t('Could not save settings: {error}', { error: e.message })); }
@@ -1122,6 +1132,19 @@ export default function App() {
     return () => { for (const e of evs) window.removeEventListener(e, input, { capture: true }); };
   }, []);
   const quiet = () => document.visibilityState === 'hidden' || Date.now() - lastInputRef.current > 2 * 60000;
+  // A language picked on another device (above): at once if nothing plays
+  // here, else once nothing plays and nobody is using the device.
+  langApplyRef.current = (soon = false) => {
+    if (!langPendingRef.current || busy() || !(soon || quiet())) return;
+    langPendingRef.current = false;
+    setTimeout(() => window.location.reload(), 800);
+  };
+  useEffect(() => {
+    const apply = () => langApplyRef.current();
+    const t = setInterval(apply, 30000);
+    document.addEventListener('visibilitychange', apply);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', apply); };
+  }, []);
   useEffect(() => {
     const running = document.querySelector('script[type="module"][src*="assets/index-"]')?.getAttribute('src');
     if (IS_DESKTOP || !running) return undefined;

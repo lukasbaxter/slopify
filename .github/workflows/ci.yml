@@ -18,7 +18,7 @@ jobs:
       # The release scripts and the desktop app's updater and transports
       # (stand-ins for gh, Electron and Cast: no install needed).
       - run: for t in tools/tests/*.test.sh; do bash "$t" || exit 1; done
-      - run: node --test electron/
+      - run: node --test electron/*.test.js
         working-directory: desktop
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run e2e

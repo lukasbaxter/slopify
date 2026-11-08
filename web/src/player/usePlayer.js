@@ -1238,7 +1238,9 @@ export function usePlayer(jf) {
 
       disagreeRef.current = 0;
       stalledRef.current = 0;
-      anchorAt(seconds, true);
+      // Playing or paused as it was: a paused seek anchored as playing (held
+      // until heard) let a speaker's clock run once the hold gave up.
+      anchorAt(seconds, playingRef.current);
 
       if (dev.kind === 'local') {
         if (jf?.transcoded?.()) {

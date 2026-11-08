@@ -13,6 +13,7 @@ import RightPanel from './components/RightPanel.jsx';
 import FullScreen from './components/FullScreen.jsx';
 import { downloadTrack } from './api/download.js';
 import { applyTheme, DEFAULT_THEME } from './api/prefs.js';
+import { fitColumns, useWindowWidth } from './layoutFit.js';
 import { setUserLanguage, t, N_ } from './i18n.js';
 import { search as relaySearch, popular as relayPopular, likes as relayLikes, playlistTracks as relayPlaylist, likedFast } from './api/search.js';
 import { likesLoad, likesSet, likesSnapshot, likedIds, likesReady, isLiked, useLikesVersion } from './api/likes.js';
@@ -333,12 +334,13 @@ export default function App() {
   });
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef(null);
+  const railShownRef = useRef(railW); // the width it shows at (folded when the window is narrow)
 
   const clampRail = (w) => (w < RAIL_SNAP ? RAIL_COLLAPSED : Math.min(RAIL_MAX, Math.max(RAIL_MIN, w)));
 
   const onRailDown = useCallback((e) => {
     e.preventDefault();
-    dragRef.current = { startX: e.clientX, startW: railW };
+    dragRef.current = { startX: e.clientX, startW: railShownRef.current };
     setResizing(true);
     const move = (ev) => {
       const d = dragRef.current; if (!d) return;
@@ -528,6 +530,11 @@ export default function App() {
   const canForward = histRef.current.idx < histRef.current.stack.length - 1;
   // null | 'npv' | 'queue' | 'lyrics'
   const [panel, setPanel] = useState(null);
+  // The columns that fit the window (layoutFit.js): the rail folds to covers, the panel narrows.
+  // Desktop layout only: the phone's Library is a page of its own.
+  const winW = useWindowWidth();
+  const cols = isMobile ? { rail: railW, panel: panelW } : fitColumns({ width: winW, railW, panelW, panel: Boolean(panel), collapsedW: RAIL_COLLAPSED });
+  railShownRef.current = cols.rail;
   const offlineMode = useOfflineMode();
   // Bumped when the server answers again after a spell offline: a re-render
   // with new cover URLs (jf.imageUrl).
@@ -1635,8 +1642,8 @@ export default function App() {
 
       <div
         ref={shellRef}
-        className={`shell ${panel ? 'with-panel' : ''} ${railW <= RAIL_COLLAPSED ? 'rail-collapsed' : ''} ${resizing ? 'resizing' : ''} ${isMobile && mobileLib ? 'show-lib' : ''}`}
-        style={{ '--rail-w': `${railW}px`, '--panel-w': `${panelW}px` }}
+        className={`shell ${panel ? 'with-panel' : ''} ${cols.rail <= RAIL_COLLAPSED ? 'rail-collapsed' : ''} ${resizing ? 'resizing' : ''} ${isMobile && mobileLib ? 'show-lib' : ''}`}
+        style={{ '--rail-w': `${cols.rail}px`, '--panel-w': `${cols.panel}px` }}
       >
         <Sidebar
           view={view}

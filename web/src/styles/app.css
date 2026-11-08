@@ -84,7 +84,6 @@ body {
   font: 400 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  min-width: 800px;
 }
 
 button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
@@ -136,10 +135,12 @@ input, textarea, select { font-family: inherit; }
    itself is the drag target exactly as in Spotify. */
 .shell {
   display: grid;
-  grid-template-columns: var(--rail-w, 280px) var(--gap) minmax(416px, 1fr);
+  grid-template-columns: var(--rail-w, 280px) var(--gap) minmax(0, 1fr);
   gap: 0; min-height: 0;
 }
-.shell.with-panel { grid-template-columns: var(--rail-w, 280px) var(--gap) minmax(416px, 1fr) var(--gap) var(--panel-w, 340px); }
+/* The widths come from layoutFit.js, which keeps their sum to the window:
+   a minimum here would push the panel off the right edge instead. */
+.shell.with-panel { grid-template-columns: var(--rail-w, 280px) var(--gap) minmax(0, 1fr) var(--gap) var(--panel-w, 340px); }
 .shell.resizing { user-select: none; cursor: col-resize; }
 .shell.resizing * { pointer-events: none; }
 .shell.resizing .rail-resizer { pointer-events: auto; }
@@ -154,14 +155,19 @@ input, textarea, select { font-family: inherit; }
 }
 .rail-resizer:hover::after, .shell.resizing .rail-resizer::after { opacity: 1; }
 
-/* Collapsed rail: icons only, centred; text and the library header hide. */
+/* Collapsed rail: covers only, centred; the library icon and + stay, the
+   names show as the rows' tooltips. */
 .shell.rail-collapsed .navitem span,
-.shell.rail-collapsed .libhead,
-.shell.rail-collapsed .libitem-text,
-.shell.rail-collapsed .newplaylist-input { display: none; }
+.shell.rail-collapsed .libhead-label,
+.shell.rail-collapsed .libitem-text { display: none; }
 .shell.rail-collapsed .navitem { justify-content: center; padding: 11px 0; }
+.shell.rail-collapsed .libhead { flex-direction: column; gap: 6px; padding: 14px 0 6px; }
 .shell.rail-collapsed .libitem { justify-content: center; padding: 8px 0; }
+.shell.rail-collapsed .libitem.infolder { padding-left: 0; }
+.shell.rail-collapsed .libitem.infolder img, .shell.rail-collapsed .libitem.infolder .ph { width: 40px; height: 40px; }
 .shell.rail-collapsed .liblist { padding: 8px 4px; }
+.shell.rail-collapsed .liblist > form { padding: 4px 0 8px !important; }
+.shell.rail-collapsed .newplaylist-input { width: 100%; min-width: 0; padding-left: 4px; padding-right: 4px; }
 
 .sidebar, .content, .rightpanel {
   background: var(--bg-base); border-radius: var(--r-panel); min-height: 0;
@@ -781,10 +787,16 @@ input[type="range"]:disabled { opacity: .4; }
 
 .home .greeting { font-size: 32px; font-weight: 700; letter-spacing: -1px; margin: 8px 0 20px; }
 
-/* Spotify's shortcut grid: 2 columns, 64px rows, art flush left, white 7%
-   background, play button revealed on hover at the right. */
-.shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 32px; }
-@media (min-width: 1200px) { .shortcuts { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Spotify's shortcut grid: 64px rows, art flush left, white 7% background,
+   play button revealed on hover at the right. The columns follow the room
+   the main view has (the library rail and the right panel take theirs from
+   the window), not the window: 4 across, then 3, 2 and 1 as it narrows,
+   each tile at least ~200 px wide. */
+.home { container-type: inline-size; }
+.shortcuts { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 8px; margin-bottom: 32px; }
+@container (min-width: 400px) { .shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (min-width: 640px) { .shortcuts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 880px) { .shortcuts { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .shortcut {
   display: flex; align-items: center; gap: 16px; height: 64px; overflow: hidden;
   background: rgba(var(--fg-rgb),0.07); border-radius: var(--r-art); cursor: pointer; position: relative;

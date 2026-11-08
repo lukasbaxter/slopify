@@ -28,6 +28,8 @@ import { addressTries, hostLabel } from './api/address.js';
 // app can suggest one with VITE_SLOPIFY_SERVER) and remembers the one signed
 // in to.
 const IS_DESKTOP = typeof window !== 'undefined' && !!window.conduit;
+// iPhone and iPad, in Safari, the home-screen web app or the phone app's WebView.
+const IS_IOS = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 const DEFAULT_SERVER = IS_DESKTOP
   ? (import.meta.env.VITE_SLOPIFY_SERVER || '')
   : window.location.origin;
@@ -1180,10 +1182,18 @@ export default function App() {
     return () => { for (const e of evs) window.removeEventListener(e, input, { capture: true }); };
   }, []);
   const quiet = () => document.visibilityState === 'hidden' || Date.now() - lastInputRef.current > 2 * 60000;
+  // When the page may reload itself. On an iPhone or iPad only in front and
+  // left alone, never in the background: a backgrounded web app's Cache
+  // Storage does not answer there (tools/ios-sim: caches.keys() still pending
+  // after 3 s once the app is sent home) and the app is suspended within
+  // seconds, so a reload started then left an empty document (10 s of it in
+  // the simulator, which does not even suspend) that the person came back
+  // to: the black screen when switching back to Slopify.
+  const reloadable = () => (IS_IOS ? document.visibilityState === 'visible' && Date.now() - lastInputRef.current > 2 * 60000 : quiet());
   // A language picked on another device (above): at once if nothing plays
   // here, else once nothing plays and nobody is using the device.
   langApplyRef.current = (soon = false) => {
-    if (!langPendingRef.current || busy() || !(soon || quiet())) return;
+    if (!langPendingRef.current || busy() || !(soon ? !IS_IOS || document.visibilityState === 'visible' : reloadable())) return;
     langPendingRef.current = false;
     setTimeout(() => window.location.reload(), 800);
   };
@@ -1201,7 +1211,7 @@ export default function App() {
     const tried = (() => { try { return sessionStorage.getItem('slopify.reloadedFor'); } catch { return null; } })();
     let reloading = false;
     const apply = async () => {
-      if (!want || busy() || !quiet() || reloading) return;
+      if (!want || busy() || !reloadable() || reloading) return;
       reloading = true;
       try { sessionStorage.setItem('slopify.reloadedFor', want); } catch { /* private mode */ }
       // The service worker opens its kept copy of the app: have it keep the new build first (sw.js), 20 s at most.

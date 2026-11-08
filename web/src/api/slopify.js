@@ -61,7 +61,13 @@ export const rowAlbum = (a) => ({
   ImageTags: a.cover ? { Primary: a.cover } : {}, UserData: { IsFavorite: !!a.likedAt || savedAlbums.has(a.id) },
 });
 export const rowArtist = (a) => ({ Id: a.id, Name: a.name, Type: 'MusicArtist', ChildCount: a.albumCount, ImageTags: a.image ? { Primary: a.image } : {}, BackdropImageTags: a.banner || a.image ? [a.banner || a.image] : [], UserData: { IsFavorite: !!a.followed || followedArtists.has(a.id) } });
-export const rowPlaylist = (p) => ({ Id: p.id, Name: p.name, Type: 'Playlist', AiPrompt: p.aiPrompt ?? null, ChildCount: p.trackCount, ImageTags: p.cover ? { Primary: p.cover } : {}, DateCreated: p.created ? new Date(p.created).toISOString() : undefined, UserData: {} });
+// A playlist's picture changes with its songs (the server's 2x2 grid): the
+// hash it is at goes on its image URL, so no kept copy outlives a change.
+const playlistArt = new Map();
+export const rowPlaylist = (p) => {
+  if (p.id) { if (p.cover) playlistArt.set(p.id, p.cover); else playlistArt.delete(p.id); }
+  return { Id: p.id, Name: p.name, Type: 'Playlist', AiPrompt: p.aiPrompt ?? null, ChildCount: p.trackCount, ImageTags: p.cover ? { Primary: p.cover } : {}, DateCreated: p.created ? new Date(p.created).toISOString() : undefined, UserData: {} };
+};
 
 const isPlaylistId = (id) => /^pl_/.test(id || '');
 
@@ -548,6 +554,7 @@ export class Slopify {
     if (small) { const t = linkTier(); size = t === 'slow' ? 64 : t === 'medium' ? 160 : Math.min(320, Math.max(160, maxHeight)); }
     const q = { size: String(size) };
     if (this._bust?.[itemId]) q.v = String(this._bust[itemId]);
+    if (playlistArt.has(itemId)) q.c = String(playlistArt.get(itemId)).slice(0, 10);
     // Back online after a spell offline: new URLs, so covers that failed
     // (or showed the small offline copy) load again (App.jsx).
     if (this._netEpoch) q.n = String(this._netEpoch);

@@ -14,7 +14,7 @@ export function artDir(dataDir: string) { return path.join(dataDir, 'art'); }
 // The size variants are served as immutable: write to a tmp name and rename,
 // so a crash mid-render never leaves a truncated file at the served path.
 // (sharp's format comes from .webp()/.jpeg(), not the extension.)
-async function toFileAtomic(img: Sharp, dst: string) {
+export async function toFileAtomic(img: Sharp, dst: string) {
   const tmp = `${dst}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   try { await img.toFile(tmp); await fs.rename(tmp, dst); } catch (e) { await fs.rm(tmp, { force: true }).catch(() => {}); throw e; }
 }

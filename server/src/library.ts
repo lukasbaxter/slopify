@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { DB } from './db.js';
 import { libraryVersion } from './db.js';
 import { artPath, nearestBig, nearestSize, renderBig, SIZES } from './artwork.js';
+import { ensureMosaic, playlistCover } from './mosaic.js';
 import { similarInLibrary } from './discover.js';
 import { albumGenreMap } from './genres.js';
 import { AUDIO_EXT, COVER_EXT, COVER_NAMES, splitArtists } from './scanner.js';
@@ -452,10 +453,9 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   });
   app.get('/api/art/sizes', async () => ({ sizes: SIZES }));
   // The picture for any id: an album's cover, a track's album cover, an
-  // artist's portrait (or its banner), a playlist's own cover or its first
-  // track's. Served straight from the rendered files; webp when accepted.
+  // artist's portrait (or its banner); a playlist's is playlistCover's
+  // (mosaic.ts). Served straight from the rendered files; webp when accepted.
   const coverOf = (id: string, kind: string): string | null => {
-    if (id.startsWith('pl_')) { const p = db.prepare('SELECT cover_hash FROM playlists WHERE id = ?').get(id) as any; if (!p) return null; return p.cover_hash ?? (db.prepare('SELECT a.cover_hash FROM playlist_tracks x JOIN tracks t ON t.id = x.track_id JOIN albums a ON a.id = t.album_id WHERE x.playlist_id = ? AND a.cover_hash IS NOT NULL ORDER BY x.pos LIMIT 1').get(id) as any)?.cover_hash ?? null; }
     const al = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(id) as any; if (al) return al.cover_hash ?? null;
     const tr = db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?').get(id) as any; if (tr) return tr.cover_hash ?? null;
     // A track that left the library (replaced file = new id) still names its album:
@@ -507,17 +507,32 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   app.get('/api/image/:id', { config: { rateLimit: { max: 6000, timeWindow: '1 minute' } } }, async (req, reply) => {
     const id = String((req.params as any).id || ''); const q = req.query as any;
     const kind = q.kind === 'banner' ? 'banner' : 'primary';
-    const hash = coverOf(id, kind);
+    // A playlist's picture changes with its songs under the same URL: every
+    // client asks again (a 304 while it is the same), none keeps an old grid.
+    const playlist = id.startsWith('pl_');
+    let hash: string | null; let mosaic = false;
+    if (playlist) {
+      const pc = playlistCover(db, id);
+      hash = pc.hash;
+      if (pc.parts) { mosaic = await ensureMosaic(dataDir, pc.hash!, pc.parts); if (!mosaic) hash = pc.parts[0]; }
+    } else hash = coverOf(id, kind);
     if (!hash) return reply.code(404).send();
     const webp = /image\/webp/.test(String(req.headers.accept || ''));
     const want = Number(q.size) || Number(q.maxHeight) || 320;
+    const caching = (file: string) => {
+      if (!playlist) { reply.header('Cache-Control', 'private, max-age=86400').header('Vary', 'Accept'); return false; }
+      const tag = `"${hash}-${path.basename(file)}"`;
+      reply.header('Cache-Control', 'private, no-cache').header('Vary', 'Accept').header('ETag', tag);
+      return req.headers['if-none-match'] === tag;
+    };
     // Bigger than the largest stored copy: the big one, made now if need be;
-    // the 640 copy when the original cannot be read.
-    if (kind === 'primary' && want > SIZES[SIZES.length - 1] && !hash.includes('/')) {
+    // the 640 copy when the original cannot be read (a grid has no original).
+    if (kind === 'primary' && want > SIZES[SIZES.length - 1] && !hash.includes('/') && !mosaic) {
       const big = nearestBig(want);
       const p = path.join(dataDir, 'art', hash, `${big}.${webp ? 'webp' : 'jpg'}`);
-      if (fs.existsSync(p) || (!noOriginal.has(hash) && await renderBig(dataDir, hash, big, () => originalOf(hash)))) {
-        reply.header('Cache-Control', 'private, max-age=86400').header('Vary', 'Accept').type(webp ? 'image/webp' : 'image/jpeg');
+      if (fs.existsSync(p) || (!noOriginal.has(hash) && await renderBig(dataDir, hash, big, () => originalOf(hash!)))) {
+        if (caching(p)) return reply.code(304).send();
+        reply.type(webp ? 'image/webp' : 'image/jpeg');
         return reply.send(fs.createReadStream(p));
       }
       noOriginal.add(hash);
@@ -527,7 +542,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const [h, sub] = hash.replace('{w}', Number(q.w) > 0 && Number(q.w) <= 800 ? '640' : '1280').split('/');
     const p = path.join(dataDir, 'art', h, sub ? `${sub}.${webp ? 'webp' : 'jpg'}` : `${size}.${webp ? 'webp' : 'jpg'}`);
     if (!fs.existsSync(p)) return reply.code(404).send();
-    reply.header('Cache-Control', 'private, max-age=86400').header('Vary', 'Accept').type(webp ? 'image/webp' : 'image/jpeg');
+    if (caching(p)) return reply.code(304).send();
+    reply.type(webp ? 'image/webp' : 'image/jpeg');
     return reply.send(fs.createReadStream(p));
   });
 }

@@ -12,7 +12,7 @@
 // other client is around.
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
-import { playTracker } from './playEvents.js';
+import { isReplay, playTracker } from './playEvents.js';
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { userByToken } from './auth.js';
@@ -35,7 +35,7 @@ export type Session = {
   // What the active client last reported (title, art, volume...), for mirrors; and its queue rows.
   nowPlaying: any; queueItems: any[];
 };
-type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; ip?: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _lastPlayId?: string; _playSince?: { id: string; at: number }; _lastWarmFor?: string; _lastDiag?: number; player?: ServerPlayer; instance?: string | null; open?: () => boolean; token?: string; kick?: (code: number, reason: string) => void };
+type Client = { id: string; uid: string; name: string; kind: string; form?: string | null; ip?: string; send: (obj: unknown) => void; close: () => void; net: string; lastSeen: number; canPlay: boolean; devices: any[]; nowPlaying: any; queue: any[] | null; _listen?: { id: string; pos: number; since: number | null; logged: boolean }; _lastWarmFor?: string; _lastDiag?: number; player?: ServerPlayer; instance?: string | null; open?: () => boolean; token?: string; kick?: (code: number, reason: string) => void };
 
 export const Event = z.object({
   type: z.enum(['play', 'pause', 'toggle', 'seek', 'next', 'previous', 'queue', 'transfer', 'progress', 'stop']),
@@ -234,9 +234,13 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   };
   // The remembered session, with the position as it is now.
   const sessionMsg = (s: Session) => (s.nowPlaying ? { type: 'session', nowPlaying: { ...s.nowPlaying, playing: s.playing, position: positionNow(s) / 1000 }, queue: s.queueItems || [], at: s.updatedAt } : null);
-  const logPlay = (uid: string, trackId: string, client: string) => {
+  // The same song logged within a minute is the same listen reported twice
+  // (a second device, a reconnect mid-song), unless that log is from before
+  // this listen began (listenStart: when it was at 0, from the reported
+  // position; a short song on repeat-one is a new play every time round).
+  const logPlay = (uid: string, trackId: string, client: string, listenStart = -Infinity) => {
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(uid) as any;
-    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid, trackId, Date.now(), client); (app as any).scrobbleStart?.(uid, trackId, Date.now()); }
+    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000 && last.at >= listenStart - 2000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid, trackId, Date.now(), client); (app as any).scrobbleStart?.(uid, trackId, Date.now()); }
   };
   // How each song went (skips, play length): for the brain's learning.
   const insEvent = db.prepare('INSERT INTO play_events (user_id, track_id, at, ms_played, end_ms, duration_ms, reason, shuffle, client) VALUES (@user_id, @track_id, @at, @ms_played, @end_ms, @duration_ms, @reason, @shuffle, @client)');
@@ -483,9 +487,21 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         if (me.kind !== 'homeassistant') plays.report(me.id, me.uid, me.name, np, durationOf);
         // A play is logged once the same track has been reported playing for
         // 8 s: songs skipped past while hunting for one never enter history.
-        if (me.kind !== 'server' && np?.playing && typeof np.itemId === 'string') {
-          if (!me._playSince || me._playSince.id !== np.itemId) me._playSince = { id: np.itemId, at: now };
-          else if (now - me._playSince.at >= 8000 && np.itemId !== me._lastPlayId) { me._lastPlayId = np.itemId; logPlay(me.uid, np.itemId, me.name); }
+        // Once per listen: another song, nothing playing, or this one again
+        // from the top (repeat-one, a replay) starts a new listen.
+        if (me.kind !== 'server') {
+          const id = np && typeof np.itemId === 'string' ? np.itemId : null;
+          const posMs = Math.max(0, Number(np?.position) || 0) * 1000;
+          if (!id) me._listen = undefined;
+          else {
+            if (!me._listen || me._listen.id !== id || isReplay(me._listen.pos, posMs)) me._listen = { id, pos: posMs, since: null, logged: false };
+            const l = me._listen;
+            l.pos = posMs;
+            if (np.playing) {
+              if (l.since == null) l.since = now;
+              else if (now - l.since >= 8000 && !l.logged) { l.logged = true; logPlay(me.uid, id, me.name, np.position != null && Number.isFinite(Number(np.position)) ? now - posMs : -Infinity); }
+            }
+          }
         }
         // Sound coming out of a client nobody else has claimed makes it the active one.
         if (np?.playing && !s.active) { s.active = me.id; s.claimedAt = now; s.rev++; }

@@ -4,8 +4,8 @@
 // and Spotify's own history counts them the same way (ms_played, reason_end).
 //
 // One tracker per server, keyed by connection: a song ends when the
-// connection reports another one (ended if it got near its end, else
-// skipped), reports nothing, or disconnects (stopped).
+// connection reports another one or the same one from the top again (ended
+// if it got near its end, else skipped), reports nothing, or disconnects (stopped).
 
 export type NowPlaying = { itemId?: string; playing?: boolean; position?: number; duration?: number; shuffle?: string } | null;
 export type PlayEvent = {
@@ -20,6 +20,12 @@ const ENDED_WITHIN_MS = 10000;
 // A gap longer than this between reports is not counted as listening (a
 // sleeping phone, a dropped socket).
 const MAX_GAP_MS = 15000;
+
+// The same song again (repeat-one, or replayed from the top): the position
+// went back to the start after the song had played a while. A new listen,
+// not the old one going on; a seek within the song is not one.
+export const REPLAY_FROM_MS = 3000, REPLAY_AFTER_MS = 8000;
+export const isReplay = (prevPosMs: number, posMs: number) => posMs < REPLAY_FROM_MS && prevPosMs >= REPLAY_AFTER_MS;
 
 export function playTracker(save: (e: PlayEvent) => void, now: () => number = Date.now) {
   const cur = new Map<string, Cur>();
@@ -41,9 +47,9 @@ export function playTracker(save: (e: PlayEvent) => void, now: () => number = Da
       const c = cur.get(key);
       if (c && c.playing) c.played += Math.min(MAX_GAP_MS, Math.max(0, t - c.seen));
       const id = np && typeof np.itemId === 'string' ? np.itemId : null;
-      if (c && c.id !== id) finish(key, id ? 'next' : 'stop');
+      const pos = Math.max(0, Number(np?.position) || 0) * 1000;
+      if (c && (c.id !== id || isReplay(c.pos, pos))) finish(key, id ? 'next' : 'stop');
       if (!id) return;
-      const pos = Math.max(0, Number(np!.position) || 0) * 1000;
       const dur = Number(np!.duration) > 0 ? Number(np!.duration) * 1000 : durationOf?.(id) ?? null;
       const same = cur.get(key);
       if (same) { same.pos = pos; same.playing = !!np!.playing; same.started ||= same.playing; same.seen = t; same.dur = dur ?? same.dur; if (np!.shuffle) same.shuffle = String(np!.shuffle); return; }

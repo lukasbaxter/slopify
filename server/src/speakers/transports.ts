@@ -395,7 +395,10 @@ export class BridgeTransport implements Transport {
       ended: !!s.ended,
       service: theirs ? (s.source || 'stream') : 'url',
       serviceName: theirs ? (s.source || 'another app') : null,
-      streamUrl: s.url || null,
+      // The player counts a speaker as taken only by a stream address that is
+      // not ours; a source pushed with no address (Bluetooth, a line in) still
+      // names one, the way a Roku names the app in front.
+      streamUrl: s.url || (theirs ? `bridge-source:${s.source || 'stream'}` : null),
       canSeek: true,
     };
   }

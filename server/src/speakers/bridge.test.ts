@@ -3,6 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { BridgeTransport } from './transports.js';
 import { Discovery } from './discovery.js';
+import { ServerPlayer } from './player.js';
 
 // A slopify-speaker/1 device: remembers what it was asked, answers /status from `unit.status`.
 const unit: { calls: string[]; status: any; down: boolean } = { calls: [], status: { state: 'idle' }, down: false };
@@ -62,6 +63,20 @@ describe('slopify-speaker transport', () => {
     await expect(t.status()).rejects.toThrow();
     expect((await t.status()).gone).toBe(true);
     unit.down = false;
+  });
+  it('something else pushed to it, with no address to show, is still another app: the player lets go', async () => {
+    const reports: any[] = [];
+    const p = new ServerPlayer('u', { db: { prepare: () => ({ get: () => undefined, run: () => {}, all: () => [] }) } as any, discovery: {} as any, publicUrl: 'http://x', token: () => 't', report: (np) => reports.push(np), reportQueue: () => {}, claim: () => {}, log: () => {} }) as any;
+    p.device = { id: 'bridge:aa:bb', kind: 'bridge', name: 'Soundbar', model: 'JBL bridge', host: '127.0.0.1', port };
+    p.transport = speaker();
+    p.queue = [{ Id: 't1', Name: 'Song', Artists: ['A'], RunTimeTicks: 300 * 10000000 }]; p.index = 0; p.duration = 300;
+    p.playing = true; p.anchor = { pos: 30, at: Date.now() }; p.reached = 30;
+    unit.status = { state: 'stream', position: 0, volume: 55, source: 'Bluetooth' }; // a phone on its Bluetooth input
+    unit.calls = [];
+    await p.tick(); await p.tick();
+    expect(p.transport).toBe(null);
+    expect(reports.at(-1)).toBe(null);
+    expect(unit.calls.filter((c) => c.startsWith('/stop'))).toEqual([]); // let go of, not stopped
   });
   it('discovery identifies it from /info', async () => {
     const d = await new Discovery(() => {}).identifyBridge('127.0.0.1', port);

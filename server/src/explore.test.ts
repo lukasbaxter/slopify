@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { brainPlaylist, buildPlaylist, collectFetched, exploreAll, matchTrack, slskdFind, slskdWait } from './explore.js';
+import { brainPlaylist, buildPlaylist, collectFetched, exploreAll, exploreScheduler, matchTrack, slskdFind, slskdWait } from './explore.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-explore-'));
@@ -234,5 +234,41 @@ describe('the brain makes the mixes', () => {
     db.prepare("INSERT INTO kv (k, v) VALUES ('session:listener', 'before') ON CONFLICT(k) DO UPDATE SET v = 'before'").run();
     await exploreAll(db, opts(brainAnswers([])), ['daily-jams']);
     expect((db.prepare("SELECT v FROM kv WHERE k = 'session:listener'").get() as any).v).toBe('before');
+  });
+});
+
+describe('the mix schedule', () => {
+  // A run like registerExplore's: one at a time ({ running: true } while one
+  // goes), the weekly one failing every time (ListenBrainz down, no list yet).
+  const schedule = () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-schedule-')));
+    const runs: string[][] = [];
+    let busy = false;
+    const run = async (kinds: any[]) => {
+      if (busy) return { running: true };
+      busy = true; runs.push(kinds);
+      try { await new Promise((r) => setTimeout(r, 0)); return kinds.includes('daily-jams') ? { built: [{}], failures: 0 } : { built: [], failures: 1 }; }
+      finally { busy = false; }
+    };
+    return { tick: exploreScheduler(db, run), runs };
+  };
+  // Monday 2026-11-09, minute by minute from `from` to midnight.
+  const monday = async (tick: (now: Date) => void, from: number) => {
+    for (let m = from; m < 24 * 60; m++) { tick(new Date(2026, 10, 9, Math.floor(m / 60), m % 60)); await new Promise((r) => setTimeout(r, 0)); }
+  };
+  const daily = (runs: string[][]) => runs.filter((k) => k.includes('daily-jams')).length;
+  const weekly = (runs: string[][]) => runs.filter((k) => k.includes('weekly-jams')).length;
+
+  it('on a Monday whose weekly run has not worked yet, Daily Jams still runs', async () => {
+    const { tick, runs } = schedule();
+    await monday(tick, 6 * 60 + 30);
+    expect(daily(runs)).toBe(1);
+    expect(weekly(runs)).toBeGreaterThan(1); // and the weekly one keeps being retried, hourly
+  });
+  it('awake only from 08:00, both due in the same minute: Daily Jams still runs', async () => {
+    const { tick, runs } = schedule();
+    await monday(tick, 8 * 60);
+    expect(daily(runs)).toBe(1);
+    expect(weekly(runs)).toBeGreaterThan(1);
   });
 });

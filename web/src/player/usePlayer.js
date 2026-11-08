@@ -2237,6 +2237,8 @@ export function usePlayer(jf) {
     ownUntilRef.current = Date.now() + 3000;
     try { if (spare.currentTime) spare.currentTime = 0; } catch { /* not seekable yet */ }
     const calledAt = performance.now();
+    const baseBefore = localBaseRef.current;
+    const gen = ++startGenRef.current;
     spare.play().then(() => {
       // Learn how long a start takes on this machine, for the next gapless one.
       const took = (performance.now() - calledAt) / 1000;
@@ -2250,6 +2252,17 @@ export function usePlayer(jf) {
       fadeReset(old);
       audioRef.current = old; spareRef.current = spare; setActiveEl(old); wa.setActive?.(old);
       ownUntilRef.current = Date.now() + 1500;
+      // The queue position, the clock and what is loaded go back with it:
+      // moved on, the old song's end advanced one further and skipped a song.
+      // Not if anything started since (that advance already ran, or a skip).
+      if (startGenRef.current !== gen) return;
+      localBaseRef.current = baseBefore;
+      setIndex(plan.nextIndex - 1); indexRef.current = plan.nextIndex - 1;
+      setDuration(ticksToSeconds(plan.cur.RunTimeTicks));
+      loadedRef.current = plan.cur.Id;
+      anchorAt(baseBefore + old.currentTime, true);
+      // Already over (it had only a moment left): advance now, the ordinary way.
+      if (old.ended) advanceRef.current(true);
     });
     // The new song is the playing one from here: the element, the queue
     // position, the clock and the reports all move to it now.
@@ -2258,7 +2271,6 @@ export function usePlayer(jf) {
     const out = plan.fade > 0 ? plan.fade : left;
     fadeRef.current = { el: old, timer: setTimeout(() => endFadeRef.current(), out * 1000 + 400) };
     if (!plan.fade) old.addEventListener('ended', () => { if (fadeRef.current?.el === old) endFadeRef.current(); }, { once: true });
-    startGenRef.current += 1;
     setIndex(plan.nextIndex); indexRef.current = plan.nextIndex;
     setDuration(ticksToSeconds(plan.next.RunTimeTicks));
     anchorAt(0, true);

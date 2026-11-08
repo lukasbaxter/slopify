@@ -7,6 +7,7 @@ const fs = require('fs');
 const { Discovery } = require('./discovery');
 const { CastTransport } = require('./transports/cast');
 const { BluOSTransport } = require('./transports/bluos');
+const { transportCache } = require('./transports/cache');
 const updater = require('./updater');
 
 // SLOPIFY_DEV=1: load the Vite dev server instead of the shipped web build.
@@ -37,18 +38,9 @@ function deviceForm() {
 
 let win = null;
 let discovery = null;
-/** @type {Map<string, CastTransport|BluOSTransport>} */
-const transports = new Map();
-
-function transportFor(device) {
-  if (!device || !device.id) throw new Error('No device supplied');
-  let t = transports.get(device.id);
-  if (!t) {
-    t = device.kind === 'cast' ? new CastTransport(device) : new BluOSTransport(device);
-    transports.set(device.id, t);
-  }
-  return t;
-}
+// One per speaker, made again when its address changes (transports/cache.js).
+const transports = transportCache((device) => (device.kind === 'cast' ? new CastTransport(device) : new BluOSTransport(device)));
+const transportFor = (device) => transports.get(device);
 
 function createWindow() {
   win = new BrowserWindow({

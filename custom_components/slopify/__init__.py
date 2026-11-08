@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,6 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
 from .api import (
@@ -143,11 +143,12 @@ async def _drop(data: SlopifyData, user_id: str) -> None:
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Serve and load the Slopify cards, and answer their lyrics requests."""
-    version = (await async_get_integration(hass, DOMAIN)).version
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARDS_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
-    )
-    add_extra_js_url(hass, f"{CARDS_URL}/slopify-cards.js?v={version}")
+    frontend = Path(__file__).parent / "frontend"
+    # The cache-buster is the card's own content: the manifest's version is
+    # not bumped with every release, so browsers kept the old card.
+    card = await hass.async_add_executor_job((frontend / "slopify-cards.js").read_bytes)
+    await hass.http.async_register_static_paths([StaticPathConfig(CARDS_URL, str(frontend), cache_headers=False)])
+    add_extra_js_url(hass, f"{CARDS_URL}/slopify-cards.js?v={hashlib.sha256(card).hexdigest()[:12]}")
     websocket_api.async_register_command(hass, ws_lyrics)
     return True
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator, WebSocketGenerator
@@ -43,3 +46,12 @@ async def test_lyrics_for_the_song_playing(
 
     await ws.send_json({"id": 3, "type": "slopify/lyrics", "entity_id": "media_player.nope"})
     assert not (await ws.receive_json())["success"]
+
+
+async def test_the_card_url_changes_with_the_card(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
+    """Browsers cache the card by its URL: a new card needs a new URL, not the manifest's version."""
+    card = Path(__file__).parents[2] / "custom_components" / "slopify" / "frontend" / "slopify-cards.js"
+    digest = hashlib.sha256(card.read_bytes()).hexdigest()[:12]
+    loaded_urls = hass.data.get("frontend_extra_module_url")
+    urls = [u for u in set(getattr(loaded_urls, "urls", loaded_urls) or []) if "/slopify_static/slopify-cards.js" in u]
+    assert urls == [f"/slopify_static/slopify-cards.js?v={digest}"]

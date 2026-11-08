@@ -1122,7 +1122,12 @@ export function usePlayer(jf) {
     if (livePos() > 3) {
       // Same track: rewind in place rather than reloading the stream.
       const el = audioRef.current;
-      if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) { el.currentTime = 0; anchorAt(0, playingRef.current); return; }
+      if (deviceRef.current.kind === 'local' && el && loadedRef.current === queueRef.current[indexRef.current]?.Id) {
+        // A progressive transcode starts at its last seek point (localBaseRef):
+        // its own 0 is not the song's, so it is asked for again from 0:00.
+        if (localBaseRef.current > 0) { seekRef.current(0); return; }
+        el.currentTime = 0; anchorAt(0, playingRef.current); return;
+      }
       return skipTo(indexRef.current);
     }
     if (isOffline()) {

@@ -155,11 +155,11 @@ export class ServerPlayer {
         const rows = this.rowsFor(cmd.trackIds || []).map((r) => ({ ...r, _queued: true }));
         let at = this.index + 1;
         while (at < this.queue.length && this.queue[at]?._queued) at += 1;
-        this.queue.splice(at, 0, ...rows); this.d.reportQueue(this.queue);
+        this.queue.splice(at, 0, ...rows); this.keepOriginal(rows); this.d.reportQueue(this.queue);
       }
-      else if (a === 'queueRemove') { const i = cmd.index | 0; if (i !== this.index && this.queue[i]) { this.queue.splice(i, 1); if (i < this.index) this.index--; this.d.reportQueue(this.queue); this.report(); } }
-      else if (a === 'queueMove') { const from = cmd.from | 0, to = cmd.to | 0; if (this.queue[from] && this.queue[to]) { const [m] = this.queue.splice(from, 1); this.queue.splice(to, 0, m); const cur = this.current; this.index = Math.max(0, this.queue.indexOf(cur as Row)); this.d.reportQueue(this.queue); this.report(); } }
-      else if (a === 'queueClear') { const cur = this.current; this.queue = this.queue.filter((t, i) => i <= this.index || !t._queued); this.index = cur ? this.queue.indexOf(cur) : -1; this.d.reportQueue(this.queue); }
+      else if (a === 'queueRemove') { const i = cmd.index | 0; if (i !== this.index && this.queue[i]) { this.queue.splice(i, 1); if (i < this.index) this.index--; this.keepOriginal(); this.d.reportQueue(this.queue); this.report(); } }
+      else if (a === 'queueMove') { const from = cmd.from | 0, to = cmd.to | 0; if (this.queue[from] && this.queue[to]) { const [m] = this.queue.splice(from, 1); this.queue.splice(to, 0, m); const cur = this.current; this.index = Math.max(0, this.queue.indexOf(cur as Row)); this.keepOriginal(); this.d.reportQueue(this.queue); this.report(); } }
+      else if (a === 'queueClear') { const cur = this.current; this.queue = this.queue.filter((t, i) => i <= this.index || !t._queued); this.index = cur ? this.queue.indexOf(cur) : -1; this.keepOriginal(); this.d.reportQueue(this.queue); }
       else if (a === 'skipTo') await this.skipTo(cmd.index | 0);
       else if (a === 'toggle') await this.toggle();
       // Asks for a state rather than flipping it: a pause sent while the
@@ -177,6 +177,22 @@ export class ServerPlayer {
     } catch (e: any) { this.d.log(`speaker ${this.device?.name || '?'}: ${a} FAILED: ${e.message}`); }
   }
 
+  // The unshuffled order follows every edit of the queue, so turning shuffle
+  // off keeps what was added and leaves out what was removed. Shuffle off, it
+  // is the queue as it stands; shuffled, songs added go after the current one
+  // (behind others added that way), as they do in the queue.
+  private keepOriginal(added: Row[] = []) {
+    if (this.shuffle === 'off') { this.original = [...this.queue]; return; }
+    if (!this.original.length) return;
+    const left = new Set(this.queue);
+    this.original = this.original.filter((t) => left.has(t));
+    if (!added.length) return;
+    const cur = this.current;
+    let at = cur ? this.original.indexOf(cur) + 1 : this.original.length;
+    if (at <= 0) at = this.original.length;
+    while (at < this.original.length && this.original[at]?._queued) at += 1;
+    this.original.splice(at, 0, ...added);
+  }
   // Another client hands its session over: its queue, playhead, and the speaker to use.
   private async transfer(cmd: any) {
     const dev = this.d.discovery.get(String(cmd.deviceId || ''));

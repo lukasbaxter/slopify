@@ -55,3 +55,38 @@ describe('autoplay at the end of the queue', () => {
     await p.stopAll();
   });
 });
+
+describe('shuffle and queue edits', () => {
+  it('turning shuffle off keeps songs added and leaves out songs removed while it was on', async () => {
+    const p = player();
+    await p.execute({ action: 'play', trackIds: ['a', 'b', 'c', 'd'], index: 0 });
+    await p.execute({ action: 'setShuffle', mode: 'on' });
+    expect(p.current.Id).toBe('a');
+    await p.execute({ action: 'enqueue', trackIds: ['x'] });
+    await p.execute({ action: 'queueRemove', index: p.queue.findIndex((t: any) => t.Id === 'c') });
+    await p.execute({ action: 'setShuffle', mode: 'off' });
+    expect(ids(p.queue)).toEqual(['a', 'x', 'b', 'd']);
+    expect(p.current.Id).toBe('a');
+    await p.stopAll();
+  });
+  it('a clear while shuffled stays cleared once shuffle is off', async () => {
+    const p = player();
+    await p.execute({ action: 'play', trackIds: ['a', 'b', 'c'], index: 0 });
+    await p.execute({ action: 'setShuffle', mode: 'on' });
+    await p.execute({ action: 'enqueue', trackIds: ['x', 'y'] });
+    await p.execute({ action: 'queueClear' });
+    await p.execute({ action: 'setShuffle', mode: 'off' });
+    expect(ids(p.queue)).toEqual(['a', 'b', 'c']);
+    await p.stopAll();
+  });
+  it('edits made with shuffle off survive shuffle on and off again', async () => {
+    const p = player();
+    await p.execute({ action: 'play', trackIds: ['a', 'b', 'c'], index: 0 });
+    await p.execute({ action: 'enqueue', trackIds: ['x'] });
+    await p.execute({ action: 'queueRemove', index: 2 }); // b
+    await p.execute({ action: 'setShuffle', mode: 'on' });
+    await p.execute({ action: 'setShuffle', mode: 'off' });
+    expect(ids(p.queue)).toEqual(['a', 'x', 'c']);
+    await p.stopAll();
+  });
+});

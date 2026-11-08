@@ -29,6 +29,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { WebView } from 'react-native-webview';
 import { VolumeManager } from 'react-native-volume-manager';
 import SlopifyMedia from './modules/slopify-media';
+import { mediaSessionRelay } from './mediaSession';
 import { addressTries, cleanAddress, originOf } from './address';
 import { answers, askAddresses, canMoveLive, homeTryable, netKey, provesItself } from './servers';
 
@@ -125,6 +126,9 @@ const MEDIA_SESSION = `(function () {
 // main: links others open use it, not a home address (TrackRow.jsx linkBase).
 // servers: the page may offer Settings > Server address (it posts { type: 'servers' }).
 const shellScript = (main) => `window.slopifyShell = ${JSON.stringify({ deviceName: DEVICE_NAME, deviceForm: DEVICE_FORM, platform: Platform.OS, version: process.env.EXPO_PUBLIC_SLOPIFY_SHELL || 'dev', servers: true, main: main || null })};${SIGNIN_BRIDGE}${PAGE_HELPERS}${Platform.OS === 'android' && SlopifyMedia ? MEDIA_SESSION : ''} true;`;
+
+// The page's media session to the playback service (Android; mediaSession.js).
+const mediaRelay = SlopifyMedia ? mediaSessionRelay(SlopifyMedia) : null;
 
 const hostLabel = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 
@@ -425,10 +429,7 @@ export default function App() {
   const onMessage = (e) => {
     let msg = null;
     try { msg = JSON.parse(e.nativeEvent.data); } catch { return; }
-    if (msg?.type === 'mediasession' && SlopifyMedia) {
-      try { if (msg.state === 'none') SlopifyMedia.stop(); else SlopifyMedia.update(msg); } catch { /* module gone */ }
-      return;
-    }
+    if (msg?.type === 'mediasession' && mediaRelay) { mediaRelay.message(msg); return; }
     if (msg?.type === 'servers') { setEditing(true); return; }
     if (msg?.type === 'share') { share(msg); return; }
     // A page (re)loaded and can be moved: where should it be? (a reload puts it back on its own address)
@@ -463,7 +464,7 @@ export default function App() {
       }
       if (msg.session) { const fresh = tokenOf(msg.session) !== myTok; keepSignin(msg.session); if (fresh) learn(true); }
       // Signed out, or a dead sign-in cleared: forget it only if it is the one kept.
-      else if (myTok && tokenOf(msg.was) === myTok) keepSignin(null);
+      else if (myTok && tokenOf(msg.was) === myTok) { keepSignin(null); mediaRelay?.stop(); }
       return;
     }
     if (msg?.type === 'session') {

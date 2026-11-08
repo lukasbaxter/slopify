@@ -737,7 +737,10 @@ export class ServerPlayer {
     // speaker someone just silenced. Anything else is an external stop.
     const atEnd = this.duration > 0 && (got >= this.duration - 5 || got >= this.duration * 0.95);
     if (s.ended && !atEnd) { await this.auto(seq, tr, () => this.yield()); return; }
-    if (s.ended || (s.state === 'stop' && this.playing && nearEnd)) { await this.auto(seq, tr, () => this.next(true), true); return; }
+    // Stopped by itself within a few seconds of the end is the end, on every
+    // transport: BluOS says 'stop', the rest (Cast, DLNA, Roku, AirPlay, the
+    // bridge) 'IDLE', so an end whose ended flag was missed still moves on.
+    if (s.ended || ((s.state === 'stop' || s.state === 'IDLE') && this.playing && nearEnd)) { await this.auto(seq, tr, () => this.next(true), true); return; }
     if (s.state === 'IDLE' || s.state === 'stop') {
       // Stopped from the speaker itself (or the stream failed): show it paused where it was.
       if (this.playing) { this.d.log(`speaker ${this.device?.name || '?'}: stopped at ${Math.round(this.position)}s of ${Math.round(this.duration)}s (reached ${Math.round(this.reached)}s), not the end: paused`); this.setPos(this.position, false); this.report(); }

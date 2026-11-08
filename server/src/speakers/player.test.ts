@@ -126,6 +126,22 @@ describe('Cast ended guard', () => {
     await p.stopAll();
   });
 
+  // Cast, DLNA, Roku and the bridge say IDLE when they stop. One whose ended
+  // flag was missed (a reading lost at the end) used to park instead of moving on.
+  it('stopped by itself at the end without saying ended still moves on', async () => {
+    for (const kind of ['cast', 'upnp', 'roku', 'bridge', 'airplay']) {
+      const p = custom();
+      p.device = { id: `${kind}:x`, kind, name: 'TV' };
+      p.queue = [row, row2]; p.index = 0; p.duration = 300;
+      p.playing = true; p.anchor = { pos: 298.5, at: Date.now() }; p.reached = 298.5;
+      const calls: string[] = [];
+      p.transport = castFake({ state: 'IDLE', ended: false }, calls);
+      await p.tick();
+      expect(p.index, kind).toBe(1);
+      expect(calls, kind).toContain('play');
+      await p.stopAll();
+    }
+  });
   it('a transport that lost its connection reads as gone, never as ended', async () => {
     const reports: any[] = [];
     const p = custom({ report: (np) => reports.push(np) });

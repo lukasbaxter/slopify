@@ -791,7 +791,10 @@ export function usePlayer(jf) {
   const stopOn = useCallback(
     async (dev) => {
       if (!dev) return;
-      loadedRef.current = null;
+      // What is loaded belongs to the device playing now: stopping the old
+      // device after a hand-over must not forget what the new one loaded, or
+      // the next pause there restarts the song instead of pausing it.
+      if (!deviceRef.current || deviceRef.current.id === dev.id) loadedRef.current = null;
       if (dev.kind === 'local') {
         ownUntilRef.current = Date.now() + 3000;
         endFadeRef.current();
@@ -1595,7 +1598,7 @@ export function usePlayer(jf) {
             try {
               const st = await remote.status(nextDevice);
               const sameTrack = st?.playing && st.streamUrl && st.streamUrl.includes(track.Id);
-              if (sameTrack) { anchorAt(st.position || 0, true); adopted = true; }
+              if (sameTrack) { anchorAt(st.position || 0, true); loadedRef.current = track.Id; adopted = true; }
             } catch { /* status is advisory */ }
           }
           if (!stillMine()) return;

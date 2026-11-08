@@ -42,7 +42,11 @@ test('signed in on the open page, a stuck song is reloaded from memory', async (
     await expect.poll(() => page.evaluate(() => ((window as any).__slopifyMediaLog || []).join('\n')), { timeout: 8000 }).toMatch(/watchdog: \w+ stuck at/);
     const { src, after } = await page.evaluate(() => ({ src: (window as any).__slopifyAudio().active.getAttribute('src') || '', after: Date.now() - (window as any).__stuckAt }));
     expect(src.startsWith('blob:')).toBe(true);
-    expect(after).toBeLessThan(5500);
+    // The watchdog ticks once a second: up to 1 s to see the clock stop, 1 s
+    // to mark it, the 3 s memory limit, up to 1 s to the tick past it, so
+    // about 6 s at worst. The network path (the bug) is 6 s + those ticks,
+    // 7 s and up, and reloads from the network (the blob check above).
+    expect(after).toBeLessThan(6500);
   } finally {
     await page.evaluate(() => { const w = window as any; const el = w.__slopifyAudio().active; delete el.currentTime; if (w.__player.playing) w.__player.toggle(); return w.__updatePrefs({ quality: 'original' }); }).catch(() => {});
   }

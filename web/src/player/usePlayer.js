@@ -746,7 +746,17 @@ export function usePlayer(jf) {
             setTimeout(settle, 3000);
           });
         }
-        await el.play();
+        // Bounded like the swap above: a play() iOS holds (hidden, see the
+        // top of this function) never settles, and the start then never got
+        // as far as marking the song loaded and reporting it. Past the wait
+        // the element keeps its src (the bridge and the reconcile look after
+        // it); a refusal is still thrown, as before.
+        const outcome = await Promise.race([
+          el.play().then(() => null, (e) => ({ e })),
+          new Promise((r) => setTimeout(() => r('timeout'), 4000)),
+        ]);
+        if (outcome && outcome.e) throw outcome.e;
+        if (outcome === 'timeout') mediaLog(`play ${track.Id.slice(0, 6)}: no answer in 4 s, carrying on`);
       } else {
         // The list fetch skipped MediaSources; get the container now so Cast
         // gets the right MIME. One tiny request, cached.

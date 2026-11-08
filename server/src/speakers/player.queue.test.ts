@@ -206,3 +206,35 @@ describe('the poll moves on one command at a time', () => {
     await p.stopAll();
   });
 });
+
+describe('plays logged from a speaker', () => {
+  it('repeat-one on a short song: every lap is a play, even under a minute apart', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE plays (user_id TEXT, track_id TEXT, at INTEGER, client TEXT, PRIMARY KEY (user_id, at, track_id))');
+    const p = player();
+    p.d.db = db;
+    await p.execute({ action: 'play', trackIds: ['a'], index: 0 });
+    p.repeat = 'one';
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(db.prepare('SELECT count(*) n FROM plays').get()).toEqual({ n: 1 });
+    // the 20 s song ends and comes round again
+    await vi.advanceTimersByTimeAsync(11000);
+    await p.next(true);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(db.prepare('SELECT count(*) n FROM plays').get()).toEqual({ n: 2 });
+    await p.stopAll();
+  });
+  it('a song handed over mid-way that was just logged elsewhere is not logged twice', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE plays (user_id TEXT, track_id TEXT, at INTEGER, client TEXT, PRIMARY KEY (user_id, at, track_id))');
+    db.prepare('INSERT INTO plays VALUES (?, ?, ?, ?)').run('u', 'a', Date.now() - 20000, 'phone');
+    const p = player();
+    p.d.db = db;
+    await p.execute({ action: 'play', trackIds: ['a'], index: 0, startAt: 30 });
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(db.prepare('SELECT count(*) n FROM plays').get()).toEqual({ n: 1 });
+    await p.stopAll();
+  });
+});

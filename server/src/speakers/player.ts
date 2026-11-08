@@ -422,7 +422,14 @@ export class ServerPlayer {
   }
   // A play is logged once the same track has kept playing for 8 s, the same
   // confirmation clients get: skip-hunting on a speaker never enters history.
+  // A start from the top (a new song, or repeat-one coming round) is a new
+  // listen and always counts; a start mid-song (a hand-over, a resume) may be
+  // a listen another device already logged, so the 60 s check applies there.
+  private listenFromTop = false;
+  private listenAt = 0;
   private armLogPlay(trackId: string) {
+    this.listenFromTop = this.position < 3;
+    this.listenAt = Date.now();
     if (this.playLogTimer) clearTimeout(this.playLogTimer);
     this.playLogTimer = setTimeout(() => { this.playLogTimer = null; if (this.playing && this.current?.Id === trackId) this.logPlay(trackId); }, 8000);
   }
@@ -430,7 +437,8 @@ export class ServerPlayer {
   private logPlay(trackId: string) {
     const db = this.d.db;
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(this.uid) as any;
-    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(this.uid, trackId, Date.now(), this.device?.name || 'speaker'); this.d.scrobble?.(trackId, Date.now()); }
+    const dup = last && last.track_id === trackId && (last.at >= this.listenAt || (!this.listenFromTop && Date.now() - last.at < 60000));
+    if (!dup) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(this.uid, trackId, Date.now(), this.device?.name || 'speaker'); this.d.scrobble?.(trackId, Date.now()); }
   }
   private async skipTo(i: number) {
     if (!this.queue[i]) return;

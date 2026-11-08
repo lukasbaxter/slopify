@@ -550,6 +550,14 @@ export default function App() {
         onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500 && e.nativeEvent.isTopFrame !== false) { httpFailed.current = true; failed(); } }}
         // Never the WebView's own (white) error page: the can't-reach screen covers it.
         renderError={() => <View style={styles.web} />}
+        // iOS ends the page's process while the app is in the background
+        // (memory), and WKWebView then shows nothing: the app came back to a
+        // black screen until it was quit, maybe twice (lab: the content process
+        // killed in the background, still black 30 s after coming back). Load
+        // the page again. Android's render process going away is the same
+        // case (unhandled, it takes the app down).
+        onContentProcessDidTerminate={() => { canMove.current = false; web.current?.reload(); }}
+        onRenderProcessGone={() => { canMove.current = false; web.current?.reload(); }}
         backgroundColor="#000"
         overScrollMode="never"
         bounces={false}

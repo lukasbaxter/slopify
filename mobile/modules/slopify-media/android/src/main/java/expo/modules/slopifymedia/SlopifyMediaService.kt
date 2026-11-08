@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -47,11 +48,24 @@ class SlopifyMediaService : Service() {
       if (svc != null) { svc.apply(s); return }
       // Only music starting brings the service up (a paused or empty session does not).
       if (s.state != "playing") return
-      ContextCompat.startForegroundService(ctx, Intent(ctx, SlopifyMediaService::class.java))
+      try {
+        ContextCompat.startForegroundService(ctx, Intent(ctx, SlopifyMediaService::class.java))
+      } catch (e: IllegalStateException) {
+        // Android 12+ refuses a foreground service started from the
+        // background (ForegroundServiceStartNotAllowedException; older ones
+        // throw this for any background start). The music goes on in the
+        // WebView; the next update with the app in front brings it up.
+        Log.w("SlopifyMedia", "playback service not started: ${e.message}")
+      }
     }
-    fun stop(ctx: Context) {
+    // Never stopService(): a start still on its way would then end before it
+    // called startForeground, which Android punishes by crashing the app
+    // ("did not then call startForeground"). With no instance there is no
+    // service yet; one on its way sees latest == null and stops itself once
+    // it is in the foreground.
+    fun stop(@Suppress("UNUSED_PARAMETER") ctx: Context) {
       latest = null
-      instance?.let { it.shutdown() } ?: ctx.stopService(Intent(ctx, SlopifyMediaService::class.java))
+      instance?.shutdown()
     }
   }
 
@@ -91,8 +105,11 @@ class SlopifyMediaService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     // Foreground at once, whatever the intent: Android stops an app that
     // asked for a foreground service and did not become one within seconds.
-    val s = latest ?: MediaState("paused", "Slopify", "", "", null, null, null, 1.0, System.currentTimeMillis(), emptyList())
+    val wanted = latest
+    val s = wanted ?: MediaState("paused", "Slopify", "", "", null, null, null, 1.0, System.currentTimeMillis(), emptyList())
     goForeground(build(s))
+    // Started by update(), and stopped before it got here: done.
+    if (wanted == null && intent?.action == null) { shutdown(); return START_NOT_STICKY }
     when (intent?.action) {
       "slopify.play" -> send("play")
       "slopify.pause" -> send("pause")

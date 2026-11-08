@@ -62,6 +62,7 @@ def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None)
 class Engine:
     def __init__(self):
         self.lock = threading.Lock(); self.ready = False; self.loaded_at = 0
+        self.thinking = threading.Lock()   # one recommend at a time (see recommend)
 
     def load(self):
         meta_p = os.path.join(MODEL_DIR, "meta.json")
@@ -95,6 +96,12 @@ class Engine:
         return played | liked, disliked
 
     def recommend(self, ask):
+        """Answered from worker threads (serve.py, search()): one at a time,
+        as it was on the event loop, so the model never runs twice at once."""
+        with self.thinking:
+            return self._recommend(ask)
+
+    def _recommend(self, ask):
         if not self.ready:
             return None
         with self.lock:

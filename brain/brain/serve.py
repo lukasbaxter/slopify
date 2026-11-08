@@ -33,7 +33,9 @@ def check(key):
 async def recommend(req: Request, x_brain_key: str = Header(default="")):
     check(x_brain_key)
     ask = await req.json(); t0 = time.time()
-    out = engine.recommend(ask)
+    # Off the event loop: run on it, the model held up /status and every
+    # other request for as long as it thought (Engine.recommend runs one at a time).
+    out = await asyncio.to_thread(engine.recommend, ask)
     if out is None:
         raise HTTPException(503, "no model yet")
     out["ms"] = round((time.time() - t0) * 1000)

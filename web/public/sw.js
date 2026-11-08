@@ -24,8 +24,11 @@ const COVERS = 'slopify-covers';
 // API answers are kept per account (slopify-api-<user id>, the id rides in
 // the X-Slopify-User header the app sends): one person's playlists and
 // history were served to the next person signing in on the same phone.
-const keepCache = (k) => k === SHELL || k === SONGS || k === COVERS || k.startsWith(API);
-const apiCacheOf = (req) => { const u = req.headers.get('X-Slopify-User'); return u && /^[\w-]{1,64}$/.test(u) ? `${API}-${u}` : API; };
+// A request without the id (sent before the app knows the user) is not
+// kept or answered from here at all: it used to share one cache,
+// 'slopify-api', across accounts, and that old cache is dropped.
+const keepCache = (k) => k === SHELL || k === SONGS || k === COVERS || k.startsWith(`${API}-`);
+const apiCacheOf = (req) => { const u = req.headers.get('X-Slopify-User'); return u && /^[\w-]{1,64}$/.test(u) ? `${API}-${u}` : null; };
 const SCOPE = self.registration.scope;
 const PLACEHOLDER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#282828"/><path d="M58 30v30.5a9 9 0 1 1-4-7.5V36l-14 3.5v25a9 9 0 1 1-4-7.5V35.5L58 30z" fill="#7f7f7f"/></svg>';
 const INDEX = new URL('./', SCOPE).href;
@@ -323,6 +326,6 @@ self.addEventListener('fetch', (e) => {
   if (img) { e.respondWith(cover(e, req, decodeURIComponent(img[1]))); return; }
   if (/^\/api\/users\/[^/]+\/avatar$/.test(url.pathname)) { e.respondWith(cover(e, req, null)); return; } // profile pictures, kept like covers
   if (url.pathname === '/healthz') return;
-  if (url.pathname.startsWith('/api/') && !SKIP.test(url.pathname)) e.respondWith(api(e, req));
+  if (url.pathname.startsWith('/api/') && !SKIP.test(url.pathname) && apiCacheOf(req)) e.respondWith(api(e, req));
   // Everything else (streams, downloads, the socket) goes straight to the network.
 });

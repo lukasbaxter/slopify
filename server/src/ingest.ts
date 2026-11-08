@@ -241,7 +241,15 @@ export class Ingest {
   private async maybeDelete(dir: string, kept: string[], st: IngestStats) {
     const rel = path.relative(this.o.incomingDir, dir) || '.';
     let files: string[];
-    try { files = (await fsp.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile() && !e.name.startsWith('.')).map((e) => path.join(dir, e.name)); } catch { return; }
+    // The same files folders() takes: NAS index leftovers (Thumbs.db,
+    // SYNO*, .DS_Store) are never copied, so they never count as missing
+    // from the NAS; they go with the folder.
+    let junk: string[];
+    try {
+      const ents = (await fsp.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile());
+      files = ents.filter((e) => !e.name.startsWith('.') && !isSynoFile(e.name)).map((e) => path.join(dir, e.name));
+      junk = ents.filter((e) => isSynoFile(e.name)).map((e) => path.join(dir, e.name));
+    } catch { return; }
     const wait = this.o.deleteSettleMs ?? 60 * 60000;
     let newest = 0;
     for (const f of files) { try { newest = Math.max(newest, (await fsp.stat(f)).mtimeMs); } catch { /* gone */ } }
@@ -265,6 +273,7 @@ export class Ingest {
       if (!t || t.size !== s.size || (this.heads() && !headOf(this.db, this.o.cacheDir, t.id, t.size))) { st.kept++; this.log(`ingest: keeping ${rel} on the SSD (${path.basename(f)} is not in the library${this.heads() ? ' with a head' : ''})`); return; }
     }
     for (const f of files) await fsp.unlink(f);
+    for (const f of junk) await fsp.unlink(f).catch(() => {});
     // empty folders up to (not including) the incoming root
     let d = dir;
     while (d !== this.o.incomingDir && d.startsWith(this.o.incomingDir)) {

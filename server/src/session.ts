@@ -183,7 +183,12 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
     // connected first used to win the phone's list, and the phone's "Node" then
     // ran through that desktop's window (11-04: its poll and stall restart
     // fought the pause buttons, and it stopped when the desktop did).
-    const served = new Set(discovery ? discovery.list().map((d) => String(d.id)) : []);
+    const servedList = discovery ? discovery.list() : [];
+    const served = new Set(servedList.map((d) => String(d.id)));
+    // The same box by where it answers: the desktop's own Cast ids differ from
+    // the server's (mDNS fqdn, or its address), and its copy was listed again.
+    const at = (d: any) => (d?.host ? `${d.kind}@${d.host}:${d.port ?? ''}` : '');
+    const servedAt = new Set(servedList.map(at).filter(Boolean));
     for (const c of ofUser(self.uid)) {
       if (c.id !== self.id) players.push({ id: c.id, name: c.name, kind: c.kind, form: c.form ?? null, canPlay: c.canPlay, nowPlaying: c.nowPlaying || null, sameNetwork: c.kind === 'server' || c.net === self.net });
       // The server's speakers are for everyone; a client's own only for clients on its network.
@@ -196,7 +201,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
         // A desktop from before 0.1.148 on Linux also listed each BluOS player by its
         // mDNS name ("bluos:NODE2i-98C1.local") next to its address: one player, twice.
         if (c.kind !== 'server' && d.kind === 'bluos' && !/^bluos:\d+\.\d+\.\d+\.\d+$/.test(String(d.id))) continue;
-        if (c.kind !== 'server' && served.has(String(d.id))) continue;
+        if (c.kind !== 'server' && (served.has(String(d.id)) || servedAt.has(at(d)))) continue;
         lanDevices.push({ ...(c.kind === 'server' ? withGroup(d) : d), viaClient: c.id });
       }
     }

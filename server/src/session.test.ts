@@ -255,3 +255,46 @@ describe('who drives a speaker', () => {
     desk.ws.terminate(); phone.ws.terminate();
   });
 });
+
+describe('one box, one entry', () => {
+  // The desktop names a Cast device its own way (its mDNS fqdn, or its address
+  // when the TXT id is missing); the same box at the same address and port is
+  // the server's, once. (Its own account: the session's clients outlive an app.)
+  const tv = { id: 'cast:3f2a', kind: 'cast', name: 'Den TV', model: 'Chromecast', host: '192.168.1.80', port: 8009 };
+  const db = { prepare: (sql: string) => ({ get: (...args: any[]) => (sql.includes('FROM tokens t JOIN users') && args[0] === 'tok-box' ? { id: 'u-box', name: 'U', role: 'user' } : undefined), all: () => [], run: () => {} }) } as any;
+  let app: any; let port = 0;
+  beforeAll(async () => {
+    vi.spyOn(Discovery.prototype, 'list').mockReturnValue([tv] as any);
+    vi.spyOn(Discovery.prototype, 'start').mockImplementation(() => {});
+    vi.spyOn(Discovery.prototype, 'stop').mockImplementation(() => {});
+    app = Fastify();
+    app.decorate('requireUser', (_req: any, _reply: any, done: any) => done());
+    await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
+    registerSession(app, db, { speakers: true } as any);
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    port = (app.server.address() as any).port;
+  });
+  afterAll(async () => { await app.close(); vi.restoreAllMocks(); });
+  const hello = async (clientId: string) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const seen: any[] = []; ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));
+    ws.send(JSON.stringify({ type: 'hello', token: 'tok-box', clientId, instance: 'i', kind: 'web' }));
+    await new Promise((r) => setTimeout(r, 100));
+    return { ws, seen };
+  };
+  it('a Cast device the desktop names differently is still listed once, as the server\'s', async () => {
+    const desk = await hello('c_cast_desk');
+    const phone = await hello('c_cast_phone');
+    desk.ws.send(JSON.stringify({ type: 'devices', devices: [
+      { id: 'cast:Chromecast-3f2a._googlecast._tcp.local', kind: 'cast', name: 'Den TV', host: tv.host, port: 8009 },
+      // A Cast group on the same TV that the server does not list: the desktop's to offer.
+      { id: 'cast:Upstairs._googlecast._tcp.local', kind: 'cast', name: 'Upstairs', host: tv.host, port: 32187 },
+    ] }));
+    await new Promise((r) => setTimeout(r, 150));
+    const lan = phone.seen.filter((m) => m.type === 'roster').at(-1)?.lanDevices ?? [];
+    expect(lan.filter((x: any) => x.name === 'Den TV').map((x: any) => `${x.id} ${x.viaClient}`)).toEqual(['cast:3f2a server:u-box']);
+    expect(lan.filter((x: any) => x.name === 'Upstairs').map((x: any) => x.viaClient)).toEqual(['c_cast_desk']);
+    desk.ws.terminate(); phone.ws.terminate();
+  });
+});

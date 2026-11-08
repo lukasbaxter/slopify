@@ -139,8 +139,30 @@ export class ServerPlayer {
 
   // Commands arrive fire-and-forget: run them one at a time so a second
   // command never interleaves with a transfer or seek still mid-flight.
+  // The poll's own moves (the next track at an end, letting go of a speaker
+  // that went away) go through the same line (see auto()).
   execute(cmd: any) {
-    this.ops = this.ops.then(() => this.run(cmd));
+    this.cmdSeq += 1;
+    // A next pressed while the track is already moving on by itself is that
+    // same move: taken as a second one, it skipped the song that was starting.
+    if (cmd?.action === 'next' && this.advancing) { this.d.log(`speaker ${this.device?.name || '?'}: next while moving on already: one move`); return this.ops; }
+    this.cmds += 1;
+    this.ops = this.ops.then(() => this.run(cmd)).finally(() => { this.cmds -= 1; });
+    return this.ops;
+  }
+  private cmdSeq = 0; // commands received
+  private cmds = 0; // commands received and not done yet
+  private advancing = false; // the poll's next-track move is running
+  // What the poll decided from a reading, run in the command line, and only
+  // if nothing was asked for since that reading and the speaker is the same
+  // one: a command that came in first already moved on (or away), and the
+  // stale reading must not move a second time or yield the new track.
+  private auto(seq: number, tr: Transport, fn: () => Promise<void>, advance = false) {
+    this.ops = this.ops.then(async () => {
+      if (seq !== this.cmdSeq || tr !== this.transport) return;
+      this.advancing = advance;
+      try { await fn(); } finally { this.advancing = false; }
+    }).catch((e: any) => this.d.log(`speaker ${this.device?.name || '?'}: ${e.message}`));
     return this.ops;
   }
   private async run(cmd: any) {
@@ -155,11 +177,11 @@ export class ServerPlayer {
         const rows = this.rowsFor(cmd.trackIds || []).map((r) => ({ ...r, _queued: true }));
         let at = this.index + 1;
         while (at < this.queue.length && this.queue[at]?._queued) at += 1;
-        this.queue.splice(at, 0, ...rows); this.d.reportQueue(this.queue);
+        this.queue.splice(at, 0, ...rows); this.keepOriginal(rows); this.d.reportQueue(this.queue);
       }
-      else if (a === 'queueRemove') { const i = cmd.index | 0; if (i !== this.index && this.queue[i]) { this.queue.splice(i, 1); if (i < this.index) this.index--; this.d.reportQueue(this.queue); this.report(); } }
-      else if (a === 'queueMove') { const from = cmd.from | 0, to = cmd.to | 0; if (this.queue[from] && this.queue[to]) { const [m] = this.queue.splice(from, 1); this.queue.splice(to, 0, m); const cur = this.current; this.index = Math.max(0, this.queue.indexOf(cur as Row)); this.d.reportQueue(this.queue); this.report(); } }
-      else if (a === 'queueClear') { const cur = this.current; this.queue = this.queue.filter((t, i) => i <= this.index || !t._queued); this.index = cur ? this.queue.indexOf(cur) : -1; this.d.reportQueue(this.queue); }
+      else if (a === 'queueRemove') { const i = cmd.index | 0; if (i !== this.index && this.queue[i]) { this.queue.splice(i, 1); if (i < this.index) this.index--; this.keepOriginal(); this.d.reportQueue(this.queue); this.report(); } }
+      else if (a === 'queueMove') { const from = cmd.from | 0, to = cmd.to | 0; if (this.queue[from] && this.queue[to]) { const [m] = this.queue.splice(from, 1); this.queue.splice(to, 0, m); const cur = this.current; this.index = Math.max(0, this.queue.indexOf(cur as Row)); this.keepOriginal(); this.d.reportQueue(this.queue); this.report(); } }
+      else if (a === 'queueClear') { const cur = this.current; this.queue = this.queue.filter((t, i) => i <= this.index || !t._queued); this.index = cur ? this.queue.indexOf(cur) : -1; this.keepOriginal(); this.d.reportQueue(this.queue); }
       else if (a === 'skipTo') await this.skipTo(cmd.index | 0);
       else if (a === 'toggle') await this.toggle();
       // Asks for a state rather than flipping it: a pause sent while the
@@ -177,6 +199,22 @@ export class ServerPlayer {
     } catch (e: any) { this.d.log(`speaker ${this.device?.name || '?'}: ${a} FAILED: ${e.message}`); }
   }
 
+  // The unshuffled order follows every edit of the queue, so turning shuffle
+  // off keeps what was added and leaves out what was removed. Shuffle off, it
+  // is the queue as it stands; shuffled, songs added go after the current one
+  // (behind others added that way), as they do in the queue.
+  private keepOriginal(added: Row[] = []) {
+    if (this.shuffle === 'off') { this.original = [...this.queue]; return; }
+    if (!this.original.length) return;
+    const left = new Set(this.queue);
+    this.original = this.original.filter((t) => left.has(t));
+    if (!added.length) return;
+    const cur = this.current;
+    let at = cur ? this.original.indexOf(cur) + 1 : this.original.length;
+    if (at <= 0) at = this.original.length;
+    while (at < this.original.length && this.original[at]?._queued) at += 1;
+    this.original.splice(at, 0, ...added);
+  }
   // Another client hands its session over: its queue, playhead, and the speaker to use.
   private async transfer(cmd: any) {
     const dev = this.d.discovery.get(String(cmd.deviceId || ''));
@@ -198,7 +236,9 @@ export class ServerPlayer {
       if (at < 0) at = 0;
     }
     await this.switchDevice(dev);
-    if (!keep) { this.queue = rows; this.original = rows; }
+    // Two arrays, never one: extend() adds to both, and one array shared by
+    // both got every autoplay song twice.
+    if (!keep) { this.queue = rows; this.original = [...rows]; }
     this.index = at;
     this.d.claim();
     await this.start(this.queue[at], Number(cmd.position) || 0, cmd.playing !== false);
@@ -223,7 +263,7 @@ export class ServerPlayer {
     const idx = Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     let order = rows, start = idx;
     if (this.shuffle === 'on' && rows.length > 1) { order = [rows[idx], ...shuffled(rows.filter((_, i) => i !== idx))]; start = 0; }
-    this.original = rows; this.queue = order; this.index = start;
+    this.original = rows; this.queue = order === rows ? [...rows] : order; this.index = start;
     this.d.claim();
     await this.start(this.queue[start], Number(cmd.startAt) || 0, true);
     this.d.reportQueue(this.queue);
@@ -326,24 +366,37 @@ export class ServerPlayer {
   // Another account took one of our speakers. A member just leaves the group;
   // the speaker the music started on hands the music to the next one in the
   // group, which carries on from the same place. Nothing left: let go.
+  // The speaker is let go of right away, never behind this player's own
+  // commands: the claimer waits on this from inside its own command line, and
+  // two accounts taking a speaker from each other at once waited on each
+  // other's line forever (and so did every command after). Only carrying the
+  // music on to the rest of the group waits its turn here.
   async giveUp(id: string) {
-    if (this.device?.id !== id) return this.dropMember(id);
+    if (this.device?.id !== id) {
+      const m = this.members.find((x) => x.id === id);
+      if (!m) return;
+      await this.unlink(m);
+      if (this.device) { if (this.members.length) linkedGroups.set(this.device.id, this.members.map((x) => x.id)); else linkedGroups.delete(this.device.id); }
+      this.report();
+      return;
+    }
     const rest = this.members.filter((m) => m.id !== id);
     if (!rest.length || !this.transport) return this.yield();
+    const pos = this.position, playing = this.playing, track = this.current;
+    this.excluded.add(id);
+    try {
+      this.stopPolling();
+      await this.dissolveGroup();
+      await this.transport?.stop().catch(() => {}); this.transport?.close(); this.transport = null;
+      if (owners.get(id) === this) owners.delete(id);
+      this.device = null;
+    } catch (e) { this.excluded.delete(id); throw e; }
     this.ops = this.ops.then(async () => {
-      const pos = this.position, playing = this.playing, track = this.current;
-      this.excluded.add(id);
       try {
-        this.stopPolling();
-        await this.dissolveGroup();
-        await this.transport?.stop().catch(() => {}); this.transport?.close(); this.transport = null;
-        if (owners.get(id) === this) owners.delete(id);
-        this.device = null;
         await this.switchDevice(rest[0]);
         if (track) await this.start(track, pos, playing);
       } finally { this.excluded.delete(id); }
     }).catch((e: any) => this.d.log(`group: hand-off failed: ${e.message}`));
-    return this.ops;
   }
   private releaseDevice() {
     if (this.device && owners.get(this.device.id) === this) owners.delete(this.device.id);
@@ -638,12 +691,14 @@ export class ServerPlayer {
   private lengthFrom(speaker: number | undefined) { if (!this.current?.RunTimeTicks && speaker && speaker > 0) this.duration = speaker; }
   private stopPolling() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   private async tick() {
-    if (!this.transport || this.starting || !this.current) return;
+    if (!this.transport || this.starting || !this.current || this.cmds) return;
     if (Date.now() < this.busyUntil) return;
     const t0 = Date.now();
+    const seq = this.cmdSeq, tr = this.transport;
     if (this.playing) this.reached = Math.max(this.reached, this.position);
-    const s = await this.transport.status();
+    const s = await tr.status();
     if (Date.now() < this.busyUntil) return; // a seek/toggle started while we read: stale
+    if (seq !== this.cmdSeq || this.cmds) return; // a command came in while we read: so is this
     const readAt = (t0 + Date.now()) / 2;
     // Mirror the speaker's own volume (someone used the dial or the BluOS
     // app), but never a muted reading and never right after we set it.
@@ -658,7 +713,7 @@ export class ServerPlayer {
     } else if (typeof s.volume === 'number' && !s.muted && Date.now() > this.volumeHeldUntil) this.volume = s.volume;
     // The transport lost the device under us (socket error, receiver hung
     // up): release the session cleanly, never relaunch on a dead connection.
-    if (s.gone) { await this.yield(); return; }
+    if (s.gone) { await this.auto(seq, tr, () => this.yield()); return; }
     // Another app took the speaker (Spotify, AirPlay, the BluOS app): what it
     // plays is no longer our stream. Twice in a row, so a reading from the
     // moment our own stream starts never counts.
@@ -668,7 +723,7 @@ export class ServerPlayer {
     const foreign = (s.state === 'play' || s.state === 'stream') && !!s.service && !/^(url)?$/i.test(s.service)
       && !!s.streamUrl && !s.streamUrl.includes('/api/stream');
     this.foreignReads = foreign ? this.foreignReads + 1 : 0;
-    if (this.foreignReads >= 2) { await this.lose(s.serviceName || s.service || 'another app'); return; }
+    if (this.foreignReads >= 2) { await this.auto(seq, tr, () => this.lose(s.serviceName || s.service || 'another app')); return; }
     // The track ran out: the speaker says so (Cast), or it stopped by itself
     // within a few seconds of the end of what we know the track to be (BluOS
     // does not always know a stream's length).
@@ -681,8 +736,11 @@ export class ServerPlayer {
     // external stop too, and skipping ahead on that would relaunch a
     // speaker someone just silenced. Anything else is an external stop.
     const atEnd = this.duration > 0 && (got >= this.duration - 5 || got >= this.duration * 0.95);
-    if (s.ended && !atEnd) { await this.yield(); return; }
-    if (s.ended || (s.state === 'stop' && this.playing && nearEnd)) { await this.next(true); return; }
+    if (s.ended && !atEnd) { await this.auto(seq, tr, () => this.yield()); return; }
+    // Stopped by itself within a few seconds of the end is the end, on every
+    // transport: BluOS says 'stop', the rest (Cast, DLNA, Roku, AirPlay, the
+    // bridge) 'IDLE', so an end whose ended flag was missed still moves on.
+    if (s.ended || ((s.state === 'stop' || s.state === 'IDLE') && this.playing && nearEnd)) { await this.auto(seq, tr, () => this.next(true), true); return; }
     if (s.state === 'IDLE' || s.state === 'stop') {
       // Stopped from the speaker itself (or the stream failed): show it paused where it was.
       if (this.playing) { this.d.log(`speaker ${this.device?.name || '?'}: stopped at ${Math.round(this.position)}s of ${Math.round(this.duration)}s (reached ${Math.round(this.reached)}s), not the end: paused`); this.setPos(this.position, false); this.report(); }

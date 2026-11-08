@@ -290,6 +290,10 @@ export class Discovery {
       const seen = new Set<string>();
       let changed = false;
       const queue = hosts.flatMap((h) => [[h, CAST_PORT], [h, BLUOS_PORT], [h, BRIDGE_PORT], [h, TV_AGENT_PORT]] as [string, number][]);
+      // What mDNS found is asked too, on its own port (a Cast group's, an
+      // AirPlay receiver's), wherever it is: it ages out below like the rest.
+      const queued = new Set(queue.map(([h, p]) => `${h}:${p}`));
+      for (const d of this.devices.values()) if (!d.ssdp && !queued.has(`${d.host}:${d.port}`)) { queued.add(`${d.host}:${d.port}`); queue.push([d.host, d.port]); }
       const agentsSeen = new Set<string>();
       const worker = async () => {
         while (queue.length) {
@@ -314,13 +318,15 @@ export class Discovery {
         this.missedAgents.set(host, n);
         if (n >= 2) { this.agents.delete(host); this.missedAgents.delete(host); }
       }
+      // Two sweeps in a row without an answer: gone. Found by mDNS too: one
+      // switched off without a goodbye stayed listed forever.
       for (const [id, d] of this.devices) {
-        if (!d.swept || d.ssdp) continue;
+        if (d.ssdp) continue;
         const key = `${d.host}:${d.port}`;
         if (seen.has(key)) { this.missed.delete(key); continue; }
         const n = (this.missed.get(key) || 0) + 1;
         this.missed.set(key, n);
-        if (n >= 2) { this.devices.delete(id); this.missed.delete(key); changed = true; }
+        if (n >= 2) { this.devices.delete(id); this.missed.delete(key); if (d.kind === 'airplay') this.airplaySeen.delete(d.host); changed = true; }
       }
       if (changed) this.onChange(this.list());
     } finally { this.sweeping = false; }

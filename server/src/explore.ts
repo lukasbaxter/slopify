@@ -363,6 +363,34 @@ export function submitListen(db: DB, opts: ExploreOptions, uid: string, trackId:
     .catch((e) => (opts.log ?? (() => {}))(`listenbrainz submit: ${e.message}`));
 }
 
+// Weekly on Monday from 06:30, daily from 07:15, whichever minute the process is awake.
+// The last-run stamp is written only AFTER a run that worked: something was
+// built, or every list was fetched and there was simply nothing new. A
+// throw or an account with no ListenBrainz playlist yet leaves the stamp
+// unset so the run is retried — and the try-stamp backs those retries off
+// to one an hour, so a ListenBrainz outage is not hammered every minute.
+export function exploreScheduler(db: DB, run: (kinds: Kind[]) => Promise<any>) {
+  const attempt = (slot: 'weekly' | 'daily', kinds: Kind[], at: number) => {
+    const tried = kvGet(db, `explore:try:${slot}`) || '0';
+    if (at - Number(tried) < 3600000) return;
+    kvSet(db, `explore:try:${slot}`, String(at));
+    void run(kinds).then((r: any) => {
+      // Another run was going (the other slot, the button): not a try; next minute again.
+      if (r?.running) { kvSet(db, `explore:try:${slot}`, tried); return; }
+      if (Array.isArray(r?.built) && (r.built.length > 0 || r.failures === 0)) kvSet(db, `explore:last:${slot}`, String(at));
+    });
+  };
+  return (now = new Date()) => {
+    const at = now.getTime();
+    const day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes();
+    const lastWeekly = Number(kvGet(db, 'explore:last:weekly') || 0), lastDaily = Number(kvGet(db, 'explore:last:daily') || 0);
+    // Each on its own: on a Monday whose weekly run had not worked yet, the
+    // weekly one kept winning and Daily Jams never ran that day.
+    if (day === 1 && mins >= 390 && at - lastWeekly > 6 * 86400000) attempt('weekly', ['weekly-exploration', 'weekly-jams'], at);
+    if (mins >= 435 && new Date(lastDaily).toDateString() !== now.toDateString()) attempt('daily', ['daily-jams'], at);
+  };
+}
+
 export function registerExplore(app: FastifyInstance, db: DB, opts: ExploreOptions) {
   const log = (m: string) => app.log.info(m);
   // With an ingest (new music on the SSD, library on the NAS) the fresh downloads are taken in by a sweep, not a walk of the NAS.
@@ -392,27 +420,8 @@ export function registerExplore(app: FastifyInstance, db: DB, opts: ExploreOptio
       if (still || later) submitListen(db, o, uid, trackId, at);
     }, wait).unref());
   });
-  // Weekly on Monday from 06:30, daily from 07:15, whichever minute the process is awake.
-  // The last-run stamp is written only AFTER a run that worked: something was
-  // built, or every list was fetched and there was simply nothing new. A
-  // throw or an account with no ListenBrainz playlist yet leaves the stamp
-  // unset so the run is retried — and the try-stamp backs those retries off
-  // to one an hour, so a ListenBrainz outage is not hammered every minute.
-  const attempt = (slot: 'weekly' | 'daily', kinds: Kind[]) => {
-    if (Date.now() - Number(kvGet(db, `explore:try:${slot}`) || 0) < 3600000) return;
-    kvSet(db, `explore:try:${slot}`, String(Date.now()));
-    void run(kinds).then((r: any) => {
-      if (Array.isArray(r?.built) && (r.built.length > 0 || r.failures === 0)) kvSet(db, `explore:last:${slot}`, String(Date.now()));
-    });
-  };
-  const tick = () => {
-    const now = new Date();
-    const day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes();
-    const lastWeekly = Number(kvGet(db, 'explore:last:weekly') || 0), lastDaily = Number(kvGet(db, 'explore:last:daily') || 0);
-    if (day === 1 && mins >= 390 && Date.now() - lastWeekly > 6 * 86400000) attempt('weekly', ['weekly-exploration', 'weekly-jams']);
-    else if (mins >= 435 && new Date(lastDaily).toDateString() !== now.toDateString()) attempt('daily', ['daily-jams']);
-  };
-  if (process.env.NODE_ENV !== 'test') setInterval(tick, 60000).unref();
+  const tick = exploreScheduler(db, run);
+  if (process.env.NODE_ENV !== 'test') setInterval(() => tick(), 60000).unref();
   app.post('/api/admin/explore', { preHandler: (app as any).requireAdmin }, async (req) => {
     const kinds = ((req.body as any)?.kinds as Kind[] | undefined)?.filter((k) => k in KINDS) ?? (['weekly-exploration', 'weekly-jams', 'daily-jams'] as Kind[]);
     const job = run(kinds);

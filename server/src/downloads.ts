@@ -10,7 +10,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { releaseInLibrary } from './discover.js';
-import type { Lidarr, AlbumState } from './lidarr.js';
+import type { Lidarr, AlbumState, Timings } from './lidarr.js';
 import { searchKey, type Soularr, type SoularrStatus } from './soularr.js';
 
 // Monitored with nothing moving for this long = stuck (a Soulseek watcher
@@ -74,7 +74,11 @@ export function withWatcher(item: ReturnType<typeof downloadOut>, st: SoularrSta
   return out;
 }
 
-export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?: Lidarr; soularr?: Soularr }) {
+// How long the Downloads page waits for Lidarr before it answers from the
+// last answer it has (see the route). Lidarr answers in ~0.3 s when it is not busy.
+export const LIDARR_WAIT_MS = 2500;
+
+export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?: Lidarr; soularr?: Soularr; waitMs?: number }) {
   const soularr = opts.soularr?.enabled || opts.soularr?.canClear ? opts.soularr : null;
   const failedImports = async () => {
     try { return soularr ? await soularr.failedImports() : new Set<number>(); }
@@ -104,42 +108,81 @@ export function registerDownloads(app: FastifyInstance, db: DB, opts: { lidarr?:
     return m;
   };
 
+  // Lidarr's answer, as last seen, per account and scope. Lidarr stalls its
+  // API while it imports a download (every /album call 19.6-19.8 s at once
+  // on the live server, 11-08, during an import; 306 ms the median of 53
+  // looks over 5 minutes), and the page waited for it: 20.9 s to open. Now
+  // Lidarr gets LIDARR_WAIT_MS, then the last answer is used and the live
+  // one lands in the kept copy for the next poll. One look at Lidarr per
+  // account and scope at a time: the page polls every 5 s and a stalled
+  // Lidarr used to collect a request per poll. Without a kept copy (the
+  // first look since the server started) the live answer is waited for.
+  const kept = new Map<string, { at: number; rows: AlbumState[] }>();
+  const inFlight = new Map<string, Promise<AlbumState[]>>();
+  const lookup = (uid: string, scope: 'mine' | 'all', t: Timings): Promise<AlbumState[]> => {
+    const key = `${uid} ${scope}`;
+    const running = inFlight.get(key); if (running) return running;
+    const p = (async () => {
+      if (scope === 'mine') {
+        const ids = (db.prepare('SELECT DISTINCT lidarr_id FROM my_requests WHERE user_id = ? ORDER BY created DESC LIMIT 500').all(uid) as any[]).map((r) => r.lidarr_id);
+        return lidarr!.albums(ids, t);
+      }
+      const rows = await lidarr!.all(t);
+      // Finished requests drop off Lidarr's wanted list: keep this
+      // account's recent ones visible with their final state.
+      const seen = new Set(rows.map((r) => r.id));
+      const mine = (db.prepare('SELECT DISTINCT lidarr_id FROM my_requests WHERE user_id = ? ORDER BY created DESC LIMIT 100').all(uid) as any[]).map((r) => r.lidarr_id);
+      // and what the watcher gave up on lately, whoever queued it
+      const quit = (db.prepare('SELECT lidarr_id FROM download_watch WHERE gave_up > ? ORDER BY gave_up DESC LIMIT 100').all(Date.now() - 7 * 86400000) as any[]).map((r) => r.lidarr_id);
+      return rows.concat(await lidarr!.albums([...new Set([...mine, ...quit])].filter((i) => !seen.has(i)), t));
+    })().then((rows) => { kept.set(key, { at: Date.now(), rows }); return rows; })
+      .finally(() => inFlight.delete(key));
+    inFlight.set(key, p);
+    return p;
+  };
+
   // scope=mine: what this account asked for (newest first); scope=all:
   // everything wanted or moving in Lidarr, whoever asked.
+  // keptAt: set when Lidarr was slow and the answer is the last one seen.
   app.get('/api/downloads', auth, async (req: any, reply) => {
     if (!ready) return reply.code(503).send({ error: 'Downloads are not set up on this server (LIDARR_URL / LIDARR_API_KEY)' });
     const scope = req.query.scope === 'all' ? 'all' : 'mine';
-    const meta = metaFor(req.user.id);
+    // Per-step ms, one debug line per answer (LOG_LEVEL=debug).
+    const t0 = Date.now(); let t = t0;
+    const ms: Record<string, unknown> = {};
+    const step = (k: string) => { const n = Date.now(); ms[k] = n - t; t = n; };
+    const lt: Timings = { chunks: [] };
+    const meta = metaFor(req.user.id); step('meta');
     let rows: AlbumState[] = [];
+    let keptAt: number | null = null;
     try {
-      if (scope === 'mine') {
-        const ids = (db.prepare('SELECT DISTINCT lidarr_id FROM my_requests WHERE user_id = ? ORDER BY created DESC LIMIT 500').all(req.user.id) as any[]).map((r) => r.lidarr_id);
-        rows = await lidarr!.albums(ids);
-      } else {
-        rows = await lidarr!.all();
-        // Finished requests drop off Lidarr's wanted list: keep this
-        // account's recent ones visible with their final state.
-        const seen = new Set(rows.map((r) => r.id));
-        const mine = (db.prepare('SELECT DISTINCT lidarr_id FROM my_requests WHERE user_id = ? ORDER BY created DESC LIMIT 100').all(req.user.id) as any[]).map((r) => r.lidarr_id);
-        // and what the watcher gave up on lately, whoever queued it
-        const quit = (db.prepare('SELECT lidarr_id FROM download_watch WHERE gave_up > ? ORDER BY gave_up DESC LIMIT 100').all(Date.now() - 7 * 86400000) as any[]).map((r) => r.lidarr_id);
-        rows = rows.concat(await lidarr!.albums([...new Set([...mine, ...quit])].filter((i) => !seen.has(i))));
+      const live = lookup(req.user.id, scope, lt);
+      const last = kept.get(`${req.user.id} ${scope}`);
+      if (!last) rows = await live;
+      else {
+        live.catch((e: any) => app.log.warn(`downloads: Lidarr: ${e.message}`));
+        const late = new Promise<null>((r) => { const tm = setTimeout(() => r(null), opts.waitMs ?? LIDARR_WAIT_MS); live.finally(() => clearTimeout(tm)).catch(() => {}); });
+        const got = await Promise.race([live, late]).catch(() => null);
+        if (got) rows = got; else { rows = last.rows; keptAt = last.at; }
       }
     } catch (e: any) { return reply.code(502).send({ error: e.message }); }
+    step('lidarr'); ms.activity = lt.activity; ms.chunks = lt.chunks.join('/');
     const now = Date.now();
-    const watch = watchOf(rows.map((a) => a.id));
-    const st = soularr?.status(now) ?? null;
+    const watch = watchOf(rows.map((a) => a.id)); step('watch');
+    const st = soularr?.status(now) ?? null; step('soularr');
     // Its failed-imports list when its Web UI is reachable; else what its log says it skips.
-    const failed = soularr?.canClear ? await failedImports() : new Set(st?.skipped.keys() ?? []);
-    const items = rows.map((a) => withWatcher(downloadOut(a, meta.get(a.id), releaseInLibrary(db, a.artist, a.title), now, watch.get(a.id)), st, failed.has(a.id)));
+    const failed = soularr?.canClear ? await failedImports() : new Set(st?.skipped.keys() ?? []); step('failedImports');
+    const lib = new Map<number, { id: string } | null>(rows.map((a) => [a.id, releaseInLibrary(db, a.artist, a.title)])); step('library');
+    const items = rows.map((a) => withWatcher(downloadOut(a, meta.get(a.id), lib.get(a.id) ?? null, now, watch.get(a.id)), st, failed.has(a.id)));
     const counts: Record<string, number> = {};
     for (const i of items) counts[i.state] = (counts[i.state] || 0) + 1;
     const order = ['downloading', 'adding', 'stuck', 'queued', 'failed', 'done'];
     items.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (b.requested ?? 0) - (a.requested ?? 0));
     // The downloader's own rhythm, so a waiting album can say when it is next looked at.
-    const wanted = st ? await Promise.resolve().then(() => lidarr!.wantedCount()).catch(() => null) : null;
+    const wanted = st ? await Promise.resolve().then(() => lidarr!.wantedCount()).catch(() => null) : null; step('wanted');
     const watcher = st ? { name: 'Soularr', lastCheck: st.lastStart, lastCheckEnd: st.lastEnd, next: st.next, interval: st.interval, checking: st.checking, perCheck: st.perCheck, wanted } : null;
-    return { scope, items, counts, stuckAfterMs: STUCK_MS, watcher, now };
+    app.log.debug(`downloads ${scope}: ${rows.length} albums in ${Date.now() - t0} ms${keptAt ? ' (Lidarr slow: kept copy)' : ''} ${JSON.stringify(ms)}`);
+    return { scope, items, counts, stuckAfterMs: STUCK_MS, watcher, now, ...(keptAt ? { keptAt } : {}) };
   });
 
   // Try a failed or stuck album again: monitor it and search Lidarr's

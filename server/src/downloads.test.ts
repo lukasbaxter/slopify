@@ -256,4 +256,38 @@ describe('downloads', () => {
     expect(fs.readdirSync(dir).sort()).toEqual(['In Progress', 'Just Emptied', 'failed_imports']);
     expect(r.failed).toEqual([{ name: 'Band - Thing (2000)', bytes: 10 }]);
   });
+
+  it('Lidarr stalled (importing a download): the page answers in seconds from the last answer, and one look at a time', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl-slow-')));
+    for (let i = 1; i <= 3; i++) recordRequest(db, 'u1', { id: i, album_id: `mb${i}`, artist: 'A', title: `T${i}` }, 'request');
+    let stall: Promise<void> | null = null; let release = () => {};
+    let looks = 0;
+    const lidarr: any = {
+      enabled: true,
+      albums: async (ids: number[]) => { looks++; if (stall) await stall; return ids.map((i) => album({ id: i, album_id: `mb${i}`, title: `T${i}`, done: looks > 1 ? 5 : 0 })); },
+    };
+    const app = appWith(db, lidarr);
+    const first = (await app.inject({ url: '/api/downloads' })).json();
+    expect(first.items.map((x: any) => x.state)).toEqual(['queued', 'queued', 'queued']);
+    expect(first.keptAt).toBeUndefined();
+    // Lidarr stops answering (live: every /album call 19.6 s during an import).
+    stall = new Promise((r) => { release = r; });
+    const t0 = Date.now();
+    const slow = await Promise.race([app.inject({ url: '/api/downloads' }), new Promise<null>((r) => setTimeout(() => r(null), 6000))]);
+    expect(slow, 'the page waited for the stalled Lidarr').not.toBeNull();
+    expect(Date.now() - t0).toBeLessThan(4000);
+    expect(slow!.json().items.map((x: any) => x.id).sort()).toEqual([1, 2, 3]);
+    expect(typeof slow!.json().keptAt).toBe('number');
+    // the next poll while Lidarr is still stalled asks it nothing new
+    const before = looks;
+    await app.inject({ url: '/api/downloads' });
+    expect(looks).toBe(before);
+    // Lidarr answers: the answer is kept and the next poll shows it, fresh
+    release(); stall = null;
+    await new Promise((r) => setTimeout(r, 20));
+    const after = (await app.inject({ url: '/api/downloads' })).json();
+    expect(after.items.map((x: any) => x.state)).toEqual(['downloading', 'downloading', 'downloading']);
+    expect(after.keptAt).toBeUndefined();
+    await app.close();
+  }, 20000);
 });

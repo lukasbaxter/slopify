@@ -96,6 +96,9 @@ const stateOf = (a: any, queue: Map<number, QueueEntry>): AlbumState => ({
   queue: queue.get(a.id) ?? null,
 });
 
+// Milliseconds per Lidarr step of one Downloads answer (its debug line).
+export type Timings = { activity?: number; chunks: number[] };
+
 export function lidarrClient(opts: LidarrOptions) {
   const base = (opts.url || '').replace(/\/+$/, '');
   const f = opts.fetcher ?? fetch;
@@ -110,7 +113,9 @@ export function lidarrClient(opts: LidarrOptions) {
       headers: { 'X-Api-Key': opts.apiKey, ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers },
       signal: AbortSignal.timeout(init?.timeoutMs ?? 20000),
     });
-    if (!r.ok) throw new Error(`Lidarr ${p.split('?')[0]} ${r.status}`);
+    // The status rides on the error: an answer that is an error (a bad id)
+    // is not the same as no answer in time (Lidarr busy).
+    if (!r.ok) throw Object.assign(new Error(`Lidarr ${p.split('?')[0]} ${r.status}`), { status: r.status });
     return r.status === 204 ? null : r.json() as Promise<any>;
   };
 
@@ -229,20 +234,27 @@ export function lidarrClient(opts: LidarrOptions) {
   // One id Lidarr no longer knows (an album deleted there after it was
   // requested) makes the whole /album?albumIds call a 500: a failing chunk
   // is split until the bad ids are alone, and those are left out.
+  // Only an error ANSWER is split. No answer in time (Lidarr stalls its API
+  // for ~20 s while it imports a download: 5 of 5 chunks at 19.6 s on the
+  // live server, 11-08) says nothing about the ids: splitting then asked the
+  // stalled Lidarr again, one half after the other, and a 45 s stall cost
+  // the Downloads page 46 s. It fails the call instead.
   const albumChunk = async (c: number[]): Promise<any[]> => {
     try { return ((await api(`/album?${c.map((i) => `albumIds=${i}`).join('&')}`)) || []) as any[]; }
     catch (e: any) {
+      if (!e.status) throw e;
       if (c.length === 1) { log(`lidarr: album ${c[0]} not fetched (${e.message})`); return []; }
       const mid = c.length >> 1;
       return [...await albumChunk(c.slice(0, mid)), ...await albumChunk(c.slice(mid))];
     }
   };
-  const albumsByIds = async (ids: number[]): Promise<any[]> => {
+  // t: where the Downloads route's debug line collects each chunk's ms.
+  const albumsByIds = async (ids: number[], t?: Timings): Promise<any[]> => {
     const chunks: number[][] = [];
     for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
     const out: any[] = [];
     await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, async () => {
-      for (let c = chunks.shift(); c; c = chunks.shift()) out.push(...await albumChunk(c));
+      for (let c = chunks.shift(); c; c = chunks.shift()) { const t0 = Date.now(); out.push(...await albumChunk(c)); t?.chunks.push(Date.now() - t0); }
     }));
     return out;
   };
@@ -430,18 +442,22 @@ export function lidarrClient(opts: LidarrOptions) {
     },
 
     // Live state of specific albums (the Downloads page's "Yours").
-    async albums(ids: number[]): Promise<AlbumState[]> {
+    async albums(ids: number[], t?: Timings): Promise<AlbumState[]> {
       if (!ids.length) return [];
+      const t0 = Date.now();
       const { queue } = await activity();
-      return (await albumsByIds(ids)).map((a) => stateOf(a, queue));
+      if (t) t.activity = (t.activity ?? 0) + Date.now() - t0;
+      return (await albumsByIds(ids, t)).map((a) => stateOf(a, queue));
     },
 
     // Everything wanted or moving, whoever asked (the Downloads page's "Everyone").
-    async all(): Promise<AlbumState[]> {
+    async all(t?: Timings): Promise<AlbumState[]> {
+      const t0 = Date.now();
       const { queue, wanted } = await activity();
+      if (t) t.activity = (t.activity ?? 0) + Date.now() - t0;
       const ids = new Set<number>([...queue.keys()]);
       for (const id of wanted.values()) ids.add(id);
-      return this.albums([...ids]);
+      return this.albums([...ids], t);
     },
 
     // Try again: make sure it is monitored and fire an indexer search now.

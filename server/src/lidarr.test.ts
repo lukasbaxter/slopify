@@ -221,6 +221,25 @@ describe('lidarr client', () => {
     for (const c of chunked) expect(c.split('albumIds=').length - 1).toBeLessThanOrEqual(100);
   });
 
+  it('albums(): a chunk Lidarr answers with an error is split down to the bad id; one it does not answer in time is not asked again', async () => {
+    const { state, fetcher } = fakeLidarr();
+    for (let i = 1; i <= 100; i++) state.albums.push(fakeAlbum(i));
+    // id 42 deleted in Lidarr: any /album?albumIds call with it is a 500
+    const bad: any = async (url: string, init?: any) => (url.includes('albumIds=') && /albumIds=42(&|$)/.test(url)
+      ? { ok: false, status: 500, json: async () => ({}) } : fetcher(url, init));
+    const out = await client(bad).albums(state.albums.map((a) => a.id));
+    expect(out.length).toBe(99);
+    // Lidarr busy importing: the call times out (fetch rejects with a TimeoutError).
+    // Splitting it asked the stalled Lidarr again, half after half: 199 calls for one chunk of 100.
+    let asked = 0;
+    const stalled: any = async (url: string, init?: any) => {
+      if (url.includes('albumIds=')) { asked++; throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); }
+      return fetcher(url, init);
+    };
+    await expect(client(stalled).albums(state.albums.map((a) => a.id))).rejects.toThrow(/timeout/);
+    expect(asked).toBe(1);
+  });
+
   it('follows wanted/queue pages past 1000 records', async () => {
     const { state, fetcher } = fakeLidarr();
     for (let i = 1; i <= 1500; i++) state.albums.push(fakeAlbum(i, { monitored: true }));

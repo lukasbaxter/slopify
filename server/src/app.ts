@@ -35,8 +35,9 @@ import { registerAddresses } from './addresses.js';
 import { registerDemo } from './demo.js';
 import { registerReports } from './reports.js';
 
-// The release this server is (package.json, bumped with every tagged release).
-export const VERSION: string = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0.0.0'; } })();
+// The release this server is: SLOPIFY_VERSION, stamped into the image by the
+// Dockerfile (the tag, or main-<commit>), else package.json in development.
+export const VERSION: string = process.env.SLOPIFY_VERSION || (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0.0.0'; } })();
 const here = path.dirname(fileURLToPath(import.meta.url));
 // server/dist/app.js or server/src/app.ts -> repo root
 export const repoRoot = path.resolve(here, '..', '..');

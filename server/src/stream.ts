@@ -599,11 +599,21 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     // higher rung: those run at low priority outside the foreground slots.
     const foreground = !q.pre && (!q.abr || isLossless(profile) || parseVariant(profile)?.profile === START_PROFILE);
     let index: string;
-    try { index = await ensureHls(dataDir, id, src, profile, log, { nice: !foreground, deadlineMs: deadlineFor(id) }); }
+    let body: string;
+    // The nightly trim can delete a finished transcode between ensureHls
+    // finding it done and the read: then it is made again, once.
+    try {
+      index = await ensureHls(dataDir, id, src, profile, log, { nice: !foreground, deadlineMs: deadlineFor(id) });
+      try { body = await fsp.readFile(index, 'utf8'); }
+      catch (e: any) {
+        if (e?.code !== 'ENOENT') throw e;
+        index = await ensureHls(dataDir, id, src, profile, log, { nice: !foreground, deadlineMs: deadlineFor(id) });
+        body = await fsp.readFile(index, 'utf8');
+      }
+    }
     catch (e: any) { log(`hls ${id}:${profile}: ${e.message}`); return reply.code(503).send({ error: e instanceof Busy ? 'busy' : 'transcode failed' }); }
     // Segment URIs carry the token, since <audio> cannot send headers.
     const tok = (req.query as any).token ? `?token=${encodeURIComponent((req.query as any).token)}` : '';
-    let body = await fsp.readFile(index, 'utf8');
     if (/#EXT-X-ENDLIST/.test(body)) fsp.utimes(path.join(path.dirname(index), 'done'), new Date(), new Date()).catch(() => {}); // last-used, for eviction
     else {
       // Still encoding: the complete playlist it is going to be (see top).

@@ -1,6 +1,7 @@
 // Streaming bugs that came back before: each test here failed on the code
 // before its fix.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import fsp from 'node:fs/promises';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { buildServer } from './app.js';
 import { scanLibrary } from './scanner.js';
@@ -53,5 +54,28 @@ describe('a normalized variant after the loudness changed', () => {
     expect((await get(`/api/stream/${id}/hls/${variant}/index.m3u8?abr=1`)).statusCode).toBe(200);
     // Still bounded: only what this server handed out (as it spelled it) or picks now.
     for (const bad of ['aac-96g-4.0', 'aac-96g-5', 'aac-96g-25', 'aac-96g13', 'aac-96g04']) expect((await get(`/api/stream/${id}/hls/${bad}/index.m3u8?abr=1`)).statusCode).toBe(404);
+  }, 60000);
+});
+
+describe('the cache trim removing a transcode while its playlist is asked for', () => {
+  it('never answers 500: the playlist is transcoded again', async () => {
+    const id = trackIds()[5];
+    const dir = path.join(DATA, 'transcodes', id, 'aac-96');
+    expect((await get(`/api/stream/${id}/hls/aac-96/index.m3u8`)).statusCode).toBe(200);
+    for (let i = 0; i < 400 && !fs.existsSync(path.join(dir, 'done')); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(fs.existsSync(path.join(dir, 'done'))).toBe(true);
+    // The trim runs between ensureHls finding it done and the playlist being read.
+    const real = fsp.readFile;
+    let trimmed = false;
+    const spy = vi.spyOn(fsp, 'readFile').mockImplementation(((p: any, ...rest: any[]) => {
+      if (!trimmed && String(p) === path.join(dir, 'index.m3u8')) { trimmed = true; fs.rmSync(dir, { recursive: true, force: true }); }
+      return (real as any).call(fsp, p, ...rest);
+    }) as any);
+    try {
+      const r = await get(`/api/stream/${id}/hls/aac-96/index.m3u8`);
+      expect(trimmed).toBe(true);
+      expect(r.statusCode).toBe(200);
+      expect(r.body).toMatch(/#EXTM3U/);
+    } finally { spy.mockRestore(); }
   }, 60000);
 });

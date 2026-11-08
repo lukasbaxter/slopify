@@ -600,10 +600,12 @@ export function usePlayer(jf) {
     if (['off', 'on', 'smart'].includes(np.shuffle)) { shuffleRef.current = np.shuffle; setShuffle(np.shuffle); }
     const dur = np.duration || ticksToSeconds(q[i].RunTimeTicks);
     setDuration(dur);
-    // The session was live when the relay last heard it; it is not playing
-    // any more (its player is gone), so freeze the playhead where it got to.
-    let pos = np.position || 0;
-    if (np.playing && np.at) pos += (Math.min(Date.now(), (s.at || Date.now())) - np.at) / 1000;
+    // Shown paused where it got to. The server sends the playhead already
+    // brought up to date on its own clock (session.ts positionNow); np.at is
+    // the sending device's wall clock, and adding the time since it here
+    // mixed two clocks (session.js): a skewed device moved the song on by
+    // its skew.
+    const pos = np.position || 0;
     anchorAt(Math.max(0, Math.min(pos, dur || pos)), false);
     loadedRef.current = null;
     setPlaying(false);

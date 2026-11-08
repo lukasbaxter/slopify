@@ -74,6 +74,11 @@ async function findCover(dir: string, cache: Map<string, string | null>): Promis
   return found;
 }
 
+// Copies of songs already in the library under another path, by the path
+// they were found at (see sameAudioElsewhere): kept for the process, so a
+// later scan does not hash them again.
+const dupMemo = new Map<string, { mtime: number; size: number; id: string }>();
+
 export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult> {
   const t0 = Date.now();
   const log = opts.log ?? (() => {});
@@ -110,6 +115,22 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
   // time (ffmpeg + sharp are the cost: ~0.6 s per new file alone, 27k files
   // = hours); the database writes stay serial.
   const CONCURRENT_FILES = Number(process.env.SCAN_CONCURRENCY || 4);
+  // Two files with the same audio are one id, one row. The row stays on the
+  // file it is on while that file is there; it flipped to whichever copy a
+  // worker read last, every scan (each one re-hashed, counted as added, its
+  // head recut). Between two copies new to this scan, the lowest path wins,
+  // whatever order the workers ran in.
+  const claimed = new Set<string>(); // paths this scan wrote a row for
+  const holderOf = (id: string) => (db.prepare('SELECT path FROM tracks WHERE id = ?').get(id) as { path: string } | undefined)?.path;
+  const sameAudioElsewhere = async (id: string, rec: string): Promise<boolean> => {
+    const h = holderOf(id);
+    if (!h || h === rec) return false;
+    if (claimed.has(h)) return h < rec;
+    const there = await fs.stat(h).then((s) => s.isFile(), () => false);
+    if (holderOf(id) !== h) return sameAudioElsewhere(id, rec); // moved meanwhile: decide again
+    if (there) log(`same audio as ${h}, left as it is: ${rec}`);
+    return there;
+  };
   let cursor = 0;
   const worker = async () => { for (;;) { const file = all[cursor++]; if (!file) return; await one(file); } };
   const one = async (file: string) => {
@@ -135,12 +156,17 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
       }
       return;
     }
+    // A copy of a song already in the library under another path, seen
+    // before and unchanged: not read or hashed again while that path is there.
+    const dup = prev ? undefined : dupMemo.get(rec);
+    if (dup && dup.mtime === Math.floor(st.mtimeMs / 1000) && dup.size === st.size && await sameAudioElsewhere(dup.id, rec)) return;
     let meta;
     try { meta = await parseFile(file, { duration: true, skipCovers: false }); } catch (e: any) { log(`tags failed ${file}: ${e.message}`); return; }
     // Under a second is not a song (a stub left by a broken download).
     if ((meta.format.duration ?? 0) < 1) { log(`not a song (under a second): ${file}`); return; }
     let id: string;
     try { id = await audioContentId(file); } catch (e: any) { log(`hash failed ${file}: ${e.message}`); return; }
+    if (!prev && await sameAudioElsewhere(id, rec)) { dupMemo.set(rec, { mtime: Math.floor(st.mtimeMs / 1000), size: st.size, id }); return; }
     const c = meta.common;
     const dir = path.dirname(file);     // where it is read (covers, sidecars)
     const recDir = path.dirname(rec);   // where it is recorded
@@ -182,12 +208,19 @@ export async function scanLibrary(db: DB, opts: ScanOptions): Promise<ScanResult
     // and left the rest pointing at nothing.
     const replaced = prev && prev.id !== id ? prev.id : null;
     const isNew = !db.prepare('SELECT 1 FROM tracks WHERE id = ?').get(id);
+    // Checked again with no await before the write: another worker may have
+    // put a copy of the same audio in meanwhile (lowest path wins), or this
+    // file takes the row from such a copy (not another song added).
+    const holder = prev ? null : holderOf(id);
+    const fromCopy = !!holder && holder !== rec && claimed.has(holder);
+    if (fromCopy && holder! < rec) { dupMemo.set(rec, { mtime: Math.floor(st.mtimeMs / 1000), size: st.size, id }); return; }
     if (replaced) db.prepare("UPDATE tracks SET path = path || '#replaced' WHERE id = ?").run(replaced);
     tx();
+    claimed.add(rec); dupMemo.delete(rec);
     if (replaced) { remapTrackId(db, replaced, id, cacheDir); db.prepare('DELETE FROM tracks WHERE id = ?').run(replaced); }
     else if (isNew) newIds.push(id);
     seenIds.add(id);
-    if (prev) changed++; else added++;
+    if (prev) changed++; else if (!fromCopy) added++;
     await syncSidecar(db, id, file, upsertLyrics);
     if (opts.heads) {
       try { await buildHead(db, opts.heads.cacheDir, id, file, st.size, Math.round((meta.format.duration ?? 0) * 1000), opts.heads.seconds); } catch (e: any) { log(`head failed ${file}: ${e.message}`); }

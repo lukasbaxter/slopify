@@ -13,11 +13,21 @@ class SlopifyMediaModule : Module() {
     Events("onAction")
 
     OnCreate {
+      // Straight to the WebView (SlopifyMediaBridge); React Native's event
+      // only when there is none, since it waits while the app is hidden.
       SlopifyMediaService.onAction = { action, seekTime ->
-        sendEvent("onAction", mapOf("action" to action, "seekTime" to seekTime))
+        if (!SlopifyMediaBridge.deliver(action, seekTime)) sendEvent("onAction", mapOf("action" to action, "seekTime" to seekTime))
       }
+      appContext.currentActivity?.let { a -> a.runOnUiThread { SlopifyMediaBridge.watch(a) } }
     }
+    OnActivityEntersForeground { appContext.currentActivity?.let { a -> a.runOnUiThread { SlopifyMediaBridge.watch(a) } } }
     OnDestroy { SlopifyMediaService.onAction = null }
+
+    // The shell calls it as it starts, so the WebView gets the page-side
+    // interface before the page has loaded.
+    Function("watch") {
+      appContext.currentActivity?.let { a -> a.runOnUiThread { SlopifyMediaBridge.watch(a) } }
+    }
 
     Function("update") { state: Map<String, Any?> ->
       val ctx = appContext.reactContext ?: return@Function

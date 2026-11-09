@@ -107,7 +107,10 @@ const MEDIA_SESSION = `(function () {
     clearTimeout(t);
     t = setTimeout(function () {
       var art = metadata && metadata.artwork && metadata.artwork[0] ? metadata.artwork[0].src : null;
-      try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mediasession', state: metadata ? state : 'none', metadata: metadata ? { title: metadata.title, artist: metadata.artist, album: metadata.album, artwork: art ? new URL(art, location.href).href : null } : null, position: position, actions: Object.keys(handlers) })); } catch (e) {}
+      var msg = JSON.stringify({ type: 'mediasession', state: metadata ? state : 'none', metadata: metadata ? { title: metadata.title, artist: metadata.artist, album: metadata.album, artwork: art ? new URL(art, location.href).href : null } : null, position: position, actions: Object.keys(handlers) });
+      // Straight to the playback service when the app gave the page its
+      // interface: React Native holds messages while the app is hidden.
+      try { if (window.SlopifyMediaNative) window.SlopifyMediaNative.update(msg); else window.ReactNativeWebView.postMessage(msg); } catch (e) {}
     }, 30);
   };
   window.MediaMetadata = function (o) { o = o || {}; this.title = o.title || ''; this.artist = o.artist || ''; this.album = o.album || ''; this.artwork = o.artwork || []; };
@@ -129,6 +132,8 @@ const shellScript = (main) => `window.slopifyShell = ${JSON.stringify({ deviceNa
 
 // The page's media session to the playback service (Android; mediaSession.js).
 const mediaRelay = SlopifyMedia ? mediaSessionRelay(SlopifyMedia) : null;
+// Gives the WebView the page-side interface (SlopifyMediaBridge.kt) before it loads.
+try { SlopifyMedia?.watch?.(); } catch { /* older module */ }
 
 const hostLabel = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 

@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
 import { scanLibrary } from './scanner.js';
-import { brainPlaylist, buildPlaylist, collectFetched, exploreAll, exploreScheduler, matchTrack, slskdFind, slskdWait } from './explore.js';
+import { matchTrack, slskdFind, slskdWait } from './explore.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-explore-'));
 
-describe('ListenBrainz playlists in the app', () => {
+describe('matching library tracks and finding them on Soulseek', () => {
   const db = openDb(DATA);
   let first: any, second: any;
   beforeAll(async () => {
@@ -38,72 +38,6 @@ describe('ListenBrainz playlists in the app', () => {
     expect(f?.filename).toBe('Music\\Artist X\\Album\\03 Song Y.flac');
     expect(f?.username).toBe('a');
   });
-
-  it('builds the weekly playlist from the createdfor list, fetching what is missing, and replaces it next time', async () => {
-    let downloads = 0; let scans = 0;
-    const fetcher: any = async (url: string) => {
-      if (url.includes('/playlists/createdfor')) return { ok: true, json: async () => ({ playlists: [{ playlist: { title: 'Weekly Exploration for lbuser, week of 2026-09-14', identifier: 'https://listenbrainz.org/playlist/abc', date: '2026-09-14T00:00:00Z', extension: { 'https://musicbrainz.org/doc/jspf#playlist': { additional_metadata: { algorithm_metadata: { source_patch: 'weekly-exploration' } } } } } }] }) };
-      if (url.endsWith('/playlist/abc')) return { ok: true, json: async () => ({ playlist: { track: [{ title: first.title, creator: first.artist }, { title: second.title, creator: second.artist }, { title: 'Missing Song', creator: 'Nobody Known' }] } }) };
-      if (url.endsWith('/api/v0/searches')) return { ok: true, json: async () => ({ id: 's2' }) };
-      if (url.endsWith('/searches/s2')) return { ok: true, json: async () => ({ state: 'Completed' }) };
-      if (url.endsWith('/responses')) return { ok: true, json: async () => [{ username: 'peer', hasFreeUploadSlot: true, queueLength: 0, files: [{ filename: 'x\\Nobody Known - Missing Song.flac', size: 10 }] }] };
-      if (url.includes('/transfers/downloads/peer')) { downloads++; return { ok: true, json: async () => ({}) }; }
-      if (url.endsWith('/transfers/downloads')) return { ok: true, json: async () => [{ username: 'peer', directories: [{ files: [{ filename: 'x\\Nobody Known - Missing Song.flac', state: 'Completed, Succeeded' }] }] }] };
-      throw new Error(`unexpected ${url}`);
-    };
-    const opts = { slskdUrl: 'http://s', slskdKey: 'k', fetcher, runScan: async () => { scans++; } };
-    const r = await buildPlaylist(db, 'u1', 'weekly-exploration', opts);
-    expect(r).toEqual({ name: 'Weekly Exploration 2026-09-14', matched: 2, total: 3, fetched: 1 });
-    expect(downloads).toBe(1); expect(scans).toBe(1);
-    const pl = db.prepare("SELECT id FROM playlists WHERE user_id = 'u1' AND name LIKE 'Weekly Exploration %'").all() as any[];
-    expect(pl.length).toBe(1);
-    expect((db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY pos').all(pl[0].id) as any[]).map((x) => x.track_id)).toEqual([first.id, second.id]);
-    // same ListenBrainz playlist again: nothing to do
-    expect(await buildPlaylist(db, 'u1', 'weekly-exploration', opts)).toBeNull();
-  });
-});
-
-describe('collectFetched: the staging dir is shared with other consumers', () => {
-  const mkFile = (name: string, size = 10): any => ({ username: 'u', filename: `dl\\${name}`, size, hasFreeUploadSlot: true, queueLength: 0 });
-  const t = { title: 'Song', artist: 'Arty', album: 'Alb' };
-
-  it('takes only files written since the download was asked for', () => {
-    const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'slop-stage-'));
-    const music = fs.mkdtempSync(path.join(os.tmpdir(), 'slop-mus-'));
-    const src = path.join(staging, 'Arty - Song.flac');
-    fs.writeFileSync(src, Buffer.alloc(10));
-    const old = (Date.now() - 7 * 86400000) / 1000;
-    fs.utimesSync(src, old, old);
-    // a week-old twin with the right name and size belongs to Soularr/Lidarr: left alone
-    expect(collectFetched([{ file: mkFile('Arty - Song.flac'), t, startedAt: Date.now() }], { downloadsDir: staging, musicDir: music })).toEqual([]);
-    expect(fs.existsSync(src)).toBe(true);
-    // freshly written: taken
-    fs.writeFileSync(src, Buffer.alloc(10));
-    const rels = collectFetched([{ file: mkFile('Arty - Song.flac'), t, startedAt: Date.now() - 5000 }], { downloadsDir: staging, musicDir: music });
-    expect(rels).toEqual([path.join('Arty', 'Alb')]);
-    expect(fs.existsSync(src)).toBe(false);
-    expect(fs.statSync(path.join(music, 'Arty', 'Alb', 'Arty - Song.flac')).size).toBe(10);
-  });
-
-  it('dest already there: same size means already delivered (src removed); a different size touches nothing', () => {
-    const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'slop-stage2-'));
-    const music = fs.mkdtempSync(path.join(os.tmpdir(), 'slop-mus2-'));
-    const src = path.join(staging, 'Arty - Song.flac');
-    const dest = path.join(music, 'Arty', 'Alb', 'Arty - Song.flac');
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    // dest holds the same size: an earlier run delivered it, only the staging copy goes
-    fs.writeFileSync(dest, Buffer.alloc(10));
-    fs.writeFileSync(src, Buffer.alloc(10));
-    expect(collectFetched([{ file: mkFile('Arty - Song.flac'), t, startedAt: Date.now() - 5000 }], { downloadsDir: staging, musicDir: music })).toEqual([path.join('Arty', 'Alb')]);
-    expect(fs.existsSync(src)).toBe(false);
-    expect(fs.statSync(dest).size).toBe(10);
-    // dest holds something ELSE (different size): neither side is touched
-    fs.writeFileSync(dest, Buffer.alloc(20));
-    fs.writeFileSync(src, Buffer.alloc(10));
-    expect(collectFetched([{ file: mkFile('Arty - Song.flac'), t, startedAt: Date.now() - 5000 }], { downloadsDir: staging, musicDir: music })).toEqual([]);
-    expect(fs.existsSync(src)).toBe(true);
-    expect(fs.statSync(dest).size).toBe(20);
-  });
 });
 
 describe('slskdWait and slskd transfer history', () => {
@@ -133,142 +67,3 @@ describe('slskdWait and slskd transfer history', () => {
   });
 });
 
-describe('rebuilds keep user edits; pruning only touches generated names', () => {
-  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-explore2-'));
-  const db = openDb(data);
-  let tr: any[];
-  beforeAll(async () => {
-    await scanLibrary(db, { musicDir: MUSIC, dataDir: data });
-    tr = db.prepare('SELECT id, title, artist FROM tracks GROUP BY title, artist HAVING COUNT(*) = 1 ORDER BY title LIMIT 2').all() as any[];
-    db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run('u1', 'lb', 'x', 'user', Date.now());
-    db.prepare('INSERT INTO prefs (user_id, json, updated) VALUES (?, ?, ?)').run('u1', JSON.stringify({ listenbrainz: { user: 'lbuser', token: 'tok' } }), Date.now());
-    const ins = db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)');
-    ins.run('px', 'u1', 'Weekly Exploration faves', 1, 1); // the user's own, a LIKE match but not the generated pattern
-    ins.run('p01', 'u1', 'Weekly Exploration 2026-01-01', 1, 1);
-    ins.run('p02', 'u1', 'Weekly Exploration 2026-01-02', 1, 1);
-    ins.run('p03', 'u1', 'Weekly Exploration 2026-01-03', 1, 1);
-  }, 120000);
-  const mkFetcher = (mbid: string, date: string): any => async (url: string) => {
-    if (url.includes('/playlists/createdfor')) return { ok: true, json: async () => ({ playlists: [{ playlist: { title: `Weekly Exploration for lbuser, week of ${date}`, identifier: `https://listenbrainz.org/playlist/${mbid}`, date: `${date}T00:00:00Z`, extension: { 'https://musicbrainz.org/doc/jspf#playlist': { additional_metadata: { algorithm_metadata: { source_patch: 'weekly-exploration' } } } } } }] }) };
-    if (url.endsWith(`/playlist/${mbid}`)) return { ok: true, json: async () => ({ playlist: { track: [{ title: tr[0].title, creator: tr[0].artist }] } }) };
-    throw new Error(`unexpected ${url}`);
-  };
-  const names = () => (db.prepare("SELECT name FROM playlists WHERE user_id = 'u1' AND name LIKE 'Weekly Exploration %' ORDER BY name").all() as any[]).map((p) => p.name);
-
-  it('replaces an untouched playlist, keeps an edited one alongside the new, and never prunes non-pattern names', async () => {
-    expect(await buildPlaylist(db, 'u1', 'weekly-exploration', { fetcher: mkFetcher('m1', '2026-09-14') })).toMatchObject({ name: 'Weekly Exploration 2026-09-14' });
-    // untouched since generation: replaced
-    await buildPlaylist(db, 'u1', 'weekly-exploration', { fetcher: mkFetcher('m2', '2026-09-21') });
-    expect(names()).toContain('Weekly Exploration 2026-09-21');
-    expect(names()).not.toContain('Weekly Exploration 2026-09-14');
-    // the user adds a track: the playlist is theirs now
-    const cur = db.prepare("SELECT id FROM playlists WHERE name = 'Weekly Exploration 2026-09-21'").get() as any;
-    db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, 99, ?, ?)').run(cur.id, tr[1].id, Date.now());
-    await buildPlaylist(db, 'u1', 'weekly-exploration', { fetcher: mkFetcher('m3', '2026-09-28') });
-    const n = names();
-    expect(n).toContain('Weekly Exploration 2026-09-28');
-    expect(n).toContain('Weekly Exploration 2026-09-21'); // kept, edits and all
-    // prune (keep 4): the oldest dated one went, the user's own name never does
-    expect(n).not.toContain('Weekly Exploration 2026-01-01');
-    expect(n).toContain('Weekly Exploration 2026-01-02');
-    expect(n).toContain('Weekly Exploration faves');
-  });
-});
-
-describe('the brain makes the mixes', () => {
-  const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-mixes-'));
-  const db = openDb(DIR);
-  const user = (id: string) => db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run(id, id, 'x', 'user', Date.now());
-  const play = (uid: string, n: number, at = Date.now()) => { for (let i = 0; i < n; i++) db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run(uid, ids[i % ids.length], at - i); };
-  let ids: string[] = [];
-  const lists = (uid: string) => (db.prepare('SELECT name FROM playlists WHERE user_id = ? ORDER BY name').all(uid) as any[]).map((p) => p.name);
-  const brainAnswers = (seen: any[]) => (async (_url: string, init: any) => { const ask = JSON.parse(init.body); seen.push(ask); return { ok: true, json: async () => ({ items: ids.filter((id) => !ask.exclude.includes(id)) }) }; }) as any;
-  const opts = (fetcher: any, more = {}) => ({ brain: true, brainUrl: 'http://brain', brainKey: 'k', fetcher, now: () => Date.parse('2026-11-05T12:00:00'), ...more });
-
-  beforeAll(async () => {
-    await scanLibrary(db, { musicDir: MUSIC, dataDir: DIR });
-    ids = (db.prepare('SELECT id FROM tracks').all() as any[]).map((r) => r.id);
-    for (const u of ['listener', 'idle', 'quiet']) user(u);
-    play('listener', 25); play('idle', 25, Date.now() - 90 * 86400000); play('quiet', 3);
-  }, 120000);
-
-  it('asks the brain, no ListenBrainz token needed, and names it so Home finds it', async () => {
-    const seen: any[] = [];
-    const r = await brainPlaylist(db, 'listener', 'weekly-jams', opts(brainAnswers(seen)));
-    expect(r?.name).toBe('Weekly Jams 2026-11-05');
-    expect(seen[0]).toMatchObject({ user: 'listener', mode: 'now' });
-    expect(lists('listener')).toContain('Weekly Jams 2026-11-05');
-  });
-
-  it('exploration leaves out everything the listener has played', async () => {
-    const seen: any[] = [];
-    await brainPlaylist(db, 'listener', 'weekly-exploration', opts(brainAnswers(seen)));
-    const played = (db.prepare('SELECT DISTINCT track_id id FROM plays WHERE user_id = ?').all('listener') as any[]).map((p) => p.id);
-    expect(seen[0].mode).toBe('radio');
-    expect([...seen[0].exclude].sort()).toEqual([...played].sort());
-  });
-
-  it('a second press replaces the mix, and one somebody edited is kept', async () => {
-    const f = brainAnswers([]);
-    await brainPlaylist(db, 'listener', 'daily-jams', opts(f));
-    await brainPlaylist(db, 'listener', 'daily-jams', opts(f));
-    expect(lists('listener').filter((n) => n.startsWith('Daily Jams'))).toHaveLength(1);
-    const mine = db.prepare("SELECT id FROM playlists WHERE user_id = 'listener' AND name LIKE 'Daily Jams%'").get() as any;
-    db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND pos = 0').run(mine.id);
-    await brainPlaylist(db, 'listener', 'daily-jams', opts(f));
-    expect(lists('listener').filter((n) => n.startsWith('Daily Jams'))).toHaveLength(2);
-  });
-
-  it('every account listening lately gets one; idle ones do not', async () => {
-    const r = await exploreAll(db, opts(brainAnswers([])), ['weekly-jams']);
-    expect(r.built.map((b: any) => b.user)).toEqual(['listener']);
-    expect(lists('idle')).toEqual([]); expect(lists('quiet')).toEqual([]);
-  });
-
-  it('a brain that does not answer counts as a failure, so the schedule tries again', async () => {
-    const r = await exploreAll(db, opts((async () => { throw new Error('down'); }) as any), ['weekly-jams']);
-    expect(r).toEqual({ built: [], failures: 1 });
-  });
-
-  it('never touches playback: a build writes playlists and nothing of any session', async () => {
-    db.prepare("INSERT INTO kv (k, v) VALUES ('session:listener', 'before') ON CONFLICT(k) DO UPDATE SET v = 'before'").run();
-    await exploreAll(db, opts(brainAnswers([])), ['daily-jams']);
-    expect((db.prepare("SELECT v FROM kv WHERE k = 'session:listener'").get() as any).v).toBe('before');
-  });
-});
-
-describe('the mix schedule', () => {
-  // A run like registerExplore's: one at a time ({ running: true } while one
-  // goes), the weekly one failing every time (ListenBrainz down, no list yet).
-  const schedule = () => {
-    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-schedule-')));
-    const runs: string[][] = [];
-    let busy = false;
-    const run = async (kinds: any[]) => {
-      if (busy) return { running: true };
-      busy = true; runs.push(kinds);
-      try { await new Promise((r) => setTimeout(r, 0)); return kinds.includes('daily-jams') ? { built: [{}], failures: 0 } : { built: [], failures: 1 }; }
-      finally { busy = false; }
-    };
-    return { tick: exploreScheduler(db, run), runs };
-  };
-  // Monday 2026-11-09, minute by minute from `from` to midnight.
-  const monday = async (tick: (now: Date) => void, from: number) => {
-    for (let m = from; m < 24 * 60; m++) { tick(new Date(2026, 10, 9, Math.floor(m / 60), m % 60)); await new Promise((r) => setTimeout(r, 0)); }
-  };
-  const daily = (runs: string[][]) => runs.filter((k) => k.includes('daily-jams')).length;
-  const weekly = (runs: string[][]) => runs.filter((k) => k.includes('weekly-jams')).length;
-
-  it('on a Monday whose weekly run has not worked yet, Daily Jams still runs', async () => {
-    const { tick, runs } = schedule();
-    await monday(tick, 6 * 60 + 30);
-    expect(daily(runs)).toBe(1);
-    expect(weekly(runs)).toBeGreaterThan(1); // and the weekly one keeps being retried, hourly
-  });
-  it('awake only from 08:00, both due in the same minute: Daily Jams still runs', async () => {
-    const { tick, runs } = schedule();
-    await monday(tick, 8 * 60);
-    expect(daily(runs)).toBe(1);
-    expect(weekly(runs)).toBeGreaterThan(1);
-  });
-});

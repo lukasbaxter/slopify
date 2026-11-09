@@ -88,11 +88,8 @@ export const config = {
   language: env('LANGUAGE', 'auto').split(':')[0].split('.')[0].replace('_', '-') || 'auto',
   // A public try-it-out server: no sign-in, a guest account per visitor cloned from the admin's (demo.ts).
   demo: env('DEMO', '0') === '1',
-  // slskd (Soulseek) for the Weekly Exploration playlist: tracks the library
-  // lacks are fetched through it. If slskd's finished-downloads folder is
-  // also mounted into this container (SLSKD_DOWNLOADS_DIR), fetched tracks
-  // are moved into the library and scanned right away; without it they stay
-  // wherever slskd put them until something else brings them in.
+  // slskd (Soulseek) for Upgrade to FLAC; SLSKD_DOWNLOADS_DIR is slskd's
+  // finished-downloads folder as this container sees it.
   slskdUrl: serviceUrl(env('SLSKD_URL', '')),
   slskdKey: env('SLSKD_API_KEY', ''),
   slskdDownloadsDir: env('SLSKD_DOWNLOADS_DIR', ''),

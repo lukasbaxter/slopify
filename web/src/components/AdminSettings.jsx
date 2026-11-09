@@ -235,11 +235,6 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
     try { await fn(); if (done) notify?.(done); } catch (e) { notify?.(`${failed}: ${e.message}`); }
     finally { busyRef.current = false; setBusy(''); }
   };
-  // Says what came of it: the button used to report only that it had started.
-  const makeMixes = (failed, kinds) => run(failed, async () => {
-    const r = await jf._fetch('/api/admin/explore', { method: 'POST', body: JSON.stringify({ kinds }) });
-    notify?.(r?.built == null ? t('Still building, this can take a while') : r.built ? t('Made {n} playlists', { n: r.built }) : t('No playlists made: nothing to build them from yet'));
-  });
   const lib = status?.library || {};
   const scan = status?.scans?.[0];
   const lyrics = Object.fromEntries((status?.lyrics || []).map((r) => [r.kind, r.n]));
@@ -322,29 +317,6 @@ export function AdminSettings({ jf, me, notify, phone = false }) {
               ))}
             </ul>
           ) : <div className="settings-hint">{t("No speakers found on the server's network yet. They are looked for continuously.")}</div>}
-        </section>
-      )}
-
-      {status?.explore && (
-        <section className="settings-section admin">
-          <h2>{t('Weekly playlists')}</h2>
-          <div className="settings-hint" style={{ marginBottom: 10 }}>
-            {status.explore.brain ? t('Every Monday the brain makes Weekly Exploration (songs new to you) and Weekly Jams for everyone who has been listening; Daily Jams every morning.') : status.explore.slskd
-              ? t('Every Monday each account with a ListenBrainz token (Settings › Scrobbling) gets Weekly Exploration (new music, fetched from Soulseek) and Weekly Jams; Daily Jams every morning.')
-              : t('Every Monday each account with a ListenBrainz token (Settings › Scrobbling) gets Weekly Exploration (new music, fetched from Soulseek — slskd is not configured on this server) and Weekly Jams; Daily Jams every morning.')}
-            {status.explore.users.length || status.explore.brain ? '' : ` ${t('Nobody has a token yet.')}`}
-          </div>
-          {status.explore.users.length > 0 && (
-            <ul className="admin-list">
-              {status.explore.users.map((u) => (
-                <li key={u.name}><b>{u.name}</b><span>{[['weekly-exploration', t('weekly exploration')], ['weekly-jams', t('weekly jams')], ['daily-jams', t('daily jams')]].map(([k, label]) => u[k] ? `${label}: ${u[k].matched}/${u[k].total} (${u[k].date})` : `${label}: ${t('none yet')}`).join(' · ')}</span></li>
-              ))}
-            </ul>
-          )}
-          <div className="settings-actions">
-            <button type="button" className="primary" disabled={!!busy || status.explore.running} onClick={() => makeMixes(t('Could not build playlists'), ['weekly-exploration', 'weekly-jams'])}>{status.explore.running ? t('Building…') : t("Make this week's playlists now")}</button>
-            <button type="button" className="btn-secondary" disabled={!!busy || status.explore.running} onClick={() => makeMixes(t('Could not build playlist'), ['daily-jams'])}>{t('Daily Jams now')}</button>
-          </div>
         </section>
       )}
 

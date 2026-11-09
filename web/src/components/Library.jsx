@@ -9,7 +9,7 @@ import { canSaveOffline, useOffline, saveOffline, removeOffline, searchOffline, 
 import { vibrantColor } from '../api/colors.js';
 import { LANGUAGES, userLanguage, t, N_ } from '../i18n.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
-import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
+import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, globalSearch as relayGlobal } from '../api/search.js';
 import Home, { topSongsSub, rankTopArtists } from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
@@ -246,13 +246,6 @@ export default function Library({
       const items = await jf.topSongs(y.year);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
-  };
-  const openRadar = async () => {
-    setDetail({ item: { Id: 'radar', Name: t('Release Radar'), Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
-    try {
-      const r = await relayRadar(jf);
-      setDetail((d) => (d && d.item?.Id === 'radar' ? { ...d, releases: r.releases || [] } : d));
-    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === 'radar' ? { ...d, releases: [] } : d)); }
   };
   const openBrowse = async (tile) => {
     const genre = tile.kind === 'genre' || String(tile.id || '').startsWith('genre:') ? tile.name : null;
@@ -628,47 +621,6 @@ export default function Library({
       },
     } : {});
 
-    if (kind === 'Radar') {
-      const rels = detail.releases;
-      return (
-        <div className="content" style={{ '--hero': phone ? phoneHero(item._color) : item._color }}>
-          <header className="hero tinted browse-hero">
-            <div style={{ minWidth: 0 }}>
-              <div className="kind">{t('Made for you')}</div>
-              <FittedTitle text={t('Release Radar')} maxLines={2} />
-              <p className="hero-meta">{rels == null ? t('Checking the last 90 days for the artists you play most…') : t('{n} new releases from the artists you play most • last 90 days', { n: rels.length })}</p>
-            </div>
-          </header>
-          <div className="actions slim" />
-          <div className="pad">
-            {err && <div className="banner error">{err}</div>}
-            {rels && rels.length === 0 && <p className="placeholder-note">{t('Nothing new from your top artists in the last 90 days.')}</p>}
-            {rels && rels.length > 0 && (
-              <div className="grid">
-                {/* Two artists can share a release (splits, features): the key needs both ids. */}
-                {rels.map((r) => r.inLibrary ? (
-                  <Card key={`${r.album_id}:${r.artistId}`} title={r.title} subtitle={`${r.artistName} • ${r.date}`} image={jf.imageUrl(r.inLibrary, { maxHeight: 320 })}
-                    onOpen={() => openAlbum({ Id: r.inLibrary, Name: r.title })} onPlay={() => playItem({ Id: r.inLibrary, Type: 'MusicAlbum' })} />
-                ) : (
-                  <div key={`${r.album_id}:${r.artistId}`} className="card missing">
-                    <div className="card-art">
-                      {r.image ? <img src={r.image} alt="" loading="lazy" /> : <div className="ph" />}
-                      {(() => {
-                        const { label, busy } = requestUi(stateOf(r));
-                        return <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy} onClick={() => requestRelease(r.artistId, r)}>{label}</button>;
-                      })()}
-                    </div>
-                    <div className="card-title">{r.title}</div>
-                    <div className="card-sub"><button className="rowlink" onClick={() => onOpenArtistById(r.artistId)}>{r.artistName}</button> • {r.rtype ? t(r.rtype) : ''} • {r.date}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
-
     if (kind === 'Browse') {
       const hub = detail.hub;
       const byAlbum = new Map();
@@ -763,7 +715,7 @@ export default function Library({
               <b>{t('Scrobbling')}</b>
             </div>
             <form className="pad settings" onSubmit={async (e) => { e.preventDefault(); await onUpdatePrefs({ listenbrainz: { user: d.user.trim(), token: d.token.trim() } }); setLbDraft(null); setLbSaved(true); setTimeout(() => setLbSaved(false), 2500); }}>
-              <p className="settings-caption">{t('Every song you play for at least half its length is sent to ListenBrainz as a listen. That history powers the Weekly Exploration and Daily Jams playlists on Home. Get the token from listenbrainz.org, under Settings.')}</p>
+              <p className="settings-caption">{t('Every song you play for at least half its length is sent to ListenBrainz as a listen. Get the token from listenbrainz.org, under Settings.')}</p>
               <div className="settings-field">
                 <label>{t('ListenBrainz username')}</label>
                 <input className="settings-input" value={d.user} onChange={(e) => setLbDraft({ ...d, user: e.target.value })} spellCheck="false" autoCapitalize="none" placeholder={t('username')} />
@@ -939,7 +891,7 @@ export default function Library({
               <h2>{t('Scrobbling & discovery')}</h2>
               <div className="settings-hint" style={{ marginBottom: 12 }}>
                 {rich(t('Every song you play for at least half its length is sent to {service} as a listen.'), { service: <a href="https://listenbrainz.org" target="_blank" rel="noreferrer">ListenBrainz</a> })}
-                {' '}{t('That history powers the Weekly Exploration / Daily Jams playlists on Home. Get the token from listenbrainz.org → Settings.')}
+                {' '}{t('Get the token from listenbrainz.org → Settings.')}
               </div>
               {(() => {
                 const cur = prefs?.listenbrainz || {};
@@ -1989,7 +1941,6 @@ export default function Library({
       onSeeAll={setSeeAll}
       bar={<FilterPills where="all" setSeeAll={setSeeAll} goHome={() => onView('home')} />}
       onOpenArtist={onOpenArtistById}
-      onOpenRadar={openRadar}
       onOpenMix={openMix}
       onOpenTopSongs={openTopSongs}
     />

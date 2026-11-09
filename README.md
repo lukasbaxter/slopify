@@ -100,10 +100,10 @@ In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 | **Fire TV / Android TV** | The Slopify TV app (`tv/`), sideloaded; it shows up in every device list under the TV's name |
 | **DIY speakers** | Anything that speaks the small `slopify-speaker/1` HTTP API on port 7780 shows up as a speaker (see `server/src/speakers/transports.ts`) |
 | **Home Assistant** | Every person and speaker becomes a media player. Install with HACS ([guide](docs/home-assistant.md)) |
-| **Soulseek (slskd)** | Weekly Exploration downloads and Upgrade to FLAC ([guide](docs/downloads.md)) |
+| **Soulseek (slskd)** | Upgrade to FLAC ([guide](docs/downloads.md)) |
 | **Lidarr** | Full discographies and requests from inside the app ([guide](docs/downloads.md)) |
 | **Spotify import** | Upload your Spotify data download: playlists, Liked Songs, saved albums and listening history come over. Anything you don't have gets requested |
-| **ListenBrainz** | Scrobbling and weekly discovery playlists, per person |
+| **ListenBrainz** | Scrobbling, per person |
 | **LrcLib** | Lyrics, if you don't have your own `.lrc` files. Can also sync them on a GPU ([guide](docs/lyric-sync.md)) |
 | **Your GPU** | Optional: the [brain](brain/README.md) learns how your house listens and what each song sounds like, and picks what plays next. Type a vibe and it makes a playlist from your library. NVIDIA, Intel Arc or CPU, one extra container |
 

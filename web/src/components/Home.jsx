@@ -115,11 +115,10 @@ function Card({ title, subtitle, image, round, onOpen, onPlay }) {
  *
  * Daily Mixes are real: each is the server's mix seeded from one of your
  * most-played artists, which is functionally what Spotify's artist-clustered
- * mixes are, kept for your local day (server: dailymix.ts). Discover Weekly
- * and Release Radar need listening data we do not have and are labelled
- * placeholders.
+ * mixes are, kept for your local day (server: dailymix.ts). Made For You
+ * is the Daily Mixes and nothing else: no weekly or daily playlists.
  */
-export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs }) {
+export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenMix, onOpenTopSongs }) {
   const [recent, setRecent] = useState(() => jf?.persisted('home.recent') || []);
   const [added, setAdded] = useState(() => jf?.persisted('home.added') || []);
   const [topArtists, setTopArtists] = useState(() => jf?.persisted('home.topArtists') || []);
@@ -187,16 +186,6 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
 
   // Daily Mixes are seeded from the artists you actually play most.
   const mixSeeds = (topArtists.length ? topArtists : artists).slice(0, 6);
-  // Explo (ListenBrainz) playlists land in Jellyfin as Weekly-Exploration-…,
-  // Weekly-Jams-…, Daily-Jams-…; the newest of each becomes a tile here.
-  const explo = useMemo(() => {
-    const pick = (re) => [...playlists].filter((p) => re.test(p.Name)).sort((a, b) => b.Name.localeCompare(a.Name))[0] || null;
-    return [
-      { key: 'dw', label: t('Discover Weekly'), sub: t('New music picked from your listening, every Monday.'), color: '#1e3264', pl: pick(/^Weekly.?Exploration/i) },
-      { key: 'wj', label: t('Weekly Jams'), sub: t('Songs you love, refreshed weekly.'), color: '#8d67ab', pl: pick(/^Weekly.?Jams/i) },
-      { key: 'dj', label: t('Daily Jams'), sub: t('A fresh mix every day.'), color: '#e8115b', pl: pick(/^Daily.?Jams/i) },
-    ];
-  }, [playlists]);
 
   // Phone: the chip row sticks to the top; once the page has scrolled it gets
   // a solid background (the home gradient scrolls away underneath). A class
@@ -249,12 +238,6 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
               image={jf.imageUrl(a.Id, { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
               onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length])} onPlay={() => playMix(a)} />
           ))}
-          {explo.map((e) => e.pl ? (
-            <MixTile key={e.key} label={e.label} sub={e.sub} color={e.color} image={jf.imageUrl(e.pl.Id, { maxHeight: 320 })}
-              onOpen={() => onOpenPlaylist(e.pl)} onPlay={() => playPlaylist(e.pl)} />
-          ) : null)}
-          <MixTile label={t('Release Radar')} sub={t('New releases from the artists you play most.')} color="#8d67ab"
-            image={topArtists[0] ? jf.imageUrl(topArtists[0].Id, { maxHeight: 320 }) : null} onOpen={onOpenRadar} onPlay={onOpenRadar} />
         </Shelf>}
 
         {showMusic && topYears.length > 0 && (

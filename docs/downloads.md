@@ -4,8 +4,7 @@ Optional. Without them Slopify plays the music folder you give it; with them it 
 
 Slopify speaks Lidarr and slskd natively — no glue services. With a Lidarr
 that manages the same music folder, the artist pages grow full
-discographies with Request buttons, search gets an "Everywhere" shelf, the
-Release Radar fills, generated playlists can fetch what the library lacks,
+discographies with Request buttons, search gets an "Everywhere" shelf,
 and a Downloads page shows where everything is. Requests simply monitor the
 album in Lidarr; whatever you have watching Lidarr does the fetching — its
 own indexers, [Soularr](https://github.com/mrusse/soularr) bridging slskd
@@ -20,7 +19,7 @@ for Soulseek, or both.
       LIDARR_QUALITY_PROFILE: ""       # profile (name or id) for artists Slopify adds; blank = Lidarr's first
       LIDARR_METADATA_PROFILE: ""
       LIDARR_SEARCH_ON_REQUEST: "0"    # "1": every request also fires Lidarr's indexer search immediately
-      # slskd: Weekly Exploration fetches single missing tracks directly
+      # slskd: Upgrade to FLAC fetches single tracks directly
       SLSKD_URL: http://127.0.0.1:5030
       SLSKD_API_KEY: ...
       SLSKD_DOWNLOADS_DIR: /slskd-downloads  # slskd's finished-downloads folder, mounted here,
@@ -90,9 +89,8 @@ hour, anything untouched for two days) and lists what sits in
 There is also **Upgrade to FLAC** (`FLAC_PER_RUN` per run). **Warning:**
 setting the three slskd envs (`SLSKD_URL`, `SLSKD_API_KEY`,
 `SLSKD_DOWNLOADS_DIR`) enables it, hourly by default, and it **replaces
-lossy files in your library** with lossless ones as it finds them. If you
-want slskd for Weekly Exploration but not that, set the task to Off in the
-Tasks UI.
+lossy files in your library** with lossless ones as it finds them. To keep
+slskd configured without that, set the task to Off in the Tasks UI.
 
 ## Using torrents safely
 

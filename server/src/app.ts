@@ -17,7 +17,7 @@ import { registerSocial } from './social.js';
 import { registerAdmin } from './admin.js';
 import websocket from '@fastify/websocket';
 import { registerSession, WS_MAX_PAYLOAD } from './session.js';
-import { registerExplore } from './explore.js';
+import { registerScrobbling } from './explore.js';
 import { registerDiscover } from './discover.js';
 import { registerPlaylistReco } from './playlistreco.js';
 import { registerJobs } from './jobs.js';
@@ -111,11 +111,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   let webBuild = '';
   try { webBuild = /assets\/index-[\w-]+\.js/.exec(fs.readFileSync(path.join(repoRoot, 'web', 'dist', 'index.html'), 'utf8'))?.[0] || ''; } catch { /* no web build (tests, API only) */ }
   registerSession(app, db, { speakers: opts.speakers ?? (process.env.NODE_ENV === 'test' ? false : config.speakers), publicUrl: config.publicUrl, bluosGroups: config.bluosGroups, webBuild });
-  registerExplore(app, db, {
-    slskdUrl: config.slskdUrl, slskdKey: config.slskdKey,
-    slskdDownloadsDir: config.slskdDownloadsDir || undefined, musicDir,
-    scanFolders: (rels) => (app as any).scanFolders(rels),
-  });
+  registerScrobbling(app, db);
   const lidarr = lidarrClient({ ...config.lidarr, log: (m) => app.log.info(m) });
   registerDiscover(app, db, { lidarr, log: (m) => app.log.info(m) });
   registerPlaylistReco(app, db, { log: (m) => app.log.info(m), warm: process.env.NODE_ENV !== 'test' });

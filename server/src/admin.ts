@@ -109,7 +109,6 @@ export function registerAdmin(app: FastifyInstance, db: DB, musicDir: string, da
       identity: db.prepare('SELECT identity_state AS state, COUNT(*) n FROM tracks GROUP BY identity_state').all(),
       enrich,
       enriching,
-      explore: (app as any).exploreStatus?.() ?? null,
     };
   });
 }

@@ -44,7 +44,7 @@ Addresses (`PUBLIC_URL`, `LIDARR_URL`, `SLSKD_URL`, `SOULARR_URL`, `BRAIN_URL`):
 | `LANGUAGE` | `auto` | The app's language for everyone: `en`, `es`, `fr`, `de`, `it`, `pt-BR`, `nl`, `pl`, `ru`, `uk`, `tr`, `sv`, `da`, `nb`, `fi`, `cs`, `ja`, `ko`, `zh-CN`, `zh-TW`, `id`, `vi`. `auto` follows each browser or phone. Anyone can still pick their own in Settings › Language |
 | `SERVER_NAME` | `Slopify on <host>` | Name the announced server is shown under (`Slopify` on Docker's default network) |
 | `DEMO` | `0` | `1` makes a public try-it-out server: no sign-in form, every visitor gets a guest account of their own with a copy of the admin's playlists, likes and history. Guests can play, like and make playlists; settings, scans, accounts and uploads are refused. Idle guests are removed after a day |
-| `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Weekly Exploration; setting all three also enables Upgrade to FLAC (see Tasks) |
+| `SLSKD_URL` / `SLSKD_API_KEY` / `SLSKD_DOWNLOADS_DIR` | (unset) | slskd for Upgrade to FLAC (see Tasks); all three are needed |
 | `BRAIN_KEY` | (unset) | Turns on the [brain](../brain/README.md): a recommender on your GPU for smart shuffle, autoplay and radio. The same value on the brain. Its rules live in Settings › Admin › Tasks › Brain |
 | `BRAIN_URL` | `http://127.0.0.1:8097` when `BRAIN_KEY` is set | Where the brain is, when it isn't on this machine. Unset key or down brain = Slopify's own mixes |
 | `BRAIN_TIMEOUT_MS` | `1500` | How long to wait for the brain before using Slopify's own mix |

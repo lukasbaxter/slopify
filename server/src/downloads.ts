@@ -319,7 +319,7 @@ export function givenUp(db: DB): Set<string> {
 }
 
 // slskd's staging folder fills with leftovers: folders emptied by an import
-// or a Weekly Exploration move, and copies Lidarr imported without moving.
+// or a FLAC upgrade move, and copies Lidarr imported without moving.
 // Anything outside failed_imports untouched for STAGING_STALE_MS is spent
 // (the watcher's stalled timeout is an hour, imports take seconds). Failed
 // imports stay for a person to look at; the summary lists them.

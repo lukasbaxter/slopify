@@ -51,7 +51,7 @@ export async function browse(jf) {
 
 // Beyond the library (the server asks Lidarr / Deezer and flags what
 // is here): the artist page's full discography with "Request" for the rest,
-// similar artists and the search page's "Everywhere" shelf.
+// similar artists, the Release Radar and the search page's "Everywhere" shelf.
 // 35 s: the server's own Lidarr lookup can take up to 30 s; a shorter client
 // timeout aborted mid-flight and the page span forever.
 export const globalSearch = (jf, q, signal) => jf._fetch(`/api/gsearch?q=${encodeURIComponent(q)}`, { timeoutMs: 35000, signal });
@@ -60,6 +60,7 @@ export const similar = (jf, artistId) => jf._fetch(`/api/similar/${encodeURIComp
 // The artist's songs, most popular first (the server ranks them: what the
 // world plays, then what this server plays).
 export const popular = async (jf, artistId) => ({ ids: (await jf._fetch(`/api/artists/${encodeURIComponent(artistId)}/popular`, { timeoutMs: 15000 })).ids || [] });
+export const radar = (jf) => jf._fetch('/api/radar', { timeoutMs: 120000 });
 export const requestAlbum = (jf, albumId) => jf._fetch('/api/requests', { method: 'POST', body: JSON.stringify({ album_id: albumId }), timeoutMs: 40000 });
 
 // Liked Songs rows in one call (the like store's ids, newest first).

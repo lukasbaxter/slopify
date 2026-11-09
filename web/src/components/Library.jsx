@@ -9,7 +9,7 @@ import { canSaveOffline, useOffline, saveOffline, removeOffline, searchOffline, 
 import { vibrantColor } from '../api/colors.js';
 import { LANGUAGES, userLanguage, t, N_ } from '../i18n.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
-import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, globalSearch as relayGlobal } from '../api/search.js';
+import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
 import Home, { topSongsSub, rankTopArtists } from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
@@ -246,6 +246,13 @@ export default function Library({
       const items = await jf.topSongs(y.year);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+  };
+  const openRadar = async () => {
+    setDetail({ item: { Id: 'radar', Name: t('Release Radar'), Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
+    try {
+      const r = await relayRadar(jf);
+      setDetail((d) => (d && d.item?.Id === 'radar' ? { ...d, releases: r.releases || [] } : d));
+    } catch (e) { setErr(e.message); setDetail((d) => (d && d.item?.Id === 'radar' ? { ...d, releases: [] } : d)); }
   };
   const openBrowse = async (tile) => {
     const genre = tile.kind === 'genre' || String(tile.id || '').startsWith('genre:') ? tile.name : null;
@@ -620,6 +627,47 @@ export default function Library({
         setDragIdx(null); setOverIdx(null);
       },
     } : {});
+
+    if (kind === 'Radar') {
+      const rels = detail.releases;
+      return (
+        <div className="content" style={{ '--hero': phone ? phoneHero(item._color) : item._color }}>
+          <header className="hero tinted browse-hero">
+            <div style={{ minWidth: 0 }}>
+              <div className="kind">{t('Made for you')}</div>
+              <FittedTitle text={t('Release Radar')} maxLines={2} />
+              <p className="hero-meta">{rels == null ? t('Checking the last 90 days for the artists you like…') : t('{n} new releases from the artists you like • last 90 days', { n: rels.length })}</p>
+            </div>
+          </header>
+          <div className="actions slim" />
+          <div className="pad">
+            {err && <div className="banner error">{err}</div>}
+            {rels && rels.length === 0 && <p className="placeholder-note">{t('Nothing new from your artists in the last 90 days.')}</p>}
+            {rels && rels.length > 0 && (
+              <div className="grid">
+                {/* Two artists can share a release (splits, features): the key needs both ids. */}
+                {rels.map((r) => r.inLibrary ? (
+                  <Card key={`${r.album_id}:${r.artistId}`} title={r.title} subtitle={`${r.artistName} • ${r.date}`} image={jf.imageUrl(r.inLibrary, { maxHeight: 320 })}
+                    onOpen={() => openAlbum({ Id: r.inLibrary, Name: r.title })} onPlay={() => playItem({ Id: r.inLibrary, Type: 'MusicAlbum' })} />
+                ) : (
+                  <div key={`${r.album_id}:${r.artistId}`} className="card missing">
+                    <div className="card-art">
+                      {r.image ? <img src={r.image} alt="" loading="lazy" /> : <div className="ph" />}
+                      {(() => {
+                        const { label, busy } = requestUi(stateOf(r));
+                        return <button className={`card-request ${busy ? 'busy' : ''}`} disabled={busy} onClick={() => requestRelease(r.artistId, r)}>{label}</button>;
+                      })()}
+                    </div>
+                    <div className="card-title">{r.title}</div>
+                    <div className="card-sub"><button className="rowlink" onClick={() => onOpenArtistById(r.artistId)}>{r.artistName}</button> • {r.rtype ? t(r.rtype) : ''} • {r.date}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     if (kind === 'Browse') {
       const hub = detail.hub;
@@ -1941,6 +1989,7 @@ export default function Library({
       onSeeAll={setSeeAll}
       bar={<FilterPills where="all" setSeeAll={setSeeAll} goHome={() => onView('home')} />}
       onOpenArtist={onOpenArtistById}
+      onOpenRadar={openRadar}
       onOpenMix={openMix}
       onOpenTopSongs={openTopSongs}
     />

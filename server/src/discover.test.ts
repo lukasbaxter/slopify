@@ -138,3 +138,39 @@ describe('release radar', () => {
     await app.close();
   });
 });
+
+// Release Radar is each person's own: new albums, EPs and singles from the
+// artists THEY like (follows, liked songs/albums, plays), nobody else's.
+describe('Release Radar per person', () => {
+  it('shows each listener only their artists, new albums/EPs/singles only, a shared release once', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-mine-')));
+    const artist = db.prepare('INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?)');
+    const album = db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES (?, ?, ?, ?, ?, 1, 0, ?)");
+    const track = db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, 0)`);
+    for (const [id, name] of [['ar-a', 'Alpha'], ['ar-b', 'Beta'], ['ar-c', 'Gamma']]) {
+      artist.run(id, name, name.toLowerCase());
+      album.run(`al-${id}`, `${name} Old`, id, name, `/m/${id}`, `${name} old`.toLowerCase());
+      track.run(`t-${id}`, `/m/${id}/01.flac`, `${name} Song`, name, JSON.stringify([name]), JSON.stringify([id]), `al-${id}`, `${name} Old`, name);
+    }
+    db.prepare('INSERT INTO likes (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', 't-ar-a', Date.now()); // u1 likes Alpha
+    db.prepare('INSERT INTO artist_follows (user_id, artist_id, at) VALUES (?, ?, ?)').run('u2', 'ar-b', Date.now()); // u2 follows Beta
+    db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u2', 't-ar-c', Date.now()); // and plays Gamma
+    const day = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+    const rel = (album_id: string, rtype: string, date: string) => ({ album_id, artist: '', title: album_id, rtype, year: date.slice(0, 4), date, image: null, total_tracks: 1, secondary: [] });
+    const catalog: Record<string, any[]> = {
+      Alpha: [rel('a-single', 'Single', day(3)), rel('a-old', 'Album', day(400)), rel('a-comp', 'Compilation', day(2)), rel('shared', 'Album', day(1))],
+      Beta: [rel('b-ep', 'EP', day(10)), rel('shared', 'Album', day(1))],
+      Gamma: [rel('c-album', 'Album', day(20)), rel('shared', 'Album', day(1))],
+    };
+    const lidarr: any = { enabled: true, statuses: async () => new Map(), discography: async (name: string) => ({ artist: { name, image: null }, releases: catalog[name] || [] }) };
+    const app = Fastify();
+    app.decorate('requireUser', async (req: any) => { req.user = { id: req.headers['x-user'] }; });
+    registerDiscover(app, db, { lidarr });
+    const ids = async (u: string) => ((await app.inject({ url: '/api/radar', headers: { 'x-user': u } })).json().releases as any[]).map((r) => r.album_id);
+    expect(await ids('u1')).toEqual(['shared', 'a-single']);
+    expect(await ids('u2')).toEqual(['shared', 'b-ep', 'c-album']);
+    expect(await ids('nobody')).toEqual([]);
+    await app.close();
+  });
+});

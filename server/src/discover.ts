@@ -159,6 +159,22 @@ export async function popularOrder(db: DB, a: { id: string; name: string }, o: {
   return [...out, ...rest.map((r) => r.id)];
 }
 
+// Release Radar's artists for one person, strongest first: followed, then
+// how many of their songs and albums are liked, then plays in the last half
+// year. Album artists, like the rest of the library.
+export const RADAR_PER_USER = 60;
+const RADAR_TYPES = new Set(['album', 'ep', 'single']);
+export function radarArtists(db: DB, uid: string, now = Date.now()): { id: string; name: string }[] {
+  return db.prepare(`SELECT a.id, a.name, SUM(w) score FROM (
+      SELECT artist_id id, 100 w FROM artist_follows WHERE user_id = ?
+      UNION ALL SELECT al.artist_id, 10 FROM album_likes l JOIN albums al ON al.id = l.album_id WHERE l.user_id = ?
+      UNION ALL SELECT al.artist_id, 3 FROM likes l JOIN tracks t ON t.id = l.track_id JOIN albums al ON al.id = t.album_id WHERE l.user_id = ?
+      UNION ALL SELECT al.artist_id, 1 FROM plays p JOIN tracks t ON t.id = p.track_id JOIN albums al ON al.id = t.album_id WHERE p.user_id = ? AND p.at > ?
+    ) x JOIN artists a ON a.id = x.id
+    WHERE a.name NOT IN ('Various Artists', 'Unknown Artist', '')
+    GROUP BY a.id ORDER BY score DESC LIMIT ?`).all(uid, uid, uid, uid, now - 180 * 86400000, RADAR_PER_USER) as { id: string; name: string }[];
+}
+
 export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOptions = {}) {
   const auth = { preHandler: (app as any).requireUser };
   const log = opts.log || (() => {});
@@ -251,13 +267,15 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     return { albums, artists };
   });
 
-  // The library's most played artists; their releases from the last 90 days.
-  // Building it takes a round trip through Lidarr per artist (minutes), so
-  // nobody waits for that: the list is kept in the database, a look answers
-  // from it at once, and it is rebuilt in the background when it gets old, and
-  // at start so a restart costs nothing. Only the raw releases are kept:
-  // library presence and request state change by the minute, so they are
-  // flagged fresh on every look.
+  // Release Radar: new albums, EPs and singles (last 90 days) from the
+  // artists each person likes: followed, liked songs and albums, and played
+  // a lot. Building it takes a round trip through Lidarr per artist
+  // (minutes), so nobody waits for that: one list covering every account's
+  // artists is kept in the database, a look answers from it at once filtered
+  // to the asker's artists, and it is rebuilt in the background when it gets
+  // old, and at start so a restart costs nothing. Only the raw releases are
+  // kept: library presence and request state change by the minute, so they
+  // are flagged fresh on every look.
   const RADAR_TTL = 6 * 60 * 60 * 1000;
   const radarSaved = (): { at: number; releases: any[] } | null => {
     const row = db.prepare("SELECT v FROM kv WHERE k = 'radar'").get() as { v: string } | undefined;
@@ -265,8 +283,11 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   };
   let radarBuild: Promise<any[]> | null = null;
   const buildRadar = () => radarBuild ??= (async () => {
-    const top = db.prepare(`SELECT a.id, a.name, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
-      WHERE p.at > ? GROUP BY a.id ORDER BY n DESC LIMIT 40`).all(Date.now() - 180 * 86400000) as { id: string; name: string }[];
+    // Everyone with any listening or likes (deleted accounts' rows go with them).
+    const users = (db.prepare('SELECT user_id id FROM plays UNION SELECT user_id FROM likes UNION SELECT user_id FROM album_likes UNION SELECT user_id FROM artist_follows').all() as { id: string }[]).map((u) => u.id);
+    const byId = new Map<string, { id: string; name: string }>();
+    for (const u of users) for (const a of radarArtists(db, u)) byId.set(a.id, a);
+    const top = [...byId.values()];
     const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
     const out: any[] = [];
     let failed = 0;
@@ -279,7 +300,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
           const d = await discography(a.id, a.name);
           if (!d.artist) failed++; // discography() turns a Lidarr error into no artist
           for (const rel of d.releases) {
-            if (!rel.album_id || !rel.date || rel.date < since) continue;
+            if (!rel.album_id || !rel.date || rel.date < since || !RADAR_TYPES.has(String(rel.rtype || '').toLowerCase())) continue;
             // keep only the raw release: the per-render flags are re-applied fresh on every GET
             const r: any = { ...rel, artistId: a.id, artistName: a.name };
             delete r.inLibrary; delete r.localName; delete r.requestStatus;
@@ -306,11 +327,16 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     setTimeout(refreshRadar, 5000).unref();
     setInterval(refreshRadar, 60 * 60 * 1000).unref();
   }
-  app.get('/api/radar', auth, async () => {
+  app.get('/api/radar', auth, async (req) => {
     if (!lidarr) return { releases: [] };
     const [raw, status] = await Promise.all([radarRaw(), requestStatuses()]);
+    // Only the asker's artists; a release two of them share shows once.
+    const uid = (req as any).user?.id as string | undefined;
+    const mine = uid ? new Set(radarArtists(db, uid).map((a) => a.id)) : null;
+    const seen = new Set<string>();
+    const picked = raw.filter((r) => (!mine || mine.has(r.artistId)) && !seen.has(r.album_id) && (seen.add(r.album_id), true));
     const have = new Map<string, (t: string) => { id: string; name: string } | null>();
-    const releases = raw.map((r) => {
+    const releases = picked.map((r) => {
       let h = have.get(r.artistId);
       if (!h) { h = matcher(creditedAlbums(db, r.artistId)); have.set(r.artistId, h); }
       const local = h(r.title);

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PlayGlyph, Heart, LikedCover, usePhone } from './TrackRow.jsx';
 import { t } from '../i18n.js';
+import { radar as relayRadar } from '../api/search.js';
 
 // The whole ranking, most played first: Show all lists it, Home's shelf the first 16.
 export function rankTopArtists(tracks) {
@@ -93,15 +94,15 @@ function Shelf({ title, children, onSeeAll }) {
   );
 }
 
-function Card({ title, subtitle, image, round, onOpen, onPlay }) {
+function Card({ title, subtitle, image, round, onOpen, onPlay, noPlay }) {
   return (
     <div className={`card ${round ? 'round' : ''}`} onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.()}>
       <div className="card-art">
         {image ? <FadeImg src={image} /> : <div className="ph" />}
-        <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
+        {!noPlay && <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
           <PlayGlyph />
-        </button>
+        </button>}
       </div>
       <div className="card-title">{title}</div>
       {subtitle && <div className="card-sub">{subtitle}</div>}
@@ -111,16 +112,16 @@ function Card({ title, subtitle, image, round, onOpen, onPlay }) {
 
 /**
  * Home. Structure follows Spotify's: greeting + 8 shortcuts, then Made For You,
- * Recently played, Jump back in, New releases, Your top artists.
+ * Recently played, Jump back in, Release Radar, Your top artists.
  *
  * Daily Mixes are real: each is the server's mix seeded from one of your
  * most-played artists, which is functionally what Spotify's artist-clustered
  * mixes are, kept for your local day (server: dailymix.ts). Made For You
  * is the Daily Mixes and nothing else: no weekly or daily playlists.
  */
-export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenMix, onOpenTopSongs }) {
+export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs }) {
   const [recent, setRecent] = useState(() => jf?.persisted('home.recent') || []);
-  const [added, setAdded] = useState(() => jf?.persisted('home.added') || []);
+  const [radar, setRadar] = useState(() => jf?.persisted('home.radar') || []);
   const [topArtists, setTopArtists] = useState(() => jf?.persisted('home.topArtists') || []);
   const [recentArtists, setRecentArtists] = useState(() => jf?.persisted('home.recentArtists') || []);
   const [topYears, setTopYears] = useState(() => jf?.persisted('home.topYears') || []);
@@ -132,7 +133,8 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
     if (!jf) return;
     jf.recentlyPlayedAlbums({ limit: 16 }).then((r) => { setRecent(r.items); jf._persist('home.recent', r.items); }).catch(() => {});
     jf.topSongYears().then((y) => { setTopYears(y); jf._persist('home.topYears', y); }).catch(() => {});
-    jf.recentlyAddedAlbums({ limit: 16 }).then((r) => { setAdded(r.items); jf._persist('home.added', r.items); }).catch(() => {});
+    // Release Radar: new albums, EPs and singles from the artists you like (server: discover.ts).
+    relayRadar(jf).then((r) => { const rel = (r.releases || []).slice(0, 16); setRadar(rel); jf._persist('home.radar', rel); }).catch(() => {});
     jf.topTracks({ limit: 200 }).then((top) => {
       const last = new Map();
       for (const tr of top) {
@@ -268,11 +270,15 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           </Shelf>
         )}
 
-        {showMusic && added.length > 0 && (
-          <Shelf title={t('Recently added')} onSeeAll={() => onSeeAll('albums')}>
-            {added.map((a) => (
-              <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || t('Album')} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
-                onOpen={() => onOpen(a)} onPlay={() => playAlbum(a)} />
+        {showMusic && radar.length > 0 && (
+          <Shelf title={t('Release Radar')} onSeeAll={onOpenRadar}>
+            {/* In the library: opens and plays. Not yet: the artist's page, where it can be requested. */}
+            {radar.map((r) => r.inLibrary ? (
+              <Card key={r.album_id} title={r.title} subtitle={`${r.artistName} • ${r.rtype ? t(r.rtype) : t('Album')}`} image={jf.imageUrl(r.inLibrary, { maxHeight: 320 })}
+                onOpen={() => onOpen({ Id: r.inLibrary, Name: r.title })} onPlay={() => playAlbum({ Id: r.inLibrary })} />
+            ) : (
+              <Card key={r.album_id} title={r.title} subtitle={`${r.artistName} • ${r.rtype ? t(r.rtype) : t('Album')}`} image={r.image} noPlay
+                onOpen={() => onOpenArtist(r.artistId)} />
             ))}
           </Shelf>
         )}

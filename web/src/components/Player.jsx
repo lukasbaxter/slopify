@@ -30,6 +30,7 @@ export function usePlayingFrom(player, jf) {
     const id = String(ctx || '');
     if (!ctx) { set(null); return undefined; }
     if (ctx === 'liked' || ctx === '__liked__') { set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Liked Songs') }); return undefined; }
+    if (ctx === 'radar') { set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Release Radar') }); return undefined; }
     if (id.startsWith('browse:')) {
       // Genre tiles are cached by the search page; the id is the tile's.
       let tiles = null; try { tiles = JSON.parse(localStorage.getItem('slopify.browse') || 'null'); } catch {}

@@ -408,10 +408,15 @@ export function lidarrClient(opts: LidarrOptions) {
       return { ...out, status: 'queued' };
     },
 
-    // How long the line is (albums monitored and still missing).
-    async wantedCount(): Promise<number> {
+    // How long the line is (albums monitored and still missing). `except`:
+    // Lidarr album ids not to count (ones nothing is working on any more).
+    async wantedCount(except?: Set<number>): Promise<number> {
       if (!this.enabled) return 0;
-      return (await activity()).wanted.size;
+      const { wanted } = await activity();
+      if (!except?.size) return wanted.size;
+      let n = 0;
+      for (const id of wanted.values()) if (!except.has(id)) n++;
+      return n;
     },
 
     // release-group id -> request state, for flagging discographies and search

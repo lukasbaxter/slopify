@@ -227,6 +227,25 @@ describe('built-in chores', () => {
     expect(await none.find((t) => t.id === 'discovery')!.run(ctxOf(none.find((t) => t.id === 'discovery')!))).toContain('not configured');
   });
 
+  it('failed imports Soularr skips do not count toward the wanted target', async () => {
+    const db = tmpdb('room-failed');
+    seed(db);
+    // 30 wanted, 28 of them failed imports nothing will fetch: 23 of room.
+    const wanted = new Map<string, number>(Array.from({ length: 30 }, (_, i) => [`mb-${i}`, i + 1]));
+    const lidarr: any = {
+      enabled: true,
+      wantedCount: async (except?: Set<number>) => [...wanted.values()].filter((id) => !except?.has(id)).length,
+      statuses: async () => new Map(),
+      discography: async () => ({ artist: null, releases: [] }),
+    };
+    const soularr: any = { enabled: true, canClear: true, failedImports: async () => new Set(Array.from({ length: 28 }, (_, i) => i + 1)), status: () => null };
+    const backlog = builtinTasks(adminApp() as any, { ...opts(db, lidarr), soularr }).find((t) => t.id === 'backlog')!;
+    expect(await backlog.run(ctxOf(backlog))).not.toContain('full');
+    const fromLog: any = { enabled: true, canClear: false, status: () => ({ skipped: new Map(Array.from({ length: 28 }, (_, i) => [i + 1, 0])) }) };
+    const backlog2 = builtinTasks(adminApp() as any, { ...opts(db, lidarr), soularr: fromLog }).find((t) => t.id === 'backlog')!;
+    expect(await backlog2.run(ctxOf(backlog2))).not.toContain('full');
+  });
+
   it('a replaced file keeps the listener\'s traces: likes, playlists, plays and lyrics move to the new id', () => {
     const db = tmpdb('remap');
     seed(db);

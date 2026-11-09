@@ -324,8 +324,16 @@ export const isStudio = (r: { rtype: string; secondary?: string[]; total_tracks:
 // at once (a manual Run now beside a scheduled one) can each see the same
 // headroom and jointly overshoot wantedTarget; the loops re-check every few
 // requests to keep that overshoot small rather than lock around Lidarr.
-async function room(lidarr: Lidarr, target: number): Promise<number> {
-  return target - (await lidarr.wantedCount());
+// Albums Soularr skips after a failed import stay wanted until someone
+// retries them, but nothing fetches them: counting them let a pile of
+// failed imports hold the list "full" and stop the chores for days.
+async function room(lidarr: Lidarr, target: number, soularr?: Soularr): Promise<number> {
+  let skip = new Set<number>();
+  try {
+    if (soularr?.canClear) skip = await soularr.failedImports();
+    else if (soularr?.enabled) skip = new Set(soularr.status()?.skipped.keys() ?? []);
+  } catch { /* Soularr unreachable: count everything, as before */ }
+  return target - (await lidarr.wantedCount(skip));
 }
 
 // How hard a chore leans on the NAS: a pause between files.
@@ -437,7 +445,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
-      const cap = Math.min(await room(lidarr, o.wantedTarget), ctx.setting<number>('perRun'));
+      const cap = Math.min(await room(lidarr, o.wantedTarget, o.soularr), ctx.setting<number>('perRun'));
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const seen = new Map<string, number>(Object.entries(JSON.parse(kvGet(db, 'task:discovery:seen') || '{}')));
       for (const [k, t] of seen) if (Date.now() - t > 90 * 86400000) seen.delete(k);
@@ -460,7 +468,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         if (req.status === 'queued') {
           n++; ctx.log(`${hit.artist} - ${hit.title} (${why})`);
           // See room(): a concurrent run may be filling the list too.
-          if (n % 5 === 0 && (await room(lidarr, o.wantedTarget)) <= 0) full = true;
+          if (n % 5 === 0 && (await room(lidarr, o.wantedTarget, o.soularr)) <= 0) full = true;
         }
       };
       const stop = (e: any, where: string) => {
@@ -524,7 +532,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
-      const cap = Math.min(await room(lidarr, o.wantedTarget), ctx.setting<number>('perRun'));
+      const cap = Math.min(await room(lidarr, o.wantedTarget, o.soularr), ctx.setting<number>('perRun'));
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const done = JSON.parse(kvGet(db, 'task:backlog:done') || '{}') as Record<string, number>;
       const pending = await lidarr.statuses();
@@ -544,7 +552,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
             if (req.status === 'queued') {
               n++; ctx.log(`${a.name} - ${r.title}`);
               // See room(): a concurrent run may be filling the list too.
-              if (n % 5 === 0 && (await room(lidarr, o.wantedTarget)) <= 0) full = true;
+              if (n % 5 === 0 && (await room(lidarr, o.wantedTarget, o.soularr)) <= 0) full = true;
             }
           }
         } catch (e: any) { ctx.log(`${a.name}: ${e.message}`); complete = false; }

@@ -245,6 +245,7 @@ describe('lidarr client', () => {
     for (let i = 1; i <= 1500; i++) state.albums.push(fakeAlbum(i, { monitored: true }));
     const l = client(fetcher);
     expect(await l.wantedCount()).toBe(1500);
+    expect(await l.wantedCount(new Set([1, 2, 3, 99999]))).toBe(1497);
     expect(state.calls.filter((c) => c.startsWith('GET /wanted/missing')).length).toBe(2);
   });
 

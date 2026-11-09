@@ -9,10 +9,10 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-explore-'));
 
 describe('matching library tracks and finding them on Soulseek', () => {
   const db = openDb(DATA);
-  let first: any, second: any;
+  let first: any;
   beforeAll(async () => {
     await scanLibrary(db, { musicDir: MUSIC, dataDir: DATA });
-    [first, second] = db.prepare('SELECT id, title, artist, album FROM tracks GROUP BY title, artist HAVING COUNT(*) = 1 ORDER BY title LIMIT 2').all() as any[];
+    [first] = db.prepare('SELECT id, title, artist, album FROM tracks GROUP BY title, artist HAVING COUNT(*) = 1 ORDER BY title LIMIT 2').all() as any[];
     db.prepare('INSERT INTO users (id, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)').run('u1', 'lb', 'x', 'user', Date.now());
     db.prepare('INSERT INTO prefs (user_id, json, updated) VALUES (?, ?, ?)').run('u1', JSON.stringify({ listenbrainz: { user: 'lbuser', token: 'tok' } }), Date.now());
   }, 120000);

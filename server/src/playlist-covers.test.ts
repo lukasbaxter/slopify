@@ -8,7 +8,7 @@ import { scanLibrary } from './scanner.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-covers-'));
-let app: Awaited<ReturnType<typeof buildServer>>; let tok = ''; let db: any; let me = '';
+let app: Awaited<ReturnType<typeof buildServer>>; let tok = ''; let db: any;
 const send = (method: any, url: string, payload?: any, t = tok) => app.inject({ method, url, payload, headers: { authorization: `Bearer ${t}` } });
 const get = (url: string, t = tok) => send('GET', url, undefined, t);
 let albums: { id: string; name: string; cover_hash: string }[] = [];
@@ -20,7 +20,6 @@ beforeAll(async () => {
   await scanLibrary(db, { musicDir: MUSIC, dataDir: DATA });
   tok = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: 'admin' } })).json().token;
   await app.inject({ method: 'POST', url: '/api/auth/password', payload: { password: 'admin test password' }, headers: { authorization: `Bearer ${tok}` } });
-  me = db.prepare("SELECT id FROM users WHERE name = 'admin'").get().id;
   // Albums with covers that differ from each other (the mistagged song's album shares its folder's cover).
   const all = db.prepare("SELECT id, name, cover_hash FROM albums WHERE cover_hash IS NOT NULL ORDER BY name").all() as any[];
   const seen = new Set<string>();

@@ -142,7 +142,7 @@ describe('release radar', () => {
 // Release Radar is each person's own: new albums, EPs and singles from the
 // artists THEY like (follows, liked songs/albums, plays), nobody else's.
 describe('Release Radar per person', () => {
-  it('shows each listener only their artists, new albums/EPs/singles only, a shared release once', async () => {
+  it('shows each listener only their artists, new albums/EPs/singles already out, a shared release once', async () => {
     const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-mine-')));
     const artist = db.prepare('INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?)');
     const album = db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES (?, ?, ?, ?, ?, 1, 0, ?)");
@@ -160,7 +160,7 @@ describe('Release Radar per person', () => {
     const rel = (album_id: string, rtype: string, date: string) => ({ album_id, artist: '', title: album_id, rtype, year: date.slice(0, 4), date, image: null, total_tracks: 1, secondary: [] });
     const catalog: Record<string, any[]> = {
       Alpha: [rel('a-single', 'Single', day(3)), rel('a-old', 'Album', day(400)), rel('a-comp', 'Compilation', day(2)), rel('shared', 'Album', day(1))],
-      Beta: [rel('b-ep', 'EP', day(10)), rel('shared', 'Album', day(1))],
+      Beta: [rel('b-ep', 'EP', day(10)), rel('shared', 'Album', day(1)), rel('b-soon', 'Album', day(-30))],
       Gamma: [rel('c-album', 'Album', day(20)), rel('shared', 'Album', day(1))],
     };
     const lidarr: any = { enabled: true, statuses: async () => new Map(), discography: async (name: string) => ({ artist: { name, image: null }, releases: catalog[name] || [] }) };

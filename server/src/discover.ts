@@ -289,6 +289,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     for (const u of users) for (const a of radarArtists(db, u)) byId.set(a.id, a);
     const top = [...byId.values()];
     const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
     const out: any[] = [];
     let failed = 0;
     // A few at a time: each discography is a round trip through Lidarr.
@@ -301,6 +302,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
           if (!d.artist) failed++; // discography() turns a Lidarr error into no artist
           for (const rel of d.releases) {
             if (!rel.album_id || !rel.date || rel.date < since || !RADAR_TYPES.has(String(rel.rtype || '').toLowerCase())) continue;
+            if (rel.date.length >= 10 && rel.date > today) continue; // announced, not out yet
             // keep only the raw release: the per-render flags are re-applied fresh on every GET
             const r: any = { ...rel, artistId: a.id, artistName: a.name };
             delete r.inLibrary; delete r.localName; delete r.requestStatus;

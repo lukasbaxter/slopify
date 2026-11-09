@@ -6,7 +6,6 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { buildServer } from './app.js';
 import { scanLibrary } from './scanner.js';
 import { MIGRATIONS, openDb } from './db.js';
-import { brainPlaylist } from './explore.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-libfolders-'));
@@ -114,14 +113,6 @@ describe('library folders and order', () => {
     expect((await layout()).order).toEqual([]);
   });
 
-  it('the library order never takes a mix', async () => {
-    const ids = (db.prepare('SELECT id FROM tracks LIMIT 5').all() as any[]).map((r) => r.id);
-    await brainPlaylist(db, db.prepare("SELECT id FROM users WHERE name = 'admin'").get().id, 'daily-jams', { brain: true, brainUrl: 'http://brain', brainKey: 'k', fetcher: (async () => ({ ok: true, json: async () => ({ items: ids }) })) as any });
-    const mix = (await get('/api/mixes')).json().items[0].id;
-    await send('PUT', '/api/library/layout', { order: [mix], folders: {} });
-    expect((await get('/api/library/layout')).json().order).not.toContain(mix);
-  });
-
   it('refuses what is not a list of ids', async () => {
     expect((await send('PUT', '/api/library/layout', { order: 'x' })).statusCode).toBe(400);
     expect((await send('PUT', '/api/library/layout', { order: ['../etc'] })).statusCode).toBe(400);
@@ -130,10 +121,10 @@ describe('library folders and order', () => {
 
 describe('the upgrade keeps the order people dragged into', () => {
   it('moves prefs.libraryOrder to the server\'s library order', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-mig34-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-mig33-'));
     const raw = new Database(path.join(dir, 'slopify.db'));
-    for (let i = 0; i < 33; i++) raw.exec(MIGRATIONS[i]);
-    raw.pragma('user_version = 33');
+    for (let i = 0; i < 32; i++) raw.exec(MIGRATIONS[i]);
+    raw.pragma('user_version = 32');
     raw.prepare("INSERT INTO users (id, name, pass_hash, role, created) VALUES ('u1', 'u1', 'x', 'user', 1)").run();
     raw.prepare("INSERT INTO users (id, name, pass_hash, role, created) VALUES ('u2', 'u2', 'x', 'user', 1)").run();
     raw.prepare('INSERT INTO prefs (user_id, json, updated) VALUES (?, ?, ?)').run('u1', JSON.stringify({ libraryOrder: ['pl_mine', 'b'.repeat(32), 'pl_faves'], theme: {} }), 1);

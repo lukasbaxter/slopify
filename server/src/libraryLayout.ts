@@ -44,13 +44,12 @@ export function readLayout(db: DB, uid: string): Layout {
 // not fit is put right rather than refused: an id twice keeps its first
 // place, a folder inside a folder goes to the top level, a folder deleted
 // on another device meanwhile gives its items to the top level in its
-// place, and a mix (never in the library) is left out.
+// place.
 export function writeLayout(db: DB, uid: string, order: string[], inFolders: Record<string, string[]>) {
   const mine = new Set((db.prepare('SELECT id FROM library_folders WHERE user_id = ?').all(uid) as { id: string }[]).map((r) => r.id));
-  const mixes = new Set((db.prepare('SELECT id FROM playlists WHERE user_id = ? AND mix IS NOT NULL').all(uid) as { id: string }[]).map((r) => r.id));
   const seen = new Set<string>();
   const top: string[] = []; const rows: [string, string | null, number][] = [];
-  const take = (id: string) => { if (seen.has(id) || mixes.has(id)) return false; seen.add(id); return true; };
+  const take = (id: string) => { if (seen.has(id)) return false; seen.add(id); return true; };
   const fill = (fid: string) => {
     let i = 0;
     for (const id of inFolders[fid] || []) {

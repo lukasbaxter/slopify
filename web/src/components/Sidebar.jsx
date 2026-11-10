@@ -196,7 +196,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     { label: t('Play'), onClick: async () => { const { items } = await jf.favoriteTracks(); if (items.length) player.playQueue(items, 0, 'liked'); } },
   ] : e.kind === 'folder' ? [
     { label: t('Rename'), icon: MI.edit, onClick: () => startNaming({ kind: 'rename', id: e.id, name: e.item.Name }) },
-    { label: t('Choose photo'), onClick: () => chooseFolderPhoto(e.id) },
+    { label: t('Choose photo'), icon: MI.photo, onClick: () => chooseFolderPhoto(e.id) },
     { label: t('Delete'), icon: MI.trash, danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: e.item.Name }))) deleteFolder(e.id); } },
   ] : e.kind === 'album' ? [
     { label: t('Add to queue'), onClick: () => playEntry(e, true) },
@@ -220,7 +220,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     { label: pinned.has(e.id) ? t('Unpin playlist') : t('Pin playlist'), onClick: () => togglePin(e.id) },
     ...(e.item.AiPrompt ? [{ label: t('Regenerate'), onClick: () => onRegeneratePlaylist?.(e.item) }] : []),
     { label: t('Edit details'), onClick: () => onEditPlaylist?.(e.item) },
-    { label: t('Delete'), danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: e.item.Name }))) onDeletePlaylist?.(e.item); } },
+    { label: t('Delete'), icon: MI.trash, danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: e.item.Name }))) onDeletePlaylist?.(e.item); } },
   ];
   const openMenu = (ev, entry) => {
     ev.preventDefault(); ev.stopPropagation();

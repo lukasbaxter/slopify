@@ -450,6 +450,8 @@ input, textarea, select { font-family: inherit; }
 .ctxmenu .ctxitem { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 8px; }
 .ctxmenu .ctx-ico { width: 16px; height: 16px; display: grid; place-items: center; color: var(--fg-dim); flex: 0 0 16px; }
 .ctxmenu .ctxitem:hover .ctx-ico { color: var(--fg); }
+/* Destructive rows: the icon red like the text, hovered or not. */
+.ctxmenu .ctxitem.danger .ctx-ico, .ctxmenu .ctxitem.danger:hover .ctx-ico { color: var(--danger); }
 .ctxmenu .ctx-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .ctxmenu .ctx-desc { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--fg-sub); white-space: normal; }
 .ctxmenu .ctx-chev { color: var(--fg-dim); flex: 0 0 14px; }

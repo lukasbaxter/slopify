@@ -114,7 +114,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
       const list = (f.items || []).filter((id) => by.has(id) && !placed.has(id));
       list.forEach((id) => placed.add(id));
       kids.set(f.id, list.map((id) => by.get(id)));
-      by.set(f.id, { id: f.id, kind: 'folder', item: { Id: f.id, Name: f.name } });
+      by.set(f.id, { id: f.id, kind: 'folder', item: { Id: f.id, Name: f.name, Cover: f.cover || null } });
     }
     const known = [];
     for (const id of lay.order || []) if (by.has(id) && !placed.has(id)) { placed.add(id); known.push(by.get(id)); }
@@ -137,9 +137,9 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
       for (const id of f.items || []) if (!list.includes(id) && !byId.has(id)) list.push(id);
       folders[f.id] = list;
     }
-    return { order, folders, names: Object.fromEntries((lay.folders || []).map((f) => [f.id, f.name])) };
+    return { order, folders, names: Object.fromEntries((lay.folders || []).map((f) => [f.id, f.name])), covers: Object.fromEntries((lay.folders || []).filter((f) => f.cover).map((f) => [f.id, f.cover])) };
   };
-  const asLayout = (c) => ({ order: c.order, folders: Object.entries(c.folders).map(([id, items]) => ({ id, name: c.names[id] ?? '', items })) });
+  const asLayout = (c) => ({ order: c.order, folders: Object.entries(c.folders).map(([id, items]) => ({ id, name: c.names[id] ?? '', ...(c.covers?.[id] ? { cover: c.covers[id] } : {}), items })) });
   const save = (c) => commit(asLayout(c), (rev) => jf.saveLibraryLayout({ order: c.order, folders: c.folders }, rev));
 
   // Downloaded lists (api/offline.js): Spotify's green mark on one kept
@@ -176,6 +176,14 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     const c = current(); c.names[id] = name;
     commit(asLayout(c), (rev) => jf.renameFolder(id, name, rev).then(() => null));
   };
+  // A picture of its own, like a playlist's: picked from the device.
+  const coverPick = useRef(null);
+  const chooseFolderPhoto = (id) => { const el = coverPick.current; if (!el) return; el.dataset.folder = id; el.value = ''; el.click(); };
+  const onFolderPhoto = (ev) => {
+    const file = ev.target.files?.[0]; const id = ev.target.dataset.folder;
+    if (!file || !id) return;
+    commit(layoutRef.current, (rev) => jf.uploadFolderCover(id, file, rev).then(() => null));
+  };
   // What it held goes back where the folder was; none of it is deleted.
   const deleteFolder = (id) => {
     const c = current(); const kids = c.folders[id] || [];
@@ -188,6 +196,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
     { label: t('Play'), onClick: async () => { const { items } = await jf.favoriteTracks(); if (items.length) player.playQueue(items, 0, 'liked'); } },
   ] : e.kind === 'folder' ? [
     { label: t('Rename'), icon: MI.edit, onClick: () => startNaming({ kind: 'rename', id: e.id, name: e.item.Name }) },
+    { label: t('Choose photo'), onClick: () => chooseFolderPhoto(e.id) },
     { label: t('Delete'), icon: MI.trash, danger: true, onClick: () => { if (window.confirm(t('Delete "{name}"?', { name: e.item.Name }))) deleteFolder(e.id); } },
   ] : e.kind === 'album' ? [
     { label: t('Add to queue'), onClick: () => playEntry(e, true) },
@@ -327,6 +336,7 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
 
   return (
     <aside className="sidebar">
+      <input ref={coverPick} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={onFolderPhoto} />
       <nav className="nav">
         <button className={`navitem ${view === 'home' ? 'on' : ''}`} onClick={() => onView('home')}>
           <Icon name="home" /><span>{t('Home')}</span>
@@ -397,7 +407,9 @@ export default function Sidebar({ view, onView, playlists, likedCount, onOpen, o
                 <button key={e.id} className={`libitem libfolder ${open ? 'open' : ''}`} data-lib-row={e.id} data-lib-folder=""
                   onClick={() => toggleFolder(e.id)} onContextMenu={(ev) => openMenu(ev, e)} onPointerDown={drag.onPointerDown(e.id)}
                   title={it.Name} aria-expanded={open}>
-                  <span className="ph libfolder-art"><Icon name={open ? 'folderOpen' : 'folder'} size={phone ? 28 : 24} /></span>
+                  {it.Cover
+                    ? <img className="libfolder-art" src={jf.imageUrl(it.Id, { maxHeight: 84 }) + `&c=${String(it.Cover).slice(0, 10)}`} alt="" loading="lazy" draggable={false} />
+                    : <span className="ph libfolder-art"><Icon name={open ? 'folderOpen' : 'folder'} size={phone ? 28 : 24} /></span>}
                   <span className="libitem-text">
                     <span className="libitem-name">{it.Name}</span>
                     <span className="libitem-sub">{`${t('Folder')} • ${t('{n} items', { n })}`}</span>

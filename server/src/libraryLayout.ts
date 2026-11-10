@@ -17,16 +17,17 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DB } from './db.js';
+import { storeArtwork } from './artwork.js';
 
 export const folderId = () => `fd_${crypto.randomBytes(12).toString('hex')}`;
 const isFolder = (id: string) => id.startsWith('fd_');
 const ID = /^[\w-]{1,64}$/;
 const MAX = 20000;
 
-export type Layout = { order: string[]; folders: { id: string; name: string; items: string[] }[] };
+export type Layout = { order: string[]; folders: { id: string; name: string; cover?: string; items: string[] }[] };
 
 export function readLayout(db: DB, uid: string): Layout {
-  const folders = db.prepare('SELECT id, name FROM library_folders WHERE user_id = ? ORDER BY created').all(uid) as { id: string; name: string }[];
+  const folders = db.prepare('SELECT id, name, cover_hash FROM library_folders WHERE user_id = ? ORDER BY created').all(uid) as { id: string; name: string; cover_hash: string | null }[];
   const rows = db.prepare('SELECT item_id, folder_id FROM library_order WHERE user_id = ? ORDER BY pos, item_id').all(uid) as { item_id: string; folder_id: string | null }[];
   const known = new Set(folders.map((f) => f.id));
   const inside = new Map(folders.map((f) => [f.id, [] as string[]]));
@@ -37,7 +38,8 @@ export function readLayout(db: DB, uid: string): Layout {
   }
   // A folder always has a place: a new one goes first.
   for (const f of [...folders].reverse()) if (!order.includes(f.id)) order.unshift(f.id);
-  return { order, folders: folders.map((f) => ({ ...f, items: inside.get(f.id)! })) };
+  // cover: only for a folder with a picture (its hash, so a client knows when it changed).
+  return { order, folders: folders.map((f) => ({ id: f.id, name: f.name, ...(f.cover_hash ? { cover: f.cover_hash } : {}), items: inside.get(f.id)! })) };
 }
 
 // The whole arrangement at once, as the app has it after a drag. What does
@@ -73,7 +75,7 @@ export function writeLayout(db: DB, uid: string, order: string[], inFolders: Rec
   })();
 }
 
-export function registerLibraryLayout(app: FastifyInstance, db: DB) {
+export function registerLibraryLayout(app: FastifyInstance, db: DB, cacheDir?: string) {
   const auth = { preHandler: (app as any).requireUser };
   const uid = (req: any) => req.user.id as string;
   const told = (req: any) => {
@@ -111,6 +113,19 @@ export function registerLibraryLayout(app: FastifyInstance, db: DB) {
     db.prepare('UPDATE library_folders SET name = ?, updated = ? WHERE id = ?').run(b.data.name, Date.now(), f.id);
     told(req);
     return { ok: true };
+  });
+  // A folder's own picture (JPEG/PNG/WebP), stored like a playlist cover.
+  app.post('/api/library/folders/:id/cover', auth, async (req, reply) => {
+    const f = ownFolder(req, (req.params as any).id); if (!f) return reply.code(404).send({ error: 'no such folder' });
+    if (!cacheDir) return reply.code(503).send({ error: 'no art store' });
+    const chunks: Buffer[] = []; let n = 0;
+    try { for await (const c of req.raw) { n += c.length; if (n > 12 * 1024 * 1024) throw new Error('too large'); chunks.push(c as Buffer); } } catch { return reply.code(413).send({ error: 'too large' }); }
+    try {
+      const { hash } = await storeArtwork(cacheDir, Buffer.concat(chunks));
+      db.prepare('UPDATE library_folders SET cover_hash = ?, updated = ? WHERE id = ?').run(hash, Date.now(), f.id);
+      told(req);
+      return { ok: true, cover: hash };
+    } catch { return reply.code(400).send({ error: 'not an image' }); }
   });
   // What the folder held goes back to the library where the folder was, in
   // the folder's order.

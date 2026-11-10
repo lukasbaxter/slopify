@@ -368,6 +368,8 @@ export class Slopify {
   saveLibraryLayout(layout, rev) { return this._fetch('/api/library/layout', { method: 'PUT', body: JSON.stringify({ order: layout.order, folders: layout.folders }), headers: { 'X-Slopify-Rev': rev } }); }
   createFolder(name, rev) { return this._fetch('/api/library/folders', { method: 'POST', body: JSON.stringify({ name }), headers: { 'X-Slopify-Rev': rev } }); }
   renameFolder(id, name, rev) { return this._fetch(`/api/library/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ name }), headers: { 'X-Slopify-Rev': rev } }); }
+  // A folder's own picture: the image file as the body, like a playlist cover.
+  async uploadFolderCover(id, file, rev) { await this._fetch(`/api/library/folders/${id}/cover`, { method: 'POST', raw: file, headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Slopify-Rev': rev } }); this.bustImage(id); }
   deleteFolder(id, rev) { return this._fetch(`/api/library/folders/${id}`, { method: 'DELETE', headers: { 'X-Slopify-Rev': rev } }); }
   playlistTracks(playlistId, opts = {}) {
     if (opts.startIndex != null) return this._playlistTracks(playlistId, opts);

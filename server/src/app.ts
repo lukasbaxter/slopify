@@ -102,7 +102,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerBrain(app, db);
   registerStream(app, db, cacheDir, songCache, altOf, config.headsEnabled);
   registerSocial(app, db, dataDir, cacheDir);
-  registerLibraryLayout(app, db);
+  registerLibraryLayout(app, db, cacheDir);
   const heads = config.headsEnabled ? { cacheDir, seconds: config.headSeconds } : undefined;
   registerAdmin(app, db, musicDir, cacheDir, { heads, pauseMs: config.scanPauseMs, saveToLibrary: config.saveToLibrary });
   app.decorate('ingest', registerIngest(app, db, { ...config.ingest, musicDir, cacheDir, headSeconds: config.headSeconds, headsEnabled: config.headsEnabled }));

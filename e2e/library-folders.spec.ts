@@ -117,6 +117,27 @@ test.describe('desktop', () => {
     await mouseDrag(page, row(page, C), { x: to.x, y: to.y - 4 });
     await expect.poll(() => names(page)).toEqual([A, B, C]);
   });
+
+  test('a folder takes a photo from its menu and shows it in the library', async ({ page }) => {
+    const n = uniq(); const F = `Pics ${n}`;
+    await freshLibrary(page, [`Hotel ${n}`]);
+    await page.reload(); await waitForLibrary(page);
+    await page.locator('.sidebar .libhead [aria-label="Create playlist"]').click();
+    await page.locator('.ctxmenu .ctxitem', { hasText: 'Folder' }).click();
+    await page.locator('.sidebar .newplaylist-input').fill(F); await page.keyboard.press('Enter');
+    await expect(row(page, F)).toBeVisible();
+    await expect(row(page, F).locator('img')).toHaveCount(0); // the folder icon until it has a picture
+    await row(page, F).click({ button: 'right' });
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('.ctxmenu .ctxitem', { hasText: 'Choose photo' }).click();
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DwHwyBNAMDA8N/BgB/bQn3nmDm/gAAAABJRU5ErkJggg==', 'base64');
+    await (await chooser).setFiles({ name: 'p.png', mimeType: 'image/png', buffer: png });
+    const img = row(page, F).locator('img');
+    await expect(img).toBeVisible();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+    await page.reload(); await waitForLibrary(page); // kept on the server
+    await expect(row(page, F).locator('img')).toBeVisible();
+  });
 });
 
 test.describe('phone', () => {

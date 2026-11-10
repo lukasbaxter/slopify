@@ -461,6 +461,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     // A track that left the library (replaced file = new id) still names its album:
     // rows a client kept from before the change keep their cover.
     const gt = db.prepare('SELECT a.cover_hash FROM gone_tracks g JOIN albums a ON a.id = g.album_id WHERE g.id = ?').get(id) as any; if (gt?.cover_hash) return gt.cover_hash;
+    // A library folder's uploaded picture.
+    if (id.startsWith('fd_')) return (db.prepare('SELECT cover_hash FROM library_folders WHERE id = ?').get(id) as any)?.cover_hash ?? null;
     const ar = db.prepare('SELECT image_hash, banner_hash FROM artists WHERE id = ?').get(id) as any;
     if (ar) {
       // A banner: the artist's wide photo when there is one (its size is

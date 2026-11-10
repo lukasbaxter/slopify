@@ -291,6 +291,10 @@ export const MIGRATIONS: string[] = [
     SELECT p.user_id, j.value, NULL, CAST(j.key AS INTEGER) FROM prefs p, json_each(p.json, '$.libraryOrder') j
     WHERE json_valid(p.json) AND json_type(p.json, '$.libraryOrder') = 'array' AND j.type = 'text';
   `,
+  // 34: a folder can have a picture of its own (uploaded, like a playlist's).
+  `
+  ALTER TABLE library_folders ADD COLUMN cover_hash TEXT;
+  `,
 ];
 
 export type DB = Database.Database;

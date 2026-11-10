@@ -6,6 +6,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { buildServer } from './app.js';
 import { scanLibrary } from './scanner.js';
 import { MIGRATIONS, openDb } from './db.js';
+import sharp from 'sharp';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-libfolders-'));
@@ -111,6 +112,23 @@ describe('library folders and order', () => {
     expect((await layout()).order).toEqual([pB]);
     await send('DELETE', `/api/playlists/${pB}`);
     expect((await layout()).order).toEqual([]);
+  });
+
+  it('a folder takes a picture of its own: in the layout, served as its image, and only by its owner', async () => {
+    const f = (await send('POST', '/api/library/folders', { name: 'Pictured' })).json();
+    expect((await layout()).folders.find((x: any) => x.id === f.id).cover).toBeUndefined();
+    const png = await sharp({ create: { width: 300, height: 300, channels: 3, background: '#ff0000' } }).png().toBuffer();
+    const up = (t: string) => app.inject({ method: 'POST', url: `/api/library/folders/${f.id}/cover`, payload: png, headers: { authorization: `Bearer ${t}`, 'content-type': 'image/png' } });
+    expect((await up(tok2)).statusCode).toBe(404); // someone else's folder
+    const r = await up(tok);
+    expect(r.statusCode).toBe(200);
+    expect((await layout()).folders.find((x: any) => x.id === f.id).cover).toBe(r.json().cover);
+    const img = await app.inject({ url: `/api/image/${f.id}?size=160` });
+    expect(img.statusCode).toBe(200);
+    const { data } = await sharp(img.rawPayload).raw().toBuffer({ resolveWithObject: true });
+    expect(data[0]).toBeGreaterThan(200); expect(data[1]).toBeLessThan(60); // red, the uploaded picture
+    expect((await app.inject({ method: 'POST', url: `/api/library/folders/${f.id}/cover`, payload: Buffer.from('not an image'), headers: { authorization: `Bearer ${tok}`, 'content-type': 'image/png' } })).statusCode).toBe(400);
+    await send('DELETE', `/api/library/folders/${f.id}`);
   });
 
   it('refuses what is not a list of ids', async () => {

@@ -136,11 +136,15 @@ test.describe('phone', () => {
     const cdp = await page.context().newCDPSession(page);
     const touch = (type: string, x?: number, y?: number) => cdp.send('Input.dispatchTouchEvent', { type: type as any, touchPoints: x == null ? [] : [{ x, y: y! }] });
 
-    // A swipe scrolls, it does not drag (Chrome's own touch scroll gesture).
+    // A swipe scrolls, it does not drag: a finger down and straight up the
+    // list, as raw touch events (Chrome's synthesized scroll gesture does
+    // not scroll anything in headless Chrome on Linux, where CI runs).
     const scroller = page.locator('.liblist');
     const s0 = await scroller.evaluate((el) => el.scrollTop);
     const mid = await centre(row(page, list[3]));
-    await cdp.send('Input.synthesizeScrollGesture', { x: Math.round(mid.x), y: Math.round(mid.y), yDistance: -250, gestureSourceType: 'touch', speed: 1200 });
+    await touch('touchStart', mid.x, mid.y);
+    for (let dy = 10; dy <= 250; dy += 10) { await touch('touchMove', mid.x, mid.y - dy); await page.waitForTimeout(8); }
+    await touch('touchEnd');
     await page.waitForTimeout(300);
     await expect(page.locator('.libitem.lib-lifted')).toHaveCount(0);
     expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(s0);

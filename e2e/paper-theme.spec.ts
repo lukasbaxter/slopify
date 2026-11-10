@@ -101,7 +101,7 @@ test('every screen is readable in a light theme', async ({ page, isMobile }) => 
   const screen = async (where: string) => { await check(where); await hovers(where); };
 
   await screen('home');
-  await page.locator('.card', { hasText: 'First Light' }).first().click();
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
   await screen('album');
 

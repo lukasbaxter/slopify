@@ -375,6 +375,22 @@ export function Lyrics({ player, jf }) {
     return () => { box.removeEventListener('wheel', stop); box.removeEventListener('touchmove', stop); };
   }, [state]);
 
+  // The top fade only once there is something above to fade: the list is scrolled down, or
+  // the first line is done and a later one is lit. Otherwise it dims the first line.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const box = listRef.current?.closest('.fs-lyrics'); if (!box) return undefined;
+    const on = () => setScrolled(box.scrollTop > 1);
+    on();
+    box.addEventListener('scroll', on, { passive: true });
+    return () => box.removeEventListener('scroll', on);
+  }, [state]);
+  useEffect(() => {
+    const box = listRef.current?.closest('.fs-lyrics'); if (!box) return undefined;
+    box.classList.toggle('fade-top', scrolled || activeIndex > 0);
+    return () => box.classList.remove('fade-top');
+  }, [scrolled, activeIndex, state]);
+
   // Breadcrumb every ~2s: what the lyrics view believes.
   useEffect(() => {
     const t = setInterval(() => {

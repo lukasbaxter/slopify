@@ -85,6 +85,34 @@ test.describe('lyrics', () => {
   });
 });
 
+// The top fade dimmed the first lyric line, so it never looked lit (all platforms, owner
+// 2026-11-11). It shows only once the list is scrolled down or a later line is lit.
+test('lyrics: no top fade over the first line', async ({ page, isMobile }) => {
+  await login(page); await waitForLibrary(page);
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
+  await expect(page.locator('.trackrow').first()).toContainText('River Harbour', { timeout: 15000 });
+  await page.locator('.trackrow').first().dblclick().catch(() => {});
+  await page.locator('.trackrow').first().click().catch(() => {});
+  const pause = page.locator('.player button[title="Pause"], .player button[aria-label="Pause"]').first();
+  await expect(pause).toBeVisible({ timeout: 20000 });
+  await pause.click();
+  await page.evaluate(() => (window as any).conduit?.player?.seek?.(0));
+  if (isMobile) await page.locator('.player-row').click();
+  else await page.locator('.player button[title*="Now playing" i], .player button[aria-label*="Now playing" i], .player .expand').first().click().catch(() => {});
+  await expect(page.locator('.fs')).toBeVisible({ timeout: 10000 });
+  await page.locator('.fs button[aria-label="Lyrics"]').locator('visible=true').first().click();
+  const box = page.locator('.fs-lyrics');
+  await expect(box.locator('.lyric-line').first()).toBeVisible({ timeout: 25000 });
+  const topIsClear = () => box.evaluate((el) => {
+    const m = getComputedStyle(el).maskImage || (getComputedStyle(el) as any).webkitMaskImage || '';
+    return !/^linear-gradient\((rgba\(0, 0, 0, 0\)|transparent)/.test(m);
+  });
+  await expect.poll(topIsClear).toBe(true);
+  // Scrolled down: the fade is back.
+  const scrolls = await box.evaluate((el) => { el.scrollTop = 40; el.dispatchEvent(new Event('scroll')); return el.scrollTop > 1; });
+  if (scrolls) await expect.poll(topIsClear).toBe(false);
+});
+
 // A socket iOS let die in the background still reads OPEN until it times out;
 // a like sent on it was lost and the heart flipped back on the next reconnect.
 test('a like is saved even when the session socket is silently dead', async ({ page }, info) => {

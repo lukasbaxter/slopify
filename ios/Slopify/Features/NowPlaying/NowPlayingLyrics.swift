@@ -59,3 +59,18 @@ enum NowPlayingLyrics {
     /// Retry delays after a failed fetch: 2, 4, 8 s, then "none".
     static func retryDelay(attempt: Int) -> Double? { attempt < 3 ? 2 * pow(2, Double(attempt)) : nil }
 }
+
+/// A new song's lyrics start at the top (web v0.1.177), or at the active line when joining
+/// mid-song. Once per song: a reload of the same song (sync finished, retry) never moves a list
+/// the user has scrolled.
+struct NowPlayingLyricsReset: Equatable {
+    enum Target: Equatable { case top, line(Int) }
+    private(set) var lastTrackId: String?
+
+    /// Call when a song's lyrics have loaded. Nil when this song was already reset.
+    mutating func loaded(trackId: String, activeIndex: Int) -> Target? {
+        guard trackId != lastTrackId else { return nil }
+        lastTrackId = trackId
+        return activeIndex >= 0 ? .line(activeIndex) : .top
+    }
+}

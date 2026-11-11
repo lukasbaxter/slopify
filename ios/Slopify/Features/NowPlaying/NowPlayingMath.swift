@@ -66,6 +66,14 @@ enum NowPlayingMath {
         !lyricsShowing || startY <= headerBottom
     }
 
+    /// Queue page swipe-down (web v0.1.177): closes when it starts on the header, or on the list
+    /// while the list is at its top (offset <= 1 pt). A swipe that starts on a drag handle is a
+    /// reorder and never closes it.
+    static func queueSwipeDismissAllowed(startY: CGFloat, headerBottom: CGFloat, listOffset: CGFloat, onHandle: Bool) -> Bool {
+        guard !onHandle else { return false }
+        return startY <= headerBottom || listOffset <= 1
+    }
+
     // MARK: Lyrics backdrop
     // The web uses blur(60px) brightness(.32) saturate(1.3) (mobile-nowplaying.css:83). Native is
     // brighter on purpose so more of the cover shows; a scrim then caps light covers.

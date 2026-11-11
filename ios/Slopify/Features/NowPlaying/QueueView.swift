@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The phone queue page (UI.md 3.3; RightPanel.jsx:43-262, 433-484). Uses the theme's own
-/// tokens (no dark island). Reorder by the drag handle; remove from the long-press sheet.
+/// tokens (no dark island). Just the list (web v0.1.177: no pinned transport). Reorder by the drag
+/// handle; remove from the long-press sheet; swipe down from the header or the list's top closes it.
 struct QueueView: View {
     @Environment(AppModel.self) private var app
     @Environment(Player.self) private var player
@@ -22,20 +23,43 @@ struct QueueView: View {
     private let rowHeight: CGFloat = 64
     private var api: APIClient { envApi ?? account.api }
 
+    // Swipe down to close (web v0.1.177): from the header, or the list at its top.
+    @State private var drag: CGFloat = 0
+    @State private var dragStart: Date?
+    @State private var dismissing = false
+    /// Decided once per gesture, from where it started.
+    @State private var swipeAllowed: Bool?
+    @State private var headerBottom: CGFloat = 0
+    @State private var listOffset: CGFloat = 0
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) { sections }
+        GeometryReader { g in
+            VStack(spacing: 0) {
+                header
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        GeometryReader { r in
+                            Color.clear.preference(key: QueueScrollKey.self, value: -r.frame(in: .named("queueScroll")).minY)
+                        }
+                        .frame(height: 0)
+                        VStack(alignment: .leading, spacing: 24) { sections }
+                    }
+                    // The list is the whole page now: no space kept for a transport (.panel-body 8 16 24).
                     .padding(.top, 8)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 80)
+                    .padding(.bottom, 24)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                }
+                .coordinateSpace(name: "queueScroll")
+                .onPreferenceChange(QueueScrollKey.self) { listOffset = $0 }
+                .scrollDisabled(dragFrom != nil || dismissing)
             }
-            .scrollDisabled(dragFrom != nil)
-            if player.current != nil { transport }
+            .frame(width: g.size.width, height: g.size.height)
+            .background(theme.page.ignoresSafeArea())
+            .offset(y: drag)
+            .simultaneousGesture(dismissGesture(height: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom))
         }
-        .background(theme.page.ignoresSafeArea())
+        .presentationBackground(.clear)
         .contextMenuSheet($menu)
         .task(id: player.context) { from = NowPlayingFrom.immediate(player.context) ?? from; from = await NowPlayingFrom.resolve(player.context, api: api) }
     }
@@ -60,6 +84,46 @@ struct QueueView: View {
         .padding(.top, 4)
         .padding(.horizontal, 16)
         .frame(minHeight: 56)
+        .background(GeometryReader { g in
+            Color.clear.onAppear { headerBottom = g.frame(in: .global).maxY }
+                .onChange(of: g.frame(in: .global).maxY) { _, y in headerBottom = y }
+        })
+    }
+
+    private func dismissGesture(height: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .onChanged { v in
+                if swipeAllowed == nil {
+                    // A reorder drag has already lifted its row by now (its gesture starts at 0 pt).
+                    swipeAllowed = menu == nil && NowPlayingMath.queueSwipeDismissAllowed(
+                        startY: v.startLocation.y, headerBottom: headerBottom,
+                        listOffset: listOffset, onHandle: dragFrom != nil)
+                }
+                guard swipeAllowed == true else { return }
+                let dy = v.translation.height, dx = v.translation.width
+                if !dismissing {
+                    guard dy > 0, abs(dx) < dy else { return }
+                    dismissing = true
+                    dragStart = Date()
+                }
+                drag = max(0, dy)
+            }
+            .onEnded { v in
+                swipeAllowed = nil
+                guard dismissing else { return }
+                dismissing = false
+                let elapsed = Date().timeIntervalSince(dragStart ?? Date())
+                dragStart = nil
+                if NowPlayingMath.dismissesNowPlaying(dy: v.translation.height, elapsed: elapsed) {
+                    withAnimation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.25)) { drag = height }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        var t = Transaction(); t.disablesAnimations = true
+                        withTransaction(t) { close() }
+                    }
+                } else {
+                    withAnimation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.25)) { drag = 0 }
+                }
+            }
     }
 
     /// The web unmounts now playing as the queue opens, so closing the queue lands on the page.
@@ -203,60 +267,9 @@ struct QueueView: View {
         let menus = NowPlayingMenus(menus: TrackMenuBuilder(app: app) { _ in })
         menu = menus.queueRow(t, at: pos, removable: !current)
     }
+}
 
-    // MARK: Pinned transport (.panel-transport)
-
-    private var transport: some View {
-        HStack(spacing: 0) {
-            Button { player.setShuffle(player.shuffle.nowPlayingNext) } label: {
-                ShuffleGlyph(mode: player.shuffle.nowPlayingGlyph, size: 24)
-                    .foregroundStyle(player.shuffle == .off ? theme.fg : theme.accentInk).frame(width: 44, height: 44)
-            }
-            .padding(.leading, -6)
-            .accessibilityLabel(L("Shuffle"))
-            Spacer(minLength: 0)
-            Button { player.previous() } label: { IconView(.previous, size: 32).foregroundStyle(theme.fg).frame(width: 44, height: 44) }
-                .accessibilityLabel(L("Previous"))
-            Spacer(minLength: 0)
-            Button { player.togglePlay() } label: {
-                IconView(player.isPlaying ? .pause : .play, size: 22).foregroundStyle(theme.onFg)
-                    .frame(width: 48, height: 48).background(theme.fg, in: Circle())
-            }
-            .accessibilityLabel(player.isPlaying ? L("Pause") : L("Play"))
-            Spacer(minLength: 0)
-            Button { player.next() } label: { IconView(.next, size: 32).foregroundStyle(theme.fg).frame(width: 44, height: 44) }
-                .accessibilityLabel(L("Next"))
-            Spacer(minLength: 0)
-            Button { player.setRepeat(player.repeatMode.nowPlayingNext) } label: {
-                RepeatGlyph(mode: player.repeatMode.nowPlayingGlyph, size: 24)
-                    .foregroundStyle(player.repeatMode == .off ? theme.fg : theme.accentInk).frame(width: 44, height: 44)
-            }
-            .padding(.trailing, -6)
-            .accessibilityLabel(L("Repeat"))
-        }
-        .buttonStyle(.pressFade)
-        .frame(height: 64)
-        .padding(.horizontal, 24)
-        .background(theme.page.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) {
-            ZStack(alignment: .top) {
-                Rectangle().fill(theme.fg(0.06)).frame(height: 1)
-                // The native app uses the live playhead (UI.md 3.3.5 asks), not the coarse position.
-                TimelineView(.periodic(from: .now, by: player.isPlaying ? 0.25 : 3600)) { _ in
-                    let f = NowPlayingMath.fraction(player.isPlaying ? player.positionNow() : player.position, duration: player.duration)
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(theme.fg(0.2))
-                            Rectangle().fill(theme.fg).frame(width: g.size.width * f)
-                        }
-                    }
-                    .frame(height: 2)
-                    .id(player.progressTick)
-                }
-                .offset(y: -2)
-                .padding(.horizontal, -24)
-            }
-            .allowsHitTesting(false)
-        }
-    }
+private struct QueueScrollKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

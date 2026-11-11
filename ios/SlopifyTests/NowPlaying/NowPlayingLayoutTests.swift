@@ -46,6 +46,19 @@ final class NowPlayingLayoutTests: XCTestCase {
         XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 500, headerBottom: 115))
     }
 
+    func testQueueSwipeStartRule() {
+        // Header: always, even with the list scrolled.
+        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 90, headerBottom: 115, listOffset: 400, onHandle: false))
+        // List at its top: yes; scrolled down: no (the swipe scrolls the list).
+        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 0, onHandle: false))
+        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 1, onHandle: false))
+        XCTAssertFalse(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 1.5, onHandle: false))
+        // Pull-down bounce above the top counts as at the top.
+        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: -20, onHandle: false))
+        // A drag handle is a reorder: never closes, wherever the list is.
+        XCTAssertFalse(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 0, onHandle: true))
+    }
+
     func testLyricsBackdropValues() {
         // Brighter than the web's brightness(.32) saturate(1.3), on purpose.
         XCTAssertEqual(NowPlayingMath.lyricsBackdropBrightness, 0.42)

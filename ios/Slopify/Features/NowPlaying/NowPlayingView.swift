@@ -58,6 +58,9 @@ struct NowPlayingView: View {
             .offset(y: drag)
             .simultaneousGesture(dismissGesture(height: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom))
         }
+        // The web unmounts now playing as the queue opens: hide it under the queue so the queue's
+        // swipe-down shows the page behind, not this.
+        .opacity(nav.queueOpen ? 0 : 1)
         .darkIsland()
         .presentationBackground(.clear)
         .contextMenuSheet($menu)

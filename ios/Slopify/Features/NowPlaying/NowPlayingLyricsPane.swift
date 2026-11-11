@@ -16,6 +16,10 @@ struct NowPlayingLyricsPane: View {
     @State private var manual = false
     /// How far the list is scrolled down, pt (for the top fade).
     @State private var scrolled: CGFloat = 0
+    @State private var reset = NowPlayingLyricsReset()
+    /// A one-off jump for the ScrollViewReader (new song: top or the active line).
+    @State private var jump: Jump?
+    private struct Jump: Equatable { let id = UUID(); let target: NowPlayingLyricsReset.Target }
 
     private var jobs: LyricJobStore { LyricJobStore.shared }
     private var revision: Int { track.map { jobs.revision[$0.id] ?? 0 } ?? 0 }
@@ -23,6 +27,8 @@ struct NowPlayingLyricsPane: View {
     private var topFade: Bool { NowPlayingLyrics.showsTopFade(scrollOffset: scrolled, activeIndex: activeIndex) }
 
     private var loadKey: String { "\(track?.id ?? "")#\(revision)" }
+
+    private static let topAnchor = "lyrics-top"
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -32,6 +38,7 @@ struct NowPlayingLyricsPane: View {
                         Color.clear.preference(key: LyricsScrollKey.self, value: -g.frame(in: .named("lyricsScroll")).minY)
                     }
                     .frame(height: 0)
+                    .id(Self.topAnchor)
                     content(proxy)
                 }
                 .padding(.top, 16)
@@ -62,6 +69,13 @@ struct NowPlayingLyricsPane: View {
                 }
             }
             .animation(.easeOut(duration: 0.2), value: manual)
+            .onChange(of: jump) { _, j in
+                guard let j else { return }
+                switch j.target {
+                case .top: proxy.scrollTo(Self.topAnchor, anchor: .top)
+                case .line(let i): proxy.scrollTo(i, anchor: .center)
+                }
+            }
             .onChange(of: activeIndex) { _, i in
                 guard !manual, i >= 0 else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(i, anchor: .center) }
@@ -157,9 +171,14 @@ struct NowPlayingLyricsPane: View {
                 lines = l.map { NowPlayingLyrics.phoneLines(NowPlayingLyrics.lines($0)) } ?? []
                 state = lines.isEmpty ? .none : .ok
                 activeIndex = pick()
+                if let t = reset.loaded(trackId: id, activeIndex: activeIndex) { jump = Jump(target: t) }
                 return
             } catch {
-                guard let d = NowPlayingLyrics.retryDelay(attempt: attempt) else { state = .none; return }
+                guard let d = NowPlayingLyrics.retryDelay(attempt: attempt) else {
+                    state = .none
+                    if let t = reset.loaded(trackId: id, activeIndex: -1) { jump = Jump(target: t) }
+                    return
+                }
                 attempt += 1
                 try? await Task.sleep(nanoseconds: UInt64(d * 1_000_000_000))
             }

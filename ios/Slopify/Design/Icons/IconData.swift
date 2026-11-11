@@ -31,10 +31,6 @@ extension Icon {
             return IconSpec(viewBox: 24, elements: [
                 IconElement(d: "M3 22a1 1 0 0 1-1-1V3a1 1 0 0 1 2 0v18a1 1 0 0 1-1 1zM15.5 2.134A1 1 0 0 0 14 3v18a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V6.464a1 1 0 0 0-.5-.866l-6-3.464zM9 2a1 1 0 0 0-1 1v18a1 1 0 1 0 2 0V3a1 1 0 0 0-1-1z", fill: .current),
             ])
-        case .loginMark: // sign-in logo, 40pt
-            return IconSpec(viewBox: 24, elements: [
-                IconElement(d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.6 14.4a.62.62 0 0 1-.86.2c-2.35-1.43-5.3-1.76-8.78-.96a.62.62 0 1 1-.28-1.22c3.8-.87 7.07-.5 9.7 1.12.3.18.4.57.22.86zm1.23-2.73a.78.78 0 0 1-1.07.26c-2.69-1.65-6.79-2.13-9.97-1.17a.78.78 0 1 1-.45-1.5c3.64-1.1 8.16-.57 11.24 1.33.37.23.48.71.25 1.08zm.1-2.85C14.7 9.16 9.4 8.98 6.32 9.92a.94.94 0 1 1-.55-1.8c3.54-1.07 9.41-.87 13.13 1.34a.94.94 0 0 1-.96 1.62z", fill: .current),
-            ])
         case .backChevron: // detail top bar back, drawn at 18
             return IconSpec(viewBox: 24, elements: [
                 IconElement(d: "M15.957 2.793a1 1 0 0 1 0 1.414L8.164 12l7.793 7.793a1 1 0 1 1-1.414 1.414L5.336 12l9.207-9.207a1 1 0 0 1 1.414 0z", fill: .current),
@@ -394,7 +390,6 @@ enum Icon: String, CaseIterable, Sendable {
     case searchTabFilled
     case libraryTab
     case libraryTabFilled
-    case loginMark
     case backChevron
     case chevronDown
     case chevronRight

@@ -11,10 +11,6 @@ struct LoginForm: View {
 
     var body: some View {
         LoginPage {
-            IconView(.loginMark, size: 40).foregroundStyle(theme.fg)
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 8)
-                .accessibilityHidden(true)
             LoginHeading(title: "Slopify", subtitle: L("Your library, on any speaker in the house."))
             LoginLabeled(title: L("Username")) {
                 TextField("", text: $model.username)

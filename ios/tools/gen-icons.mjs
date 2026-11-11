@@ -21,7 +21,6 @@ const SVG = [
   ['searchTabFilled', 'App.jsx', 'const TabSearch', 0, 'tab bar, on'],
   ['libraryTab', 'App.jsx', 'const TabLib', 1, 'tab bar, off'],
   ['libraryTabFilled', 'App.jsx', 'const TabLib', 0, 'tab bar, on'],
-  ['loginMark', 'App.jsx', 'className="login-mark"', 0, 'sign-in logo, 40pt'],
   ['backChevron', 'App.jsx', 'className="mobile-back"', 0, 'detail top bar back, drawn at 18'],
   ['chevronDown', 'components/RightPanel.jsx', 'const ChevronDown', 0, 'close now playing / queue'],
   ['chevronRight', 'components/ContextMenu.jsx', 'const Chevron', 0, 'settings rows, submenu'],

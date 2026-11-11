@@ -36,14 +36,54 @@ final class NowPlayingLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(width(b, proposed: 250), 250.5)
     }
 
-    func testLyricsSwipeNeverDismisses() {
-        XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true))
-        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: false))
+    func testSwipeDismissRegions() {
+        // Album tab: anywhere.
+        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: false, startY: 600, headerBottom: 115))
+        // Lyrics tab: only from the header (chevron, title, artist), never from the lines.
+        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 80, headerBottom: 115))
+        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 115, headerBottom: 115))
+        XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 116, headerBottom: 115))
+        XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 500, headerBottom: 115))
     }
 
-    func testLyricsBackdropMatchesWebFilter() {
-        // mobile-nowplaying.css:83 `brightness(.32) saturate(1.3)`; brightness is a multiply.
-        XCTAssertEqual(NowPlayingMath.lyricsBackdropBrightness, 0.32)
-        XCTAssertEqual(NowPlayingMath.lyricsBackdropSaturation, 1.3)
+    func testLyricsBackdropValues() {
+        // Brighter than the web's brightness(.32) saturate(1.3), on purpose.
+        XCTAssertEqual(NowPlayingMath.lyricsBackdropBrightness, 0.55)
+        XCTAssertEqual(NowPlayingMath.lyricsBackdropSaturation, 1.5)
+    }
+
+    func testLightCoverGetsScrimSoWhiteTextStaysReadable() {
+        let white = RGB(hex: 0xffffff), pale = RGB(hex: 0xf2e6c8)
+        for cover in [white, pale] {
+            let a = NowPlayingMath.lyricsScrimOpacity(average: cover)
+            XCTAssertGreaterThan(a, 0)
+            let k = NowPlayingMath.lyricsBackdropBrightness * (1 - a)
+            let bg = RGB(cover.r * k, cover.g * k, cover.b * k)
+            XCTAssertGreaterThanOrEqual(white.contrast(bg), 7)
+            // The 50 % upcoming lines still read against it.
+            XCTAssertGreaterThanOrEqual(white.opacity(0.5).flattened(on: bg).contrast(bg), 2.4)
+        }
+        // Without the scrim a white cover at 0.55 would be too bright for white text.
+        let raw = RGB(255 * 0.55, 255 * 0.55, 255 * 0.55)
+        XCTAssertLessThan(white.contrast(raw), 4.5)
+    }
+
+    func testDarkCoverNoScrim() {
+        XCTAssertEqual(NowPlayingMath.lyricsScrimOpacity(average: RGB(hex: 0x2a1a40)), 0)
+        XCTAssertEqual(NowPlayingMath.lyricsScrimOpacity(average: RGB(hex: 0x000000)), 0)
+    }
+
+    func testAverageColor() {
+        XCTAssertNil(NowPlayingMath.averageColor([]))
+        let px: [UInt8] = [255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0, 0]
+        let avg = NowPlayingMath.averageColor(px)
+        XCTAssertEqual(avg?.r, 127.5); XCTAssertEqual(avg?.b, 127.5); XCTAssertEqual(avg?.g, 0)
+    }
+}
+
+private extension RGB {
+    /// Composite this (with its alpha) over an opaque background.
+    func flattened(on bg: RGB) -> RGB {
+        RGB(r * alpha + bg.r * (1 - alpha), g * alpha + bg.g * (1 - alpha), b * alpha + bg.b * (1 - alpha))
     }
 }

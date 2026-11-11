@@ -58,3 +58,6 @@ task starts, `project.yml`, `Makefile`, `docs/` (except API.md/UI.md authorship)
 - [lead] Lists opened from the Home root (albums, playlists, Liked, mixes, Top Songs, Radar, See all)
   use the iOS 18 zoom transition: swipe down hides them back into the tile. Artist pages push
   normally. Deployment target now iOS 18. DONE (App/HomeZoom.swift)
+- Round 1 all fixed and installed (966cf1f). Swipe to queue + library swipe-back added.
+- Open: "Added to queue" not in web locales (English everywhere). System full-width swipe-back
+  still on for Home/Search stacks on iOS 26+ (system default).

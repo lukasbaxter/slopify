@@ -16,6 +16,9 @@ struct NowPlayingView: View {
     enum Tab { case album, lyrics }
     @State private var tab: Tab = .album
     @State private var npColor: RGB?
+    @State private var backdropScrim: Double = 0
+    /// Bottom of the top row (global), where a lyrics-tab swipe may start.
+    @State private var headerBottom: CGFloat = 0
     @State private var from: NowPlayingFrom = .fallback
     // Swipe down to close.
     @State private var drag: CGFloat = 0
@@ -88,6 +91,7 @@ struct NowPlayingView: View {
                         .colorMultiply(Color(white: NowPlayingMath.lyricsBackdropBrightness))
                         .saturation(NowPlayingMath.lyricsBackdropSaturation)
                         .padding(-60)
+                        .overlay { Color.black.opacity(backdropScrim).animation(.easeInOut(duration: 0.3), value: backdropScrim) }
                         .id(t.id)
                         .transition(.opacity.animation(reduceMotion ? nil : .easeInOut(duration: 0.9)))
                 }
@@ -95,6 +99,13 @@ struct NowPlayingView: View {
             .clipped()
             .ignoresSafeArea()
         }
+    }
+
+    /// Average cover colour -> scrim that keeps light covers readable under white lyrics.
+    private func loadBackdropScrim() async {
+        guard let u = colorURL, let data = await ImageLoader.shared.data(u),
+              let px = ArtworkColor.pixels(data, side: 8), let avg = NowPlayingMath.averageColor(px) else { backdropScrim = 0; return }
+        backdropScrim = NowPlayingMath.lyricsScrimOpacity(average: avg)
     }
 
     private var colorURL: URL? { player.current.map { NowPlayingCover.source($0).url(api, size: 320) } ?? nil }
@@ -135,6 +146,10 @@ struct NowPlayingView: View {
         .padding(.top, 4)
         .padding(.horizontal, 16)
         .frame(minHeight: 56)
+        .background(GeometryReader { g in
+            Color.clear.onAppear { headerBottom = g.frame(in: .global).maxY }
+                .onChange(of: g.frame(in: .global).maxY) { _, y in headerBottom = y }
+        })
     }
 
     // MARK: Stage (.fs-stage)
@@ -328,7 +343,8 @@ struct NowPlayingView: View {
         DragGesture(minimumDistance: 10, coordinateSpace: .global)
             .onChanged { v in
                 guard !scrubbing, menu == nil, !showDevices,
-                      NowPlayingMath.swipeDismissAllowed(lyricsShowing: tab == .lyrics) else { return }
+                      NowPlayingMath.swipeDismissAllowed(lyricsShowing: tab == .lyrics, startY: v.startLocation.y,
+                                                         headerBottom: headerBottom) else { return }
                 let dy = v.translation.height, dx = v.translation.width
                 if !dragging {
                     guard dy > 0, abs(dx) < dy else { return }

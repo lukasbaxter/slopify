@@ -59,15 +59,48 @@ enum NowPlayingMath {
         dy > 140 || (elapsed < 0.3 && dy > 60)
     }
 
-    /// Only the Album tab closes on a swipe down. On the Lyrics tab scrolling the lines must never
-    /// close the page; only the chevron does (owner's rule, overrides UI.md 3.2.5).
-    static func swipeDismissAllowed(lyricsShowing: Bool) -> Bool { !lyricsShowing }
+    /// Swipe down closes from anywhere on the Album tab. On the Lyrics tab only a swipe that starts
+    /// on the header (chevron, title, artist) closes it; one on the lyric lines never does
+    /// (owner's rule, overrides UI.md 3.2.5). `startY` and `headerBottom` in the same space.
+    static func swipeDismissAllowed(lyricsShowing: Bool, startY: CGFloat, headerBottom: CGFloat) -> Bool {
+        !lyricsShowing || startY <= headerBottom
+    }
 
-    // MARK: Lyrics backdrop (mobile-nowplaying.css:83: blur(60px) brightness(.32) saturate(1.3))
+    // MARK: Lyrics backdrop
+    // The web uses blur(60px) brightness(.32) saturate(1.3) (mobile-nowplaying.css:83). Native is
+    // brighter on purpose so more of the cover shows; a scrim then caps light covers.
 
-    static let lyricsBackdropBrightness = 0.32
-    static let lyricsBackdropSaturation = 1.3
+    static let lyricsBackdropBrightness = 0.55
+    static let lyricsBackdropSaturation = 1.5
+    /// Highest backdrop luminance allowed. White text then has >= 7:1 contrast and the 50 %
+    /// upcoming lines stay as readable as on the web's darkest-allowed backdrop.
+    static let lyricsBackdropMaxLuminance = 0.09
 
+    /// Black scrim opacity over the backdrop so a cover with this average colour, after the
+    /// brightness multiply, stays at or under `lyricsBackdropMaxLuminance`. 0 for dark covers.
+    static func lyricsScrimOpacity(average: RGB) -> Double {
+        func lum(_ a: Double) -> Double {
+            let k = lyricsBackdropBrightness * (1 - a)
+            return RGB(average.r * k, average.g * k, average.b * k).luminance
+        }
+        guard lum(0) > lyricsBackdropMaxLuminance else { return 0 }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<30 { let m = (lo + hi) / 2; if lum(m) > lyricsBackdropMaxLuminance { lo = m } else { hi = m } }
+        return hi
+    }
+
+    /// Mean colour of RGBA bytes (alpha-weighted, so transparent pixels count as nothing).
+    static func averageColor(_ px: [UInt8]) -> RGB? {
+        var r = 0.0, g = 0.0, b = 0.0, n = 0.0
+        var i = 0
+        while i + 3 < px.count {
+            let a = Double(px[i + 3]) / 255
+            if a > 0 { r += Double(px[i]) / a; g += Double(px[i + 1]) / a; b += Double(px[i + 2]) / a; n += 1 }
+            i += 4
+        }
+        guard n > 0 else { return nil }
+        return RGB(min(255, r / n), min(255, g / n), min(255, b / n))
+    }
 
     // MARK: Queue reorder (RightPanel.jsx:170-207)
 

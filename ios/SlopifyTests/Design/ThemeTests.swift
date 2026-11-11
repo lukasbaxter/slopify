@@ -43,8 +43,8 @@ final class ThemeTests: XCTestCase {
     }
 
     func testPresetsAndEquality() {
-        XCTAssertEqual(ThemePreset.all.map(\.name), ["Spotify", "Midnight", "Ember", "Orchid", "Mono", "Paper"])
-        XCTAssertEqual(ThemePreset.matching(ThemeColors(accent: "#1ED760", bg: "#121212", surface: "#1F1F1F", fg: "#FFFFFF"))?.name, "Spotify")
+        XCTAssertEqual(ThemePreset.all.map(\.name), ["Classic", "Midnight", "Ember", "Orchid", "Mono", "Paper"])
+        XCTAssertEqual(ThemePreset.matching(ThemeColors(accent: "#1ED760", bg: "#121212", surface: "#1F1F1F", fg: "#FFFFFF"))?.name, "Classic")
         XCTAssertNil(ThemePreset.matching(ThemeColors(accent: "#123456", bg: "#121212", surface: "#1f1f1f", fg: "#ffffff")))
     }
 

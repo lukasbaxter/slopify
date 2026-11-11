@@ -1,0 +1,5 @@
+*.xcodeproj/
+build/
+DerivedData/
+Local.xcconfig
+.status.json

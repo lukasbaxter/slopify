@@ -155,13 +155,21 @@ input, textarea, select { font-family: inherit; }
 }
 .rail-resizer:hover::after, .shell.resizing .rail-resizer::after { opacity: 1; }
 
-/* Collapsed rail: covers only, centred; the library icon and + stay, the
-   names show as the rows' tooltips. */
+/* Collapsed rail: covers only, centred; the names show as the rows' tooltips.
+   The library title goes and the + stays alone, as a round button sized to
+   sit over the 48 px covers. */
 .shell.rail-collapsed .navitem span,
-.shell.rail-collapsed .libhead-label,
-.shell.rail-collapsed .libitem-text { display: none; }
+.shell.rail-collapsed .libhead-title,
+.shell.rail-collapsed .libitem-text { display: none !important; }
 .shell.rail-collapsed .navitem { justify-content: center; padding: 11px 0; }
-.shell.rail-collapsed .libhead { flex-direction: column; gap: 6px; padding: 14px 0 6px; }
+.shell.rail-collapsed .libhead { justify-content: center; padding: 14px 0 8px; }
+.shell.rail-collapsed .libhead-actions .icon-btn {
+  width: 40px; height: 40px; background: var(--tint); color: var(--fg);
+  transition: background-color .15s ease-out, transform .1s ease-out;
+}
+.shell.rail-collapsed .libhead-actions .icon-btn:hover { background: var(--tint-hi); }
+.shell.rail-collapsed .libhead-actions .icon-btn:active { background: var(--tint-press); transform: scale(.96); }
+.shell.rail-collapsed .libhead-actions .icon-btn svg { width: 20px; height: 20px; }
 .shell.rail-collapsed .libitem { justify-content: center; padding: 8px 0; }
 .shell.rail-collapsed .libitem.infolder { padding-left: 0; }
 .shell.rail-collapsed .libitem.infolder img, .shell.rail-collapsed .libitem.infolder .ph { width: 40px; height: 40px; }

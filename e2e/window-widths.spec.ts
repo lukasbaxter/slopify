@@ -63,6 +63,12 @@ test.describe('window widths', () => {
     await expect(page.locator('.sidebar .libitem-text').first()).toBeHidden();
     await expect(row(page, A)).toHaveAttribute('title', A);
     expect((await page.locator('.sidebar').boundingBox())!.width).toBeLessThan(80);
+    // No library icon over the covers: the + is alone, round, on one row.
+    await expect(page.locator('.sidebar .libhead-title')).toBeHidden();
+    const plus = (await page.locator('.sidebar .libhead [aria-label="Create playlist"]').boundingBox())!;
+    expect(Math.round(plus.width)).toBe(40);
+    expect((await page.locator('.sidebar .libhead').boundingBox())!.height).toBeLessThan(70);
+    await page.locator('.sidebar').screenshot({ path: process.env.RAIL_SHOT || 'test-results/rail-folded.png' });
     // + › Folder in the rail
     await page.locator('.sidebar .libhead [aria-label="Create playlist"]').click();
     await page.locator('.ctxmenu .ctxitem', { hasText: 'Folder' }).click();

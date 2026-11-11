@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useOffset } from '../api/offsets.js';
-import { ArtistLinks, PlayGlyph, PauseGlyph, ShuffleGlyph } from './TrackRow.jsx';
+import { ArtistLinks, PlayGlyph } from './TrackRow.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import { isLiked } from '../api/likes.js';
 import { useOfflineMode } from '../offline/net.js';
@@ -368,6 +368,17 @@ export function Lyrics({ player, jf }) {
   };
   useEffect(() => { if (!manual) follow(); }, [activeIndex]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setManual(false); }, [trackId]);
+  // A new song's lyrics start at the top. Nothing used to do this: it only happened when the
+  // "Loading" note briefly emptied the box, so a quick answer kept the last song's scroll.
+  const toppedFor = useRef(null);
+  useEffect(() => {
+    if (state !== 'ok' || toppedFor.current === trackId) return;
+    toppedFor.current = trackId;
+    const box = listRef.current?.closest('.panel-body, .fs-lyrics');
+    if (box) box.scrollTop = 0;
+    // Joined mid-song (a transfer, a reload): go on to the line being sung.
+    if (activeRef.current) follow();
+  }, [state, trackId, lines]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const box = listRef.current?.closest('.panel-body, .fs-lyrics'); if (!box) return undefined;
     const stop = () => setManual(true);
@@ -452,7 +463,38 @@ export default function RightPanel({ mode, onClose, onMode, player, jf, onOpenAr
   const from = usePlayingFrom(player, jf);
   const rootRef = useRef(null);
   const close = () => slideOut(rootRef.current, onClose);
-  const { playing, position, duration, shuffle, repeat } = player;
+  // Phone queue: just the list (owner 11-11). A swipe down from the header, or from the list
+  // while it is scrolled to the top, closes it; the sheet follows the finger like now playing.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!phone || mode !== 'queue' || !el) return undefined;
+    let start = null;
+    const down = (e) => {
+      const tc = e.touches?.[0]; start = null;
+      if (!tc || e.touches.length !== 1 || e.target.closest?.('.qrow-handle, .ctxmenu')) return;
+      const body = el.querySelector('.panel-body');
+      if (!e.target.closest?.('.panel-header') && body && body.scrollTop > 0) return;
+      start = { x: tc.clientX, y: tc.clientY, at: Date.now() };
+    };
+    const move = (e) => {
+      if (!start) return;
+      if (el.querySelector('.qrow.lifted')) { start = null; el.style.transform = ''; return; }
+      const tc = e.touches[0]; const dy = tc.clientY - start.y;
+      if (dy > 0 && Math.abs(tc.clientX - start.x) < dy) { el.style.transform = `translateY(${dy}px)`; el.style.transition = 'none'; }
+    };
+    const up = (e) => {
+      if (!start) return;
+      const tc = e.changedTouches?.[0]; const dy = tc ? tc.clientY - start.y : 0; const fast = Date.now() - start.at < 300;
+      el.style.transition = 'transform .25s cubic-bezier(.2,.7,.2,1)';
+      if (dy > 140 || (fast && dy > 60)) { el.style.transform = 'translateY(100%)'; setTimeout(onClose, 200); }
+      else el.style.transform = '';
+      start = null;
+    };
+    el.addEventListener('touchstart', down, { passive: true });
+    el.addEventListener('touchmove', move, { passive: true });
+    el.addEventListener('touchend', up, { passive: true });
+    return () => { el.removeEventListener('touchstart', down); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', up); };
+  }, [phone, mode]); // eslint-disable-line react-hooks/exhaustive-deps
   // Lyrics sit on the blurred cover, like the now-playing view does.
   const np = player.nowPlaying;
   const bg = mode === 'lyrics' ? (np?.artId ? jf.imageUrl(np.artId, { maxHeight: 640 }) : np?.artUrl || null) : null;
@@ -482,19 +524,6 @@ export default function RightPanel({ mode, onClose, onMode, player, jf, onOpenAr
         {mode === 'queue' && <Queue player={player} jf={jf} onOpenArtist={onOpenArtist} onOpenAlbum={onOpenAlbum} onLike={onLike} onAddTo={onAddTo} playlists={playlists} />}
         {mode === 'lyrics' && <Lyrics player={player} jf={jf} />}
       </div>
-      {/* Phone queue page: Spotify pins the transport under the list. */}
-      {phone && mode === 'queue' && player.nowPlaying && (
-        <div className="panel-transport">
-          <div className="panel-transport-row">
-            <button className={`ctl-mode ${shuffle && shuffle !== 'off' ? 'on' : ''}`} onClick={player.cycleShuffle} title={t('Shuffle')}><ShuffleGlyph size={24} /></button>
-            <button onClick={player.previous} title={t('Previous')}><svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor"><path d="M3.3 1a.7.7 0 0 1 .7.7v5.15l9.95-5.744a.7.7 0 0 1 1.05.606v12.575a.7.7 0 0 1-1.05.607L4 9.149V14.3a.7.7 0 0 1-.7.7H1.7a.7.7 0 0 1-.7-.7V1.7a.7.7 0 0 1 .7-.7h1.6z" /></svg></button>
-            <button className="panel-play" onClick={player.toggle} title={playing ? t('Pause') : t('Play')}>{playing ? <PauseGlyph size={22} /> : <PlayGlyph size={22} />}</button>
-            <button onClick={player.next} title={t('Next')}><svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor"><path d="M12.7 1a.7.7 0 0 0-.7.7v5.15L2.05 1.107A.7.7 0 0 0 1 1.712v12.575a.7.7 0 0 0 1.05.607L12 9.149V14.3a.7.7 0 0 0 .7.7h1.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-1.6z" /></svg></button>
-            <button className={`ctl-mode ${repeat && repeat !== 'off' ? 'on' : ''}`} onClick={player.cycleRepeat} title={t('Repeat')}><svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor"><path d="M0 4.75A3.75 3.75 0 0 1 3.75 1h8.5A3.75 3.75 0 0 1 16 4.75v5a3.75 3.75 0 0 1-3.75 3.75H9.81l1.018 1.018a.75.75 0 1 1-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 1 1 1.06 1.06L9.811 12h2.439a2.25 2.25 0 0 0 2.25-2.25v-5a2.25 2.25 0 0 0-2.25-2.25h-8.5A2.25 2.25 0 0 0 1.5 4.75v5A2.25 2.25 0 0 0 3.75 12H5v1.5H3.75A3.75 3.75 0 0 1 0 9.75v-5z" /></svg></button>
-          </div>
-          <div className="panel-progress"><span style={{ width: `${duration ? Math.min(100, (position / duration) * 100) : 0}%` }} /></div>
-        </div>
-      )}
     </aside>
   );
 }

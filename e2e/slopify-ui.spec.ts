@@ -113,6 +113,32 @@ test('lyrics: no top fade over the first line', async ({ page, isMobile }) => {
   if (scrolls) await expect.poll(topIsClear).toBe(false);
 });
 
+// Phone queue: just the list, no transport (owner 2026-11-11); a swipe down from the top closes it.
+test('phone queue: list only, swipe down closes', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'the phone queue page');
+  await login(page); await waitForLibrary(page);
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
+  await expect(page.locator('.trackrow').first()).toContainText('River Harbour', { timeout: 15000 });
+  await page.locator('.trackrow').first().click();
+  const pause = page.locator('.player button[title="Pause"], .player button[aria-label="Pause"]').first();
+  await expect(pause).toBeVisible({ timeout: 20000 });
+  await pause.click();
+  await page.locator('.player-row').click();
+  await expect(page.locator('.fs')).toBeVisible({ timeout: 10000 });
+  await page.locator('.fs button[aria-label="Queue"]').locator('visible=true').first().click();
+  const panel = page.locator('.rightpanel');
+  await expect(panel.locator('.qrow').first()).toBeVisible({ timeout: 10000 });
+  for (const label of ['Previous', 'Next', 'Shuffle', 'Repeat']) await expect(panel.locator(`button[title="${label}"]`)).toHaveCount(0);
+  await panel.locator('.panel-header').evaluate((h) => {
+    const r = h.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const touch = (yy: number) => new Touch({ identifier: 1, target: h, clientX: x, clientY: yy });
+    h.dispatchEvent(new TouchEvent('touchstart', { touches: [touch(y)], changedTouches: [touch(y)], bubbles: true }));
+    h.dispatchEvent(new TouchEvent('touchmove', { touches: [touch(y + 200)], changedTouches: [touch(y + 200)], bubbles: true }));
+    h.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch(y + 200)], bubbles: true }));
+  });
+  await expect(panel).toHaveCount(0, { timeout: 5000 });
+});
+
 // A socket iOS let die in the background still reads OPEN until it times out;
 // a like sent on it was lost and the heart flipped back on the next reconnect.
 test('a like is saved even when the session socket is silently dead', async ({ page }, info) => {

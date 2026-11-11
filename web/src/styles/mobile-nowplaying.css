@@ -197,17 +197,6 @@
   .qrow.shifting { transition: transform .15s ease-out; }
   .qrow.dragging { opacity: 1; }
   .qrow.dropbefore { box-shadow: none; }
-  .rightpanel .panel-body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
-  /* Pinned transport under the list: shuffle / prev / 48pt play / next / repeat and a 2pt progress line. */
-  .panel-transport { position: relative; flex: none; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 24px env(safe-area-inset-bottom); box-sizing: border-box; background: var(--page); border-top: 1px solid rgba(var(--fg-rgb),.06); }
-  .panel-transport-row { display: flex; align-items: center; justify-content: space-between; height: 64px; color: var(--fg); }
-  .panel-transport-row > button { width: 44px; height: 44px; display: grid; place-items: center; color: var(--fg); padding: 0; }
-  .panel-transport-row > button:first-child { margin-left: -6px; }
-  .panel-transport-row > button:last-child { margin-right: -6px; }
-  .panel-transport-row .ctl-mode.on { color: var(--accent-ink); }
-  .panel-transport-row .panel-play { width: 48px; height: 48px; border-radius: 50%; background: var(--fg); color: var(--on-fg); }
-  .panel-progress { position: absolute; left: 0; right: 0; top: -2px; height: 2px; background: rgba(var(--fg-rgb),.2); }
-  .panel-progress > span { display: block; height: 100%; background: var(--fg); }
   .rightpanel .placeholder-note, .rightpanel .qrow-sub { font-size: 13px; }
   .qrow-title[role=button]:hover { text-decoration: none; }
 

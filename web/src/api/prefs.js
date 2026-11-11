@@ -20,7 +20,7 @@ export const crossfadeLabel = (sec) => { const n = Number(sec) || 0; return n ? 
 export const DEFAULT_THEME = { accent: '#1ed760', bg: '#121212', surface: '#1f1f1f', fg: '#ffffff' };
 
 export const THEME_PRESETS = [
-  { name: 'Spotify', theme: DEFAULT_THEME },
+  { name: N_('Classic'), theme: DEFAULT_THEME },
   { name: N_('Midnight'), theme: { accent: '#4c8dff', bg: '#0b1020', surface: '#151d33', fg: '#ffffff' } },
   { name: N_('Ember'), theme: { accent: '#ff7a3d', bg: '#151010', surface: '#241a18', fg: '#fff5ee' } },
   { name: N_('Orchid'), theme: { accent: '#c77dff', bg: '#120f18', surface: '#1e1826', fg: '#ffffff' } },

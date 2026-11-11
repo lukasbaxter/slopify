@@ -8,7 +8,7 @@ struct ThemeColors: Hashable, Sendable, Codable {
     var surface: String
     var fg: String
 
-    /// prefs.js `DEFAULT_THEME` (the "Spotify" preset).
+    /// prefs.js `DEFAULT_THEME` (the "Classic" preset).
     static let `default` = ThemeColors(accent: "#1ed760", bg: "#121212", surface: "#1f1f1f", fg: "#ffffff")
 
     /// From the account prefs value; missing or malformed keys fall back per key (prefs.js applyTheme).
@@ -35,16 +35,16 @@ struct ThemeColors: Hashable, Sendable, Codable {
     }
 }
 
-/// A named preset (prefs.js `THEME_PRESETS`). `name` is an i18n key, except "Spotify".
+/// A named preset (prefs.js `THEME_PRESETS`). `name` is an i18n key.
 struct ThemePreset: Hashable, Sendable, Identifiable {
     var name: String
     var colors: ThemeColors
     var id: String { name }
-    /// The label to show: `L(name)`, but "Spotify" is never translated.
-    var label: String { name == "Spotify" ? name : L(name) }
+    /// The label to show.
+    var label: String { L(name) }
 
     static let all: [ThemePreset] = [
-        ThemePreset(name: "Spotify", colors: .default),
+        ThemePreset(name: "Classic", colors: .default),
         ThemePreset(name: "Midnight", colors: ThemeColors(accent: "#4c8dff", bg: "#0b1020", surface: "#151d33", fg: "#ffffff")),
         ThemePreset(name: "Ember", colors: ThemeColors(accent: "#ff7a3d", bg: "#151010", surface: "#241a18", fg: "#fff5ee")),
         ThemePreset(name: "Orchid", colors: ThemeColors(accent: "#c77dff", bg: "#120f18", surface: "#1e1826", fg: "#ffffff")),

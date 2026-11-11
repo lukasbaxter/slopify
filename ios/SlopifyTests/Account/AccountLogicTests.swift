@@ -48,7 +48,7 @@ final class AccountSettingsLogicTests: XCTestCase {
     func testLanguageAndTheme() {
         XCTAssertEqual(AccountSettingsLogic.languageLabel(pick: ""), "Automatic")
         XCTAssertEqual(AccountSettingsLogic.languageLabel(pick: "de"), "Deutsch")
-        XCTAssertEqual(AccountSettingsLogic.themeLabel(.default), "Spotify")
+        XCTAssertEqual(AccountSettingsLogic.themeLabel(.default), "Classic")
         XCTAssertEqual(AccountSettingsLogic.themeLabel(ThemeColors(accent: "#123456", bg: "#000000", surface: "#111111", fg: "#ffffff")), "Custom")
         XCTAssertFalse(AccountSettingsLogic.canReset(ThemeColors(accent: "#1ED760", bg: "#121212", surface: "#1f1f1f", fg: "#FFFFFF")))
         XCTAssertTrue(AccountSettingsLogic.canReset(ThemePreset.all[1].colors))

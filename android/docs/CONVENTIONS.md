@@ -71,3 +71,12 @@ Ground truth when the docs are unclear: `server/src`, then `web/src/api/*.js`, t
 4. **Requests**: changes you need in lead-owned files, precise (type, field, signature).
 5. **Spec issues**: anything in API.md/UI.md that was wrong or missing.
 Do not claim something works unless you built and tested it.
+
+## Parallel builds (every task)
+- Always pass your task name: `make build TASK=<task>`, `make test TASK=<task> ONLY='*YourTest'`.
+  It builds into `build-<task>/` with its own Gradle cache, so parallel agents never wait on locks.
+- Run Gradle in the foreground only. Never end your turn while a build, test or emulator runs.
+- Emulator (AVD `slopify`): headless (`-no-window -no-audio`), with a kill timer, shut down before you finish.
+  Only one agent may use it at a time; prefer JVM tests and Compose previews.
+- Names: every helper type that is not one of your stub screens is `private`/`internal` to your file
+  or prefixed with your area (`HomeShelfModel`, `SearchFakeApi`). Shared helpers belong in design/.

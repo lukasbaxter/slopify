@@ -2,8 +2,47 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+  workflow_dispatch:
+# Each platform's tests run only when the change touches it
+# (tools/test-areas.mjs owns the path map, the same one `npm run test:changed`
+# uses locally). A change to a shared file (root package.json, lockfile,
+# this workflow) runs everything; a manual run runs everything.
 jobs:
-  test:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      areas: ${{ steps.areas.outputs.areas }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: areas
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            areas='["lint","server","web","android","desktop","tv","tools","ios","docker"]'
+          else
+            areas=$(node tools/test-areas.mjs --base "$BASE" --json | node -pe 'JSON.stringify(JSON.parse(require("fs").readFileSync(0)).areas)')
+          fi
+          echo "areas=$areas" >> "$GITHUB_OUTPUT"
+          echo "areas: $areas"
+
+  lint:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'lint')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run licenses && git diff --exit-code docs/THIRD_PARTY_LICENSES.md
+
+  server:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'server')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,21 +50,70 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libchromaprint-tools
       - run: npm ci
-      - run: npm run lint
-      - run: npm run licenses && git diff --exit-code docs/THIRD_PARTY_LICENSES.md
       - run: npm run fixtures
-      - run: npm test
-      # The release scripts and the desktop app's updater and transports
-      # (stand-ins for gh, Electron and Cast: no install needed).
-      - run: for t in tools/tests/*.test.sh; do bash "$t" || exit 1; done
-      - run: node --test electron/*.test.js
-        working-directory: desktop
+      - run: node tools/test-areas.mjs server
+
+  web:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'web')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libchromaprint-tools
+      - run: npm ci
+      - run: npm run fixtures
       - run: npx playwright install --with-deps chromium webkit
-      - run: npm run e2e
+      - run: node tools/test-areas.mjs web
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: playwright-report, path: playwright-report }
+
+  # The Expo phone shell (Android APK + SideStore ipa).
+  android:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'android')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: node tools/test-areas.mjs android
+
+  desktop:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'desktop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node tools/test-areas.mjs desktop
+
+  # The release scripts (stand-ins for gh: no install needed).
+  tools:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'tools')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node tools/test-areas.mjs tools
+
+  # The native iPhone app: unit tests on a simulator.
+  ios:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'ios')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: node tools/test-areas.mjs ios
+
   docker:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'docker')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

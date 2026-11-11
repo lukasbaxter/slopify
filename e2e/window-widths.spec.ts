@@ -68,6 +68,13 @@ test.describe('window widths', () => {
     const plus = (await page.locator('.sidebar .libhead [aria-label="Create playlist"]').boundingBox())!;
     expect(Math.round(plus.width)).toBe(40);
     expect((await page.locator('.sidebar .libhead').boundingBox())!.height).toBeLessThan(70);
+    // Scrolls, but shows no scroll bar over the covers.
+    await page.setViewportSize({ width: 840, height: 360 });
+    const list = page.locator('.sidebar .liblist');
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    // (headless Chrome draws overlay bars that take no width, so check the style)
+    expect(await list.evaluate((el) => getComputedStyle(el).scrollbarWidth)).toBe('none');
+    await page.setViewportSize({ width: 840, height: 900 });
     await page.locator('.sidebar').screenshot({ path: process.env.RAIL_SHOT || 'test-results/rail-folded.png' });
     // + › Folder in the rail
     await page.locator('.sidebar .libhead [aria-label="Create playlist"]').click();

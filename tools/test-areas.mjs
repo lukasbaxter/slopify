@@ -47,6 +47,8 @@ const AREAS = {
   tools: { paths: ['tools/'], run: [['.', 'for t in tools/tests/*.test.sh; do bash "$t" || exit 1; done']] },
   // The native iPhone app. Simulator unit tests; skipped where there is no Xcode.
   ios: { paths: ['ios/'], run: [['ios', 'make test']], needs: 'xcodebuild' },
+  // The native Android app (Kotlin). JVM unit tests; skipped where there is no Java.
+  'android-native': { paths: ['android/'], run: [['android', 'make test']], needs: 'java' },
   // The image build; CI only (nothing to run locally).
   docker: { paths: ['Dockerfile', 'docker/', 'server/', 'web/'], run: [] },
 };

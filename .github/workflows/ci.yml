@@ -21,7 +21,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           if [ "$EVENT" = workflow_dispatch ] || [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            areas='["lint","server","web","android","desktop","tv","tools","ios","docker"]'
+            areas='["lint","server","web","android","desktop","tv","tools","ios","android-native","docker"]'
           else
             areas=$(node tools/test-areas.mjs --base "$BASE" --json | node -pe 'JSON.stringify(JSON.parse(require("fs").readFileSync(0)).areas)')
           fi
@@ -110,6 +110,19 @@ jobs:
       - uses: actions/checkout@v4
       - run: brew install xcodegen
       - run: node tools/test-areas.mjs ios
+
+  # The native Android app: JVM unit tests.
+  android-native:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.areas), 'android-native')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: node tools/test-areas.mjs android-native
 
   docker:
     needs: changes

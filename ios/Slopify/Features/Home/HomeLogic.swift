@@ -41,10 +41,15 @@ enum HomeLogic {
                 map[id]!.score += 1 + (t.plays ?? 0)
             }
         }
-        return order.enumerated()
-            .map { (i: $0.offset, a: map[$0.element]!) }
-            .sorted { $0.a.score != $1.a.score ? $0.a.score > $1.a.score : $0.i < $1.i }
-            .map(\.a)
+        var ranked: [(i: Int, a: RankedArtist)] = []
+        for (i, id) in order.enumerated() {
+            if let a = map[id] { ranked.append((i: i, a: a)) }
+        }
+        ranked.sort { (x, y) -> Bool in
+            if x.a.score != y.a.score { return x.a.score > y.a.score }
+            return x.i < y.i
+        }
+        return ranked.map { $0.a }
     }
 
     /// Home.jsx `recentArtists`: latest last-played date per artist, newest first, 16.
@@ -62,10 +67,16 @@ enum HomeLogic {
                 }
             }
         }
-        return order.enumerated()
-            .map { (i: $0.offset, v: map[$0.element]!) }
-            .sorted { $0.v.lp != $1.v.lp ? $0.v.lp > $1.v.lp : $0.i < $1.i }
-            .prefix(16).map(\.v.a)
+        var ranked: [(i: Int, a: RankedArtist, lp: String)] = []
+        for (i, id) in order.enumerated() {
+            guard let e = map[id] else { continue }
+            ranked.append((i: i, a: e.a, lp: e.lp))
+        }
+        ranked.sort { (x, y) -> Bool in
+            if x.lp != y.lp { return x.lp > y.lp }
+            return x.i < y.i
+        }
+        return ranked.prefix(16).map { $0.a }
     }
 
     private static let tileInner = try! NSRegularExpression(

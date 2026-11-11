@@ -74,11 +74,20 @@ enum ColorMath {
         }
         if total > 0 && Double(neutral) / Double(total) >= 0.6 { return [RGB(hex: 0xffffff), RGB(hex: 0xe2e2e2), RGB(hex: 0xbebebe)] }
         struct E { var rgb: [Int]; var h, s, l, score: Double }
-        let ranked = bins.enumerated().map { idx, e -> (Int, E) in
-            let l = e.l / e.n
-            return (idx, E(rgb: [jsRound(e.r / e.n), jsRound(e.g / e.n), jsRound(e.b / e.n)], h: e.h / e.n, s: e.s / e.n, l: l,
-                           score: e.n * (0.15 + e.s / e.n) * (l > 0.2 && l < 0.8 ? 1 : 0.35)))
-        }.sorted { $0.1.score != $1.1.score ? $0.1.score > $1.1.score : $0.0 < $1.0 }.map(\.1)
+        var scored: [(i: Int, e: E)] = []
+        for (idx, b) in bins.enumerated() {
+            let l: Double = b.l / b.n
+            let s: Double = b.s / b.n
+            let lightness: Double = (l > 0.2 && l < 0.8) ? 1 : 0.35
+            let score: Double = b.n * (0.15 + s) * lightness
+            let rgb: [Int] = [jsRound(b.r / b.n), jsRound(b.g / b.n), jsRound(b.b / b.n)]
+            scored.append((i: idx, e: E(rgb: rgb, h: b.h / b.n, s: s, l: l, score: score)))
+        }
+        scored.sort { (x, y) -> Bool in
+            if x.e.score != y.e.score { return x.e.score > y.e.score }
+            return x.i < y.i
+        }
+        let ranked: [E] = scored.map { $0.e }
         func hueDist(_ a: Double, _ b: Double) -> Double { let x = abs(a - b); return min(x, 1 - x) }
         var out: [E] = []
         for e in ranked {
@@ -91,7 +100,13 @@ enum ColorMath {
             return E(rgb: hslToRgb(e.h, max(e.s, 0.35), l), h: e.h, s: e.s, l: l, score: 0)
         }
         while out.count < 3 { out.append(shift(first, out.count == 1 ? 0.22 : -0.22)) }
-        out = out.enumerated().sorted { $0.1.l != $1.1.l ? $0.1.l > $1.1.l : $0.0 < $1.0 }.map(\.1)
+        var byLight: [(i: Int, e: E)] = []
+        for (i, e) in out.enumerated() { byLight.append((i: i, e: e)) }
+        byLight.sort { (x, y) -> Bool in
+            if x.e.l != y.e.l { return x.e.l > y.e.l }
+            return x.i < y.i
+        }
+        out = byLight.map { $0.e }
         let floor = [0.66, 0.54, 0.42]
         return out.enumerated().map { i, e in
             let c = hslToRgb(e.h, min(0.62, max(e.s, 0.38)), max(e.l, floor[i]))

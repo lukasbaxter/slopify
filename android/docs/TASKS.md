@@ -54,3 +54,9 @@ files, `Makefile`, `docs/`. Paths below are under
 - Player strings marked TODO(lead) → L() once design lands.
 - Playback resumption (Bluetooth play when the app is not running): not implemented.
 - Real-phone checks: gapless/crossfade sound, notification/lock screen, BT buttons, noisy pause, focus.
+- detail (11-11): shared DetailOutlinePill + SectionHeader hint into design; offline store has/play/playPage.
+  iOS BUG to fix: after unfollowing an artist the Follow pill can flip back to "Following" (page `followed` stays true).
+- search (11-11): offline store search(q)/has/unavailable; RequestPill variant without shadow; remove SearchSession once tab roots stay alive.
+- home (11-11): public missingArt() modifier in design (copy in ReleaseRadarPage.kt).
+- signin (11-11): sign-in server-screen strings are missing from web locales (English everywhere). iOS: no URL scheme, so invite links can't reach the iOS app (add `slopify://` there too). UI.md 2.12 still mentions the removed logo.
+- nowplaying (11-11): design type tokens for 11sp medium tracked / 11sp tabular / 12 semibold / 13 bold (NowPlayingType copies); no blur on API 29-30; "Seek" missing from locales.

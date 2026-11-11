@@ -140,7 +140,14 @@ fun LikedCover(modifier: Modifier = Modifier, heart: Float = 0.45f, radius: Dp =
 @Composable
 fun Avatar(userId: String?, name: String?, modifier: Modifier = Modifier, size: Dp = 32.dp, drawer: Boolean = false) {
     val api = LocalApiClient.current
-    val url = remember(userId, api, api?.baseUrl) { userId?.let { CoverSource.User(it).url(api, (size.value * 3).toInt()) } }
+    val bust = AvatarVersion.bust
+    val url = remember(userId, api, api?.baseUrl, bust) {
+        userId?.let { id ->
+            // After an upload the disk cache still holds the old picture: a new URL skips it.
+            if (bust != null && api != null) api.url("api/users/$id/avatar", mapOf("v" to bust.toString())).toString()
+            else CoverSource.User(id).url(api, (size.value * 3).toInt())
+        }
+    }
     var image by remember(url) { mutableStateOf(url?.let { ImageLoader.shared.cached(it) }) }
     LaunchedEffect(url) { if (image == null && url != null) image = ImageLoader.shared.image(url) }
     val initial = (name?.takeIf { it.isNotEmpty() } ?: "?").take(1).uppercase()

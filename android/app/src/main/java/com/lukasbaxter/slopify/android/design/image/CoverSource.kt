@@ -26,7 +26,8 @@ sealed interface CoverSource {
     /** Artist wide banner. */
     data class Banner(val artistId: String) : CoverSource
     /** Library folder picture (`fd_`). */
-    data class Folder(val id: String) : CoverSource
+    /** `cover`: the layout folder's cover hash (`&c=`), so a new photo shows at once. */
+    data class Folder(val id: String, val cover: String? = null) : CoverSource
     data class User(val id: String) : CoverSource
     /** Any absolute URL (Lidarr release art, now-playing `artUrl`). */
     data class Url(val url: String?) : CoverSource
@@ -41,7 +42,7 @@ sealed interface CoverSource {
             is PlaylistArt -> api.imageUrl(id, size, bust = cover).toString()
             is ArtistArt -> if (image != null && size <= 640) api.artUrl(image, size).toString() else api.imageUrl(id, size).toString()
             is Banner -> api.imageUrl(artistId, size, banner = true).toString()
-            is Folder -> api.imageUrl(id, size).toString()
+            is Folder -> api.imageUrl(id, size, bust = cover).toString()
             is User -> api.avatarUrl(id).toString()
             is Url -> url
         }

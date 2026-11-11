@@ -14,6 +14,12 @@ import com.lukasbaxter.slopify.android.core.session.SessionClient
 import com.lukasbaxter.slopify.android.core.session.SessionConnection
 import com.lukasbaxter.slopify.android.core.session.toTrack
 import com.lukasbaxter.slopify.android.core.stores.Likes
+import com.lukasbaxter.slopify.android.design.L
+import java.io.File
+import kotlin.math.abs
+import kotlin.properties.ReadWriteProperty
+import kotlin.random.Random
+import kotlin.reflect.KProperty
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -25,11 +31,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.File
-import kotlin.math.abs
-import kotlin.random.Random
-import kotlin.properties.ReadWriteProperty
-import kotlin.reflect.KProperty
 
 /**
  * The real [Player]: plays locally through an [AudioEngine] (Media3 in the app) when this
@@ -666,7 +667,7 @@ class SlopifyPlayer(
         lastTask = scope.launch {
             val first = fetch(listOf(chosen)).firstOrNull()
             if (first == null) {
-                error = PlayerText.format("Could not take over playback: {error}", mapOf("error" to "track not found"))
+                error = L("Could not take over playback: {error}", "error" to "track not found")
                 return@launch
             }
             mutate { it.adopt(listOf(QueueEntry(first)), 0, context = t.ctx) }

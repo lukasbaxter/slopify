@@ -1,12 +1,13 @@
 package com.lukasbaxter.slopify.android.features.detail
 
 import androidx.compose.runtime.Composable
-import com.lukasbaxter.slopify.android.features.ScreenPlaceholder
 
-// Placeholders named like the iOS screens (ios/Slopify/Features). TODO(features-detail).
+// Entry points named like the iOS screens (ios/Slopify/Features/Detail).
 
+/** Album page; `highlightTrack` lights and centres that song (a song link). */
 @Composable
-fun AlbumView(id: String, highlightTrack: String? = null) = ScreenPlaceholder("AlbumView $id ${highlightTrack.orEmpty()}")
+fun AlbumView(id: String, highlightTrack: String? = null) = DetailAlbumPage(id, highlightTrack)
 
+/** Artist page. */
 @Composable
-fun ArtistView(id: String) = ScreenPlaceholder("ArtistView $id")
+fun ArtistView(id: String) = DetailArtistPage(id)

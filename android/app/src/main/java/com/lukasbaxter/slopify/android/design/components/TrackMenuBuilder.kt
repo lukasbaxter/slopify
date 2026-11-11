@@ -8,10 +8,6 @@ import androidx.compose.ui.platform.LocalContext
 import com.lukasbaxter.slopify.android.app.AppModel
 import com.lukasbaxter.slopify.android.app.LocalAppModel
 import com.lukasbaxter.slopify.android.app.Route
-import com.lukasbaxter.slopify.android.core.api.addToPlaylist
-import com.lukasbaxter.slopify.android.core.api.createPlaylist
-import com.lukasbaxter.slopify.android.core.api.playlists
-import com.lukasbaxter.slopify.android.core.attempt
 import com.lukasbaxter.slopify.android.core.auth.Account
 import com.lukasbaxter.slopify.android.core.model.ItemKind
 import com.lukasbaxter.slopify.android.core.model.Playlist
@@ -42,8 +38,9 @@ class TrackMenuBuilder(
     private val scope: CoroutineScope,
     /** Presents the "New playlist" name prompt. */
     private val askName: (NameDialog) -> Unit,
-    private val library: TrackMenuLibrary = TrackMenuLibrary.shared(app),
 ) {
+    private val library get() = app.library
+
     /**
      * - `remove`: "Remove from this playlist" (a user playlist's own page).
      * - `downloaded`: kept for offline, so "Add to queue" stays in the offline menu (the player's
@@ -58,7 +55,7 @@ class TrackMenuBuilder(
         header: MenuHeader? = null,
         trailing: List<MenuItem> = emptyList(),
     ): MenuSheet {
-        if (library.playlists.isEmpty()) scope.launch { library.refresh() }
+        if (library.playlists.isEmpty()) scope.launch { library.refreshPlaylists() }
         val state = TrackMenu.State(
             track = t,
             liked = app.likes.isLiked(t.id),
@@ -91,7 +88,7 @@ class TrackMenuBuilder(
     fun newPlaylistDialog(seed: Track?): NameDialog =
         NameDialog(L("New playlist"), TrackMenu.newPlaylistName(seed), L("Create")) { name ->
             val n = name.trim()
-            if (n.isNotEmpty()) scope.launch { library.create(n, seed) }
+            if (n.isNotEmpty()) scope.launch { library.createPlaylist(n, seed) }
         }
 
     /** App.jsx:1013-1028: optimistic toggle, toast, a reverted toggle says "Not saved". */
@@ -143,66 +140,3 @@ fun rememberTrackMenuBuilder(askName: (NameDialog) -> Unit): TrackMenuBuilder {
     return remember(app, context, scope) { TrackMenuBuilder(app, context, scope, askName) }
 }
 
-/**
- * The playlists the track menu offers and the two writes it makes (ios LibraryStore `add`,
- * `createPlaylist`, `refreshPlaylists`).
- * TODO(lead): back this with the Library store once it is ported; until then it talks to the API.
- */
-interface TrackMenuLibrary {
-    val playlists: List<Playlist>
-    suspend fun refresh()
-    /** One request, one toast. */
-    suspend fun add(trackIds: List<String>, to: Playlist)
-    suspend fun create(name: String, with: Track?)
-
-    companion object {
-        @Volatile private var instance: Pair<AppModel, ApiTrackMenuLibrary>? = null
-
-        /** One per AppModel, so the list survives between menus. */
-        fun shared(app: AppModel): TrackMenuLibrary = synchronized(this) {
-            instance?.takeIf { it.first === app }?.second ?: ApiTrackMenuLibrary(app).also { instance = app to it }
-        }
-    }
-}
-
-/** [TrackMenuLibrary] straight on the API; forgets the list when the signed-in user changes. */
-class ApiTrackMenuLibrary(private val app: AppModel) : TrackMenuLibrary {
-    @Volatile private var owner: String? = null
-    @Volatile private var list: List<Playlist> = emptyList()
-
-    override val playlists: List<Playlist>
-        get() = if (owner == app.account.user.value?.id) list else emptyList()
-
-    override suspend fun refresh() {
-        val user = app.account.user.value?.id
-        val pl = attempt { app.account.api.playlists() } ?: return
-        owner = user
-        list = pl
-    }
-
-    override suspend fun add(trackIds: List<String>, to: Playlist) {
-        if (trackIds.isEmpty()) return
-        try {
-            app.account.api.addToPlaylist(to.id, trackIds)
-            ToastCenter.shared.show(L("Added to {name}", "name" to to.name))
-            refresh()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ToastCenter.shared.show(L("Could not add: {error}", "error" to (e.message ?: e.toString())))
-        }
-    }
-
-    override suspend fun create(name: String, with: Track?) {
-        try {
-            app.account.api.createPlaylist(name, with?.let { listOf(it.id) } ?: emptyList())
-            refresh()
-            app.libraryChangedHere()
-            ToastCenter.shared.show(if (with != null) L("Added to {name}", "name" to name) else L("Created {name}", "name" to name))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ToastCenter.shared.show(L("Could not create playlist: {error}", "error" to (e.message ?: e.toString())))
-        }
-    }
-}

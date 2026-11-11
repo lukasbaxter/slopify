@@ -1,24 +1,24 @@
 package com.lukasbaxter.slopify.android.features.account
 
 import androidx.compose.runtime.Composable
-import com.lukasbaxter.slopify.android.features.ScreenPlaceholder
 
-// Placeholders named like the iOS screens (ios/Slopify/Features). TODO(features-account).
-
-@Composable
-fun ProfileView() = ScreenPlaceholder("ProfileView")
+// Entry points named like the iOS screens (ios/Slopify/Features/Account); the shell routes here.
 
 @Composable
-fun HistoryView() = ScreenPlaceholder("HistoryView")
+fun ProfileView() = AccountProfileScreen()
 
 @Composable
-fun DownloadsView() = ScreenPlaceholder("DownloadsView")
+fun HistoryView() = AccountHistoryScreen()
 
 @Composable
-fun SettingsView() = ScreenPlaceholder("SettingsView")
+fun DownloadsView() = AccountDownloadsScreen()
 
 @Composable
-fun ScrobblingView() = ScreenPlaceholder("ScrobblingView")
+fun SettingsView() = AccountSettingsScreen()
 
 @Composable
-fun AccountDrawer() = ScreenPlaceholder("AccountDrawer")
+fun ScrobblingView() = AccountScrobblingScreen()
+
+/** The account drawer layer; it follows `nav.drawerOpen` itself, so the shell may always compose it. */
+@Composable
+fun AccountDrawer() = AccountDrawerLayer()

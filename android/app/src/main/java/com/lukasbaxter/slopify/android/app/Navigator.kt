@@ -4,14 +4,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.concurrent.atomic.AtomicLong
 
 enum class Tab { Home, Search, Library }
 
 /**
- * One page on a tab's back stack. `fromHome`: opened from the Home root (the iOS zoom-from-tile
- * transition; the Android transition is the design task's call).
+ * One page on a tab's back stack. `fromHome`: opened from the Home root (zooms out of its tile,
+ * a swipe down hides it again). `id` tells two pushes of the same route apart (the shell keys
+ * page state by it); it is not part of equality.
  */
-data class StackEntry(val route: Route, val fromHome: Boolean = false)
+data class StackEntry(val route: Route, val fromHome: Boolean = false) {
+    val id: Long = ids.incrementAndGet()
+
+    private companion object {
+        val ids = AtomicLong()
+    }
+}
 
 data class NavState(
     val tab: Tab = Tab.Home,
@@ -19,6 +27,7 @@ data class NavState(
     val nowPlayingOpen: Boolean = false,
     val queueOpen: Boolean = false,
     val drawerOpen: Boolean = false,
+    /** Unused by the shell: the device sheet is the mini player's / now playing's own (as on iOS). */
     val deviceSheetOpen: Boolean = false,
     /** Bumped when the lit tab is tapped on its root: the root scrolls to top. */
     val scrollToTop: Map<Tab, Int> = emptyMap(),

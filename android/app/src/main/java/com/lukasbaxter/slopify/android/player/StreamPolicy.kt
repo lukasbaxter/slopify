@@ -103,12 +103,3 @@ class VolumeStepper {
         return if (next == from) null else next
     }
 }
-
-/**
- * Localization keys (web locales, English key = text). TODO(lead): route through L() once
- * the design task's locale loader exists; the keys below are the web's.
- */
-internal object PlayerText {
-    fun format(key: String, args: Map<String, String> = emptyMap()): String =
-        args.entries.fold(key) { s, (k, v) -> s.replace("{$k}", v) }
-}

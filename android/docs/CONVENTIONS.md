@@ -72,6 +72,28 @@ Ground truth when the docs are unclear: `server/src`, then `web/src/api/*.js`, t
 5. **Spec issues**: anything in API.md/UI.md that was wrong or missing.
 Do not claim something works unless you built and tested it.
 
+## Shell and insets (one rule)
+- The shell (`app/MainShell`) draws every page full screen and passes **no insets** (no
+  Scaffold padding). The mini player and the tab bar float over the bottom of the page.
+- Top: each screen handles the status bar itself. Root pages pad their header by
+  `WindowInsets.statusBars`; detail pages use `DetailScaffold` (it adds `56 + top inset`). Never
+  add the status bar twice.
+- Bottom: scrolling content ends with `shellContentPadding()` (design: `Shell.contentBottom` +
+  navigation bar inset). `shellTabBarHeight()` / `shellChromeHeight()` (app) give the tab bar and
+  tab bar + mini player heights for anything pinned to the bottom.
+- Layers (now playing, queue, drawer) are full screen too and pad both insets themselves.
+- Every tab root and every page on a stack stays composed while it is on the stack (like the iOS
+  ZStack of NavigationStacks), so plain `remember` / `rememberSaveable` state and list scroll
+  survive pushes and tab switches. Screens need no app-lifetime state holders for that.
+- Lit-tab tap on a root: `ScrollToTopEffect(Tab.X) { listState.animateScrollToItem(0) }`.
+- Lists opened from the Home root: `nav.pushFromHome(route)` and mark the tile with
+  `Modifier.homeZoomSource(route)`; the shell zooms from it and closes on a swipe down.
+- Now playing / queue / drawer: `nav.setNowPlayingOpen`, `setQueueOpen`, `setDrawerOpen`. The
+  shell slides now playing and the queue in (`Motion.nowPlayingIn`) and out, closes them on
+  system back, and has a fallback swipe-down that yields to a screen consuming the drag itself.
+  `AccountDrawer()` is always composed and shows itself from `nav.drawerOpen`. The device sheet
+  is local state of the mini player / now playing (as on iOS); the shell hosts none.
+
 ## Parallel builds (every task)
 - Always pass your task name: `make build TASK=<task>`, `make test TASK=<task> ONLY='*YourTest'`.
   It builds into `build-<task>/` with its own Gradle cache, so parallel agents never wait on locks.

@@ -16,6 +16,7 @@ import com.lukasbaxter.slopify.android.core.storage.KeystoreSecureStore
 import com.lukasbaxter.slopify.android.core.storage.SecureStore
 import com.lukasbaxter.slopify.android.core.storage.SharedPrefsStore
 import com.lukasbaxter.slopify.android.core.stores.Connectivity
+import com.lukasbaxter.slopify.android.core.stores.LibraryStore
 import com.lukasbaxter.slopify.android.core.stores.Likes
 import com.lukasbaxter.slopify.android.core.stores.LyricJobStore
 import com.lukasbaxter.slopify.android.design.Design
@@ -30,6 +31,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -37,14 +40,18 @@ import java.util.concurrent.TimeUnit
  * process, created by [SlopifyApplication]; screens get it from `LocalAppModel`.
  */
 class AppModel(
-    private val scope: CoroutineScope,
+    /** App-lifetime scope (Main): work that must outlive a screen. */
+    val scope: CoroutineScope,
     secureStore: SecureStore,
-    kv: KeyValueStore,
+    /** Small device-local settings (SharedPreferences in the app). */
+    val kv: KeyValueStore,
     network: NetworkMonitor?,
     deviceName: String,
     form: String,
     makeSocket: ((String) -> SocketTransport)? = null,
     val player: Player = NoopPlayer(),
+    /** Where the library's per-user local copy lives; null keeps nothing on disk. */
+    cacheDir: File? = null,
 ) {
     val connectivity = Connectivity(scope)
     val account = Account(secureStore, connectivity, network, scope, deviceName)
@@ -57,6 +64,8 @@ class AppModel(
     val lyricJobs = LyricJobStore(scope)
     /** Colours from `prefs.theme`, live (design root). */
     val themeStore = ThemeStore(account, scope)
+    /** Your Library's data (playlists, saved albums, followed artists, layout) for every screen. */
+    val library = LibraryStore(scope, cacheDir)
 
     private val libraryChangedFlow = MutableSharedFlow<Prefs?>(extraBufferCapacity = 8)
     /**
@@ -76,6 +85,12 @@ class AppModel(
             if (patch.containsKey("_libraryLayout") || patch.containsKey("_libraryChanged")) libraryChangedFlow.tryEmit(patch)
         }
         session.onSignedOut = { account.signedOutBySession() }
+        library.onLibraryChanged = { libraryChangedHere() }
+        scope.launch {
+            // The patch's `_libraryLayout` rev lets the store skip its own change coming back.
+            libraryChanged.collect { patch -> library.remoteChange((patch?.get("_libraryLayout") as? JsonPrimitive)?.contentOrNull) }
+        }
+        scope.launch { library.events.collect { ToastCenter.shared.show(it.toastText()) } }
         likes.attach(account.api)
         player.likes = likes
         player.attach(account, session)
@@ -102,14 +117,19 @@ class AppModel(
     suspend fun start() {
         if (account.state.value != AccountState.SignedIn) return
         val token = account.api.token ?: return
+        library.attach(account.api, account.user.value?.id)
         val base = account.activeBase.value
         if (!started && base != null) {
             started = true
             session.connect(base, token)
         }
         account.refreshAfterSignIn()
+        // The user is known for sure once the session is refreshed.
+        library.attach(account.api, account.user.value?.id)
         Localizer.shared.refreshServerDefault(account.api)
         likes.refresh()
+        // Menus offer the playlists ("Add to playlist") without waiting for the Library tab.
+        library.refresh()
     }
 
     /** Signed out: nothing of the last account stays in memory (App.jsx `signOut`). */
@@ -118,6 +138,7 @@ class AppModel(
         session.disconnect()
         nav.reset()
         likes.reset()
+        library.attach(account.api, null)
         connectivity.reset()
     }
 
@@ -142,6 +163,7 @@ class AppModel(
                 deviceName = deviceName(app),
                 form = if (app.resources.configuration.smallestScreenWidthDp >= 600) "tablet" else "phone",
                 player = com.lukasbaxter.slopify.android.player.AndroidPlayer.create(app, scope),
+                cacheDir = app.cacheDir,
             )
         }
 

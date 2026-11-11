@@ -16,6 +16,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.lukasbaxter.slopify.android.design.L
 
 /**
  * The media session's home: foreground service (type mediaPlayback) with the playback
@@ -97,11 +98,10 @@ class PlaybackService : MediaLibraryService() {
         /** The heart, filled when the current song is liked. Hidden with nothing playing. */
         private fun buttons(liked: Boolean?): List<CommandButton> {
             if (liked == null) return emptyList()
-            // TODO(lead): display names through L() once the locale loader lands.
             val b = if (liked) {
-                CommandButton.Builder(CommandButton.ICON_HEART_FILLED).setDisplayName(PlayerText.format("Remove from Liked Songs")).setSessionCommand(UNLIKE)
+                CommandButton.Builder(CommandButton.ICON_HEART_FILLED).setDisplayName(L("Remove from Liked Songs")).setSessionCommand(UNLIKE)
             } else {
-                CommandButton.Builder(CommandButton.ICON_HEART_UNFILLED).setDisplayName(PlayerText.format("Add to Liked Songs")).setSessionCommand(LIKE)
+                CommandButton.Builder(CommandButton.ICON_HEART_UNFILLED).setDisplayName(L("Add to Liked Songs")).setSessionCommand(LIKE)
             }
             return listOf(b.setSlots(CommandButton.SLOT_OVERFLOW).build())
         }

@@ -125,6 +125,6 @@ NameDialogHost(dialog) { dialog = null }
   closes the top sheet or dialog. `ConfirmDialog` uses the platform (Material) alert.
 - `DetailScaffold` is a `LazyColumn` (content is `LazyListScope`), so long track lists stay lazy.
 - The artist back disc is black 50 % without the iOS blur material.
-- `TrackMenuBuilder` reads playlists from `TrackMenuLibrary` (API-backed) until the Library store
-  is ported (TODO(lead)); "downloaded" comes from `Player.localFile` until the offline store exists.
+- `TrackMenuBuilder` reads playlists from `AppModel.library` (`LibraryStore`); "downloaded" comes
+  from `Player.localFile` until the offline store exists.
 - Text sizes are `sp`, so the phone's font scale applies (iOS uses fixed sizes).

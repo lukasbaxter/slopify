@@ -22,7 +22,7 @@ data class LoginResponse(val token: String, val user: User, val demo: Boolean? =
 data class ServerAddresses(val key: String, val lan: String? = null, val public: List<String>? = null)
 
 @Serializable
-data class ServerInfo(val id: String, val name: String? = null, val version: String? = null)
+data class ServerInfo(val id: String, val name: String? = null, val version: String? = null, val source: String? = null)
 
 @Serializable
 data class DeviceToken(

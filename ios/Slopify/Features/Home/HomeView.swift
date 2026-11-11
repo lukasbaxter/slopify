@@ -101,21 +101,30 @@ struct HomeView: View {
         case .madeForYou: madeForYou
         case .topSongs: topSongs
         case .recent:
-            shelf(L("Recently played"), seeAll: { nav.push(.seeAll(.albums)) }) {
+            shelf(L("Recently played"), seeAll: { nav.pushFromHome(.seeAll(.albums)) }) {
                 Shelf(items: store.data.recent, style: .home) { a in
                     MediaCard(.init(a), title: a.name, subtitle: a.artist.isEmpty ? L("Album") : a.artist, style: .home, artSize: 150) {
-                        nav.push(.album(id: a.id))
+                        nav.pushFromHome(.album(id: a.id))
                     }
+                    .homeZoomSource(.album(id: a.id))
                 }
             }
         case .jumpBackIn:
             shelf(L("Jump back in"), seeAll: { nav.push(.seeAll(.artists)) }) { artistShelf(store.data.recentArtists) }
         case .radar:
-            shelf(L("Release Radar"), seeAll: { nav.push(.releaseRadar) }) {
+            shelf(L("Release Radar"), seeAll: { nav.pushFromHome(.releaseRadar) }) {
                 Shelf(items: store.radarShelf, style: .home) { r in radarCard(r) }
             }
         case .topArtists:
             shelf(L("Your top artists"), seeAll: { nav.push(.seeAll(.topArtists)) }) { artistShelf(Array(store.data.topArtists.prefix(16))) }
+        }
+    }
+
+    private static func route(_ s: HomeLogic.Shortcut) -> Route {
+        switch s {
+        case .liked: .likedSongs
+        case .album(let a): .album(id: a.id)
+        case .playlist(let p): .playlist(id: p.id)
         }
     }
 
@@ -124,11 +133,12 @@ struct HomeView: View {
             ForEach(store.shortcuts) { s in
                 HomeShortcutTile(shortcut: s) {
                     switch s {
-                    case .liked: nav.push(.likedSongs)
-                    case .album(let a): nav.push(.album(id: a.id))
-                    case .playlist(let p): nav.push(.playlist(id: p.id))
+                    case .liked: nav.pushFromHome(.likedSongs)
+                    case .album(let a): nav.pushFromHome(.album(id: a.id))
+                    case .playlist(let p): nav.pushFromHome(.playlist(id: p.id))
                     }
                 }
+                .homeZoomSource(Self.route(s))
             }
         }
         .padding(.horizontal, Spacing.gutter)
@@ -140,9 +150,10 @@ struct HomeView: View {
             Shelf(items: Array(seeds.enumerated()).map { MixItem(index: $0.offset, artist: $0.element) }, style: .home) { m in
                 let label = L("Daily Mix {n}", ["n": m.index + 1])
                 MediaCard(title: label, subtitle: L("{name} and more", ["name": m.artist.name]), style: .home,
-                          action: { nav.push(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name)) }) {
+                          action: { nav.pushFromHome(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name)) }) {
                     HomeMixArt(source: .artist(id: m.artist.id, image: m.artist.image), color: mixColor(m.index), label: label, pixelSize: 150)
                 }
+                .homeZoomSource(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name))
             }
         }
     }
@@ -154,9 +165,10 @@ struct HomeView: View {
             Shelf(items: years, style: .home) { y in
                 let label = L("Your Top Songs {year}", ["year": y.year.year])
                 MediaCard(title: label, subtitle: HomeLogic.topSongsSub(y.year.year, currentYear: year), style: .home,
-                          action: { nav.push(.topSongs(year: y.year.year, colorIndex: y.index)) }) {
+                          action: { nav.pushFromHome(.topSongs(year: y.year.year, colorIndex: y.index)) }) {
                     HomeMixArt(source: y.year.top.map { CoverSource.album(id: $0.albumId, art: $0.cover) }, color: mixColor(y.index), label: label, pixelSize: 150)
                 }
+                .homeZoomSource(.topSongs(year: y.year.year, colorIndex: y.index))
             }
         }
     }
@@ -172,8 +184,9 @@ struct HomeView: View {
     @ViewBuilder private func radarCard(_ r: Release) -> some View {
         if let lib = r.inLibrary {
             MediaCard(.album(id: lib, art: nil), title: r.title, subtitle: HomeLogic.radarShelfSub(r), style: .home, artSize: 150) {
-                nav.push(.album(id: lib))
+                nav.pushFromHome(.album(id: lib))
             }
+            .homeZoomSource(.album(id: lib))
         } else {
             // Not in the library yet: the artist's page, where it can be requested.
             MediaCard(.url(r.image.flatMap(URL.init(string:))), title: r.title, subtitle: HomeLogic.radarShelfSub(r), style: .home, artSize: 150) {

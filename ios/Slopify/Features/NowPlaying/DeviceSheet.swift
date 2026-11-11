@@ -34,7 +34,7 @@ struct DeviceSheet: View {
                     Text(NowPlayingDevices.subline(active, in: all)).font(.system(size: 13)).foregroundStyle(theme.fgSub).lineLimit(1)
                     QualityBadge(format: ps.deliveredFormat(player.current), small: true).padding(.top, 2)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
             .padding(.top, 12).padding(.bottom, 16)
             .overlay(alignment: .bottom) { Rectangle().fill(theme.fg(0.1)).frame(height: 1) }
@@ -53,7 +53,7 @@ struct DeviceSheet: View {
                                 Text(NowPlayingDevices.label(d, in: all)).font(.system(size: 16)).foregroundStyle(theme.fg).lineLimit(1)
                                 Text(NowPlayingDevices.subline(d, in: all)).font(.system(size: 13)).foregroundStyle(theme.fgSub).lineLimit(1)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.vertical, 10)
                         .frame(minHeight: 56)
@@ -72,7 +72,7 @@ struct DeviceSheet: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
     /// `onSelect(d); close()`: the transfer starts at once, the sheet slides out.

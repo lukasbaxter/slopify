@@ -7,6 +7,7 @@ import SwiftUI
 /// `number` (artist Popular: index column with the now-playing bars), `subtitle` override
 /// (Popular play counts), downloaded mark, unavailable (offline and not downloaded: 40 %),
 /// highlighted (opened from a link), lyric snippet (Liked "find" by lyrics).
+/// Swipe right adds the track to the queue (`SwipeToQueue`, uses the environment's `Player`).
 ///
 ///     TrackRow(track: t, showArt: true, isCurrent: player.currentId == t.id,
 ///              onTap: { play(i) }, onMore: { menu = t })
@@ -36,6 +37,9 @@ struct TrackRow: View {
     var onSnippet: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
+    // Optional: previews and tests have no player, the swipe is then off.
+    @Environment(Player.self) private var player: Player?
+    @Environment(OfflineStore.self) private var offlineStore: OfflineStore?
 
     struct LyricSnippet: Hashable {
         var text: String
@@ -87,9 +91,20 @@ struct TrackRow: View {
         .frame(minHeight: Shell.trackRow)
         .background { if isHighlighted { theme.tintHi.overlay(Rectangle().strokeBorder(theme.tintPress, lineWidth: 1)) } }
         .pressable(.row, onTap: onTap, onLongPress: onMore, onTouchDown: onTouchDown)
+        .swipeToQueue(enabled: player != nil, queueable: queueable, onQueue: queue)
         .opacity(isUnavailable ? 0.4 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// Asked when a swipe starts, so rows do not observe the offline store.
+    private func queueable() -> Bool {
+        SwipeToQueue.canQueue(offline: Connectivity.shared.offline, downloaded: isDownloaded || offlineStore?.has(track.id) == true)
+    }
+
+    private func queue() {
+        player?.addToQueue([track])
+        ToastCenter.shared.show(L("Added to queue"))
     }
 
     @ViewBuilder private func indexColumn(_ n: Int) -> some View {

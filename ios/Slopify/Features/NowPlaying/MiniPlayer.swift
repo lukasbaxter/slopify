@@ -46,7 +46,7 @@ struct MiniPlayer: View {
             now(track, elsewhere: ps.elsewhere)
                 .offset(x: dx)
                 .opacity(nowOpacity)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .background(GeometryReader { g in
                     Color.clear.onAppear { nowWidth = g.size.width }.onChange(of: g.size.width) { _, w in nowWidth = w }
                 })
@@ -99,7 +99,7 @@ struct MiniPlayer: View {
                     Text(track.creditLine).textStyle(.miniArtist).foregroundStyle(theme.fg(0.7)).lineLimit(1)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -124,7 +124,7 @@ struct MiniPlayer: View {
     private func errorBar(_ e: String) -> some View {
         Text(e)
             .font(.system(size: 14)).foregroundStyle(theme.danger)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8).padding(.horizontal, 16)
             .background(theme.dangerBg, in: RoundedRectangle(cornerRadius: 4))
             .padding(.bottom, 8)

@@ -15,7 +15,7 @@ struct Marquee: View {
     var body: some View {
         let dist = max(0, width - box)
         Text(text).lineLimit(1).fixedSize().hidden()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .leading) {
                 GeometryReader { g in
                     Color.clear.onAppear { box = g.size.width }.onChange(of: g.size.width) { _, w in box = w }
@@ -26,11 +26,11 @@ struct Marquee: View {
                     TimelineView(.animation) { ctx in
                         let (x, moving) = Self.offset(at: ctx.date.timeIntervalSinceReferenceDate, dist: dist)
                         Text(text).lineLimit(1).fixedSize().offset(x: x)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                             .mask(Self.mask(leftFade: moving))
                     }
                 } else {
-                    Text(text).lineLimit(1).fixedSize().frame(maxWidth: .infinity, alignment: .leading)
+                    Text(text).lineLimit(1).fixedSize().frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
             }
             .clipped()

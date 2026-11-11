@@ -16,6 +16,9 @@ final class Navigator {
 
     func push(_ r: Route) { paths[tab, default: NavigationPath()].append(r) }
 
+    /// A list opened from the Home root: zooms from its tile, swipe down hides it.
+    func pushFromHome(_ r: Route) { paths[.home, default: NavigationPath()].append(HomeRoute(route: r)) }
+
     /// From now playing / queue: close them, then open the page (DECISIONS fix).
     func open(_ r: Route) {
         queueOpen = false; nowPlayingOpen = false; drawerOpen = false
@@ -26,7 +29,11 @@ final class Navigator {
         if t == tab {
             if paths[t]?.isEmpty == false { paths[t] = NavigationPath() }
             else { scrollToTop[t, default: 0] += 1 }
-        } else { tab = t }
+        } else {
+            // Home always lands on the Home root, never back where you were (owner, 11-11).
+            if t == .home { paths[.home] = NavigationPath() }
+            tab = t
+        }
     }
 
     func reset() {

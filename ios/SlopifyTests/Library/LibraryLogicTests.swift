@@ -292,8 +292,8 @@ final class LibraryStoreCommitTests: XCTestCase {
     }
 }
 
-/// The live drag shared by Your Library and playlist songs: a still hold is the menu, a move
-/// lands in a slot (the playlist sends it as `{from, to}`).
+/// The live drag shared by Your Library and playlist songs, all in list coordinates: a still
+/// hold is the menu, a move lands in a slot (the playlist sends it as `{from, to}`).
 @MainActor
 final class LibraryDragControllerTests: XCTestCase {
     private func songs(_ n: Int) -> [LibraryDrag.Row] {
@@ -302,29 +302,56 @@ final class LibraryDragControllerTests: XCTestCase {
 
     func testStillHoldIsTheMenu() {
         let c = LibraryDragController()
-        c.begin(id: "s1", rows: songs(4))
-        c.move(start: CGPoint(x: 100, y: 100), to: CGPoint(x: 103, y: 104))
+        c.begin(id: "s1", rows: songs(4), at: CGPoint(x: 100, y: 100))
+        c.move(to: CGPoint(x: 103, y: 104))
         XCTAssertEqual(c.end(), .hold("s1"))
         XCTAssertFalse(c.isLifted)
     }
 
     func testDragDownLandsInFinalSlot() {
         let c = LibraryDragController()
-        // The list starts 300 pt down the screen (under a hero).
-        c.contentOrigin = CGPoint(x: 0, y: 300)
-        c.begin(id: "s0", rows: songs(4))
-        c.move(start: CGPoint(x: 100, y: 330), to: CGPoint(x: 100, y: 330 + 64 * 2 + 40))
-        XCTAssertEqual(c.offset(for: "s0").height, 64 * 2 + 40)
-        XCTAssertEqual(c.offset(for: "s1").height, -64) // slid up out of the way
+        c.begin(id: "s0", rows: songs(4), at: CGPoint(x: 100, y: 30))
+        c.move(to: CGPoint(x: 100, y: 30 + 64 * 2 + 40))
+        XCTAssertEqual(c.offset(for: "s0").height, 64 * 2 + 40) // under the finger
+        XCTAssertEqual(c.offset(for: "s1").height, -64)         // slid up out of the way
         XCTAssertEqual(c.end(), .drop(id: "s0", to: 2, into: nil, rows: ["s0", "s1", "s2", "s3"]))
     }
 
     func testMovedBackIsNoDrop() {
         let c = LibraryDragController()
-        c.begin(id: "s2", rows: songs(4))
-        c.move(start: CGPoint(x: 100, y: 150), to: CGPoint(x: 100, y: 60))   // aims at slot 1
+        c.begin(id: "s2", rows: songs(4), at: CGPoint(x: 100, y: 150))
+        c.move(to: CGPoint(x: 100, y: 60))   // aims at slot 1
         // Back over the lower half of s1 (now slid down into slot 2): its own slot again.
-        c.move(start: CGPoint(x: 100, y: 150), to: CGPoint(x: 100, y: 170))
+        c.move(to: CGPoint(x: 100, y: 170))
         XCTAssertNil(c.end())
+    }
+
+    func testListScrollingUnderStillFingerRetargets() {
+        // Auto-scroll: the finger stays put on screen but its list point moves 3 rows down.
+        let c = LibraryDragController()
+        c.begin(id: "s0", rows: songs(8), at: CGPoint(x: 100, y: 30))
+        c.move(to: CGPoint(x: 100, y: 40))
+        c.move(to: CGPoint(x: 100, y: 40 + 64 * 3))
+        XCTAssertEqual(c.lift?.target.to, 3)
+        XCTAssertEqual(c.end(), .drop(id: "s0", to: 3, into: nil, rows: (0..<8).map { "s\($0)" }))
+    }
+
+    func testCancelPutsBack() {
+        let c = LibraryDragController()
+        c.begin(id: "s0", rows: songs(4), at: CGPoint(x: 100, y: 30))
+        c.move(to: CGPoint(x: 100, y: 200))
+        c.cancel()
+        XCTAssertFalse(c.isLifted)
+        XCTAssertNil(c.end())
+        XCTAssertEqual(c.offset(for: "s0"), .zero)
+    }
+
+    func testRecognizerOnlyBeginsOverADragRow() {
+        // Flat mode / Liked Songs / hero: no row under the finger, so the scroll view keeps the touch.
+        let c = LibraryDragController()
+        XCTAssertNil(c.rowId(at: CGPoint(x: 100, y: 30)))
+        c.rows = { [LibraryDrag.Row(id: "a", folder: false, rect: CGRect(x: 16, y: 80, width: 361, height: 80))] }
+        XCTAssertNil(c.rowId(at: CGPoint(x: 100, y: 40)))   // the Liked row above
+        XCTAssertEqual(c.rowId(at: CGPoint(x: 100, y: 120)), "a")
     }
 }

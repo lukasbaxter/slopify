@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// One shown lyric line. `start` in seconds; `gap` = an inserted "♪".
 struct NowPlayingLyricLine: Hashable, Sendable {
@@ -39,6 +40,9 @@ enum NowPlayingLyrics {
         }
         return out
     }
+
+    /// Top edge fade only when scrolled down (> 1 pt) or past the first line (owner rule, web too).
+    static func showsTopFade(scrollOffset: CGFloat, activeIndex: Int) -> Bool { scrollOffset > 1 || activeIndex > 0 }
 
     static func isSynced(_ lines: [NowPlayingLyricLine]) -> Bool { lines.contains { $0.start != nil } }
 

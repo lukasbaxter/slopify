@@ -3,8 +3,6 @@ import SwiftUI
 /// The now playing Lyrics tab body (RightPanel.jsx `Lyrics`; UI.md 3.2.5, 3.4).
 struct NowPlayingLyricsPane: View {
     let track: Track?
-    /// True while the pane is scrolled to the top (swipe-down may close now playing).
-    @Binding var atTop: Bool
 
     @Environment(Player.self) private var player
     @Environment(SessionClient.self) private var session
@@ -16,9 +14,14 @@ struct NowPlayingLyricsPane: View {
     @State private var lines: [NowPlayingLyricLine] = []
     @State private var activeIndex = -1
     @State private var manual = false
+    /// How far the list is scrolled down, pt (for the top fade).
+    @State private var scrolled: CGFloat = 0
 
     private var jobs: LyricJobStore { LyricJobStore.shared }
     private var revision: Int { track.map { jobs.revision[$0.id] ?? 0 } ?? 0 }
+    /// The top fade dims the first line, so it only shows once there is something above.
+    private var topFade: Bool { NowPlayingLyrics.showsTopFade(scrollOffset: scrolled, activeIndex: activeIndex) }
+
     private var loadKey: String { "\(track?.id ?? "")#\(revision)" }
 
     var body: some View {
@@ -26,7 +29,7 @@ struct NowPlayingLyricsPane: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     GeometryReader { g in
-                        Color.clear.preference(key: TopOffsetKey.self, value: g.frame(in: .named("lyrics")).minY)
+                        Color.clear.preference(key: LyricsScrollKey.self, value: -g.frame(in: .named("lyricsScroll")).minY)
                     }
                     .frame(height: 0)
                     content(proxy)
@@ -34,13 +37,13 @@ struct NowPlayingLyricsPane: View {
                 .padding(.top, 16)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 48)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
-            .coordinateSpace(name: "lyrics")
+            .coordinateSpace(name: "lyricsScroll")
             .scrollIndicators(.hidden)
-            .onPreferenceChange(TopOffsetKey.self) { y in atTop = y >= -1 }
+            .onPreferenceChange(LyricsScrollKey.self) { y in scrolled = y }
             .simultaneousGesture(DragGesture(minimumDistance: 4).onChanged { _ in if state == .ok { manual = true } })
-            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.06),
+            .mask(LinearGradient(stops: [.init(color: topFade ? .clear : .black, location: 0), .init(color: .black, location: 0.06),
                                          .init(color: .black, location: 0.92), .init(color: .clear, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             .overlay(alignment: .bottom) {
@@ -105,7 +108,7 @@ struct NowPlayingLyricsPane: View {
                         .lineSpacing(24 * 0.3 - 4)
                         .foregroundStyle(!synced || i <= activeIndex ? theme.fg : theme.fg(0.5))
                         .animation(.easeOut(duration: 0.1), value: activeIndex)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -180,7 +183,7 @@ struct NowPlayingLyricsPane: View {
     }
 }
 
-private struct TopOffsetKey: PreferenceKey {
+private struct LyricsScrollKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

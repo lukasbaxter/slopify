@@ -4,6 +4,7 @@ import SwiftUI
 /// now playing / queue as full-screen layers, the account drawer and the device sheet.
 struct MainShell: View {
     @Environment(Navigator.self) private var nav
+    @Namespace private var homeZoom
     @Environment(Player.self) private var player
 
     var body: some View {
@@ -33,8 +34,14 @@ struct MainShell: View {
     @ViewBuilder
     private func tabStack<Root: View>(_ t: Navigator.Tab, @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: nav.binding(t)) {
-            root().navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+            root()
+                .background { if t == .library { LibrarySwipeBackInstaller(isLibraryTab: { [weak nav] in nav?.tab == .library }) } }
+                .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+                .navigationDestination(for: HomeRoute.self) {
+                    RouteDestination(route: $0.route).navigationTransition(.zoom(sourceID: $0, in: homeZoom))
+                }
         }
+        .environment(\.homeZoom, t == .home ? homeZoom : nil)
         .opacity(nav.tab == t ? 1 : 0)
         .allowsHitTesting(nav.tab == t)
         .accessibilityHidden(nav.tab != t)

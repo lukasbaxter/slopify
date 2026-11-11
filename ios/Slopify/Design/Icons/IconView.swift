@@ -23,26 +23,29 @@ struct IconView: View {
     var size: CGFloat
     /// Overrides the foreground style for `.current` parts.
     var tint: Color?
+    /// Paint every part with `tint`, including fixed-colour parts (the Liked Songs tile's white heart).
+    var tintAll = false
 
     @Environment(\.theme) private var theme
 
-    init(_ icon: Icon, filled: Bool = false, size: CGFloat = 16, tint: Color? = nil) {
+    init(_ icon: Icon, filled: Bool = false, size: CGFloat = 16, tint: Color? = nil, tintAll: Bool = false) {
         self.icon = filled ? icon.filled : icon
         self.size = size
         self.tint = tint
+        self.tintAll = tintAll
     }
 
     var body: some View {
         let spec = icon.spec
-        let theme = theme, tint = tint
+        let theme = theme, tint = tint, all = tintAll
         Canvas { ctx, sz in
-            IconView.draw(spec, in: &ctx, size: sz, theme: theme, tint: tint)
+            IconView.draw(spec, in: &ctx, size: sz, theme: theme, tint: tint, tintAll: all)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 
-    static func draw(_ spec: IconSpec, in ctx: inout GraphicsContext, size: CGSize, theme: Theme, tint: Color?) {
+    static func draw(_ spec: IconSpec, in ctx: inout GraphicsContext, size: CGSize, theme: Theme, tint: Color?, tintAll: Bool = false) {
         let scale = min(size.width, size.height) / spec.viewBox
         let dx = (size.width - spec.viewBox * scale) / 2, dy = (size.height - spec.viewBox * scale) / 2
         for el in spec.elements {
@@ -52,11 +55,12 @@ struct IconView: View {
             }
             let path = Path(el.path).applying(t)
             func shading(_ p: IconPaint) -> GraphicsContext.Shading {
+                if tintAll, let tint { return .color(tint) }
                 switch p {
-                case .current: tint.map { .color($0) } ?? .foreground
-                case .seekAccent: .color(theme.seekAccent)
-                case .green: .color(theme.green)
-                case .rgb(let x): .color(RGB(hex: x).color)
+                case .current: return tint.map { GraphicsContext.Shading.color($0) } ?? .foreground
+                case .seekAccent: return .color(theme.seekAccent)
+                case .green: return .color(theme.green)
+                case .rgb(let x): return .color(RGB(hex: x).color)
                 }
             }
             var c = ctx

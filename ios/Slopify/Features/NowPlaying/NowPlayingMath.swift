@@ -59,6 +59,16 @@ enum NowPlayingMath {
         dy > 140 || (elapsed < 0.3 && dy > 60)
     }
 
+    /// Only the Album tab closes on a swipe down. On the Lyrics tab scrolling the lines must never
+    /// close the page; only the chevron does (owner's rule, overrides UI.md 3.2.5).
+    static func swipeDismissAllowed(lyricsShowing: Bool) -> Bool { !lyricsShowing }
+
+    // MARK: Lyrics backdrop (mobile-nowplaying.css:83: blur(60px) brightness(.32) saturate(1.3))
+
+    static let lyricsBackdropBrightness = 0.32
+    static let lyricsBackdropSaturation = 1.3
+
+
     // MARK: Queue reorder (RightPanel.jsx:170-207)
 
     /// Target slot `pos + round(dy / rowHeight)`, clamped to the upcoming rows `[current+1, count-1]`.

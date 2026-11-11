@@ -21,7 +21,6 @@ struct NowPlayingView: View {
     @State private var drag: CGFloat = 0
     @State private var dragStart: Date?
     @State private var dragging = false
-    @State private var lyricsAtTop = true
     // Scrub.
     @State private var scrub: Double?
     @State private var scrubbing = false
@@ -39,17 +38,20 @@ struct NowPlayingView: View {
         GeometryReader { g in
             ZStack(alignment: .top) {
                 background(g)
+                    .frame(width: g.size.width, height: g.size.height)
                 VStack(spacing: 0) {
                     topRow
                     if tab == .album {
                         stage
                         bottomBlock
                     } else {
-                        NowPlayingLyricsPane(track: player.current, atTop: $lyricsAtTop)
+                        NowPlayingLyricsPane(track: player.current)
                             .frame(maxHeight: .infinity)
                     }
                 }
             }
+            // Nothing inside may widen the page past the screen.
+            .frame(width: g.size.width, height: g.size.height)
             .offset(y: drag)
             .simultaneousGesture(dismissGesture(height: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom))
         }
@@ -82,8 +84,9 @@ struct NowPlayingView: View {
                     CoverImage(NowPlayingCover.source(t), size: 320, shape: .rounded(0), placeholder: .none)
                         .scaleEffect(1.1)
                         .blur(radius: 60)
-                        .brightness(-0.68)
-                        .saturation(1.3)
+                        // CSS brightness() multiplies; SwiftUI .brightness() adds and crushed it to black.
+                        .colorMultiply(Color(white: NowPlayingMath.lyricsBackdropBrightness))
+                        .saturation(NowPlayingMath.lyricsBackdropSaturation)
                         .padding(-60)
                         .id(t.id)
                         .transition(.opacity.animation(reduceMotion ? nil : .easeInOut(duration: 0.9)))
@@ -120,7 +123,7 @@ struct NowPlayingView: View {
             }
             .lineLimit(1)
             .padding(.horizontal, 4)
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity)
             Button { openMenu() } label: {
                 IconView(.dots24, size: 24).foregroundStyle(theme.fg).frame(width: 44, height: 44)
             }
@@ -143,7 +146,7 @@ struct NowPlayingView: View {
                 .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.panel))
                 .padding(.top, 24)
-                .frame(maxWidth: .infinity, alignment: .top)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity)
     }
@@ -176,7 +179,7 @@ struct NowPlayingView: View {
                     QualityBadge(format: ps.deliveredFormat(t)).padding(.top, 6)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if let t {
                 let liked = likes.isLiked(t.id)
                 Button { Task { await NowPlayingLike.toggle(t.id, likes: likes) } } label: {
@@ -302,7 +305,7 @@ struct NowPlayingView: View {
         let ps = ps
         return HStack(spacing: 0) {
             NowPlayingDeviceButton(casting: ps.casting, label: NowPlayingDevices.label(ps.active, in: ps.devices), showName: true) { showDevices = true }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, -10)
             Button { tab = .lyrics } label: {
                 IconView(.lyrics24, size: 24).foregroundStyle(tab == .lyrics ? theme.accentInk : theme.fg).frame(width: 44, height: 44)
@@ -324,8 +327,8 @@ struct NowPlayingView: View {
     private func dismissGesture(height: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 10, coordinateSpace: .global)
             .onChanged { v in
-                guard !scrubbing, menu == nil, !showDevices else { return }
-                if tab == .lyrics && !lyricsAtTop && !dragging { return }
+                guard !scrubbing, menu == nil, !showDevices,
+                      NowPlayingMath.swipeDismissAllowed(lyricsShowing: tab == .lyrics) else { return }
                 let dy = v.translation.height, dx = v.translation.width
                 if !dragging {
                     guard dy > 0, abs(dx) < dy else { return }

@@ -42,9 +42,6 @@ struct PlaylistView: View {
 
     var body: some View {
         page
-        .background(GeometryReader { g in
-            Color.clear.onAppear { setViewport(g) }.onChange(of: g.size) { _, _ in setViewport(g) }
-        })
         .contextMenuSheet($menu)
         .nameDialog($nameDialog)
         .confirmDialog($confirm)
@@ -122,10 +119,6 @@ struct PlaylistView: View {
                              onTouchDown: { player.prewarm(e.track) })
                         .frame(height: Shell.trackRow)
                         .background { if lifted { theme.cardHover.shadow(color: .black.opacity(0.45), radius: 12, y: 8) } }
-                        .modifier(LibraryDragGesture(highPriority: true, coordinateSpace: .global,
-                                                     onLift: { liftSong(key) },
-                                                     onMove: { start, p in drag.move(start: start, to: p) },
-                                                     onEnd: finishSongDrag))
                         .scaleEffect(lifted ? 1.02 : 1)
                         .offset(drag.offset(for: key))
                         .zIndex(lifted ? 1 : 0)
@@ -133,13 +126,12 @@ struct PlaylistView: View {
                 }
             }
             .overlay(alignment: .topLeading) { songDropLine }
-            .background {
-                GeometryReader { g in
-                    Color.clear.preference(key: LibraryPlaylistRowsKey.self, value: g.frame(in: .global))
-                }
-            }
-            .background(LibraryScrollFinder(handle: drag.scroll))
-            .onPreferenceChange(LibraryPlaylistRowsKey.self) { f in drag.contentOrigin = f.origin; listWidth = f.width }
+            .background(GeometryReader { g in
+                Color.clear.onAppear { listWidth = g.size.width }.onChange(of: g.size.width) { _, w in listWidth = w }
+            })
+            // The hold-to-drag recognizer goes on the page's scroll view; points are in this list's space.
+            .background(LibraryDragProbe(drag: drag))
+            .onAppear { wireDrag() }
         }
     }
 
@@ -158,32 +150,27 @@ struct PlaylistView: View {
 
     // MARK: - Hold to drag
 
-    /// The scroller's visible band in global coordinates: below the top bar, above the mini player and tabs.
-    private func setViewport(_ g: GeometryProxy) {
-        let f = g.frame(in: .global)
-        let top = f.minY + Shell.topBar
-        drag.viewportTop = top
-        drag.viewport = CGSize(width: f.width, height: max(0, f.maxY - Shell.contentBottom - top))
-    }
-
-    /// Songs have fixed 64 pt rows, so every slot is known without measuring (the list is lazy).
-    private func liftSong(_ key: String) {
+    /// The rows (fixed 64 pt, so the lazy list needs no measuring) and what a drop or hold does.
+    private func wireDrag() {
+        drag.rows = { songRows() }
         drag.canEnter = { _ in false }
-        let all = songRows()
-        // Nothing to arrange (one song, or offline): the hold is just the menu, nothing slides.
-        drag.begin(id: key, rows: entries.count > 1 && !ctx.offline ? all : all.filter { $0.id == key })
+        drag.coveredTop = Shell.topBar
+        drag.coveredBottom = Shell.contentBottom - 24
+        drag.onFinish = { finishSongDrag($0) }
     }
 
+    /// Nothing to arrange (one song, or offline): only the held row, so a hold is just the menu.
     private func songRows() -> [LibraryDrag.Row] {
-        entries.enumerated().map { i, e in
+        let all = entries.enumerated().map { i, e in
             LibraryDrag.Row(id: e.key.uuidString, folder: false,
                             rect: CGRect(x: 0, y: CGFloat(i) * Shell.trackRow, width: listWidth, height: Shell.trackRow))
         }
+        return all
     }
 
-    private func finishSongDrag() {
+    private func finishSongDrag(_ outcome: LibraryDragController.Outcome?) {
         let canMove = entries.count > 1 && !ctx.offline
-        switch drag.end() {
+        switch outcome {
         case .hold(let key):
             if let e = entries.first(where: { $0.key.uuidString == key }) { menu = trackMenu(e) }
         case let .drop(key, to, _, rows):
@@ -380,9 +367,4 @@ struct LibraryPlaylistEntry: Identifiable, Hashable {
     let key = UUID()
     var track: Track
     var id: UUID { key }
-}
-
-private struct LibraryPlaylistRowsKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }

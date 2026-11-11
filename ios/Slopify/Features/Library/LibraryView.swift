@@ -28,12 +28,12 @@ struct LibraryView: View {
     @State private var confirm: ConfirmDialog?
     @State private var drag = LibraryDragController()
     @State private var gridFrames: [String: CGRect] = [:]
+    @State private var listWidth: CGFloat = 0
     @State private var photoFolder: String?
     @State private var photoItem: PhotosPickerItem?
     @FocusState private var findFocused: Bool
 
     private let contentSpace = "lib-content"
-    private let viewportSpace = "lib-viewport"
     private let topId = "lib-top"
 
     private var ctx: LibraryContext { LibraryContext(api: account.api, account: account, player: player, likes: likes, nav: nav, session: session) }
@@ -220,20 +220,16 @@ struct LibraryView: View {
                 .padding(.horizontal, Spacing.gutter)
                 .coordinateSpace(name: contentSpace)
                 .overlay(alignment: .topLeading) { dropLine }
-                .background {
-                    GeometryReader { g in
-                        Color.clear.preference(key: LibraryContentOriginKey.self, value: g.frame(in: .named(viewportSpace)).origin)
-                    }
-                }
-                .background(LibraryScrollFinder(handle: drag.scroll))
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { listWidth = g.size.width }.onChange(of: g.size.width) { _, w in listWidth = w }
+                })
+                // The drag's one recognizer lives on this scroll view; points are in this view's space.
+                .background(LibraryDragProbe(drag: drag))
                 .shellContentPadding()
             }
             .scrollIndicators(.hidden)
-            .scrollDisabled(drag.isLifted)
             .scrollDismissesKeyboard(.immediately)
-            .coordinateSpace(name: viewportSpace)
-            .background(GeometryReader { g in Color.clear.onAppear { drag.viewport = g.size }.onChange(of: g.size) { _, s in drag.viewport = s } })
-            .onPreferenceChange(LibraryContentOriginKey.self) { drag.contentOrigin = $0 }
+            .onAppear { wireDrag() }
             .onChange(of: scrollTopRequest) { _, _ in withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(topId, anchor: .top) } }
         }
     }
@@ -296,12 +292,8 @@ struct LibraryView: View {
             content()
                 .background { if target { theme.fg(0.14).overlay(Rectangle().strokeBorder(theme.accentInk, lineWidth: 2)) } }
                 .background { if lifted { theme.cardHover.shadow(color: .black.opacity(0.45), radius: 12, y: 8) } }
-                .modifier(LibraryDragGesture(
-                    onTap: { open(e) },
-                    coordinateSpace: .named(viewportSpace),
-                    onLift: { liftRow(e, shown: shown, showLiked: showLiked) },
-                    onMove: { start, p in drag.move(start: start, to: p) },
-                    onEnd: { finishDrag(arrangement: a, shown: shown) }))
+                // Tap opens; the 380 ms hold (drag or menu) is the scroll view's recognizer.
+                .pressable(.row, onTap: { open(e) })
                 .scaleEffect(lifted ? 1.02 : 1)
                 .offset(drag.offset(for: e.id))
                 .zIndex(lifted ? 1 : 0)
@@ -317,7 +309,7 @@ struct LibraryView: View {
                 Circle().fill(theme.page).overlay(Circle().strokeBorder(theme.accentInk, lineWidth: 2))
                     .frame(width: 8, height: 8).offset(x: -4)
             }
-            .offset(x: r.minX - Spacing.gutter, y: r.minY)
+            .offset(x: r.minX, y: r.minY)
             .allowsHitTesting(false)
             .transition(.opacity)
         }
@@ -325,29 +317,31 @@ struct LibraryView: View {
 
     // MARK: - Drag
 
-    private func liftRow(_ e: LibraryEntry, shown: [LibraryEntry], showLiked: Bool) {
+    /// Tree mode only: the rows, folders shutting for a folder drag, and what a drop or hold does.
+    private func wireDrag() {
+        drag.rows = { currentRows() }
         drag.canEnter = { [store] id in store.arrangement(pinned: []).byId[id]?.kind != .folder }
-        let measure = {
-            let rows = currentRows(showLiked: showLiked)
-            drag.begin(id: e.id, rows: rows)
-        }
-        if e.kind == .folder && !openFolders.isEmpty && !shut {
+        drag.willLift = { id in
+            guard store.arrangement(pinned: []).byId[id]?.kind == .folder, !openFolders.isEmpty, !shut else { return false }
             shut = true
-            // Measure once the shut folders have laid out.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { measure() }
-        } else {
-            measure()
+            return true
         }
+        drag.coveredBottom = Shell.contentBottom - 24
+        drag.onFinish = { finishDrag($0) }
     }
 
     /// Drag rows in content coordinates. The list has fixed 80 pt rows; the grid is measured.
-    private func currentRows(showLiked: Bool) -> [LibraryDrag.Row] {
+    private func currentRows() -> [LibraryDrag.Row] {
+        let offline = ctx.offline
+        guard !LibraryArrangement.isFlat(filter: filter, query: query, offline: offline) else { return [] }
+        let showLiked = LibraryArrangement.showLiked(filter: filter, query: query, likedName: L("Liked Songs"), offline: offline,
+                                                     likedDownloaded: offlineStore.heldCollections.contains(LibraryRowModel.likedId))
         let a = store.arrangement(pinned: ctx.pinned)
         let shown = a.shown(filter: filter, query: query, offline: ctx.offline, downloaded: offlineStore.heldCollections, openFolders: openFolders, shut: shut)
         if grid {
             return shown.compactMap { e in gridFrames[e.id].map { LibraryDrag.Row(id: e.id, folder: e.kind == .folder, rect: $0) } }
         }
-        let width = max(0, drag.viewport.width - 2 * Spacing.gutter)
+        let width = max(0, listWidth - 2 * Spacing.gutter)
         let y0: CGFloat = showLiked ? LibraryLayoutMetrics.listRow : 0
         return shown.enumerated().map { i, e in
             LibraryDrag.Row(id: e.id, folder: e.kind == .folder,
@@ -355,8 +349,7 @@ struct LibraryView: View {
         }
     }
 
-    private func finishDrag(arrangement _: LibraryArrangement, shown _: [LibraryEntry]) {
-        let outcome = drag.end()
+    private func finishDrag(_ outcome: LibraryDragController.Outcome?) {
         // Use the arrangement as it is now (folders may have shut for the drag).
         let a = store.arrangement(pinned: ctx.pinned)
         let shown = a.shown(filter: filter, query: query, offline: ctx.offline, downloaded: offlineStore.heldCollections, openFolders: openFolders, shut: shut)
@@ -540,11 +533,6 @@ enum LibraryOpenFolders {
     static func save(_ ids: Set<String>, _ d: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(ids.sorted()), let s = String(data: data, encoding: .utf8) { d.set(s, forKey: key) }
     }
-}
-
-private struct LibraryContentOriginKey: PreferenceKey {
-    static let defaultValue: CGPoint = .zero
-    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) { value = nextValue() }
 }
 
 private struct LibraryFramesKey: PreferenceKey {

@@ -101,7 +101,7 @@ struct LikedCover: View {
         GeometryReader { g in
             let side = min(g.size.width, g.size.height)
             LinearGradient(colors: Theme.Fixed.likedGradient, startPoint: .topLeading, endPoint: .bottomTrailing)
-                .overlay { IconView(.heartFilled, size: side * heart, tint: .white) }
+                .overlay { IconView(.heartFilled, size: side * heart, tint: .white, tintAll: true) }
         }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .accessibilityHidden(true)

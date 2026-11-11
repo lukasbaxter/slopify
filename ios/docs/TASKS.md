@@ -46,3 +46,15 @@ task starts, `project.yml`, `Makefile`, `docs/` (except API.md/UI.md authorship)
 - OWNER DECIDED (11-10): playlist reorder = long-press to drag. Hold lifts the row, drag moves it,
   letting go without moving opens the song menu (same as the library drag). Remove the
   "Drag to reorder" ⋯ item and the edit-mode List. Library agent does it after the menu agent lands.
+
+## Device round 1 (owner, 11-11)
+- [library] playlist: scroll blocked when finger starts on a row; hold+drag lifts but never drops.
+- [lead] Liked Songs tile heart green → white (IconView tintAll). DONE
+- [nowplaying] lyrics: scroll up closes now playing; only the chevron may close it.
+- [nowplaying] lyrics background nearly black.
+- [player] after a daily mix, a playlist song would not start.
+- [nowplaying] long title ("There's Still a Light in the House", Valley) overflows the whole page right.
+- [lead] Home tab always lands on the Home root. DONE
+- [lead] Lists opened from the Home root (albums, playlists, Liked, mixes, Top Songs, Radar, See all)
+  use the iOS 18 zoom transition: swipe down hides them back into the tile. Artist pages push
+  normally. Deployment target now iOS 18. DONE (App/HomeZoom.swift)

@@ -143,6 +143,14 @@ final class NowPlayingLyricsTests: XCTestCase {
         XCTAssertEqual(NowPlayingLyrics.activeIndex(lines, at: NowPlayingLyrics.lookupTime(playhead: 11.8, speakerDelay: 0.5)), 0)
     }
 
+    func testTopFadePredicate() {
+        XCTAssertFalse(NowPlayingLyrics.showsTopFade(scrollOffset: 0, activeIndex: -1))
+        XCTAssertFalse(NowPlayingLyrics.showsTopFade(scrollOffset: 1, activeIndex: 0))
+        XCTAssertFalse(NowPlayingLyrics.showsTopFade(scrollOffset: -30, activeIndex: 0)) // overscroll bounce
+        XCTAssertTrue(NowPlayingLyrics.showsTopFade(scrollOffset: 1.5, activeIndex: 0))
+        XCTAssertTrue(NowPlayingLyrics.showsTopFade(scrollOffset: 0, activeIndex: 1))
+    }
+
     func testRetryDelays() {
         XCTAssertEqual(NowPlayingLyrics.retryDelay(attempt: 0), 2)
         XCTAssertEqual(NowPlayingLyrics.retryDelay(attempt: 1), 4)

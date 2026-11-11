@@ -30,7 +30,7 @@ struct QueueView: View {
                     .padding(.top, 8)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 80)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
             .scrollDisabled(dragFrom != nil)
             if player.current != nil { transport }
@@ -54,7 +54,7 @@ struct QueueView: View {
                 Text(from.name).font(.system(size: 13, weight: .bold)).foregroundStyle(theme.fg)
             }
             .lineLimit(1)
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity)
             Color.clear.frame(width: 44, height: 44)
         }
         .padding(.top, 4)
@@ -79,7 +79,7 @@ struct QueueView: View {
                 Text(L("Play an album or playlist, or use “Add to queue” on any song.")).font(.system(size: 13)).foregroundStyle(theme.fgSub)
                     .multilineTextAlignment(.center)
             }
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity)
             .padding(.vertical, 32)
         } else {
             let base = idx + 1
@@ -159,7 +159,7 @@ struct QueueView: View {
                 NowPlayingArtistLinks(track: t) { id in nav.open(.artist(id: id)) }
                     .font(.system(size: 13)).foregroundStyle(theme.fgSub)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             if !current {
                 IconView(.handle, size: 24).foregroundStyle(theme.fgSub)
                     .frame(width: 44, height: 44)

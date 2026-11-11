@@ -72,6 +72,7 @@ an invite link.
 | Web | Any browser, nothing to install |
 | Android | `.apk` from [releases](https://github.com/lukasbaxter/slopify/releases/latest) |
 | iPhone / iPad | Add to Home Screen from Safari, or the `.ipa` through SideStore ([how](docs/iphone.md)) |
+| iPhone (native, beta) | SwiftUI app, build it from [`ios/`](ios/README.md) with Xcode |
 | Mac | `.dmg` from releases (Apple Silicon) |
 | Windows | Installer or portable `.exe` from releases |
 | Linux | Web app |
@@ -132,6 +133,7 @@ npm test                # unit (vitest)
 npm run e2e             # Playwright against the fixture library
 npm run test:changed    # only the platforms your change touches (tools/test-areas.mjs)
 npm run test:area android   # one platform: lint server web android desktop tools ios
+cd ios && make test      # native iOS app (Xcode + xcodegen), see ios/README.md
 ```
 
 Tests never touch a real library or account: they run against the fixture

@@ -70,8 +70,8 @@ enum NowPlayingMath {
     // The web uses blur(60px) brightness(.32) saturate(1.3) (mobile-nowplaying.css:83). Native is
     // brighter on purpose so more of the cover shows; a scrim then caps light covers.
 
-    static let lyricsBackdropBrightness = 0.55
-    static let lyricsBackdropSaturation = 1.5
+    static let lyricsBackdropBrightness = 0.42
+    static let lyricsBackdropSaturation = 1.4
     /// Highest backdrop luminance allowed. White text then has >= 7:1 contrast and the 50 %
     /// upcoming lines stay as readable as on the web's darkest-allowed backdrop.
     static let lyricsBackdropMaxLuminance = 0.09

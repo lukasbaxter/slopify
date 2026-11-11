@@ -48,8 +48,8 @@ final class NowPlayingLayoutTests: XCTestCase {
 
     func testLyricsBackdropValues() {
         // Brighter than the web's brightness(.32) saturate(1.3), on purpose.
-        XCTAssertEqual(NowPlayingMath.lyricsBackdropBrightness, 0.55)
-        XCTAssertEqual(NowPlayingMath.lyricsBackdropSaturation, 1.5)
+        XCTAssertEqual(NowPlayingMath.lyricsBackdropBrightness, 0.42)
+        XCTAssertEqual(NowPlayingMath.lyricsBackdropSaturation, 1.4)
     }
 
     func testLightCoverGetsScrimSoWhiteTextStaysReadable() {

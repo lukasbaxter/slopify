@@ -18,6 +18,10 @@ import com.lukasbaxter.slopify.android.core.storage.SharedPrefsStore
 import com.lukasbaxter.slopify.android.core.stores.Connectivity
 import com.lukasbaxter.slopify.android.core.stores.Likes
 import com.lukasbaxter.slopify.android.core.stores.LyricJobStore
+import com.lukasbaxter.slopify.android.design.Design
+import com.lukasbaxter.slopify.android.design.i18n.Localizer
+import com.lukasbaxter.slopify.android.design.overlay.ToastCenter
+import com.lukasbaxter.slopify.android.design.theme.ThemeStore
 import com.lukasbaxter.slopify.android.player.NoopPlayer
 import com.lukasbaxter.slopify.android.player.Player
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +55,8 @@ class AppModel(
     val likes = Likes()
     val nav = Navigator()
     val lyricJobs = LyricJobStore(scope)
+    /** Colours from `prefs.theme`, live (design root). */
+    val themeStore = ThemeStore(account, scope)
 
     private val libraryChangedFlow = MutableSharedFlow<Prefs?>(extraBufferCapacity = 8)
     /**
@@ -75,6 +81,9 @@ class AppModel(
         player.attach(account, session)
         // Follows sign-in itself: resumes this account's unfinished jobs, forgets them on sign-out.
         lyricJobs.attach(account)
+        // Design roots: words follow prefs.language, the pills follow offline and lyric jobs.
+        Localizer.shared.follow(account.prefs, scope)
+        ToastCenter.shared.follow(connectivity, lyricJobs, scope)
         scope.launch {
             account.state.collect { s ->
                 when (s) {
@@ -99,6 +108,7 @@ class AppModel(
             session.connect(base, token)
         }
         account.refreshAfterSignIn()
+        Localizer.shared.refreshServerDefault(account.api)
         likes.refresh()
     }
 
@@ -123,6 +133,7 @@ class AppModel(
     companion object {
         fun create(context: Context, scope: CoroutineScope): AppModel {
             val app = context.applicationContext
+            Design.install(app, SharedPrefsStore(app))
             return AppModel(
                 scope = scope,
                 secureStore = KeystoreSecureStore(app),
@@ -130,6 +141,7 @@ class AppModel(
                 network = AndroidNetworkMonitor(app),
                 deviceName = deviceName(app),
                 form = if (app.resources.configuration.smallestScreenWidthDp >= 600) "tablet" else "phone",
+                player = com.lukasbaxter.slopify.android.player.AndroidPlayer.create(app, scope),
             )
         }
 

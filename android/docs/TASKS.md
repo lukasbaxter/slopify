@@ -48,3 +48,9 @@ files, `Makefile`, `docs/`. Paths below are under
 
 ## Lead request queue
 (empty)
+
+## Lead follow-ups (from player, 11-11)
+- Android Auto: add `com.google.android.gms.car.application` meta-data + res/xml/automotive_app_desc.xml.
+- Player strings marked TODO(lead) → L() once design lands.
+- Playback resumption (Bluetooth play when the app is not running): not implemented.
+- Real-phone checks: gapless/crossfade sound, notification/lock screen, BT buttons, noisy pause, focus.

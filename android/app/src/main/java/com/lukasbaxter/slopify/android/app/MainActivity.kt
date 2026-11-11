@@ -18,7 +18,7 @@ class MainActivity : ComponentActivity() {
         val model = (application as SlopifyApplication).model
         setContent {
             CompositionLocalProvider(LocalAppModel provides model) {
-                SlopifyTheme { RootView() }
+                SlopifyTheme(model.themeStore, model.account.api, model.player, model.connectivity) { RootView() }
             }
         }
     }

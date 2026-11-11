@@ -176,8 +176,9 @@ struct HomeView: View {
     private func artistShelf(_ list: [HomeLogic.RankedArtist]) -> some View {
         Shelf(items: list, style: .home) { a in
             MediaCard(.artist(id: a.id, image: a.image), title: a.name, subtitle: L("Artist"), round: true, style: .home, artSize: 150) {
-                nav.push(.artist(id: a.id))
+                nav.pushFromHome(.artist(id: a.id))
             }
+            .homeZoomSource(.artist(id: a.id))
         }
     }
 
@@ -190,8 +191,9 @@ struct HomeView: View {
         } else {
             // Not in the library yet: the artist's page, where it can be requested.
             MediaCard(.url(r.image.flatMap(URL.init(string:))), title: r.title, subtitle: HomeLogic.radarShelfSub(r), style: .home, artSize: 150) {
-                if let a = r.artistId { nav.push(.artist(id: a)) }
+                if let a = r.artistId { nav.pushFromHome(.artist(id: a)) }
             }
+            .homeZoomSource(r.artistId.map { Route.artist(id: $0) } ?? .releaseRadar)
         }
     }
 

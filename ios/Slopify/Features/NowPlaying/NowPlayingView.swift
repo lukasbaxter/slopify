@@ -214,6 +214,9 @@ struct NowPlayingView: View {
 
     private var seek: some View {
         TimelineView(.periodic(from: .now, by: player.isPlaying && scrub == nil ? 0.25 : 3600)) { _ in
+            // Read the tick so a paused seek redraws, but never `.id` it: a new identity every
+            // 0.5 s cancels the drag in progress (owner, 11-11: the handle let go mid-drag).
+            let _ = player.progressTick
             let duration = player.duration
             let shown = scrub ?? min(player.isPlaying ? player.positionNow() : player.position, duration)
             let f = NowPlayingMath.fraction(shown, duration: max(1, duration))
@@ -241,7 +244,6 @@ struct NowPlayingView: View {
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(theme.fgSub)
             }
-            .id(player.progressTick)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L("Seek"))

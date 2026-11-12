@@ -5,7 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import com.lukasbaxter.slopify.android.core.api.await
+import com.lukasbaxter.slopify.android.core.api.awaitUse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -67,8 +67,8 @@ class ImageLoader(
             return@withContext null
         }
         try {
-            http.newCall(req).await().use { r ->
-                if (!r.isSuccessful) return@use null
+            http.newCall(req).awaitUse { r ->
+                if (!r.isSuccessful) return@awaitUse null
                 r.body?.bytes()?.takeIf { it.isNotEmpty() }
             }
         } catch (e: CancellationException) {

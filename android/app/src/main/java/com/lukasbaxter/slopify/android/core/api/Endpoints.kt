@@ -78,7 +78,7 @@ suspend fun ApiClient.demoSignIn(device: String): LoginResponse? {
     val req = Request.Builder().url(url("api/auth/demo"))
         .post(buildJsonObject { put("device", device) }.toString().toRequestBody("application/json".toMediaType()))
         .build()
-    val body = attempt { http.newCall(req).await().use { r -> if (r.code == 200) r.body?.string() else null } }
+    val body = attempt { http.newCall(req).awaitUse { r -> if (r.code == 200) r.body?.string() else null } }
     if (body.isNullOrEmpty()) return null
     return SlopifyJson.decodeFromString(LoginResponse.serializer(), body)
 }

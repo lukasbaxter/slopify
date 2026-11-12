@@ -2,7 +2,7 @@ package com.lukasbaxter.slopify.android.player
 
 import com.lukasbaxter.slopify.android.core.api.ApiClient
 import com.lukasbaxter.slopify.android.core.api.artist
-import com.lukasbaxter.slopify.android.core.api.await
+import com.lukasbaxter.slopify.android.core.api.awaitUse
 import com.lukasbaxter.slopify.android.core.api.mix
 import com.lukasbaxter.slopify.android.core.api.postPlay
 import com.lukasbaxter.slopify.android.core.api.tracks
@@ -49,7 +49,7 @@ class ApiPlayerBackend(private val api: ApiClient) : PlayerBackend {
      */
     override suspend fun prewarm(master: String) {
         suspend fun text(u: String): String? = attempt {
-            api.http.newCall(Request.Builder().url(u).build()).await().use { r -> if (r.code == 200) r.body?.string() else null }
+            api.http.newCall(Request.Builder().url(u).build()).awaitUse { r -> if (r.code == 200) r.body?.string() else null }
         }
         val masterUrl = master.toHttpUrlOrNull() ?: return
         val first = text(master)?.let { HlsPlaylist.variants(it).firstOrNull() } ?: return
@@ -61,7 +61,7 @@ class ApiPlayerBackend(private val api: ApiClient) : PlayerBackend {
             if ("#EXT-X-ENDLIST" in pl) {
                 for (seg in HlsPlaylist.segments(pl, 2)) {
                     val u = variant.resolve(seg) ?: continue
-                    attempt { api.http.newCall(Request.Builder().url(u).build()).await().close() }
+                    attempt { api.http.newCall(Request.Builder().url(u).build()).awaitUse { } }
                 }
                 return
             }

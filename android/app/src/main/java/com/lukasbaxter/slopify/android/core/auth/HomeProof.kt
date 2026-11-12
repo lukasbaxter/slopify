@@ -1,6 +1,6 @@
 package com.lukasbaxter.slopify.android.core.auth
 
-import com.lukasbaxter.slopify.android.core.api.await
+import com.lukasbaxter.slopify.android.core.api.awaitUse
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.model.asString
 import kotlinx.serialization.json.JsonObject
@@ -45,9 +45,9 @@ object HomeProof {
         val client = http.newBuilder().callTimeout(ms, TimeUnit.MILLISECONDS).build()
         val req = Request.Builder().url(url).header("Cache-Control", "no-cache").get().build()
         return runCatching {
-            client.newCall(req).await().use { r ->
-                if (r.code != 200) return@use false
-                val proof = (SlopifyJson.parseToJsonElement(r.body?.string() ?: "") as? JsonObject)?.get("proof").asString() ?: return@use false
+            client.newCall(req).awaitUse { r ->
+                if (r.code != 200) return@awaitUse false
+                val proof = (SlopifyJson.parseToJsonElement(r.body?.string() ?: "") as? JsonObject)?.get("proof").asString() ?: return@awaitUse false
                 verify(keyHex, n, proof)
             }
         }.getOrDefault(false)

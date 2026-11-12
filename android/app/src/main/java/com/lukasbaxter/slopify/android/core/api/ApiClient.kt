@@ -4,6 +4,8 @@ import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.model.asString
 import com.lukasbaxter.slopify.android.core.session.SocketIdentity
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -110,7 +112,7 @@ class ApiClient(
             http.newBuilder().callTimeout(ms, TimeUnit.MILLISECONDS).readTimeout(ms, TimeUnit.MILLISECONDS).build()
         }
         val (status, message, data) = try {
-            client.newCall(req).await().use { r -> Triple(r.code, r.message, r.body?.string() ?: "") }
+            client.newCall(req).awaitUse { r -> Triple(r.code, r.message, r.body?.string() ?: "") }
         } catch (e: IOException) {
             // Like the web, a timeout alone says nothing about the link (a slow server).
             if (!isTimeout(e) && isUnreachable(e)) onReachability?.invoke(false)
@@ -220,7 +222,13 @@ class ApiClient(
     }
 }
 
-/** OkHttp call as a cancellable suspend. */
+/**
+ * The call, with [block] (which reads the body) run on IO, never on the caller's thread: the
+ * app calls from Main, and reading a body there throws NetworkOnMainThreadException (11-12).
+ */
+internal suspend fun <T> Call.awaitUse(block: (Response) -> T): T = withContext(Dispatchers.IO) { await().use(block) }
+
+/** OkHttp call as a cancellable suspend. Read the body through [awaitUse], not after this returns. */
 internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     cont.invokeOnCancellation { cancel() }
     enqueue(object : Callback {

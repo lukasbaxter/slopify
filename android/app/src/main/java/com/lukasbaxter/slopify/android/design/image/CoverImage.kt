@@ -120,11 +120,14 @@ private fun CoverPlaceholderView(p: CoverPlaceholder) {
     }
 }
 
-/** Liked Songs tile: 135deg #450af5 -> #c4efd9 with a centred white heart at `heart` of the box. */
+/**
+ * Liked Songs tile: 135deg #450af5 -> #c4efd9 with a centred white heart at `heart` of the box.
+ * Fills its slot like the other covers (11-12: a bare call shrank to the heart, top-left in the hero).
+ */
 @Composable
 fun LikedCover(modifier: Modifier = Modifier, heart: Float = 0.45f, radius: Dp = Radius.art) {
     BoxWithConstraints(
-        modifier.clip(RoundedCornerShape(radius)).clearAndSetSemantics {}
+        modifier.fillMaxSize().clip(RoundedCornerShape(radius)).clearAndSetSemantics {}
             .background(Brush.linearGradient(Theme.Fixed.likedGradient, start = Offset.Zero, end = Offset.Infinite)),
         contentAlignment = Alignment.Center,
     ) {

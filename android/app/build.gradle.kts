@@ -10,17 +10,34 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // Placeholder until the owner picks the store id (the Expo app is com.lukasbaxter.slopify).
-        applicationId = "com.lukasbaxter.slopify.android"
+        // The Expo app's id (owner, 11-12: the native app replaces it), so the release apk installs as an update over it.
+        applicationId = "com.lukasbaxter.slopify"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // The release tag sets these (-PslopifyVersion=0.1.179 -> versionCode 1179, the Expo app's scheme).
+        val version = (findProperty("slopifyVersion") as String?) ?: "0.1.0"
+        val (a, b, c) = version.split(".").map { it.toInt() }
+        versionCode = a * 1_000_000 + b * 1_000 + c
+        versionName = version
+    }
+
+    // The release keystore (the Expo app's key, alias "conduit"); only CI has it. Without it, release is unsigned.
+    val keystore = System.getenv("SLOPIFY_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = keystore
+                storePassword = System.getenv("CONDUIT_KS_PASS")
+                keyAlias = "conduit"
+                keyPassword = System.getenv("CONDUIT_KS_PASS")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

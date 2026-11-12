@@ -66,17 +66,31 @@ Composites: `RepeatGlyph(mode: .off/.all/.one)`, `ShuffleGlyph(mode: .off/.on/.s
 `L("Added to {name}", ["name": x])`, `LBold(key)` for `<b>` markup, `Localizer.shared`
 (`language`, `locale`, `setUserPick`, `languages`). Locale JSON: `ios/tools/sync-locales.sh`.
 
+## Gestures (owner 11-12: one meaning each)
+
+| Gesture | Means | Where |
+|---|---|---|
+| swipe right | back (pushed page) / open the drawer (tab root) | anywhere except track rows and scrubbers (`App/SwipeBack.swift`) |
+| swipe right on a track row | add to queue | `TrackRow` |
+| swipe down | close | sheets, menus, now playing, queue, Home-zoomed pages (system zoom) |
+| swipe left | close the drawer | drawer |
+| swipe up on the mini player | open now playing | `MiniPlayer` |
+| swipe left / right on the mini player or now playing art | next / previous | `swipeToSkip` |
+| long press | context menu | rows, cards, tiles |
+| pull down at the top | refresh | Home, Your Library, detail pages |
+
 ## Components
 
 | View / modifier | What |
 |---|---|
 | `.pressable(.row/.fade/.dim, onTap:onLongPress:onTouchDown:)` | tap + 450 ms long-press with haptic, press feedback |
-| `.onLongPressMenu {}`, `.pressDim()`, `ButtonStyle .pressFade/.pressRow/.pressPlain`, `Haptics.tick()` | press helpers |
+| `.onLongPressMenu {}`, `.buttonLongPressMenu(action)`, `.pressDim()`, `ButtonStyle .pressFade/.pressRow/.pressPlain`, `Haptics.tick()` | press helpers |
 | `TrackRow(track:showArt:number:isCurrent:isPlaying:isDownloaded:isUnavailable:isHighlighted:subtitle:snippet:onTap:onMore:onArt:onTouchDown:onSnippet:)` | shared track row (5.4) |
-| `MediaCard(source, title:subtitle:round:style:missing:request:action:)` | album / artist tile (6.0.7) |
+| `MediaCard(source, title:subtitle:round:style:missing:request:action:onLongPress:)` | album / artist tile (6.0.7) |
+| `CardMenuBuilder(app:).album/.artist/.playlist/.likedSongs` | long-press menus for cards and tiles |
 | `Shelf(items:style:) { cell }`, `CardGrid(items:) { cell }` | horizontal shelf, 2-col grid |
 | `SectionHeader(title, style: .home/.search/.artist/.detail, first:, showAll:)` | `.shelf-head` |
-| `DetailScaffold(title:heroColor:barStyle:onBack:) { ... }` | detail page with the fading top bar (2.6) |
+| `DetailScaffold(title:heroColor:barStyle:onBack:onRefresh:) { ... }` | detail page with the fading top bar (2.6), pull to refresh |
 | `HeroHeader(color:title:coverSize:onTitleTap:) { cover } meta: { ... }`, `HeroOwner` | album/playlist hero (6.3.2) |
 | `ActionRow(heroColor:artist:) { leading } trailing: { ... }` | colour band + action row (6.3.3) |
 | `.reportsHeroHeight()`, `.shellContentPadding()`, `\.detailTopInset` | custom heroes, root scroll padding |
@@ -89,6 +103,9 @@ Composites: `RepeatGlyph(mode: .off/.all/.one)`, `ShuffleGlyph(mode: .off/.on/.s
 | `TextField(...).textFieldStyle(.slopify(focused:))`, `SearchField(placeholder:text:)` | inputs |
 | `.contextMenuSheet($menu)` with `MenuSheet(header: MenuHeader, items: [MenuItem])` | context menus (5.5); `MenuItem.separator/.heading`, `offlineSubset`, `tidy` |
 | `.bottomSheet(item:)`, `.bottomSheet(isPresented:)`, `BottomSheetFrame`, `@Environment(\.closeSheet)` | any bottom sheet (device sheet, sleep timer) |
+| `.swipeToDismiss(.down/.left, offset:distance:rubberBand:canBegin:) { close }` | THE swipe-to-close (sheets, now playing, queue, drawer) |
+| `.swipeToSkip($state, width:onSwipeUp:) { skip }` | swipe left/right to skip (mini player, now playing art) |
+| `.swipeToQueue { }`, `.claimsHorizontalSwipes()` | row swipe right to queue; keep the back swipe off a scrubber |
 | `MenuList(header:items:onPick:)` | menu rows inside a custom sheet |
 | `.nameDialog($dialog)` (`NameDialog`), `.confirmDialog($dialog)` (`ConfirmDialog`) | dialogs (2.10) |
 | `.overlayCover(item:) { item, close in }` | transparent full-screen presentation (custom modals) |

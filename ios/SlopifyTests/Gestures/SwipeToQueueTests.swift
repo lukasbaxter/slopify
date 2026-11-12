@@ -67,46 +67,89 @@ final class SwipeToQueueTests: XCTestCase {
     }
 }
 
-final class LibrarySwipeBackTests: XCTestCase {
-    private let screen = CGSize(width: 390, height: 844)
-
-    private func input(_ f: (inout LibrarySwipeBack.Input) -> Void = { _ in }) -> LibrarySwipeBack.Input {
-        var i = LibrarySwipeBack.Input(isLibraryTab: true, stackCount: 2, start: CGPoint(x: 150, y: 200), screen: screen,
-                                       direction: CGPoint(x: 10, y: 1), scrollAtTop: true, onTrackRow: false)
+final class SwipeBackTests: XCTestCase {
+    private func input(_ f: (inout SwipeBack.Input) -> Void = { _ in }) -> SwipeBack.Input {
+        var i = SwipeBack.Input(isActiveTab: true, stackCount: 2, start: CGPoint(x: 150, y: 200),
+                                direction: CGPoint(x: 10, y: 1), claimed: false)
         f(&i)
         return i
     }
 
-    func testBeginsOnALibraryPageTopHalfAtTop() {
-        XCTAssertTrue(LibrarySwipeBack.shouldBegin(input()))
+    func testGoesBackOnAPushedPage() {
+        XCTAssertEqual(SwipeBack.action(input()), .back)
+        XCTAssertEqual(SwipeBack.action(input { $0.stackCount = 4 }), .back)
+    }
+
+    /// Owner 11-12: from anywhere, on every tab (was: Library only, top half, scrolled to the top).
+    func testAnywhereOnAnyPage() {
+        XCTAssertEqual(SwipeBack.action(input { $0.start.y = 700 }), .back, "bottom half")
+        XCTAssertEqual(SwipeBack.action(input { $0.direction = CGPoint(x: 12, y: 11) }), .back, "nearly diagonal")
+    }
+
+    func testRootOpensTheDrawer() {
+        XCTAssertEqual(SwipeBack.action(input { $0.stackCount = 1 }), .drawer)
+        XCTAssertEqual(SwipeBack.action(input { $0.stackCount = 1; $0.start.x = 4 }), .drawer, "from the edge too")
     }
 
     func testEachGate() {
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.isLibraryTab = false }), "Home / Search")
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.stackCount = 1 }), "Library root")
-        XCTAssertTrue(LibrarySwipeBack.shouldBegin(input { $0.stackCount = 4 }))
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.start.y = 422 }), "bottom half")
-        XCTAssertTrue(LibrarySwipeBack.shouldBegin(input { $0.start.y = 421 }))
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.start.x = 10 }), "edge: the system swipe")
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.direction = CGPoint(x: -10, y: 0) }), "leftward")
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.direction = CGPoint(x: 2, y: 10) }), "vertical")
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.scrollAtTop = false }), "scrolled down")
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.onTrackRow = true }), "rows queue instead")
-        XCTAssertFalse(LibrarySwipeBack.shouldBegin(input { $0.inScrolledShelf = true }), "a scrolled shelf scrolls")
+        XCTAssertNil(SwipeBack.action(input { $0.isActiveTab = false }), "a hidden tab")
+        XCTAssertNil(SwipeBack.action(input { $0.covered = true }), "now playing / drawer over the page")
+        XCTAssertNil(SwipeBack.action(input { $0.start.x = 10 }), "edge: the system swipe")
+        XCTAssertNil(SwipeBack.action(input { $0.direction = CGPoint(x: -10, y: 0) }), "leftward")
+        XCTAssertNil(SwipeBack.action(input { $0.direction = CGPoint(x: 2, y: 10) }), "vertical")
+        XCTAssertNil(SwipeBack.action(input { $0.claimed = true }), "rows queue, charts scrub")
+        XCTAssertNil(SwipeBack.action(input { $0.inScrolledShelf = true }), "a scrolled shelf scrolls")
+        XCTAssertNil(SwipeBack.action(input { $0.stackCount = 1; $0.claimed = true }))
+        XCTAssertNil(SwipeBack.action(input { $0.heldFor = 0.5 }), "press-and-drag (library reorder)")
     }
 
-    func testAtTop() {
-        XCTAssertTrue(LibrarySwipeBack.isAtTop(offsetY: -59, insetTop: 59))
-        XCTAssertTrue(LibrarySwipeBack.isAtTop(offsetY: -80, insetTop: 59), "pulled down past the top")
-        XCTAssertTrue(LibrarySwipeBack.isAtTop(offsetY: 0.5, insetTop: 0), "epsilon")
-        XCTAssertFalse(LibrarySwipeBack.isAtTop(offsetY: 2, insetTop: 0))
-        XCTAssertFalse(LibrarySwipeBack.isAtTop(offsetY: -40, insetTop: 59))
+    func testBackstop() {
+        XCTAssertTrue(SwipeBack.backstopPops(dx: 81, vx: 0))
+        XCTAssertFalse(SwipeBack.backstopPops(dx: 79, vx: 0))
+        XCTAssertTrue(SwipeBack.backstopPops(dx: 40, vx: 900), "flick")
+        XCTAssertFalse(SwipeBack.backstopPops(dx: 20, vx: 900), "a twitch")
     }
 
     @MainActor func testPopHandlerIsFound() throws {
         let nav = UINavigationController(rootViewController: UIViewController())
         let pop = try XCTUnwrap(nav.interactivePopGestureRecognizer)
-        let (target, action) = try XCTUnwrap(LibrarySwipeBack.popHandler(of: pop))
+        let (target, action) = try XCTUnwrap(SwipeBack.popHandler(of: pop))
         XCTAssertTrue(target.responds(to: action))
+    }
+}
+
+final class SwipeDismissTests: XCTestCase {
+    func testDirection() {
+        XCTAssertTrue(SwipeDismiss.isDismissward(CGPoint(x: 30, y: 40), .down), "diagonal down")
+        XCTAssertFalse(SwipeDismiss.isDismissward(CGPoint(x: 50, y: 40), .down), "more sideways than down")
+        XCTAssertFalse(SwipeDismiss.isDismissward(CGPoint(x: 0, y: -10), .down), "up")
+        XCTAssertTrue(SwipeDismiss.isDismissward(CGPoint(x: -40, y: 25), .left))
+        XCTAssertFalse(SwipeDismiss.isDismissward(CGPoint(x: 40, y: 0), .left))
+    }
+
+    func testBeginsOnlyWithTheScrollAtItsTop() {
+        XCTAssertTrue(SwipeDismiss.shouldBegin(translation: CGPoint(x: 3, y: 12), velocity: .zero, direction: .down, scrollAtTop: true))
+        XCTAssertFalse(SwipeDismiss.shouldBegin(translation: CGPoint(x: 3, y: 12), velocity: .zero, direction: .down, scrollAtTop: false))
+        XCTAssertTrue(SwipeDismiss.shouldBegin(translation: .zero, velocity: CGPoint(x: 0, y: 900), direction: .down, scrollAtTop: true), "velocity before any movement")
+        XCTAssertTrue(SwipeDismiss.isAtTop(offsetY: -59, insetTop: 59))
+        XCTAssertTrue(SwipeDismiss.isAtTop(offsetY: -80, insetTop: 59), "pulled down past the top")
+        XCTAssertFalse(SwipeDismiss.isAtTop(offsetY: 2, insetTop: 0))
+    }
+
+    func testFollowsAndRubberBands() {
+        XCTAssertEqual(SwipeDismiss.displayOffset(80, rubberBand: true), 80)
+        let up = SwipeDismiss.displayOffset(-200, rubberBand: true)
+        XCTAssertLessThan(up, 0)
+        XCTAssertGreaterThan(up, -SwipeDismiss.rubberMax)
+        XCTAssertEqual(SwipeDismiss.displayOffset(-200, rubberBand: false), 0)
+    }
+
+    /// Distance or a flick, however long the drag took (was: a 300 ms window).
+    func testDismissRule() {
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 101, velocity: 0, distance: 100))
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 99, velocity: 0, distance: 100))
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 30, velocity: 900, distance: 100), "short fast flick")
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 10, velocity: 900, distance: 100), "a twitch")
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 160, velocity: -900, distance: 100), "flung back up")
     }
 }

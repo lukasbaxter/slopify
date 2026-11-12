@@ -57,16 +57,7 @@ enum SwipeToQueue {
     static func canQueue(offline: Bool, downloaded: Bool) -> Bool { !offline || downloaded }
 }
 
-/// Touches that landed on a track row, so the Library back swipe can leave them to the row.
-@MainActor
-enum SwipeToQueueTouches {
-    private static let rows = NSHashTable<UITouch>.weakObjects()
-    static func add(_ t: UITouch) { rows.add(t) }
-    static func remove(_ t: UITouch) { rows.remove(t) }
-    static func contains(_ t: UITouch) -> Bool { rows.contains(t) }
-}
-
-/// The row's pan. Every other non-edge pan under the same touch (the list scroll, the Library
+/// The row's pan. Every other non-edge pan under the same touch (the list scroll, the
 /// back swipe, the iOS 26 full-width content pop) waits for it to fail, which it does within 6 pt of a
 /// vertical or leftward move.
 final class SwipeToQueueRecognizer: UIPanGestureRecognizer {
@@ -80,7 +71,7 @@ final class SwipeToQueueRecognizer: UIPanGestureRecognizer {
             downAt = t.timestamp
             startPoint = t.location(in: nil)
         }
-        for t in touches { tracked.append(t); SwipeToQueueTouches.add(t) }
+        for t in touches { tracked.append(t); HorizontalTouchClaims.add(t) }
         // The edge belongs to the system back swipe: step aside before it has to wait.
         if state == .possible, startPoint.x < SwipeToQueue.edgeGuard { state = .failed }
     }
@@ -98,7 +89,7 @@ final class SwipeToQueueRecognizer: UIPanGestureRecognizer {
 
     override func reset() {
         super.reset()
-        for t in tracked { SwipeToQueueTouches.remove(t) }
+        for t in tracked { HorizontalTouchClaims.remove(t) }
         tracked = []
     }
 

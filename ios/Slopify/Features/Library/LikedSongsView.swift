@@ -34,7 +34,7 @@ struct LikedSongsView: View {
     var body: some View {
         let rows = all
         let shown = debounced.trimmingCharacters(in: .whitespaces).isEmpty ? rows : rows.filter { LibraryText.matches($0, query: debounced) }
-        DetailScaffold(title: L("Liked Songs"), heroColor: hero, barStyle: .hidden) {
+        DetailScaffold(title: L("Liked Songs"), heroColor: hero, barStyle: .hidden, onRefresh: { await store.loadLiked() }) {
             hero.color.frame(height: findBarHeight)
             HeroHeader(color: hero, title: L("Liked Songs"), coverSize: 180) {
                 LikedCover()

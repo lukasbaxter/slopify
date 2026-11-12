@@ -1333,6 +1333,15 @@ extension Player: AudioEngineEvents {
     }
 
     func audioStarved(_ id: String) { linkWatch?.noteStarve() }
+
+    /// Built again from the backend, so a retry follows the address the app uses now (a song
+    /// started at home keeps going on the main address once home is gone).
+    func audioItemForRetry(_ item: AudioItem) -> AudioItem {
+        guard let track = model.entries.first(where: { $0.track.id == item.id })?.track else { return item }
+        let fresh = audioItem(for: track)
+        if item.id == loadedId { set(\.deliveredProfile, Self.delivered(fresh)) }
+        return fresh
+    }
 }
 
 /// Seedable RNG so shuffle tests are deterministic.

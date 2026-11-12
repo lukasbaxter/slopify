@@ -177,6 +177,40 @@ describe('ws client ids across accounts', () => {
     expect(seen.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_laptop_1');
     laptop.ws.terminate();
   });
+  // The phone app moving between its home and main address (iOS API.md §20.8). Its audio is
+  // local and plays on through the move. Closing the old socket first is a disconnect of the
+  // active client: every other device is told the session paused (the live log's "iPhone
+  // disconnected while active; session paused" between two "came back" lines). The new socket
+  // saying hello while the old one is still open is a reconnect: swapped in silently.
+  it('an active phone moving address pauses nothing when its new socket is in before the old one closes', async () => {
+    const laptop = await hello('tokA', 'c_laptop_mv');
+    const seen: any[] = []; laptop.ws.on('message', (d: any) => seen.push(JSON.parse(String(d))));
+    const first = await hello('tokA', 'c_phone_mv');
+    first.ws.send(JSON.stringify({ type: 'claim' }));
+    first.ws.send(JSON.stringify({ type: 'nowplaying', nowPlaying: { itemId: 't1', title: 'T', playing: true, position: 10 } }));
+    await new Promise((r) => setTimeout(r, 100));
+    const paused = () => seen.filter((m) => m.type === 'session' && m.nowPlaying?.playing === false);
+    // Close first, then reconnect: the session pauses for the laptop.
+    seen.length = 0;
+    first.ws.close();
+    await new Promise((r) => setTimeout(r, 100));
+    const second = await hello('tokA', 'c_phone_mv');
+    second.ws.send(JSON.stringify({ type: 'claim', reassert: true, ago: 1000 }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(paused().length).toBe(1);
+    // New socket first, old one closed after its hello-ok: no pause, the phone stays active.
+    second.ws.send(JSON.stringify({ type: 'nowplaying', nowPlaying: { itemId: 't1', title: 'T', playing: true, position: 12 } }));
+    await new Promise((r) => setTimeout(r, 100));
+    seen.length = 0;
+    const third = await hello('tokA', 'c_phone_mv');
+    third.ws.send(JSON.stringify({ type: 'claim', reassert: true, ago: 1000 }));
+    second.ws.close();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(paused()).toEqual([]);
+    expect(seen.filter((m) => m.type === 'roster').at(-1)?.activeClientId).toBe('c_phone_mv');
+    expect(seen.filter((m) => m.type === 'command' && m.command?.action === 'yield').length).toBeGreaterThan(0);
+    laptop.ws.terminate(); third.ws.terminate();
+  });
   it('a device coming back with an older press yields to the one that pressed play since; a newer press takes over', async () => {
     const phone = await hello('tokA', 'c_phone_2');
     phone.ws.send(JSON.stringify({ type: 'claim' }));

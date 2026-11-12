@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The phone account drawer (UI.md 2.7, 7.1; web App.jsx:1594-1640, app.css:1205-1223).
 /// Scrim `rgba(0,0,0,.55)` fading in, a `--page` panel `min(82 %, 340)` wide sliding in from the
-/// left over 0.25 s. Tap the scrim or swipe left to close.
+/// left over 0.25 s. Tap the scrim or swipe left (anywhere, follows the finger) to close.
 // TODO(lead): MainShell wraps this in `.transition(.move(edge: .leading))`; the drawer animates
 // itself (scrim fade + slide), so `.transition(.identity)` there is what matches the web.
 struct AccountDrawer: View {
@@ -10,6 +10,7 @@ struct AccountDrawer: View {
     @Environment(Account.self) private var account
     @Environment(\.theme) private var theme
     @State private var appeared = false
+    @State private var drag: CGFloat = 0
 
     var body: some View {
         GeometryReader { g in
@@ -28,9 +29,9 @@ struct AccountDrawer: View {
                     .background(theme.page.ignoresSafeArea())
                     .compositingGroup()
                     .shadow(color: .black.opacity(0.7), radius: 30)
-                    .offset(x: appeared ? 0 : -(width + 60))
-                    .gesture(swipeToClose)
+                    .offset(x: appeared ? -drag : -(width + 60))
             }
+            .swipeToDismiss(.left, offset: $drag, distance: min(width * 0.3, 80), rubberBand: false) { close() }
         }
         .onAppear { withAnimation(Motion.drawerIn) { appeared = true } }
     }
@@ -85,24 +86,16 @@ struct AccountDrawer: View {
         .buttonStyle(.pressFade)
     }
 
-    /// App.jsx:1605-1611: dx < -50 and |dx| > 1.5 |dy|.
-    private var swipeToClose: some Gesture {
-        DragGesture(minimumDistance: 10).onChanged { v in
-            let dx = v.translation.width, dy = v.translation.height
-            if AccountDrawerLogic.isCloseSwipe(dx: dx, dy: dy) { close() }
-        }
+    /// Slides out, then goes (rows that navigate close it at once through `nav.open`).
+    private func close() {
+        withAnimation(Motion.drawerIn) { appeared = false; drag = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { nav.drawerOpen = false }
     }
-
-    private func close() { nav.drawerOpen = false }
 
     private func logOut() {
         close()
         Task { await account.signOut() }
     }
-}
-
-enum AccountDrawerLogic {
-    static func isCloseSwipe(dx: CGFloat, dy: CGFloat) -> Bool { dx < -50 && abs(dx) > abs(dy) * 1.5 }
 }
 
 #Preview {

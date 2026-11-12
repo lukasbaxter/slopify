@@ -30,11 +30,15 @@ final class NowPlayingMathTests: XCTestCase {
     }
 
     func testSkipSwipe() {
-        XCTAssertEqual(NowPlayingMath.skip(dx: -61, dy: 10, elapsed: 0.3), .next)
-        XCTAssertEqual(NowPlayingMath.skip(dx: 61, dy: -10, elapsed: 0.3), .previous)
-        XCTAssertNil(NowPlayingMath.skip(dx: 60, dy: 0, elapsed: 0.3))
-        XCTAssertNil(NowPlayingMath.skip(dx: -100, dy: 40, elapsed: 0.3))
-        XCTAssertNil(NowPlayingMath.skip(dx: -100, dy: 0, elapsed: 0.6))
+        XCTAssertEqual(NowPlayingMath.skip(dx: -61, dy: 10, velocityX: 0), .next)
+        XCTAssertEqual(NowPlayingMath.skip(dx: 61, dy: -10, velocityX: 0), .previous)
+        XCTAssertNil(NowPlayingMath.skip(dx: 60, dy: 0, velocityX: 0))
+        XCTAssertNil(NowPlayingMath.skip(dx: -100, dy: 110, velocityX: -900), "more down than sideways")
+        // Owner 11-12: forgiving. A sloppy diagonal, a slow swipe and a short flick all skip.
+        XCTAssertEqual(NowPlayingMath.skip(dx: -100, dy: 60, velocityX: 0), .next)
+        XCTAssertEqual(NowPlayingMath.skip(dx: -30, dy: 5, velocityX: -900), .next)
+        XCTAssertNil(NowPlayingMath.skip(dx: -30, dy: 5, velocityX: 900), "flicked back")
+        XCTAssertNil(NowPlayingMath.skip(dx: -20, dy: 0, velocityX: -900), "a twitch")
         let f = NowPlayingMath.skipFollow(dx: -120)
         XCTAssertEqual(f.offset, -80)
         XCTAssertEqual(f.opacity, 0.6, accuracy: 1e-9)
@@ -44,10 +48,19 @@ final class NowPlayingMathTests: XCTestCase {
     }
 
     func testNowPlayingDismiss() {
-        XCTAssertTrue(NowPlayingMath.dismissesNowPlaying(dy: 141, elapsed: 2))
-        XCTAssertTrue(NowPlayingMath.dismissesNowPlaying(dy: 61, elapsed: 0.2))
-        XCTAssertFalse(NowPlayingMath.dismissesNowPlaying(dy: 61, elapsed: 0.4))
-        XCTAssertFalse(NowPlayingMath.dismissesNowPlaying(dy: 140, elapsed: 1))
+        let d = Gestures.nowPlayingDismissDistance
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 141, velocity: 0, distance: d))
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 140, velocity: 0, distance: d))
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 61, velocity: 700, distance: d), "flick")
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 61, velocity: 100, distance: d))
+    }
+
+    func testMiniPlayerSwipeUp() {
+        XCTAssertTrue(NowPlayingMath.opensNowPlaying(dx: 10, dy: -41, velocityY: 0))
+        XCTAssertTrue(NowPlayingMath.opensNowPlaying(dx: 0, dy: -20, velocityY: -800), "short flick")
+        XCTAssertFalse(NowPlayingMath.opensNowPlaying(dx: 0, dy: -20, velocityY: -100))
+        XCTAssertFalse(NowPlayingMath.opensNowPlaying(dx: 60, dy: -50, velocityY: -900), "sideways: a skip")
+        XCTAssertFalse(NowPlayingMath.opensNowPlaying(dx: 0, dy: 80, velocityY: 900), "down")
     }
 
     func testReorderTargetClampsToUpcoming() {

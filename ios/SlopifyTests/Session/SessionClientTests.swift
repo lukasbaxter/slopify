@@ -137,13 +137,37 @@ final class SessionClientTests: XCTestCase {
     func testMoveReconnectsSameIdentity() {
         client.connect(base: URL(string: "https://main.test")!, token: "t"); client.handle(.open); helloOk("c_kept")
         client.move(to: URL(string: "http://192.168.1.2:8080")!)
-        XCTAssertTrue(sockets[0].closed)
         XCTAssertEqual(sock.url.absoluteString, "ws://192.168.1.2:8080/api/ws")
         client.handle(.open)
         XCTAssertEqual(sock.sent[0]["clientId"] as? String, "c_kept")
         XCTAssertEqual(sock.sent[0]["instance"] as? String, sockets[0].sent[0]["instance"] as? String)
+        helloOk("c_kept")
+        XCTAssertTrue(sockets[0].closed)   // §20.8: once the new socket is in
         client.move(to: URL(string: "http://192.168.1.2:8080")!)
         XCTAssertEqual(sockets.count, 2)
+    }
+
+    /// Moving address opens the new socket before closing the old one: the server swaps them
+    /// by client id, so the session never sees the active phone leave ("disconnected while
+    /// active; session paused" for every other device) while its music plays on.
+    func testMoveKeepsTheOldSocketUntilTheNewOneIsUp() {
+        client.connect(base: URL(string: "https://main.test")!, token: "t"); client.handle(.open); helloOk("c_kept")
+        client.claim()
+        client.move(to: URL(string: "http://h.test:8090")!)
+        XCTAssertEqual(sockets.count, 2)
+        XCTAssertFalse(sockets[0].closed, "closed before the new socket is up: the server pauses the session")
+        client.handle(.open)
+        XCTAssertFalse(sockets[0].closed)
+        helloOk("c_kept")
+        XCTAssertTrue(sockets[0].closed, "the old socket is let go once the new one is in")
+        XCTAssertEqual(client.connection, .connected)
+        XCTAssertEqual(sockets[1].types.prefix(2), ["hello", "claim"])
+        // A move whose new socket fails lets the old one go too, and retries as usual.
+        client.move(to: URL(string: "https://main.test")!)
+        XCTAssertFalse(sockets[1].closed)
+        client.handle(.closed(code: nil))
+        XCTAssertTrue(sockets[1].closed)
+        XCTAssertEqual(client.connection, .disconnected)
     }
 
     func testStateFromServer() {

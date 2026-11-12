@@ -1395,8 +1395,12 @@ become active and the holder gets `yield`. `ago` is clamped to 7 days.
 
 ### 20.8 Moving address
 
-When the base URL changes (home ↔ main, §4.4), close the socket and connect to the new base
-with the same `clientId`/`instance`, backoff reset to 1 s. Same server, same session.
+When the base URL changes (home ↔ main, §4.4), connect to the new base with the same
+`clientId`/`instance`, backoff reset to 1 s, and close the old socket once the new one has its
+`hello-ok` (or failed). Same server, same session. Make before break: the server swaps a
+reconnect in by client id silently, while the active client's socket closing first makes it
+pause the session for every other device ("disconnected while active") although the phone's
+own audio plays on.
 
 ### 20.9 Clock sync and playhead extrapolation
 

@@ -15,6 +15,8 @@ final class Navigator {
     private(set) var scrollToTop: [Tab: Int] = [:]
 
     func push(_ r: Route) { paths[tab, default: NavigationPath()].append(r) }
+    /// One page back on tab `t` (the swipe-back backstop).
+    func pop(_ t: Tab) { if paths[t]?.isEmpty == false { paths[t]?.removeLast() } }
 
     /// A list opened from the Home root: zooms from its tile, swipe down hides it.
     func pushFromHome(_ r: Route) { paths[.home, default: NavigationPath()].append(HomeRoute(route: r)) }

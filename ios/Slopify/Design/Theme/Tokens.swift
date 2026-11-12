@@ -59,8 +59,8 @@ enum Motion {
     static let nowPlayingIn = sheet(0.3)
     /// The one dismiss used for every sheet: slide down 0.25 s ease-in (DECISIONS).
     static let sheetOut = Animation.easeIn(duration: 0.25)
-    /// Snap back after a drag that did not dismiss.
-    static let snapBack = Animation.easeOut(duration: 0.2)
+    /// Spring back after a drag that did not dismiss or skip.
+    static let snapBack = Animation.spring(response: 0.3, dampingFraction: 0.82)
     /// Image fade-in (Home FadeImg).
     static let imageFade = Animation.easeOut(duration: 0.15)
     /// Scrim fade.
@@ -71,15 +71,11 @@ enum Motion {
 enum Gestures {
     static let longPressDuration: Double = 0.45
     static let longPressSlop: CGFloat = 10
-    /// Sheet drag-to-dismiss: dy > 100, or dy > 40 within 300 ms.
+    /// Swipe down to close (`SwipeDismiss`): past this distance, or a flick.
     static let sheetDismissDistance: CGFloat = 100
-    static let sheetFlickDistance: CGFloat = 40
-    static let sheetFlickTime: Double = 0.3
-    /// Now playing swipe-down: dy > 140, or dy > 60 within 300 ms.
     static let nowPlayingDismissDistance: CGFloat = 140
-    static let nowPlayingFlickDistance: CGFloat = 60
-    /// Mini player skip swipe: |dx| > 60, |dy| < 40, within 600 ms.
+    /// Swipe to skip (mini player, now playing art): past this, or a flick.
     static let skipDistance: CGFloat = 60
-    static let skipMaxVertical: CGFloat = 40
-    static let skipTime: Double = 0.6
+    /// A flick, pt/s.
+    static let flickVelocity: CGFloat = 500
 }

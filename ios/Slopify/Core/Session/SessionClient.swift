@@ -46,6 +46,8 @@ final class SessionClient {
     @ObservationIgnored private var base: URL?
     @ObservationIgnored private var token: String?
     @ObservationIgnored private var socket: SocketTransport?
+    /// The socket on the old base during a move, kept until the new one is in (§20.8).
+    @ObservationIgnored private var retiring: SocketTransport?
     @ObservationIgnored private var consumer: Task<Void, Never>?
     @ObservationIgnored private var retryTask: Task<Void, Never>?
     @ObservationIgnored private var pingTask: Task<Void, Never>?
@@ -117,11 +119,18 @@ final class SessionClient {
         backoff.reset()
     }
 
-    /// Base URL moved (home <-> main): reconnect there, same clientId/instance.
+    /// Base URL moved (home <-> main): reconnect there, same clientId/instance. Make before
+    /// break: the server swaps a reconnect in by client id without a word, but an active
+    /// client's socket closing first pauses the session for every other device ("disconnected
+    /// while active") while this phone's music plays on. So the old socket stays open until
+    /// the new one has its hello-ok (or fails).
     func move(to base: URL) {
         guard !stopped, self.base?.absoluteString != base.absoluteString else { return }
         self.base = base
+        let old = helloed ? socket : nil
+        if old != nil { socket = nil }
         reconnectNow()
+        if let old { retiring = old }
     }
 
     /// "I am the one making sound now." Call on a local play press.
@@ -201,6 +210,7 @@ final class SessionClient {
         pingTask?.cancel(); pingTask = nil
         livenessTask?.cancel(); livenessTask = nil
         socket?.close(); socket = nil
+        retiring?.close(); retiring = nil
         helloed = false
         openedAt = nil
     }
@@ -268,6 +278,7 @@ final class SessionClient {
         switch m {
         case let .helloOk(h):
             helloed = true
+            retiring?.close(); retiring = nil
             connection = .connected
             if let id = h.clientId, !id.isEmpty { clientId = id }
             offsets = h.offsets

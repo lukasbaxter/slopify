@@ -6,11 +6,13 @@ import SwiftUI
 struct HomeView: View {
     @Environment(Account.self) private var account
     @Environment(Navigator.self) private var nav
+    @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
 
     @State private var store = HomeStore.shared
     @State private var filter: HomeLogic.Filter = .all
     @State private var scrollTop: CGFloat = 0
+    @State private var menu: MenuSheet?
     private let space = "home-scroll"
 
     var body: some View {
@@ -58,6 +60,7 @@ struct HomeView: View {
         }
         .background(theme.bgBase.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .contextMenuSheet($menu)
         .task(id: HomeStore.key(for: account)) {
             store.use(key: HomeStore.key(for: account))
             await refresh(force: false)
@@ -105,6 +108,8 @@ struct HomeView: View {
                 Shelf(items: store.data.recent, style: .home) { a in
                     MediaCard(.init(a), title: a.name, subtitle: a.artist.isEmpty ? L("Album") : a.artist, style: .home, artSize: 150) {
                         nav.pushFromHome(.album(id: a.id))
+                    } onLongPress: {
+                        menu = CardMenuBuilder(app: app).album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
                     }
                     .homeZoomSource(.album(id: a.id))
                 }
@@ -136,6 +141,13 @@ struct HomeView: View {
                     case .liked: nav.pushFromHome(.likedSongs)
                     case .album(let a): nav.pushFromHome(.album(id: a.id))
                     case .playlist(let p): nav.pushFromHome(.playlist(id: p.id))
+                    }
+                } onLongPress: {
+                    let m = CardMenuBuilder(app: app)
+                    switch s {
+                    case .liked: menu = m.likedSongs()
+                    case .album(let a): menu = m.album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
+                    case .playlist(let p): menu = m.playlist(p.id, name: p.name)
                     }
                 }
                 .homeZoomSource(Self.route(s))
@@ -177,6 +189,8 @@ struct HomeView: View {
         Shelf(items: list, style: .home) { a in
             MediaCard(.artist(id: a.id, image: a.image), title: a.name, subtitle: L("Artist"), round: true, style: .home, artSize: 150) {
                 nav.pushFromHome(.artist(id: a.id))
+            } onLongPress: {
+                menu = CardMenuBuilder(app: app).artist(a.id, name: a.name)
             }
             .homeZoomSource(.artist(id: a.id))
         }
@@ -186,6 +200,8 @@ struct HomeView: View {
         if let lib = r.inLibrary {
             MediaCard(.album(id: lib, art: nil), title: r.title, subtitle: HomeLogic.radarShelfSub(r), style: .home, artSize: 150) {
                 nav.pushFromHome(.album(id: lib))
+            } onLongPress: {
+                menu = CardMenuBuilder(app: app).album(lib, name: r.title, artist: r.artist, artistId: r.artistId)
             }
             .homeZoomSource(.album(id: lib))
         } else {

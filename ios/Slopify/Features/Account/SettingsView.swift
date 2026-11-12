@@ -10,6 +10,8 @@ struct SettingsView: View {
     @Environment(\.theme) private var theme
     @State private var sheet: AccountSettingsSheet?
     @State private var languagePick = Localizer.shared.userPick
+    @State private var showIcons = false
+    @State private var appIcon = AccountAppIcon.current
 
     var body: some View {
         let prefs = account.prefs
@@ -50,6 +52,9 @@ struct SettingsView: View {
             AccountSettingsRow(title: L("Theme"), subtitle: AccountSettingsLogic.themeLabel(colors)) {
                 sheet = themeSheet()
             }
+            AccountSettingsRow(title: L("App icon"), subtitle: appIcon.label) {
+                showIcons = true
+            }
             AccountSettingsRow(title: L("Reset to default"), subtitle: nil, chevron: false) {
                 setTheme(.default)
             }
@@ -60,6 +65,7 @@ struct SettingsView: View {
             AccountAboutBlock()
         }
         .accountSettingsSheet($sheet)
+        .bottomSheet(isPresented: $showIcons, onDismiss: { appIcon = AccountAppIcon.current }) { AccountAppIconPicker() }
         .onAppear { languagePick = Localizer.shared.userPick }
         .onChange(of: account.pref("language")) { _, _ in languagePick = Localizer.shared.userPick }
     }

@@ -61,8 +61,8 @@ struct SheetHost<Content: View>: View {
 /// One sheet panel: pinned to the bottom, top radius 16, `--sheet`, shadow `0 -8 40 .6`,
 /// padding 12 8 (24 + bottom inset), at most 80 % of the screen (content scrolls inside),
 /// 36x4 grabber 6 pt from the top. Enters from +40 pt with a fade (0.2 s); sub-sheets
-/// (`sub: true`) appear without animation, are at least 45 % tall and are not draggable.
-/// Drag down: follows the finger; closes past 100 pt, or 40 pt within 300 ms; else snaps back.
+/// (`sub: true`) appear without animation and are at least 45 % tall.
+/// Swipe down anywhere on it (`swipeToDismiss`, the list at its top) closes everything.
 struct BottomSheetFrame<Content: View>: View {
     var sub = false
     @ViewBuilder var content: () -> Content
@@ -71,7 +71,6 @@ struct BottomSheetFrame<Content: View>: View {
     @Environment(\.sheetPhase) private var phase
     @Environment(\.closeSheet) private var closeSheet
     @State private var drag: CGFloat = 0
-    @State private var dragStart: Date?
     @State private var contentHeight: CGFloat = 0
     @State private var bornShown = false
 
@@ -100,14 +99,17 @@ struct BottomSheetFrame<Content: View>: View {
                         Capsule().fill(theme.fg(0.25)).frame(width: 36, height: 4).padding(.top, 6).accessibilityHidden(true)
                     }
                 }
+                // Room below the screen edge for the upward rubber band.
+                .padding(.bottom, SwipeDismiss.rubberMax)
                 .background(theme.sheet)
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: Radius.sheet, topTrailingRadius: Radius.sheet))
                 .shadow(color: .black.opacity(phase.leaving ? 0 : 0.6), radius: 20, y: -8)
+                .padding(.bottom, -SwipeDismiss.rubberMax)
                 .offset(y: offset(screenH))
                 .opacity(entering ? 0 : 1)
                 .contentShape(Rectangle())
                 .onTapGesture {} // a tap on the sheet never reaches the scrim
-                .simultaneousGesture(sub ? nil : dragGesture)
+                .swipeToDismiss(offset: $drag, canBegin: { _ in !phase.leaving }) { closeSheet() }
             }
             .ignoresSafeArea(edges: .bottom)
         }
@@ -125,28 +127,7 @@ struct BottomSheetFrame<Content: View>: View {
     private func offset(_ screenH: CGFloat) -> CGFloat {
         if phase.leaving { return screenH }
         if entering { return 40 }
-        return max(0, drag)
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .global)
-            .onChanged { v in
-                guard v.translation.height > abs(v.translation.width) || drag > 0 else { return }
-                if dragStart == nil { dragStart = Date() }
-                drag = max(0, v.translation.height)
-            }
-            .onEnded { v in
-                let dt = Date().timeIntervalSince(dragStart ?? Date())
-                let moved = dragStart != nil
-                dragStart = nil
-                if moved && Self.shouldDismiss(dy: v.translation.height, elapsed: dt) { closeSheet() }
-                else { withAnimation(Motion.snapBack) { drag = 0 } }
-            }
-    }
-
-    /// dy > 100, or dy > 40 within 300 ms (App.jsx:1481-1512).
-    static func shouldDismiss(dy: CGFloat, elapsed: TimeInterval) -> Bool {
-        dy > Gestures.sheetDismissDistance || (elapsed < Gestures.sheetFlickTime && dy > Gestures.sheetFlickDistance)
+        return drag
     }
 }
 

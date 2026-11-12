@@ -56,10 +56,7 @@ struct MediaCard<Art: View>: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .buttonStyle(.pressPlain)
-        .simultaneousGesture(LongPressGesture(minimumDuration: Gestures.longPressDuration, maximumDistance: Gestures.longPressSlop).onEnded { _ in
-            guard let onLongPress else { return }
-            Haptics.tick(); onLongPress()
-        }, including: onLongPress == nil ? .subviews : .all)
+        .buttonLongPressMenu(onLongPress)
     }
 
     private var centred: Bool { round && style == .page }

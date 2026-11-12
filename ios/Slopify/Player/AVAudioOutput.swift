@@ -372,9 +372,10 @@ final class AVAudioOutput: NSObject, AudioEngine {
     }
 
     private func reload(at seconds: Double) {
-        guard let item = active.item else { return }
+        guard let old = active.item else { return }
+        let item = events?.audioItemForRetry(old) ?? old
         let keep = retries, play = wantPlaying
-        let next = active.next?.item, t = transition
+        let next = active.next.map { events?.audioItemForRetry($0.item) ?? $0.item }, t = transition
         clear(active)
         let av = makeItem(item)
         active.item = item; active.av = av

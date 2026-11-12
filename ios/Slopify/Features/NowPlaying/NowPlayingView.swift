@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Full-screen now playing (UI.md 3.2, 4.2.2, 4.5.4; FullScreen.jsx, mobile-nowplaying.css:5-111).
-/// Always opens on the Album tab; swipe down or the chevron closes it.
+/// Always opens on the Album tab; swipe down or the chevron closes it, swipe the art to skip.
 struct NowPlayingView: View {
     @Environment(AppModel.self) private var app
     @Environment(Player.self) private var player
@@ -20,10 +20,10 @@ struct NowPlayingView: View {
     /// Bottom of the top row (global), where a lyrics-tab swipe may start.
     @State private var headerBottom: CGFloat = 0
     @State private var from: NowPlayingFrom = .fallback
-    // Swipe down to close.
+    // Swipe down to close, swipe the art to skip.
     @State private var drag: CGFloat = 0
-    @State private var dragStart: Date?
-    @State private var dragging = false
+    @State private var skip = SkipSwipeState()
+    @State private var artWidth: CGFloat = 320
     // Scrub.
     @State private var scrub: Double?
     @State private var scrubbing = false
@@ -56,7 +56,12 @@ struct NowPlayingView: View {
             // Nothing inside may widen the page past the screen.
             .frame(width: g.size.width, height: g.size.height)
             .offset(y: drag)
-            .simultaneousGesture(dismissGesture(height: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom))
+            .swipeToDismiss(offset: $drag, distance: Gestures.nowPlayingDismissDistance, rubberBand: false, canBegin: { p in
+                !scrubbing && menu == nil && !showDevices
+                    && NowPlayingMath.swipeDismissAllowed(lyricsShowing: tab == .lyrics, startY: p.y, headerBottom: headerBottom)
+            }) {
+                SwipeDismiss.slideOut($drag, to: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom) { close() }
+            }
         }
         // The web unmounts now playing as the queue opens: hide it under the queue so the queue's
         // swipe-down shows the page behind, not this.
@@ -163,10 +168,18 @@ struct NowPlayingView: View {
             SteadyArt(track: player.current, api: api)
                 .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.panel))
+                .offset(x: skip.dx)
+                .opacity(skip.opacity)
                 .padding(.top, 24)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .contentShape(Rectangle())
+                .onAppear { artWidth = g.size.width }
+                .onChange(of: g.size.width) { _, w in artWidth = w }
         }
         .frame(maxHeight: .infinity)
+        .swipeToSkip($skip, width: artWidth, enabled: player.current != nil) { s in
+            if s == .next { player.next() } else { player.previous() }
+        }
     }
 
     // MARK: Bottom block (.fs-bottom)
@@ -190,6 +203,7 @@ struct NowPlayingView: View {
                 Marquee(t?.title ?? L("Nothing playing"))
                     .font(.system(size: 24, weight: .bold)).tracking(-0.3)
                     .foregroundStyle(theme.fg)
+                    .accessibilityIdentifier("np-title")
                 if let t {
                     NowPlayingArtistLinks(track: t) { id in nav.open(.artist(id: id)) }
                         .font(.system(size: 16)).foregroundStyle(theme.fgSub)
@@ -343,37 +357,6 @@ struct NowPlayingView: View {
     // MARK: Closing
 
     private func close() { nav.nowPlayingOpen = false }
-
-    private func dismissGesture(height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .global)
-            .onChanged { v in
-                guard !scrubbing, menu == nil, !showDevices,
-                      NowPlayingMath.swipeDismissAllowed(lyricsShowing: tab == .lyrics, startY: v.startLocation.y,
-                                                         headerBottom: headerBottom) else { return }
-                let dy = v.translation.height, dx = v.translation.width
-                if !dragging {
-                    guard dy > 0, abs(dx) < dy else { return }
-                    dragging = true
-                    dragStart = Date()
-                }
-                drag = max(0, dy)
-            }
-            .onEnded { v in
-                guard dragging else { return }
-                dragging = false
-                let elapsed = Date().timeIntervalSince(dragStart ?? Date())
-                dragStart = nil
-                if NowPlayingMath.dismissesNowPlaying(dy: v.translation.height, elapsed: elapsed) {
-                    withAnimation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.25)) { drag = height }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        var t = Transaction(); t.disablesAnimations = true
-                        withTransaction(t) { nav.nowPlayingOpen = false }
-                    }
-                } else {
-                    withAnimation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.25)) { drag = 0 }
-                }
-            }
-    }
 
     // MARK: Menu
 

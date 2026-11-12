@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The floating mini player card (UI.md 3.1, 4.2.1, 4.5.3; Player.jsx:190-444,
-/// mobile-nowplaying.css:125-164). Tap opens now playing; swipe left/right skips.
+/// mobile-nowplaying.css:125-164). Tap or swipe up opens now playing; swipe left/right skips.
 struct MiniPlayer: View {
     @Environment(Player.self) private var player
     @Environment(SessionClient.self) private var session
@@ -13,10 +13,7 @@ struct MiniPlayer: View {
     @State private var showDevices = false
     /// The error text the user tapped away (Player has no clearError yet).
     // Swipe to skip: only the art + text follow the finger.
-    @State private var dx: CGFloat = 0
-    @State private var nowOpacity: Double = 1
-    @State private var dragStart: Date?
-    @State private var abandoned = false
+    @State private var skip = SkipSwipeState()
     @State private var nowWidth: CGFloat = 320
 
     var body: some View {
@@ -44,8 +41,8 @@ struct MiniPlayer: View {
         let ps = NowPlayingSession(player: player, session: session)
         return HStack(spacing: 0) {
             now(track, elsewhere: ps.elsewhere)
-                .offset(x: dx)
-                .opacity(nowOpacity)
+                .offset(x: skip.dx)
+                .opacity(skip.opacity)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .background(GeometryReader { g in
                     Color.clear.onAppear { nowWidth = g.size.width }.onChange(of: g.size.width) { _, w in nowWidth = w }
@@ -70,7 +67,9 @@ struct MiniPlayer: View {
         .clipShape(RoundedRectangle(cornerRadius: Radius.row))
         .contentShape(RoundedRectangle(cornerRadius: Radius.row))
         .onTapGesture { nav.nowPlayingOpen = true }
-        .simultaneousGesture(skipGesture)
+        .swipeToSkip($skip, width: nowWidth, enabled: track != nil, onSwipeUp: { nav.nowPlayingOpen = true }) { s in
+            if s == .next { player.next() } else { player.previous() }
+        }
         .task(id: tintURL) { tint = await ArtworkColor.shared.mini(tintURL) }
     }
 
@@ -89,6 +88,7 @@ struct MiniPlayer: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(track?.title ?? L("Nothing playing"))
                     .textStyle(.miniTitle).foregroundStyle(theme.fg).lineLimit(1)
+                    .accessibilityIdentifier("mini-title")
                 if let elsewhere {
                     HStack(spacing: 6) {
                         IconView(.cast, size: 13)
@@ -131,47 +131,6 @@ struct MiniPlayer: View {
             .onTapGesture { player.clearError() }
             .accessibilityAddTraits(.isButton)
             .accessibilityHint(L("Dismiss"))
-    }
-
-    // MARK: Swipe to skip (App.jsx:1434-1450, Player.jsx:223-245)
-
-    private var skipGesture: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .local)
-            .onChanged { v in
-                let x = v.translation.width, y = v.translation.height
-                if dragStart == nil {
-                    dragStart = Date()
-                    abandoned = NowPlayingMath.abandonsSwipe(dx: x, dy: y)
-                }
-                guard !abandoned else { return }
-                let f = NowPlayingMath.skipFollow(dx: x)
-                dx = f.offset; nowOpacity = f.opacity
-            }
-            .onEnded { v in
-                let elapsed = Date().timeIntervalSince(dragStart ?? Date())
-                dragStart = nil
-                let wasAbandoned = abandoned
-                abandoned = false
-                if player.current != nil,
-                   let s = NowPlayingMath.skip(dx: v.translation.width, dy: v.translation.height, elapsed: elapsed) {
-                    runSkip(s)
-                } else if !wasAbandoned || dx != 0 {
-                    withAnimation(.easeOut(duration: 0.18)) { dx = 0; nowOpacity = 1 }
-                }
-            }
-    }
-
-    private func runSkip(_ s: NowPlayingMath.Skip) {
-        if s == .next { player.next() } else { player.previous() }
-        let out = (s == .next ? -1.2 : 1.2) * nowWidth
-        withAnimation(.easeOut(duration: 0.18)) { dx = out; nowOpacity = 0 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) { dx = s == .next ? 40 : -40 }
-            DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.2)) { dx = 0; nowOpacity = 1 }
-            }
-        }
     }
 }
 

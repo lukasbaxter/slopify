@@ -16,7 +16,8 @@ import UIKit
 /// - `.artist`: the back disc (black 50 % + blur) until fully scrolled. `.liked`: never a bar
 ///   or title. `.solid`: Settings, bar `--bg-base` and title always on. `.hidden`: no bar.
 /// - The system navigation bar is hidden; Back uses `dismiss` unless `onBack` is given.
-///   The edge-swipe pop keeps working (see `UINavigationController` extension below).
+///   Swipe right anywhere goes back (`SwipeBack`; the edge swipe: extension below).
+/// - `onRefresh`: pull to refresh (pages whose content comes from the server).
 struct DetailScaffold<Content: View>: View {
     enum BarStyle: Sendable { case standard, artist, liked, solid, hidden }
 
@@ -25,6 +26,7 @@ struct DetailScaffold<Content: View>: View {
     var heroColor: RGB?
     var barStyle: BarStyle = .standard
     var onBack: (() -> Void)? = nil
+    var onRefresh: (() async -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
     @Environment(\.theme) private var theme
@@ -33,8 +35,10 @@ struct DetailScaffold<Content: View>: View {
     @State private var heroHeight: CGFloat = 0
     private let space = "detail-scroll"
 
-    init(title: String, heroColor: RGB? = nil, barStyle: BarStyle = .standard, onBack: (() -> Void)? = nil, @ViewBuilder content: @escaping () -> Content) {
-        self.title = title; self.heroColor = heroColor; self.barStyle = barStyle; self.onBack = onBack; self.content = content
+    init(title: String, heroColor: RGB? = nil, barStyle: BarStyle = .standard, onBack: (() -> Void)? = nil,
+         onRefresh: (() async -> Void)? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title; self.heroColor = heroColor; self.barStyle = barStyle; self.onBack = onBack
+        self.onRefresh = onRefresh; self.content = content
     }
 
     /// The fade math, exposed for tests.
@@ -62,6 +66,7 @@ struct DetailScaffold<Content: View>: View {
                 })
             }
             .scrollIndicators(.hidden)
+            .modifier(PullToRefresh(action: onRefresh))
             .coordinateSpace(name: space)
             .ignoresSafeArea(edges: .top)
             .environment(\.detailTopInset, topInset)
@@ -112,8 +117,18 @@ struct DetailScaffold<Content: View>: View {
         }
         .frame(height: Shell.topBar + topInset)
         .frame(maxWidth: .infinity)
+        // The bar is never a row: a swipe on it goes back instead of queueing what scrolled under it.
+        .contentShape(Rectangle())
         .ignoresSafeArea(edges: .top)
         .modifier(BarIsland(hero: hasHero))
+    }
+}
+
+/// `.refreshable` only when there is something to refresh.
+struct PullToRefresh: ViewModifier {
+    var action: (() async -> Void)?
+    func body(content: Content) -> some View {
+        if let action { content.refreshable { await action() } } else { content }
     }
 }
 

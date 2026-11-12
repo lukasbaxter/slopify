@@ -7,8 +7,10 @@ struct SeeAllView: View {
 
     @Environment(Account.self) private var account
     @Environment(Navigator.self) private var nav
+    @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     @State private var store = HomeStore.shared
+    @State private var menu: MenuSheet?
 
     var body: some View {
         // The bar mixes the page's default `--hero` (#3d3c3c), as on the web.
@@ -24,6 +26,7 @@ struct SeeAllView: View {
                 }
             }
         }
+        .contextMenuSheet($menu)
         .task {
             store.use(key: HomeStore.key(for: account))
             await store.load(api: account.api, maxAge: 60)
@@ -42,16 +45,22 @@ struct SeeAllView: View {
         switch kind {
         case .albums:
             CardGrid(items: store.data.albums) { a in
-                MediaCard(.init(a), title: a.name, subtitle: a.artist, style: .home, artSize: 175) { nav.push(.album(id: a.id)) }
+                MediaCard(.init(a), title: a.name, subtitle: a.artist, style: .home, artSize: 175) { nav.push(.album(id: a.id)) } onLongPress: {
+                    menu = CardMenuBuilder(app: app).album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
+                }
             }
         case .artists:
             CardGrid(items: store.data.artists) { a in
-                MediaCard(.init(a), title: a.name, subtitle: L("Artist"), round: true, style: .home, artSize: 175) { nav.push(.artist(id: a.id)) }
+                MediaCard(.init(a), title: a.name, subtitle: L("Artist"), round: true, style: .home, artSize: 175) { nav.push(.artist(id: a.id)) } onLongPress: {
+                    menu = CardMenuBuilder(app: app).artist(a.id, name: a.name)
+                }
             }
         case .topArtists:
             CardGrid(items: store.data.topArtists) { a in
                 MediaCard(.artist(id: a.id, image: a.image), title: a.name, subtitle: L("Artist"), round: true, style: .home, artSize: 175) {
                     nav.push(.artist(id: a.id))
+                } onLongPress: {
+                    menu = CardMenuBuilder(app: app).artist(a.id, name: a.name)
                 }
             }
         }

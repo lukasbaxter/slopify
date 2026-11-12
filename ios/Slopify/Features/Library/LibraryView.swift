@@ -229,6 +229,7 @@ struct LibraryView: View {
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.immediately)
+            .refreshable { await store.refresh() }
             .onAppear { wireDrag() }
             .onChange(of: scrollTopRequest) { _, _ in withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(topId, anchor: .top) } }
         }

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The phone queue page (UI.md 3.3; RightPanel.jsx:43-262, 433-484). Uses the theme's own
 /// tokens (no dark island). Just the list (web v0.1.177: no pinned transport). Reorder by the drag
-/// handle; remove from the long-press sheet; swipe down from the header or the list's top closes it.
+/// handle; remove from the long-press sheet; swipe down closes it (from the header, or the list at its top).
 struct QueueView: View {
     @Environment(AppModel.self) private var app
     @Environment(Player.self) private var player
@@ -25,39 +25,29 @@ struct QueueView: View {
 
     // Swipe down to close (web v0.1.177): from the header, or the list at its top.
     @State private var drag: CGFloat = 0
-    @State private var dragStart: Date?
-    @State private var dismissing = false
-    /// Decided once per gesture, from where it started.
-    @State private var swipeAllowed: Bool?
-    @State private var headerBottom: CGFloat = 0
-    @State private var listOffset: CGFloat = 0
 
     var body: some View {
         GeometryReader { g in
             VStack(spacing: 0) {
                 header
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        GeometryReader { r in
-                            Color.clear.preference(key: QueueScrollKey.self, value: -r.frame(in: .named("queueScroll")).minY)
-                        }
-                        .frame(height: 0)
-                        VStack(alignment: .leading, spacing: 24) { sections }
-                    }
+                    VStack(alignment: .leading, spacing: 24) { sections }
                     // The list is the whole page now: no space kept for a transport (.panel-body 8 16 24).
                     .padding(.top, 8)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 24)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
-                .coordinateSpace(name: "queueScroll")
-                .onPreferenceChange(QueueScrollKey.self) { listOffset = $0 }
-                .scrollDisabled(dragFrom != nil || dismissing)
+                .scrollDisabled(dragFrom != nil)
             }
             .frame(width: g.size.width, height: g.size.height)
             .background(theme.page.ignoresSafeArea())
             .offset(y: drag)
-            .simultaneousGesture(dismissGesture(height: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom))
+            // A reorder drag has lifted its row by the time this may begin (its gesture starts at 0 pt).
+            .swipeToDismiss(offset: $drag, distance: Gestures.nowPlayingDismissDistance, rubberBand: false,
+                            canBegin: { _ in menu == nil && dragFrom == nil }) {
+                SwipeDismiss.slideOut($drag, to: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom) { close() }
+            }
         }
         .presentationBackground(.clear)
         .contextMenuSheet($menu)
@@ -84,47 +74,8 @@ struct QueueView: View {
         .padding(.top, 4)
         .padding(.horizontal, 16)
         .frame(minHeight: 56)
-        .background(GeometryReader { g in
-            Color.clear.onAppear { headerBottom = g.frame(in: .global).maxY }
-                .onChange(of: g.frame(in: .global).maxY) { _, y in headerBottom = y }
-        })
     }
 
-    private func dismissGesture(height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .global)
-            .onChanged { v in
-                if swipeAllowed == nil {
-                    // A reorder drag has already lifted its row by now (its gesture starts at 0 pt).
-                    swipeAllowed = menu == nil && NowPlayingMath.queueSwipeDismissAllowed(
-                        startY: v.startLocation.y, headerBottom: headerBottom,
-                        listOffset: listOffset, onHandle: dragFrom != nil)
-                }
-                guard swipeAllowed == true else { return }
-                let dy = v.translation.height, dx = v.translation.width
-                if !dismissing {
-                    guard dy > 0, abs(dx) < dy else { return }
-                    dismissing = true
-                    dragStart = Date()
-                }
-                drag = max(0, dy)
-            }
-            .onEnded { v in
-                swipeAllowed = nil
-                guard dismissing else { return }
-                dismissing = false
-                let elapsed = Date().timeIntervalSince(dragStart ?? Date())
-                dragStart = nil
-                if NowPlayingMath.dismissesNowPlaying(dy: v.translation.height, elapsed: elapsed) {
-                    withAnimation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.25)) { drag = height }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        var t = Transaction(); t.disablesAnimations = true
-                        withTransaction(t) { close() }
-                    }
-                } else {
-                    withAnimation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.25)) { drag = 0 }
-                }
-            }
-    }
 
     /// The web unmounts now playing as the queue opens, so closing the queue lands on the page.
     private func close() {
@@ -267,9 +218,4 @@ struct QueueView: View {
         let menus = NowPlayingMenus(menus: TrackMenuBuilder(app: app) { _ in })
         menu = menus.queueRow(t, at: pos, removable: !current)
     }
-}
-
-private struct QueueScrollKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

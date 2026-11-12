@@ -35,7 +35,12 @@ struct MainShell: View {
     private func tabStack<Root: View>(_ t: Navigator.Tab, @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: nav.binding(t)) {
             root()
-                .background { if t == .library { LibrarySwipeBackInstaller(isLibraryTab: { [weak nav] in nav?.tab == .library }) } }
+                .background {
+                    SwipeBackInstaller(isActiveTab: { [weak nav] in nav?.tab == t },
+                                       isCovered: { [weak nav] in nav.map { $0.drawerOpen || $0.nowPlayingOpen } ?? true },
+                                       openDrawer: { [weak nav] in nav?.drawerOpen = true },
+                                       goBack: { [weak nav] in nav?.pop(t) })
+                }
                 .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
                 .navigationDestination(for: HomeRoute.self) {
                     RouteDestination(route: $0.route).navigationTransition(.zoom(sourceID: $0, in: homeZoom))

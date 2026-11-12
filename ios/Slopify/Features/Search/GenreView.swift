@@ -46,7 +46,7 @@ struct SearchBrowsePage: View {
 
     var body: some View {
         let hero = hero
-        DetailScaffold(title: title, heroColor: hero) {
+        DetailScaffold(title: title, heroColor: hero, onRefresh: { await load() }) {
             SearchBrowseHero(color: hero, title: title, meta: meta)
             ActionRow(heroColor: hero) {
                 EmptyView()
@@ -123,6 +123,10 @@ struct SearchBrowsePage: View {
         return out
     }
 
+    private func albumMenu(_ a: Album) -> MenuSheet {
+        CardMenuBuilder(app: app).album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
+    }
+
     private var albums: [Album] {
         let list = hub?.albums ?? Self.albumsFromTracks(tracks, unknown: L("Unknown album"))
         return Array(list.prefix(18))
@@ -136,20 +140,20 @@ struct SearchBrowsePage: View {
             Shelf(items: artists) { a in
                 MediaCard(.artist(id: a.id, image: nil), title: a.name, subtitle: L("Artist"), round: true) {
                     nav.push(.artist(id: a.id))
-                }
+                } onLongPress: { menu = CardMenuBuilder(app: app).artist(a.id, name: a.name) }
             }
         }
         if !albums.isEmpty {
             SectionHeader(L("Albums"), first: artists.isEmpty)
             CardGrid(items: albums) { a in
                 MediaCard(CoverSource(a), title: a.name, subtitle: [a.artist, a.year.map(String.init) ?? ""].filter { !$0.isEmpty }.joined(separator: " • "),
-                          artSize: 175) { nav.push(.album(id: a.id)) }
+                          artSize: 175) { nav.push(.album(id: a.id)) } onLongPress: { menu = albumMenu(a) }
             }
         }
         if !recent.isEmpty {
             SectionHeader(L("New additions"), first: artists.isEmpty && albums.isEmpty)
             Shelf(items: recent) { a in
-                MediaCard(CoverSource(a), title: a.name, subtitle: a.artist) { nav.push(.album(id: a.id)) }
+                MediaCard(CoverSource(a), title: a.name, subtitle: a.artist) { nav.push(.album(id: a.id)) } onLongPress: { menu = albumMenu(a) }
             }
         }
         if !tracks.isEmpty {

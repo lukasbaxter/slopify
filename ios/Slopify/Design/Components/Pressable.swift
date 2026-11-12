@@ -91,6 +91,14 @@ extension View {
         }
     }
 
+    /// Long-press menu on a `Button` (cards, tiles): the tap stays the button's.
+    func buttonLongPressMenu(_ action: (() -> Void)?) -> some View {
+        simultaneousGesture(LongPressGesture(minimumDuration: Gestures.longPressDuration, maximumDistance: Gestures.longPressSlop).onEnded { _ in
+            guard let action else { return }
+            Haptics.tick(); action()
+        }, including: action == nil ? .subviews : .all)
+    }
+
     /// Card art: brightness .8 while the enclosing button is pressed.
     func pressDim() -> some View { modifier(PressDim()) }
 }

@@ -29,7 +29,7 @@ struct AlbumView: View {
         @Bindable var actions = actions
         let hero = model.hero
         ScrollViewReader { proxy in
-            DetailScaffold(title: album?.name ?? "", heroColor: hero) {
+            DetailScaffold(title: album?.name ?? "", heroColor: hero, onRefresh: { await model.load(api: app.account.api, scope: app.account.user?.id) }) {
                 header(hero)
                 ActionRow(heroColor: hero) { leadingActions } trailing: { trailingActions }
                 trackList

@@ -5,11 +5,13 @@ import SwiftUI
 struct HomeShortcutTile: View {
     let shortcut: HomeLogic.Shortcut
     var action: () -> Void
+    var onLongPress: (() -> Void)? = nil
     @Environment(\.theme) private var theme
 
     var body: some View {
         Button(action: action) { Face(shortcut: shortcut) }
             .buttonStyle(.pressPlain)
+            .buttonLongPressMenu(onLongPress)
             .accessibilityLabel(title)
     }
 

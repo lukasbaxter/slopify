@@ -57,4 +57,12 @@ protocol AudioEngineEvents: AnyObject {
     func audioDuration(_ id: String, seconds: Double)
     /// A stall worth noting for the cellular quality cap.
     func audioStarved(_ id: String)
+    /// A failed or stuck song is about to be loaded again: what to load. The address in use
+    /// may have moved since the song started (home lost, now on main, API.md §4.4), so a retry
+    /// must not go back to the dead one.
+    func audioItemForRetry(_ item: AudioItem) -> AudioItem
+}
+
+extension AudioEngineEvents {
+    func audioItemForRetry(_ item: AudioItem) -> AudioItem { item }
 }

@@ -33,14 +33,25 @@ enum NowPlayingMath {
     /// How long the scrubbed value is held after release so the thumb does not snap back.
     static func scrubHold(mirroring: Bool) -> Double { mirroring ? 1.5 : 0.25 }
 
-    // MARK: Mini player swipe to skip (App.jsx:1434-1450, Player.jsx:223-245)
+    // MARK: Swipe to skip (mini player, now playing art) and swipe up (mini player)
 
     enum Skip: Equatable { case next, previous }
 
-    /// `|dx| > 60 && |dy| < 40 && < 600 ms`; left = next.
-    static func skip(dx: CGFloat, dy: CGFloat, elapsed: Double) -> Skip? {
-        guard abs(dx) > 60, abs(dy) < 40, elapsed < 0.6 else { return nil }
+    /// Left = next, right = previous: past 60 pt and more sideways than up/down, or a sideways
+    /// flick past 24 pt. No time limit, so an unhurried swipe skips too (owner 11-12).
+    static func skip(dx: CGFloat, dy: CGFloat, velocityX: CGFloat) -> Skip? {
+        guard abs(dx) > abs(dy) else { return nil }
+        let far = abs(dx) > Gestures.skipDistance
+        let flick = abs(dx) > 24 && abs(velocityX) > Gestures.flickVelocity && (velocityX < 0) == (dx < 0)
+        guard far || flick else { return nil }
         return dx < 0 ? .next : .previous
+    }
+
+    /// Mini player swipe up opens now playing: up past 40 pt and more up than sideways, or an
+    /// upward flick past 16 pt.
+    static func opensNowPlaying(dx: CGFloat, dy: CGFloat, velocityY: CGFloat) -> Bool {
+        guard dy < 0, abs(dy) > abs(dx) else { return false }
+        return -dy > 40 || (-dy > 16 && velocityY < -Gestures.flickVelocity)
     }
 
     /// The row follows the finger once `|dx| > 6`: offset clamp(dx, -80, 80), opacity `1 - min(80,|dx|)/200`.
@@ -49,29 +60,16 @@ enum NowPlayingMath {
         return (min(80, max(-80, dx)), 1 - Double(min(80, abs(dx))) / 200)
     }
 
-    /// Abandon the swipe when vertical movement wins before 6 pt of horizontal travel.
+    /// The first 6 pt of movement pick the axis: sideways skips, up/down does not.
     static func abandonsSwipe(dx: CGFloat, dy: CGFloat) -> Bool { abs(dx) <= 6 && abs(dy) > abs(dx) }
 
-    // MARK: Now playing swipe down (App.jsx:1451-1480)
-
-    /// Close if `dy > 140`, or `dy > 60` in under 300 ms.
-    static func dismissesNowPlaying(dy: CGFloat, elapsed: Double) -> Bool {
-        dy > 140 || (elapsed < 0.3 && dy > 60)
-    }
+    // MARK: Now playing swipe down
 
     /// Swipe down closes from anywhere on the Album tab. On the Lyrics tab only a swipe that starts
     /// on the header (chevron, title, artist) closes it; one on the lyric lines never does
     /// (owner's rule, overrides UI.md 3.2.5). `startY` and `headerBottom` in the same space.
     static func swipeDismissAllowed(lyricsShowing: Bool, startY: CGFloat, headerBottom: CGFloat) -> Bool {
         !lyricsShowing || startY <= headerBottom
-    }
-
-    /// Queue page swipe-down (web v0.1.177): closes when it starts on the header, or on the list
-    /// while the list is at its top (offset <= 1 pt). A swipe that starts on a drag handle is a
-    /// reorder and never closes it.
-    static func queueSwipeDismissAllowed(startY: CGFloat, headerBottom: CGFloat, listOffset: CGFloat, onHandle: Bool) -> Bool {
-        guard !onHandle else { return false }
-        return startY <= headerBottom || listOffset <= 1
     }
 
     // MARK: Lyrics backdrop

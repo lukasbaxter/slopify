@@ -16,6 +16,9 @@ final class AppModel {
 
     private var started = false
 
+    /// The running app's model, for scenes outside SwiftUI (the CarPlay scene delegate).
+    static weak var current: AppModel?
+
     init() {
         themeStore = ThemeStore(account: account)
         library = LibraryStore()
@@ -48,6 +51,7 @@ final class AppModel {
         player.attach(account: account, session: session)
         // Follows sign-in itself: resumes this account's unfinished jobs, forgets them on sign-out.
         LyricJobStore.shared.attach(account)
+        AppModel.current = self
     }
 
     /// Call when signed in (launch, after sign-in, foreground).

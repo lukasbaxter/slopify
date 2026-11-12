@@ -46,17 +46,15 @@ final class NowPlayingLayoutTests: XCTestCase {
         XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 500, headerBottom: 115))
     }
 
+    /// The queue (and every sheet) uses the shared rule: header always (no scroll view under
+    /// it), the list only at its top; pull-down bounce counts as the top.
     func testQueueSwipeStartRule() {
-        // Header: always, even with the list scrolled.
-        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 90, headerBottom: 115, listOffset: 400, onHandle: false))
-        // List at its top: yes; scrolled down: no (the swipe scrolls the list).
-        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 0, onHandle: false))
-        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 1, onHandle: false))
-        XCTAssertFalse(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 1.5, onHandle: false))
-        // Pull-down bounce above the top counts as at the top.
-        XCTAssertTrue(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: -20, onHandle: false))
-        // A drag handle is a reorder: never closes, wherever the list is.
-        XCTAssertFalse(NowPlayingMath.queueSwipeDismissAllowed(startY: 400, headerBottom: 115, listOffset: 0, onHandle: true))
+        let down = CGPoint(x: 2, y: 12)
+        XCTAssertTrue(SwipeDismiss.shouldBegin(translation: down, velocity: .zero, direction: .down, scrollAtTop: true))
+        XCTAssertFalse(SwipeDismiss.shouldBegin(translation: down, velocity: .zero, direction: .down, scrollAtTop: false))
+        XCTAssertTrue(SwipeDismiss.isAtTop(offsetY: 1, insetTop: 0))
+        XCTAssertFalse(SwipeDismiss.isAtTop(offsetY: 1.5, insetTop: 0))
+        XCTAssertTrue(SwipeDismiss.isAtTop(offsetY: -20, insetTop: 0))
     }
 
     func testLyricsBackdropValues() {

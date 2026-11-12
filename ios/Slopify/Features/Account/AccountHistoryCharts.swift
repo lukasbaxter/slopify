@@ -19,6 +19,7 @@ struct AccountHistoryLineChart: View {
                 let size = g.size
                 chart(size)
                     .contentShape(Rectangle())
+                    .claimsHorizontalSwipes()
                     .simultaneousGesture(DragGesture(minimumDistance: 0)
                         .onChanged { v in
                             hover = AccountHistoryLogic.scrubIndex(x: v.location.x, plotMinX: padL, plotMaxX: size.width - padR, count: points.count)

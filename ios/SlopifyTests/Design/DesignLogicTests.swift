@@ -78,10 +78,12 @@ final class MenuTests: XCTestCase {
 
 final class GestureMathTests: XCTestCase {
     func testSheetDismissThresholds() {
-        XCTAssertTrue(BottomSheetFrame<EmptyView>.shouldDismiss(dy: 101, elapsed: 2))
-        XCTAssertFalse(BottomSheetFrame<EmptyView>.shouldDismiss(dy: 99, elapsed: 2))
-        XCTAssertTrue(BottomSheetFrame<EmptyView>.shouldDismiss(dy: 41, elapsed: 0.2))
-        XCTAssertFalse(BottomSheetFrame<EmptyView>.shouldDismiss(dy: 41, elapsed: 0.31))
+        let d = Gestures.sheetDismissDistance
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 101, velocity: 0, distance: d))
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 99, velocity: 0, distance: d))
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 41, velocity: 600, distance: d))
+        // A slow drag that stops short springs back, however quick it was.
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 41, velocity: 50, distance: d))
     }
 
     func testTopBarFade() {
@@ -142,5 +144,29 @@ final class ImageLoaderTests: XCTestCase {
         XCTAssertEqual(Stub.accepts.first, "image/webp,image/jpeg")
         XCTAssertEqual(Stub.hits, 1)
         XCTAssertNotNil(loader.cached(url))
+    }
+
+    /// The app moving between the server's home and main address must not grey out covers it
+    /// already has: the same server's artwork is the same picture at either address.
+    func testArtworkSurvivesTheAddressMove() async {
+        Stub.hits = 0
+        let loader = ImageLoader(diskBytes: 0, protocolClasses: [Stub.self])
+        let main = URL(string: "https://music.example.com/api/art/abc/160.webp")!
+        let home = URL(string: "http://h.test:8090/api/art/abc/160.webp")!
+        let playlist = URL(string: "https://music.example.com/api/image/pl_1?c=aa&size=192")!
+        let a = await loader.image(main), b = await loader.image(playlist)
+        XCTAssertNotNil(a); XCTAssertNotNil(b)
+        XCTAssertNotNil(loader.cached(home), "moved to the home address: the cover is gone until refetched")
+        XCTAssertNotNil(loader.cached(URL(string: "http://h.test:8090/api/image/pl_1?c=aa&size=192")!))
+        let c = await loader.image(home)
+        XCTAssertNotNil(c)
+        XCTAssertEqual(Stub.hits, 2, "no refetch after the move")
+        // A different picture is still a different picture.
+        XCTAssertNil(loader.cached(URL(string: "http://h.test:8090/api/art/abc/320.webp")!))
+        XCTAssertNil(loader.cached(URL(string: "http://h.test:8090/api/image/pl_1?c=bb&size=192")!))
+        // Pictures from other sites keep their own address.
+        XCTAssertNil(loader.cached(URL(string: "https://example.invalid/front.jpg")!))
+        _ = await loader.image(URL(string: "https://example.invalid/front.jpg")!)
+        XCTAssertNil(loader.cached(URL(string: "https://example.org/front.jpg")!))
     }
 }

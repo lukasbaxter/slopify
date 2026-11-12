@@ -51,7 +51,8 @@ struct ArtistView: View {
 
     private var page: some View {
         let hero = model.hero
-        return DetailScaffold(title: model.artist?.name ?? "", heroColor: hero, barStyle: .artist) {
+        return DetailScaffold(title: model.artist?.name ?? "", heroColor: hero, barStyle: .artist,
+                              onRefresh: { await model.load(api: app.account.api, scope: app.account.user?.id) }) {
             ArtistHero(model: model, hero: hero)
             ActionRow(heroColor: hero, artist: true) {
                 FollowPill(following: following) { toggleFollow() }
@@ -135,7 +136,9 @@ struct ArtistView: View {
         if !model.appearsOn.isEmpty {
             SectionHeader(L("Appears On"), style: .artist)
             Shelf(items: model.appearsOn) { a in
-                MediaCard(.init(a), title: a.name, subtitle: a.artist) { app.nav.push(.album(id: a.id)) }
+                MediaCard(.init(a), title: a.name, subtitle: a.artist) { app.nav.push(.album(id: a.id)) } onLongPress: {
+                    actions.menu = CardMenuBuilder(app: app).album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
+                }
             }
         }
     }
@@ -145,7 +148,9 @@ struct ArtistView: View {
         if !similar.isEmpty {
             SectionHeader(L("Fans also like"), style: .artist)
             Shelf(items: similar) { a in
-                MediaCard(.artist(id: a.id, image: nil), title: a.name, subtitle: L("Artist"), round: true) { app.nav.push(.artist(id: a.id)) }
+                MediaCard(.artist(id: a.id, image: nil), title: a.name, subtitle: L("Artist"), round: true) { app.nav.push(.artist(id: a.id)) } onLongPress: {
+                    actions.menu = CardMenuBuilder(app: app).artist(a.id, name: a.name)
+                }
             }
         }
     }

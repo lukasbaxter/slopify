@@ -66,7 +66,7 @@ struct PlaylistView: View {
     }
 
     private var page: some View {
-        DetailScaffold(title: name ?? "", heroColor: heroColor) {
+        DetailScaffold(title: name ?? "", heroColor: heroColor, onRefresh: { await load() }) {
             HeroHeader(color: heroColor, title: name, onTitleTap: openEdit) {
                 Button(action: openEdit) {
                     CoverImage(.playlist(id: id, cover: playlist?.cover), size: 250, shape: .rounded(Radius.art), placeholder: .cardHover)

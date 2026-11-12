@@ -1,6 +1,7 @@
 # make gen        generate Slopify.xcodeproj (XcodeGen)
 # make build      simulator build
 # make test       unit tests on a simulator
+# make uitest     gesture UI tests against a local fixture server (UITEST_PORT, default 18765)
 # make install    signed Release on a USB/Wi-Fi paired iPhone
 #                 (DEVELOPMENT_TEAM=<id> once; it is kept in the git-ignored Local.xcconfig)
 # DD=<dir> picks the derived-data dir, so parallel builds do not collide.
@@ -24,9 +25,14 @@ build: gen
 test: gen
 	$(XB) -destination 'id=$(SIM)' test $(if $(ONLY),-only-testing:$(ONLY))
 
+UITEST_PORT ?= 18765
+uitest: gen
+	@URL=$$(tools/uitest-server.sh $(UITEST_PORT) $(abspath $(DD))/uitest-server) && \
+	TEST_RUNNER_SLOPIFY_UITEST_SERVER=$$URL $(XB) -destination 'id=$(SIM)' test -only-testing:$(or $(ONLY),SlopifyUITests)
+
 install: gen
 	@grep -q 'DEVELOPMENT_TEAM = .\+' Local.xcconfig || { echo "set DEVELOPMENT_TEAM=<team id> (once)"; exit 1; }
 	$(XB) -configuration Release -destination 'id=$(DEVICE)' -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 	$(XCRUN) devicectl device install app --device $(DEVICE) $(DD)/Build/Products/Release-iphoneos/Slopify.app
 
-.PHONY: gen build test install
+.PHONY: gen build test uitest install

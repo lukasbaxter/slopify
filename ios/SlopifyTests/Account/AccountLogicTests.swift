@@ -64,11 +64,13 @@ final class AccountSettingsLogicTests: XCTestCase {
                                "https://github.com/lukasbaxter/slopify/blob/main/docs/PRIVACY.md"])
     }
 
+    /// The drawer closes with the shared swipe (`SwipeDismiss`, leftwards).
     func testDrawerSwipe() {
-        XCTAssertTrue(AccountDrawerLogic.isCloseSwipe(dx: -60, dy: 10))
-        XCTAssertFalse(AccountDrawerLogic.isCloseSwipe(dx: -40, dy: 0))
-        XCTAssertFalse(AccountDrawerLogic.isCloseSwipe(dx: -60, dy: 50))
-        XCTAssertFalse(AccountDrawerLogic.isCloseSwipe(dx: 80, dy: 0))
+        XCTAssertTrue(SwipeDismiss.isDismissward(CGPoint(x: -60, y: 10), .left))
+        XCTAssertTrue(SwipeDismiss.isDismissward(CGPoint(x: -60, y: 50), .left), "sloppy diagonal")
+        XCTAssertFalse(SwipeDismiss.isDismissward(CGPoint(x: 80, y: 0), .left))
+        XCTAssertFalse(SwipeDismiss.shouldDismiss(along: 40, velocity: 0, distance: 80))
+        XCTAssertTrue(SwipeDismiss.shouldDismiss(along: 40, velocity: 800, distance: 80), "flick")
     }
 }
 

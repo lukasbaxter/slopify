@@ -27,8 +27,9 @@ test: gen
 
 UITEST_PORT ?= 18765
 uitest: gen
-	@URL=$$(tools/uitest-server.sh $(UITEST_PORT) $(abspath $(DD))/uitest-server) && \
-	TEST_RUNNER_SLOPIFY_UITEST_SERVER=$$URL $(XB) -destination 'id=$(SIM)' test -only-testing:$(or $(ONLY),SlopifyUITests)
+	@# Through a file, not $$(...): the server it starts keeps the capture open and $$(...) never returns.
+	@tools/uitest-server.sh $(UITEST_PORT) $(abspath $(DD))/uitest-server > $(DD)/uitest-url && \
+	TEST_RUNNER_SLOPIFY_UITEST_SERVER=$$(cat $(DD)/uitest-url) $(XB) -destination 'id=$(SIM)' test -only-testing:$(or $(ONLY),SlopifyUITests)
 
 install: gen
 	@grep -q 'DEVELOPMENT_TEAM = .\+' Local.xcconfig || { echo "set DEVELOPMENT_TEAM=<team id> (once)"; exit 1; }

@@ -82,14 +82,23 @@ export class CastTransport implements Transport {
     };
     const opts: any = { autoplay: true };
     if (startAt > 0) opts.currentTime = Math.max(0, Math.floor(startAt));
-    const status = await bounded(promisify(player.load, player)(media, opts), 'load');
     // A receiver that cannot play (TV off, stream unreachable) still ACKs the load, then flips to IDLE/ERROR.
-    const settled: any = await new Promise((resolve) => {
-      const onStatus = (s: any) => { if (s.playerState === 'PLAYING' || s.playerState === 'BUFFERING' || (s.playerState === 'IDLE' && s.idleReason === 'ERROR')) done(s); };
-      const done = (s: any) => { player.removeListener('status', onStatus); resolve(s); };
+    // Listen from before the LOAD and take the load's own answer too: a receiver that is already
+    // PLAYING when it answers sends no later status, and waiting on one cost every quick skip the
+    // full 6 s (11-11: eight back presses on the bathroom speakers took a minute to play out).
+    const isSettled = (s: any) => !!s && (s.playerState === 'PLAYING' || s.playerState === 'BUFFERING' || (s.playerState === 'IDLE' && s.idleReason === 'ERROR'));
+    let onStatus: (s: any) => void = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const heard = new Promise<any>((resolve) => {
+      onStatus = (s: any) => { if (isSettled(s)) resolve(s); };
       player.on('status', onStatus);
-      setTimeout(() => done(null), 6000);
+      timer = setTimeout(() => resolve(null), 6000);
     });
+    let status: any, settled: any;
+    try {
+      status = await bounded(promisify(player.load, player)(media, opts), 'load');
+      settled = isSettled(status) ? status : await heard;
+    } finally { player.removeListener('status', onStatus); clearTimeout(timer); }
     if (settled && settled.playerState === 'IDLE' && settled.idleReason === 'ERROR') throw Object.assign(new Error(`${this.device.name} could not play this. If it drives a TV, check the TV is on.`), { code: 'ECASTLOAD' });
     await bounded(promisify(player.getStatus, player)(), 'status').catch(() => {}); // refresh the media session id
     this.lastState = 'PLAYING';

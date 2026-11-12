@@ -10,6 +10,8 @@ import { mixFor, tracksByIds } from '../library.js';
 import type { Discovery, Speaker } from './discovery.js';
 import { BluOSTransport, transportFor, type Transport } from './transports.js';
 
+const NAV = new Set(['next', 'previous', 'skipTo']);
+
 type Row = { Id: string; Name: string; Artists: string[]; AlbumArtist: string; Album: string; AlbumId: string; RunTimeTicks: number; ArtistItems: { Id: string; Name: string }[]; AlbumArtists: { Id: string; Name: string }[]; UserData: { IsFavorite: boolean }; _queued: boolean; _codec?: string | null };
 // The codec as the scanner stores it (music-metadata's names: "FLAC",
 // "MPEG 1 Layer 3", "MPEG-4/AAC", "ALAC", "Vorbis", "Opus", "PCM"...) to the
@@ -147,9 +149,16 @@ export class ServerPlayer {
     // same move: taken as a second one, it skipped the song that was starting.
     if (cmd?.action === 'next' && this.advancing) { this.d.log(`speaker ${this.device?.name || '?'}: next while moving on already: one move`); return this.ops; }
     this.cmds += 1;
-    this.ops = this.ops.then(() => this.run(cmd)).finally(() => { this.cmds -= 1; });
+    const nav = NAV.has(cmd?.action);
+    if (nav) this.navWaiting += 1;
+    this.ops = this.ops.then(() => { if (nav) this.navWaiting -= 1; return this.run(cmd); }).finally(() => { this.cmds -= 1; });
     return this.ops;
   }
+  // Skips (next / previous / a queue tap) waiting behind the one running. A skip with another
+  // behind it only moves the index: loading every song of a burst of presses kept the speaker
+  // playing through them for a minute after the listener stopped pressing (11-11).
+  private navWaiting = 0;
+  private coalesced = false; // the index moved past the song the speaker has loaded
   private cmdSeq = 0; // commands received
   private cmds = 0; // commands received and not done yet
   private advancing = false; // the poll's next-track move is running
@@ -192,6 +201,8 @@ export class ServerPlayer {
       else if (a === 'setVolume') await this.setVolume(Number(cmd.level ?? 100));
       else if (a === 'next') await this.next(false);
       else if (a === 'previous') await this.previous();
+      // The last skip of a burst that moved nowhere (the end of the queue): the song shown still plays.
+      if (NAV.has(a) && this.coalesced && this.navWaiting === 0 && this.current) await this.start(this.current, 0, true);
       else if (a === 'setRepeat') { this.repeat = ['off', 'all', 'one'].includes(cmd.mode) ? cmd.mode : 'off'; this.report(); }
       else if (a === 'setShuffle') { this.setShuffle(cmd.mode === 'on' ? 'on' : 'off'); }
       else if (a === 'yield') await this.yield();
@@ -405,6 +416,7 @@ export class ServerPlayer {
   private async start(t: Row, startAt: number, play: boolean) {
     if (!this.transport || !t) return;
     this.parked = false;
+    this.coalesced = false;
     this.starting = true;
     try {
       this.duration = t.RunTimeTicks / 10000000;
@@ -443,6 +455,14 @@ export class ServerPlayer {
   private async skipTo(i: number) {
     if (!this.queue[i]) return;
     this.index = i;
+    if (this.navWaiting > 0) {
+      const t = this.current;
+      if (t) this.duration = t.RunTimeTicks / 10000000;
+      this.moveTo(0, this.playing);
+      this.coalesced = true;
+      this.report();
+      return;
+    }
     await this.start(this.queue[i], 0, true);
   }
   // Stopped by the sleep timer at the end of a track: the next one is shown,
@@ -609,6 +629,8 @@ export class ServerPlayer {
     return true;
   }
   async previous() {
+    // Mid-burst the clock means nothing (the song shown is not loaded yet): always go back one.
+    if (this.coalesced) return this.skipTo(Math.max(0, this.index - 1));
     if (this.position > 3 || this.index <= 0) return this.seek(0);
     return this.skipTo(this.index - 1);
   }

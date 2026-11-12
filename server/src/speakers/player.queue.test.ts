@@ -238,3 +238,35 @@ describe('plays logged from a speaker', () => {
     await p.stopAll();
   });
 });
+
+describe('a burst of skips', () => {
+  // 11-11: eight back presses in seven seconds on the bathroom speakers, each one loaded in turn
+  // (7 s each), kept the speaker playing through them for a minute after the presses stopped.
+  const slow = (p: any, calls: string[]) => { p.transport.play = async (url: string) => { calls.push(`play ${url.split('/api/stream/')[1]?.split('?')[0]}`); await new Promise((r) => setTimeout(r, 1000)); }; };
+  it('loads only the song it lands on, not every song pressed through', async () => {
+    const calls: string[] = [];
+    const p = player(calls);
+    await p.execute({ action: 'play', trackIds: ['a', 'b', 'c', 'd', 'e', 'f'], index: 5 });
+    calls.length = 0; slow(p, calls);
+    const all: Promise<unknown>[] = [];
+    for (let i = 0; i < 4; i++) { all.push(p.execute({ action: 'previous' })); await vi.advanceTimersByTimeAsync(300); } // a tap every 300 ms, 1 s loads
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.all(all);
+    expect(p.current.Id).toBe('b');
+    expect(calls).toEqual(['play e', 'play b']);
+    await p.stopAll();
+  });
+  it('a burst that ends on a skip going nowhere still plays the song it shows', async () => {
+    const calls: string[] = [];
+    const p = player(calls);
+    await p.execute({ action: 'play', trackIds: ['a', 'b', 'c'], index: 0 });
+    calls.length = 0; slow(p, calls);
+    const all: Promise<unknown>[] = [];
+    for (const c of [{ action: 'next' }, { action: 'next' }, { action: 'skipTo', index: 99 }]) { all.push(p.execute(c)); await vi.advanceTimersByTimeAsync(300); }
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.all(all);
+    expect(p.current.Id).toBe('c');
+    expect(calls).toEqual(['play b', 'play c']);
+    await p.stopAll();
+  });
+});

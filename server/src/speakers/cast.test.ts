@@ -10,6 +10,8 @@ class FakePlayer extends EventEmitter {
   stop(cb: any) { if (answer) cb(null, {}); }
   pause(cb: any) { if (answer) cb(null, {}); }
   play(cb: any) { if (answer) cb(null, {}); }
+  loadAnswer: any = { playerState: 'BUFFERING' };
+  load(_m: any, _o: any, cb: any) { if (answer) cb(null, this.loadAnswer); }
 }
 class FakeClient extends EventEmitter {
   connect(_h: string, cb: any) { cb(); }
@@ -43,5 +45,17 @@ describe('Cast transport when the receiver goes away', () => {
     await expect(t.status()).resolves.toMatchObject({ gone: true });
     await t.stop();
     expect(launches).toBe(1);
+  });
+
+  it('a load the receiver answers as already playing starts without waiting on a later status', async () => {
+    // 11-11: such a load sat out the full 6 s wait for a status that never came (7 s per skip).
+    const t = new CastTransport(dev);
+    await t.pause();
+    lastPlayer.loadAnswer = { playerState: 'PLAYING' };
+    let done = false;
+    const p = t.play('http://x/s.mp3').then(() => { done = true; });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(done).toBe(true);
+    await p;
   });
 });

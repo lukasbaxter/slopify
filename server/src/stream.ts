@@ -122,14 +122,16 @@ export type Src = { file: string; name: string; size: number; head: { path: stri
 // so it never blocks the process; past STAT_MS the record is trusted). While
 // a stat is stuck past its time, no more are started: each would pin a
 // thread of the pool behind the same dead mount.
+// MISSING: the mount answered and the file is not there (not a slow mount).
 const STAT_MS = 1500;
+const MISSING = 'missing' as const;
 let statsStuck = 0;
-function statNow(file: string): Promise<fs.Stats | null> {
+function statNow(file: string): Promise<fs.Stats | typeof MISSING | null> {
   if (statsStuck) return Promise.resolve(null);
   return new Promise((resolve) => {
     let late = false;
     const t = setTimeout(() => { late = true; statsStuck++; resolve(null); }, STAT_MS);
-    fsp.stat(file).then(resolve, () => resolve(null)).finally(() => { clearTimeout(t); if (late) statsStuck--; });
+    fsp.stat(file).then(resolve, (e) => resolve(e?.code === 'ENOENT' ? MISSING : null)).finally(() => { clearTimeout(t); if (late) statsStuck--; });
   });
 }
 
@@ -369,13 +371,17 @@ export function registerStream(app: FastifyInstance, db: DB, cacheDir: string, s
     const t = db.prepare('SELECT path, size, mtime FROM tracks WHERE id = ?').get(id) as { path: string; size: number; mtime: number } | undefined;
     if (!t) return undefined;
     const alt = altOf?.(t.path) ?? null;
-    const st = (await statNow(t.path)) ?? (alt ? await statNow(alt) : null);
-    if (st && (st.size !== t.size || Math.floor(st.mtimeMs / 1000) !== Math.floor(t.mtime / 1000))) {
+    const first = await statNow(t.path);
+    const st = first && first !== MISSING ? first : alt ? await statNow(alt) : first;
+    if (st && st !== MISSING && (st.size !== t.size || Math.floor(st.mtimeMs / 1000) !== Math.floor(t.mtime / 1000))) {
       rescanSoon(t.path);
       return { file: t.path, name: t.path, size: st.size, head: null, alt };
     }
     const local = songs?.get(id, t.size);
     if (local) return { file: local, name: t.path, size: t.size, head: null };
+    // Gone from the NAS (11-13: renamed under it): a 404 now, not a head and a
+    // reply cut off mid-song that a browser then keeps.
+    if (st === MISSING) return undefined;
     if (want) songs?.want(id, t.path, t.size);
     return { file: t.path, name: t.path, size: t.size, head: headsEnabled ? headOf(db, cacheDir, id, t.size) : null, alt };
   };

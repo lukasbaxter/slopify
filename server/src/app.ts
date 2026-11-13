@@ -89,6 +89,13 @@ export async function buildServer(opts: BuildOptions = {}) {
     // Never inside another site's frame (clickjacking the controls).
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Content-Security-Policy', "frame-ancestors 'none'");
+    // An error is never kept: a stream route sets "keep an hour" before it
+    // opens the file, and a browser replayed the failure from its cache
+    // without asking again (11-13).
+    if (reply.statusCode >= 400) {
+      reply.header('Cache-Control', 'no-store');
+      if (reply.statusCode !== 416) reply.removeHeader('Content-Range');
+    }
   });
 
   const musicDir = opts.musicDir ?? config.musicDir;

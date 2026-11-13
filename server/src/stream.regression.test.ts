@@ -112,3 +112,30 @@ describe('a file rewritten in place (Lidarr retagging) before the next scan', ()
     expect(head.rawPayload.equals(now.subarray(0, 200))).toBe(true);
   }, 60000);
 });
+
+describe('a song whose file went missing (11-13: the NAS moved to NFS and 14k paths stopped resolving)', () => {
+  // The Mac app kept "playing" a missing song without asking again: the reply
+  // said "keep for an hour" (a 206 cut short, a 500 after it), so its browser
+  // replayed the broken answer from its own cache.
+  it('answers 404 that nothing keeps, before any byte, at the start and mid-song', async () => {
+    const id = trackIds()[6];
+    const file = (db().prepare('SELECT path FROM tracks WHERE id = ?').get(id) as any).path as string;
+    fs.renameSync(file, file + '.away');
+    try {
+      for (const range of ['bytes=0-', 'bytes=30000-']) {
+        const r = await get(`/api/stream/${id}?chunk=1`, { range });
+        expect(r.statusCode, range).toBe(404);
+        expect(r.headers['cache-control'], range).toBe('no-store');
+        expect(r.headers['content-range'], range).toBeUndefined();
+      }
+    } finally { fs.renameSync(file + '.away', file); }
+    const back = await get(`/api/stream/${id}?chunk=1`, { range: 'bytes=0-' });
+    expect(back.statusCode).toBe(206);
+  }, 60000);
+
+  it('never lets an error reply be cached', async () => {
+    const r = await get('/api/stream/0123456789abcdef0123456789abcdef?chunk=1');
+    expect(r.statusCode).toBeGreaterThanOrEqual(400);
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+});

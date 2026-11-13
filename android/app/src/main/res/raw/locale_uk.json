@@ -855,5 +855,10 @@
  "{value}. Not on iPhone yet": "{value}. Поки не на iPhone",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "За адресою {host} не відповів жоден сервер Slopify. Перевірте адресу і чи доступна вона з цього комп’ютера.",
  "That server address doesn’t look right. Try something like music.example.com.": "Адреса сервера виглядає неправильно. Спробуйте щось на кшталт music.example.com.",
- "With or without https:// in front. Slopify works it out.": "З https:// на початку або без нього. Slopify розбереться сам."
+ "With or without https:// in front. Slopify works it out.": "З https:// на початку або без нього. Slopify розбереться сам.",
+ "Glass bars": "Скляні смуги",
+ "Stereo": "Стерео",
+ "Halo": "Ореол",
+ "Aurora": "Сяйво",
+ "Orb": "Сфера"
 }

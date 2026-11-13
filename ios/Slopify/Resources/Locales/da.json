@@ -855,5 +855,10 @@
  "{value}. Not on iPhone yet": "{value}. Ikke på iPhone endnu",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Ingen Slopify-server svarede på {host}. Tjek adressen, og at denne computer kan nå den.",
  "That server address doesn’t look right. Try something like music.example.com.": "Serveradressen ser forkert ud. Prøv noget i stil med music.example.com.",
- "With or without https:// in front. Slopify works it out.": "Med eller uden https:// foran. Slopify finder selv ud af det."
+ "With or without https:// in front. Slopify works it out.": "Med eller uden https:// foran. Slopify finder selv ud af det.",
+ "Glass bars": "Glasbjælker",
+ "Stereo": "Stereo",
+ "Halo": "Glorie",
+ "Aurora": "Nordlys",
+ "Orb": "Kugle"
 }

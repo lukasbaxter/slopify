@@ -14,14 +14,11 @@
  "Regenerate playlist": "プレイリストを再生成",
  "Release Radar": "Release Radar",
  "Could not save Your Library: {error}": "ライブラリを保存できませんでした: {error}",
- "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "聴きたいものを説明してください。ブレインがライブラリからそれらしく聞こえる25曲を探します。まだ聴いていない20曲と、知っている5曲です。",
  "Folder": "フォルダ",
  "Folder name": "フォルダ名",
  "Give your folder a name": "フォルダに名前を付けましょう",
  "My folder": "マイフォルダ",
  "Organize your library": "ライブラリを整理",
- "Regenerate": "再生成",
- "Regenerate playlist": "プレイリストを再生成",
  "Rename": "名前を変更",
  "Rename folder": "フォルダ名を変更",
  "{app} is free software under the <a>GNU AGPL v3</a>.": "{app} は <a>GNU AGPL v3</a> のもとで提供されるフリーソフトウェアです。",
@@ -858,5 +855,10 @@
  "Yours": "あなたのもの",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "{host} で Slopify サーバーからの応答がありません。アドレスと、このコンピュータから接続できるかを確認してください。",
  "That server address doesn’t look right. Try something like music.example.com.": "サーバーのアドレスが正しくないようです。music.example.com のように入力してください。",
- "With or without https:// in front. Slopify works it out.": "先頭の https:// はあってもなくてもかまいません。Slopify が判断します。"
+ "With or without https:// in front. Slopify works it out.": "先頭の https:// はあってもなくてもかまいません。Slopify が判断します。",
+ "Glass bars": "ガラスバー",
+ "Stereo": "ステレオ",
+ "Halo": "ハロー",
+ "Aurora": "オーロラ",
+ "Orb": "オーブ"
 }

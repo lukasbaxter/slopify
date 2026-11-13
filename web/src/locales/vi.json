@@ -855,5 +855,10 @@
  "{value}. Not on iPhone yet": "{value}. Chưa có trên iPhone",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Không có máy chủ Slopify nào trả lời tại {host}. Hãy kiểm tra địa chỉ và xem máy tính này có kết nối được không.",
  "That server address doesn’t look right. Try something like music.example.com.": "Địa chỉ máy chủ có vẻ không đúng. Hãy thử dạng music.example.com.",
- "With or without https:// in front. Slopify works it out.": "Có hoặc không có https:// ở đầu đều được. Slopify sẽ tự xử lý."
+ "With or without https:// in front. Slopify works it out.": "Có hoặc không có https:// ở đầu đều được. Slopify sẽ tự xử lý.",
+ "Glass bars": "Thanh kính",
+ "Stereo": "Âm thanh nổi",
+ "Halo": "Vầng sáng",
+ "Aurora": "Cực quang",
+ "Orb": "Quả cầu"
 }

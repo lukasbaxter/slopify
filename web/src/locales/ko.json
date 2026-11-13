@@ -14,14 +14,11 @@
  "Regenerate playlist": "플레이리스트 다시 생성",
  "Release Radar": "Release Radar",
  "Could not save Your Library: {error}": "내 라이브러리를 저장할 수 없습니다: {error}",
- "Describe what you want. The brain finds 25 songs in your library that sound like it: 20 you have not played yet, 5 you know.": "원하는 것을 설명하세요. 브레인이 라이브러리에서 그렇게 들리는 25곡을 찾습니다. 아직 듣지 않은 20곡과 아는 5곡입니다.",
  "Folder": "폴더",
  "Folder name": "폴더 이름",
  "Give your folder a name": "폴더 이름을 지어 주세요",
  "My folder": "내 폴더",
  "Organize your library": "라이브러리 정리하기",
- "Regenerate": "다시 생성",
- "Regenerate playlist": "플레이리스트 다시 생성",
  "Rename": "이름 바꾸기",
  "Rename folder": "폴더 이름 바꾸기",
  "{app} is free software under the <a>GNU AGPL v3</a>.": "{app}은(는) <a>GNU AGPL v3</a>에 따른 자유 소프트웨어입니다.",
@@ -858,5 +855,10 @@
  "Yours": "내 항목",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "{host}에서 응답한 Slopify 서버가 없습니다. 주소와 이 컴퓨터에서 접속할 수 있는지 확인하세요.",
  "That server address doesn’t look right. Try something like music.example.com.": "서버 주소가 올바르지 않은 것 같습니다. music.example.com 같은 형식으로 입력해 보세요.",
- "With or without https:// in front. Slopify works it out.": "앞에 https://를 붙여도 되고 안 붙여도 됩니다. Slopify가 알아서 찾습니다."
+ "With or without https:// in front. Slopify works it out.": "앞에 https://를 붙여도 되고 안 붙여도 됩니다. Slopify가 알아서 찾습니다.",
+ "Glass bars": "유리 막대",
+ "Stereo": "스테레오",
+ "Halo": "헤일로",
+ "Aurora": "오로라",
+ "Orb": "구체"
 }

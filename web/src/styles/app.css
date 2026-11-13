@@ -1087,6 +1087,7 @@ button:disabled { cursor: default; }
 /* The whole visualizer box sits a little lower on the screen. */
 .viz { margin-top: 7vh; height: calc(100% - 7vh); }
 .viz-stage canvas { width: 100% !important; height: 100% !important; display: block; }
+.viz-stage canvas.viz-drawn { position: absolute; inset: 0; }
 .viz-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 40px; color: rgba(var(--fg-rgb),0.70); font-size: 16px; }
 
 /* Speaker timing calibration (tap along) over the visualizer. */

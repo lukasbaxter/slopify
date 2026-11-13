@@ -855,5 +855,10 @@
  "{value}. Not on iPhone yet": "{value}. Pas encore sur iPhone",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Aucun serveur Slopify n’a répondu à {host}. Vérifiez l’adresse et que cet ordinateur peut y accéder.",
  "That server address doesn’t look right. Try something like music.example.com.": "Cette adresse de serveur ne semble pas correcte. Essayez quelque chose comme music.example.com.",
- "With or without https:// in front. Slopify works it out.": "Avec ou sans https:// devant. Slopify s’en charge."
+ "With or without https:// in front. Slopify works it out.": "Avec ou sans https:// devant. Slopify s’en charge.",
+ "Glass bars": "Barres de verre",
+ "Stereo": "Stéréo",
+ "Halo": "Halo",
+ "Aurora": "Aurore",
+ "Orb": "Orbe"
 }

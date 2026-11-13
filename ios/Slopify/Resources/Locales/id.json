@@ -855,5 +855,10 @@
  "{value}. Not on iPhone yet": "{value}. Belum ada di iPhone",
  "No Slopify server answered at {host}. Check the address, and that this computer can reach it.": "Tidak ada server Slopify yang menjawab di {host}. Periksa alamatnya, dan pastikan komputer ini bisa menjangkaunya.",
  "That server address doesn’t look right. Try something like music.example.com.": "Alamat server itu sepertinya salah. Coba seperti music.example.com.",
- "With or without https:// in front. Slopify works it out.": "Dengan atau tanpa https:// di depan. Slopify akan mencari tahu sendiri."
+ "With or without https:// in front. Slopify works it out.": "Dengan atau tanpa https:// di depan. Slopify akan mencari tahu sendiri.",
+ "Glass bars": "Batang kaca",
+ "Stereo": "Stereo",
+ "Halo": "Halo",
+ "Aurora": "Aurora",
+ "Orb": "Bola"
 }

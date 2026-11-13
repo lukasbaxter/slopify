@@ -238,14 +238,14 @@ class NowPlayingLyricsTest {
 
     @Test fun newSongResetsScrollOnce() {
         val r = NowPlayingLyricsReset()
-        assertEquals(NowPlayingLyricsReset.Target.Top, r.loaded("a", -1))
+        assertTrue(r.loaded("a"))
         // Same song again (sync finished, reload): never moves the list.
-        assertNull(r.loaded("a", 4))
-        // Next song joined mid-way: go to its active line, once.
-        assertEquals(NowPlayingLyricsReset.Target.Line(7), r.loaded("b", 7))
-        assertNull(r.loaded("b", 9))
+        assertFalse(r.loaded("a"))
+        // Next song, even joined mid-way: its top, once (owner 11-13).
+        assertTrue(r.loaded("b"))
+        assertFalse(r.loaded("b"))
         // Back to the first song: it is new again.
-        assertEquals(NowPlayingLyricsReset.Target.Line(0), r.loaded("a", 0))
+        assertTrue(r.loaded("a"))
     }
 
     @Test fun retryDelays() {

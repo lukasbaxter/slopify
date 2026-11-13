@@ -62,23 +62,18 @@ object NowPlayingLyrics {
 }
 
 /**
- * A new song's lyrics start at the top (web v0.1.177), or at the active line when joining
- * mid-song. Once per song: a reload of the same song (sync finished, retry) never moves a list
- * the user has scrolled.
+ * A new song's lyrics start at the top, always (owner 11-13: also when joining mid-song;
+ * following picks up from there as lines light). Once per song: a reload of the same song
+ * (sync finished, retry) never moves a list the user has scrolled.
  */
 class NowPlayingLyricsReset {
-    sealed interface Target {
-        data object Top : Target
-        data class Line(val index: Int) : Target
-    }
-
     var lastTrackId: String? = null
         private set
 
-    /** Call when a song's lyrics have loaded. Null when this song was already reset. */
-    fun loaded(trackId: String, activeIndex: Int): Target? {
-        if (trackId == lastTrackId) return null
+    /** Call when a song's lyrics have loaded (or failed to). True when the list goes to its top. */
+    fun loaded(trackId: String): Boolean {
+        if (trackId == lastTrackId) return false
         lastTrackId = trackId
-        return if (activeIndex >= 0) Target.Line(activeIndex) else Target.Top
+        return true
     }
 }

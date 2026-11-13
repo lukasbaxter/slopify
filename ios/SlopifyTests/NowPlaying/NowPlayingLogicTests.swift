@@ -166,14 +166,14 @@ final class NowPlayingLyricsTests: XCTestCase {
 
     func testNewSongResetsScrollOnce() {
         var r = NowPlayingLyricsReset()
-        XCTAssertEqual(r.loaded(trackId: "a", activeIndex: -1), .top)
+        XCTAssertTrue(r.loaded(trackId: "a"))
         // Same song again (sync finished, reload): never moves the list.
-        XCTAssertNil(r.loaded(trackId: "a", activeIndex: 4))
-        // Next song joined mid-way: go to its active line, once.
-        XCTAssertEqual(r.loaded(trackId: "b", activeIndex: 7), .line(7))
-        XCTAssertNil(r.loaded(trackId: "b", activeIndex: 9))
+        XCTAssertFalse(r.loaded(trackId: "a"))
+        // Next song, even joined mid-way: its top, once (owner 11-13).
+        XCTAssertTrue(r.loaded(trackId: "b"))
+        XCTAssertFalse(r.loaded(trackId: "b"))
         // Back to the first song: it is new again.
-        XCTAssertEqual(r.loaded(trackId: "a", activeIndex: 0), .line(0))
+        XCTAssertTrue(r.loaded(trackId: "a"))
     }
 
     func testRetryDelays() {

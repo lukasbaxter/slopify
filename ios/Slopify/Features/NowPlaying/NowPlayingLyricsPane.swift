@@ -17,9 +17,11 @@ struct NowPlayingLyricsPane: View {
     /// How far the list is scrolled down, pt (for the top fade).
     @State private var scrolled: CGFloat = 0
     @State private var reset = NowPlayingLyricsReset()
-    /// A one-off jump for the ScrollViewReader (new song: top or the active line).
+    /// A one-off jump to the top for the ScrollViewReader (a new song).
     @State private var jump: Jump?
-    private struct Jump: Equatable { let id = UUID(); let target: NowPlayingLyricsReset.Target }
+    private struct Jump: Equatable { let id = UUID() }
+    /// The line lit when this song's lyrics loaded: following starts from the next one.
+    @State private var loadIndex: Int?
 
     private var jobs: LyricJobStore { LyricJobStore.shared }
     private var revision: Int { track.map { jobs.revision[$0.id] ?? 0 } ?? 0 }
@@ -70,13 +72,12 @@ struct NowPlayingLyricsPane: View {
             }
             .animation(.easeOut(duration: 0.2), value: manual)
             .onChange(of: jump) { _, j in
-                guard let j else { return }
-                switch j.target {
-                case .top: proxy.scrollTo(Self.topAnchor, anchor: .top)
-                case .line(let i): proxy.scrollTo(i, anchor: .center)
-                }
+                guard j != nil else { return }
+                proxy.scrollTo(Self.topAnchor, anchor: .top)
             }
             .onChange(of: activeIndex) { _, i in
+                // The line lit by the load itself stays put: the list is at its top.
+                if let held = loadIndex { loadIndex = nil; if i == held { return } }
                 guard !manual, i >= 0 else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(i, anchor: .center) }
             }
@@ -170,13 +171,14 @@ struct NowPlayingLyricsPane: View {
                 guard !Task.isCancelled else { return }
                 lines = l.map { NowPlayingLyrics.phoneLines(NowPlayingLyrics.lines($0)) } ?? []
                 state = lines.isEmpty ? .none : .ok
-                activeIndex = pick()
-                if let t = reset.loaded(trackId: id, activeIndex: activeIndex) { jump = Jump(target: t) }
+                let lit = pick()
+                if reset.loaded(trackId: id) { loadIndex = lit; jump = Jump() }
+                activeIndex = lit
                 return
             } catch {
                 guard let d = NowPlayingLyrics.retryDelay(attempt: attempt) else {
                     state = .none
-                    if let t = reset.loaded(trackId: id, activeIndex: -1) { jump = Jump(target: t) }
+                    if reset.loaded(trackId: id) { jump = Jump() }
                     return
                 }
                 attempt += 1

@@ -85,8 +85,8 @@ import kotlin.math.roundToInt
 
 private enum class LyricsLoad { Idle, Loading, None, Ok }
 
-/** A one-off jump (new song: top or the active line). */
-private class LyricsJump(val target: NowPlayingLyricsReset.Target)
+/** A one-off jump to the top (a new song). */
+private class LyricsJump
 
 /** The now playing Lyrics tab body (RightPanel.jsx `Lyrics`; UI.md 3.2.5, 3.4; ios NowPlayingLyricsPane.swift). */
 @Composable
@@ -109,6 +109,8 @@ internal fun NowPlayingLyricsPane(track: Track?, ps: NowPlayingSession, modifier
     var activeIndex by remember { mutableIntStateOf(-1) }
     var manual by remember { mutableStateOf(false) }
     var jump by remember { mutableStateOf<LyricsJump?>(null) }
+    // The line lit when this song's lyrics loaded: following starts from the next one.
+    var loadIndex by remember { mutableStateOf<Int?>(null) }
     val reset = remember { NowPlayingLyricsReset() }
     val scroll = rememberScrollState()
     // Line i -> (top in content px, height px); read when scrolling to a line.
@@ -147,10 +149,11 @@ internal fun NowPlayingLyricsPane(track: Track?, ps: NowPlayingSession, modifier
                 val l = api.lyrics(id)
                 lines = l?.let { NowPlayingLyrics.phoneLines(NowPlayingLyrics.lines(it)) } ?: emptyList()
                 state = if (lines.isEmpty()) LyricsLoad.None else LyricsLoad.Ok
-                activeIndex = NowPlayingLyrics.activeIndex(
+                val lit = NowPlayingLyrics.activeIndex(
                     lines, NowPlayingLyrics.lookupTime(player.positionNow() - player.outputLag(), delaySeconds),
                 ).takeIf { state == LyricsLoad.Ok } ?: -1
-                reset.loaded(id, activeIndex)?.let { jump = LyricsJump(it) }
+                if (reset.loaded(id)) { loadIndex = lit; jump = LyricsJump() }
+                activeIndex = lit
                 return@LaunchedEffect
             } catch (e: CancellationException) {
                 throw e
@@ -158,7 +161,7 @@ internal fun NowPlayingLyricsPane(track: Track?, ps: NowPlayingSession, modifier
                 val d = NowPlayingLyrics.retryDelay(attempt)
                 if (d == null) {
                     state = LyricsLoad.None
-                    reset.loaded(id, -1)?.let { jump = LyricsJump(it) }
+                    if (reset.loaded(id)) jump = LyricsJump()
                     return@LaunchedEffect
                 }
                 attempt += 1
@@ -176,6 +179,8 @@ internal fun NowPlayingLyricsPane(track: Track?, ps: NowPlayingSession, modifier
         }
     }
     LaunchedEffect(activeIndex) {
+        // The line lit by the load itself stays put: the list is at its top.
+        loadIndex?.let { held -> loadIndex = null; if (activeIndex == held) return@LaunchedEffect }
         if (!manual && activeIndex >= 0) center(activeIndex, animate = true)
     }
     LaunchedEffect(jump) {
@@ -183,10 +188,7 @@ internal fun NowPlayingLyricsPane(track: Track?, ps: NowPlayingSession, modifier
         // Let the new lines lay out first.
         withFrameNanos { }
         withFrameNanos { }
-        when (val t = j.target) {
-            NowPlayingLyricsReset.Target.Top -> scroll.scrollTo(0)
-            is NowPlayingLyricsReset.Target.Line -> center(t.index, animate = false)
-        }
+        scroll.scrollTo(0)
     }
 
     val manualScroll = remember {

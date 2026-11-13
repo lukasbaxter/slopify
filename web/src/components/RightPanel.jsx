@@ -366,18 +366,22 @@ export function Lyrics({ player, jf }) {
     const er = el.getBoundingClientRect(), br = box.getBoundingClientRect();
     box.scrollTo({ top: box.scrollTop + (er.top - br.top) - br.height / 2 + er.height / 2, behavior: 'smooth' });
   };
-  useEffect(() => { if (!manual) follow(); }, [activeIndex]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setManual(false); }, [trackId]);
-  // A new song's lyrics start at the top. Nothing used to do this: it only happened when the
-  // "Loading" note briefly emptied the box, so a quick answer kept the last song's scroll.
+  // A new song's lyrics start at the top, always (owner 11-13: also when joining mid-song).
+  // Following picks up from the next line to light; the one lit as they loaded stays put.
   const toppedFor = useRef(null);
+  const heldAt = useRef(null);
+  useEffect(() => {
+    if (toppedFor.current !== trackId) return; // the new song's top comes first
+    if (heldAt.current !== null) { const h = heldAt.current; heldAt.current = null; if (activeIndex === h) return; }
+    if (!manual) follow();
+  }, [activeIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setManual(false); }, [trackId]);
   useEffect(() => {
     if (state !== 'ok' || toppedFor.current === trackId) return;
     toppedFor.current = trackId;
+    heldAt.current = activeIndex;
     const box = listRef.current?.closest('.panel-body, .fs-lyrics');
     if (box) box.scrollTop = 0;
-    // Joined mid-song (a transfer, a reload): go on to the line being sung.
-    if (activeRef.current) follow();
   }, [state, trackId, lines]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const box = listRef.current?.closest('.panel-body, .fs-lyrics'); if (!box) return undefined;

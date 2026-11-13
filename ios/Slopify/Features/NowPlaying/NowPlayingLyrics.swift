@@ -60,17 +60,16 @@ enum NowPlayingLyrics {
     static func retryDelay(attempt: Int) -> Double? { attempt < 3 ? 2 * pow(2, Double(attempt)) : nil }
 }
 
-/// A new song's lyrics start at the top (web v0.1.177), or at the active line when joining
-/// mid-song. Once per song: a reload of the same song (sync finished, retry) never moves a list
-/// the user has scrolled.
+/// A new song's lyrics start at the top, always (owner 11-13: also when joining mid-song;
+/// following picks up from there as lines light). Once per song: a reload of the same song
+/// (sync finished, retry) never moves a list the user has scrolled.
 struct NowPlayingLyricsReset: Equatable {
-    enum Target: Equatable { case top, line(Int) }
     private(set) var lastTrackId: String?
 
-    /// Call when a song's lyrics have loaded. Nil when this song was already reset.
-    mutating func loaded(trackId: String, activeIndex: Int) -> Target? {
-        guard trackId != lastTrackId else { return nil }
+    /// Call when a song's lyrics have loaded (or failed to). True when the list goes to its top.
+    mutating func loaded(trackId: String) -> Bool {
+        guard trackId != lastTrackId else { return false }
         lastTrackId = trackId
-        return activeIndex >= 0 ? .line(activeIndex) : .top
+        return true
     }
 }

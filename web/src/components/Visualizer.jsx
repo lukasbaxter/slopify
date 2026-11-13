@@ -96,6 +96,8 @@ function smoothPath(cx, pts, closed) {
   }
 }
 const withAlpha = (c, a) => {
+  if (c && typeof c === 'object') c = c.color; // an audioMotion colour stop
+  c = String(c || '#fff');
   const m = /^rgba?\(([^)]+)\)/.exec(c);
   if (m) { const [r, g, b] = m[1].split(',').map((x) => parseFloat(x)); return `rgba(${r},${g},${b},${a})`; }
   let h = c.replace('#', ''); if (h.length === 3) h = h.split('').map((x) => x + x).join('');
@@ -376,7 +378,8 @@ export default function Visualizer({ player, active, jf, settings, offset = 0, c
     let alive = true;
     paletteColors(artUrl).then((cols) => {
       if (!alive || !amRef.current) return;
-      if (cols) { bandColorsRef.current = cols; try { amRef.current.registerGradient('album', { bgColor: 'transparent', colorStops: cols }); amRef.current.gradient = 'album'; } catch { /* keep current */ } }
+      // audioMotion rewrites the stops it is given (strings become objects): it gets its own copy.
+      if (cols) { bandColorsRef.current = [...cols]; try { amRef.current.registerGradient('album', { bgColor: 'transparent', colorStops: [...cols] }); amRef.current.gradient = 'album'; } catch { /* keep current */ } }
       else amRef.current.gradient = 'classic';
     });
     return () => { alive = false; };

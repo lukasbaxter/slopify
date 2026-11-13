@@ -43,6 +43,10 @@ jobs:
         id: meta
         with:
           images: ghcr.io/lukasbaxter/slopify
+          # Only the slim image is :latest (the raw tag above). The default (latest=auto) also
+          # tagged every release build :latest, so the slower gpu build won the race and
+          # :latest was the amd64-only gpu image (11-13).
+          flavor: latest=false
           tags: |
             type=raw,value=${{ matrix.latest }}
             type=ref,event=tag,suffix=${{ matrix.suffix }}
@@ -87,6 +91,8 @@ jobs:
         id: meta
         with:
           images: ghcr.io/lukasbaxter/slopify-brain
+          # No :latest: pick the card (nvidia, intel, cpu). latest=auto raced the three onto it.
+          flavor: latest=false
           tags: |
             type=raw,value=${{ matrix.gpu }}
             type=ref,event=tag,suffix=-${{ matrix.gpu }}
@@ -117,3 +123,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: tools/smoke-install.sh ghcr.io/lukasbaxter/slopify:sha-${GITHUB_SHA::7}
+      # What the README pulls: :latest must be the slim image, on both architectures.
+      - name: latest is the slim multi-arch image
+        if: matrix.runner == 'ubuntu-24.04'
+        run: |
+          m=$(docker buildx imagetools inspect ghcr.io/lukasbaxter/slopify:latest)
+          echo "$m"
+          grep -q 'linux/arm64' <<<"$m" || { echo "::error::slopify:latest has no arm64 image (is it the gpu build?)"; exit 1; }

@@ -1667,12 +1667,16 @@ export default function Library({
       else if (kind === 'Playlist') onOpenPlaylist(item);
       else open(item);
     };
+    // A song played from search is its own context (Spotify): it plays alone,
+    // not with the other hits, and the player's early queue extension fills
+    // "Next up" with its continuation mix right away.
+    const playSong = (track, at = 0) => player.playQueue([track], 0, null, at);
     // Rows on the search page: any way of playing one records the query.
     const searchRow = (i, extra = {}) => rowProps(r.tracks, i, {
       showArt: true,
-      onPlay: () => { remember(query, hit('Song', r.tracks[i])); player.playQueue(r.tracks, i, null); },
+      onPlay: () => { remember(query, hit('Song', r.tracks[i])); playSong(r.tracks[i]); },
       onRowOpen: () => { remember(query, hit('Song', r.tracks[i])); openAlbum({ Id: r.tracks[i].AlbumId, Name: r.tracks[i].Album }); },
-      onPlayAt: (t, at) => { remember(query, hit('Song', r.tracks[i])); player.playQueue(r.tracks, i, null, at); },
+      onPlayAt: (t, at) => { remember(query, hit('Song', r.tracks[i])); playSong(r.tracks[i], at); },
       ...extra,
     });
     const onSearchKey = (e) => {
@@ -1914,7 +1918,7 @@ export default function Library({
                       </div>
                     )}
                   </div>
-                  <button className="card-play" onClick={(e) => { e.stopPropagation(); remember(query, hit(top.kind, top.item)); top.kind === 'Song' ? player.playQueue(r.tracks, Math.max(0, r.tracks.findIndex((t) => t.Id === top.item.Id))) : playItem(top.item); }}>
+                  <button className="card-play" onClick={(e) => { e.stopPropagation(); remember(query, hit(top.kind, top.item)); top.kind === 'Song' ? playSong(top.item) : playItem(top.item); }}>
                     <PlayGlyph />
                   </button>
                 </div>

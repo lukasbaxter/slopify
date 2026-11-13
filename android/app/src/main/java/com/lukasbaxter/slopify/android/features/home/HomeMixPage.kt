@@ -227,7 +227,7 @@ private fun homeMixMenu(
         val sub = TrackMenu.playlistSub(
             library.playlists,
             new = { askName(menus.newPlaylistDialog(first)) },
-            add = { p -> scope.launch { library.add(tracks.map { it.id }, p) } },
+            add = { p -> scope.launch { library.add(tracks, p) } },
         )
         items += MenuItem(L("Add to playlist"), Icon.Plus, sub = sub)
     }

@@ -24,6 +24,7 @@ import { isOffline, subscribeNet, useOfflineMode } from './offline/net.js';
 import { readLib, getActive as downloading } from './offline/store.js';
 import { clientLog } from './api/clientLog.js';
 import { addressTries, hostLabel } from './api/address.js';
+import { addTracksToPlaylist, addedToast } from './api/playlistAdd.js';
 
 // The browser build is same-origin. The desktop app has no server of its
 // own: its sign-in form asks for yours (empty in release builds; a self-built
@@ -259,6 +260,8 @@ export default function App() {
   // "New playlist" dialog: {track} while open. window.prompt() does not exist
   // in Electron, which is why creating a playlist from a row did nothing there.
   const [namePrompt, setNamePrompt] = useState(null);
+  // "Already added" dialog: { track, playlist, left, all, resolve } while it asks.
+  const [dupAsk, setDupAsk] = useState(null);
   // "Generated playlist (AI)" dialog.
   const [generating, setGenerating] = useState(false);
   // Now-playing view (Spotify's expand button): Album / Visualizer / Lyrics
@@ -1106,11 +1109,19 @@ export default function App() {
     catch (e) { notify(t('Download failed: {error}', { error: e.message })); }
   };
 
-  const onAddTo = async (pl, track) => {
+  // Every "Add to playlist" comes here: one song (a row, the queue, now
+  // playing) or many (a page menu). Songs already there are asked about.
+  const askDuplicate = (q) => new Promise((resolve) => setDupAsk({ ...q, all: false, resolve }));
+  const answerDuplicate = (add) => { dupAsk?.resolve({ add, all: dupAsk.all }); setDupAsk(null); };
+  const onAddTo = async (pl, trackOrTracks) => {
+    const tracks = Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks];
     try {
-      await jf.addToPlaylist(pl.Id, [track.Id]);
-      notify(t('Added to {name}', { name: pl.Name }));
-      refreshPlaylists();
+      const { added, skipped } = await addTracksToPlaylist(jf, pl, tracks, askDuplicate);
+      if (!added && !skipped) return;
+      notify(addedToast(pl.Name, added, skipped));
+      if (!added) return;
+      // Refreshes the playlists here and tells the account's other devices.
+      window.dispatchEvent(new CustomEvent('slopify:librarychanged'));
       // If that playlist is open, show the new row.
       if (detail?.item?.Id === pl.Id) {
         const { items } = await jf.playlistTracks(pl.Id);
@@ -1786,6 +1797,24 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
             else if (more) notify(more);
             else openPlaylist({ Id: r.playlistId, Name: r.name, Type: 'Playlist', ChildCount: r.count, ImageTags: {}, UserData: {} });
           }} />
+      )}
+      {dupAsk && (
+        <div className="modal-back dupe-ask" onMouseDown={(e) => { if (e.target === e.currentTarget) answerDuplicate(false); }} onKeyDown={(e) => { if (e.key === 'Escape') answerDuplicate(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="dupe-ask-title">
+            <h3 id="dupe-ask-title">{t('Already added')}</h3>
+            <p>{t('"{song}" is already in {name}.', { song: dupAsk.track?.Name || '', name: dupAsk.playlist.Name })}</p>
+            {dupAsk.left > 1 && (
+              <label className="dupe-ask-all">
+                <input type="checkbox" checked={dupAsk.all} onChange={(e) => { const all = e.target.checked; setDupAsk((d) => d && { ...d, all }); }} />
+                <span>{t('Do this for all')}</span>
+              </label>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => answerDuplicate(false)}>{t("Don't add")}</button>
+              <button type="button" className="primary" autoFocus onClick={() => answerDuplicate(true)}>{t('Add anyway')}</button>
+            </div>
+          </div>
+        </div>
       )}
       {namePrompt && (
         <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) setNamePrompt(null); }}>

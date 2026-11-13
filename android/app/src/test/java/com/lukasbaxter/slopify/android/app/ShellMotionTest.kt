@@ -106,5 +106,7 @@ class ShellMotionTest {
         assertEquals("Added to Mix", LibraryEvent.Added("Mix").toastText())
         assertEquals("Could not save Your Library: nope", LibraryEvent.Failed(LibraryAction.SaveLibrary, "nope").toastText())
         assertEquals("Playlist updated", LibraryEvent.PlaylistUpdated.toastText())
+        assertEquals("Already in Mix", LibraryEvent.AlreadyIn("Mix").toastText())
+        assertEquals("Added 12 to Mix, skipped 3 already there", LibraryEvent.AddedSkipping("Mix", 12, 3).toastText())
     }
 }

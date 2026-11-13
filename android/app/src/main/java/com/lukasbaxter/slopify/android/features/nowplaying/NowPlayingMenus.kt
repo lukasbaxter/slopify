@@ -40,7 +40,7 @@ internal class NowPlayingMenus(
         if (removable) items += MenuItem(L("Remove from queue")) { app.player.removeFromQueue(index) }
         items += MenuItem(if (liked) L("Remove from Liked Songs") else L("Add to Liked Songs")) { builder.like(t) }
         if (library.playlists.isNotEmpty()) {
-            items += MenuItem(L("Add to playlist"), sub = library.playlists.map { p -> MenuItem(p.name) { scope.launch { library.add(listOf(t.id), p) } } })
+            items += MenuItem(L("Add to playlist"), sub = library.playlists.map { p -> MenuItem(p.name) { scope.launch { library.add(listOf(t), p) } } })
         }
         items += MenuItem.separator
         t.artistIds.firstOrNull()?.let { id -> items += MenuItem(L("Go to artist")) { app.nav.open(Route.Artist(id)) } }

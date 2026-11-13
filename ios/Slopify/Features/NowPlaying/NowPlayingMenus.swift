@@ -32,7 +32,7 @@ struct NowPlayingMenus {
         items.append(MenuItem(liked ? L("Remove from Liked Songs") : L("Add to Liked Songs")) { menus.like(t) })
         if !store.playlists.isEmpty {
             items.append(MenuItem(L("Add to playlist"), sub: store.playlists.map { p in
-                MenuItem(p.name) { Task { await store.add([t.id], to: p) } }
+                MenuItem(p.name) { Task { await store.add([t], to: p) } }
             }))
         }
         items.append(.separator)

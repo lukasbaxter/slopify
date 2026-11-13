@@ -195,17 +195,41 @@ final class LibraryStore {
         }
     }
 
-    /// Track menu "Add to playlist": one request, one toast.
-    func add(_ trackIds: [String], to p: Playlist) async {
-        guard let api, !trackIds.isEmpty else { return }
-        do {
-            try await api.addToPlaylist(p.id, trackIds: trackIds)
-            ToastCenter.shared.show(L("Added to {name}", ["name": p.name]))
-            revision[p.id, default: 0] += 1
-            await refreshPlaylists()
-        } catch {
-            ToastCenter.shared.show(L("Could not add: {error}", ["error": error.localizedDescription]))
+    /// The one way every "Add to playlist" goes (API.md 8.2): asks about each song already there
+    /// (or twice in `tracks`), then one request with what is kept, one toast. `onError` replaces
+    /// the error toast (a page banner). True when it finished without an error.
+    @discardableResult
+    func add(_ tracks: [Track], to p: Playlist, onError: ((Error) -> Void)? = nil) async -> Bool {
+        guard let api, !tracks.isEmpty else { return false }
+        let ids = tracks.map(\.id)
+        // A server without the route: go on as if none were there.
+        let existing = Set((try? await api.playlistContains(p.id, trackIds: ids)) ?? [])
+        let dup = PlaylistAdd.duplicates(ids, existing: existing)
+        let ask = askDuplicate
+        let (kept, skipped) = await PlaylistAdd.resolve(ids, duplicates: dup) { i, left in
+            await ask(tracks[i], p, left > 1)
         }
+        do {
+            if !kept.isEmpty {
+                try await api.addToPlaylist(p.id, trackIds: kept)
+            }
+            ToastCenter.shared.show(PlaylistAdd.toast(added: kept.count, skipped: skipped, name: p.name))
+            if !kept.isEmpty {
+                revision[p.id, default: 0] += 1
+                await refreshPlaylists()
+            }
+            return true
+        } catch {
+            if let onError { onError(error) } else {
+                ToastCenter.shared.show(L("Could not add: {error}", ["error": error.localizedDescription]))
+            }
+            return false
+        }
+    }
+
+    /// The "Already added" question (song, playlist, show "Do this for all"). Tests answer it.
+    @ObservationIgnored var askDuplicate: (Track, Playlist, Bool) async -> PlaylistAdd.Answer = { t, p, showAll in
+        await DuplicateDialog.shared.ask(song: t.title, playlist: p.name, showAll: showAll)
     }
 
     /// True when deleted.

@@ -25,7 +25,7 @@ struct HomeMenus {
             let store = menus.attachedStore()
             // One POST with every id, one toast (App.jsx onAddTo); New playlist is seeded with the first song.
             let sub = TrackMenu.playlistSub(store.playlists, new: { menus.askName(menus.newPlaylistDialog(seed: first)) },
-                                            add: { p in Task { await store.add(tracks.map(\.id), to: p) } })
+                                            add: { p in Task { await store.add(tracks, to: p) } })
             items.append(MenuItem(L("Add to playlist"), icon: .plus, sub: sub))
         }
         let shown = TrackMenuBuilder.offline ? MenuItem.offlineSubset(items) : MenuItem.tidy(items)

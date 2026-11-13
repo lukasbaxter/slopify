@@ -271,15 +271,9 @@ struct PlaylistView: View {
 
     private func addRecommended(_ t: Track) {
         reco.removeAll { $0.id == t.id }
-        Task {
-            do {
-                try await account.api.addToPlaylist(id, trackIds: [t.id])
-                await load()
-                await store.refreshPlaylists()
-            } catch {
-                ToastCenter.shared.show(L("Could not add: {error}", ["error": error.localizedDescription]))
-            }
-        }
+        // The shared add: its revision bump reloads this page.
+        guard let p = playlist ?? store.playlists.first(where: { $0.id == id }) else { return }
+        Task { await store.add([t], to: p) }
     }
 
     /// Positions are the shown index (API.md gotcha 7).
@@ -326,7 +320,7 @@ struct PlaylistView: View {
         if !tracks.isEmpty {
             var sub: [MenuItem] = [MenuItem(L("New playlist"), icon: .plus) { nameDialog = menus.newPlaylistDialog(seed: tracks.first) }]
             sub += ctx.store.playlists.filter { $0.id != id }.map { other in
-                MenuItem(other.name) { Task { await ctx.store.add(tracks.map(\.id), to: other) } }
+                MenuItem(other.name) { Task { await ctx.store.add(tracks, to: other) } }
             }
             items.append(MenuItem(L("Add to playlist"), icon: .plus, sub: sub))
         }

@@ -103,6 +103,13 @@ extension APIClient {
         struct B: Encodable { var trackIds: [String] }
         let _: OK = try await send("POST", "api/playlists/\(id)/tracks", body: B(trackIds: trackIds))
     }
+    /// Which of these ids the playlist already has, each once (API.md 8.2).
+    func playlistContains(_ id: String, trackIds: [String]) async throws -> [String] {
+        struct B: Encodable { var trackIds: [String] }
+        struct R: Decodable { var ids: [String] }
+        let r: R = try await send("POST", "api/playlists/\(id)/contains", body: B(trackIds: trackIds))
+        return r.ids
+    }
     /// Remove positions; sends highest first because positions renumber (§8).
     func removeFromPlaylist(_ id: String, positions: [Int]) async throws {
         for p in positions.sorted(by: >) { try await send("DELETE", "api/playlists/\(id)/tracks/\(p)") }

@@ -5,6 +5,8 @@ import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.stores.LibraryAction
 import com.lukasbaxter.slopify.android.core.stores.LibraryEvent
 import com.lukasbaxter.slopify.android.core.stores.LibraryStore
+import com.lukasbaxter.slopify.android.core.stores.PlaylistDuplicates
+import com.lukasbaxter.slopify.android.design.designTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -99,7 +101,7 @@ class LibraryStoreTest {
         store.onLibraryChanged = { changed++ }
         val events = mutableListOf<LibraryEvent>()
         val job = collect(store, events)
-        store.add(listOf("t1"), Playlist("p1", "Mix"))
+        store.add(listOf(designTrack("t1")), Playlist("p1", "Mix"))
         assertEquals(1, store.state.value.revision["p1"])
         s.answers.remove("/api/playlists")
         s.answers["/api/playlists"] = 200 to """{"id":"p2","name":"New"}"""
@@ -109,6 +111,69 @@ class LibraryStoreTest {
         waitFor { synchronized(events) { events.size >= 2 } }
         assertEquals(listOf(LibraryEvent.Added("Mix"), LibraryEvent.Created("New")), events.take(2))
         job.cancel()
+    }
+
+    /** The body of the last POST to `path`, as sent. */
+    private fun StubServer.lastBody(path: String) = seen.last { it.method == "POST" && it.path!!.endsWith(path) }.body.readUtf8()
+
+    @Test fun addAsksAboutEachSongAlreadyThereAndSendsOnlyTheKeptOnes() = withStore { store, s ->
+        s.library()
+        // t1 is in the playlist; t3 comes twice in the batch (the second one is a duplicate too).
+        s.answers["/api/playlists/p1/contains"] = 200 to """{"ids":["t1"]}"""
+        s.answers["/api/playlists/p1/tracks"] = 200 to "{}"
+        store.attach(s.client(), "u1")
+        val events = mutableListOf<LibraryEvent>()
+        val job = collect(store, events)
+        val asked = mutableListOf<Pair<String, Int>>()
+        val answering = CoroutineScope(Dispatchers.Default).launch(start = CoroutineStart.UNDISPATCHED) {
+            store.duplicateQuestion.collect { q ->
+                if (q == null) return@collect
+                asked += q.track.title to q.left
+                assertEquals("Mix", q.playlistName)
+                // Keep t1 again, skip the second t3.
+                q.reply(PlaylistDuplicates.Answer(add = q.track.id == "t1"))
+            }
+        }
+        val tracks = listOf("t1", "t2", "t3", "t3").map { designTrack(it) }
+        assertTrue(store.add(tracks, Playlist("p1", "Mix")))
+        answering.cancel()
+        assertEquals(listOf("Tt1" to 2, "Tt3" to 1), asked)
+        assertEquals("""{"trackIds":["t1","t2","t3"]}""", s.lastBody("/api/playlists/p1/tracks"))
+        assertEquals("""{"trackIds":["t1","t2","t3"]}""", s.lastBody("/api/playlists/p1/contains"))
+        waitFor { synchronized(events) { events.isNotEmpty() } }
+        assertEquals(LibraryEvent.AddedSkipping("Mix", 3, 1), events.first())
+        assertNull(store.duplicateQuestion.value)
+        job.cancel()
+    }
+
+    @Test fun addWithDoThisForAllSkipsEveryDuplicateAndSendsNothingWhenNoneLeft() = withStore { store, s ->
+        s.library()
+        s.answers["/api/playlists/p1/contains"] = 200 to """{"ids":["t1","t2"]}"""
+        s.answers["/api/playlists/p1/tracks"] = 200 to "{}"
+        store.attach(s.client(), "u1")
+        val events = mutableListOf<LibraryEvent>()
+        val job = collect(store, events)
+        var asks = 0
+        val answering = CoroutineScope(Dispatchers.Default).launch(start = CoroutineStart.UNDISPATCHED) {
+            store.duplicateQuestion.collect { q -> if (q != null) { asks++; q.reply(PlaylistDuplicates.Answer(add = false, all = true)) } }
+        }
+        assertFalse(store.add(listOf(designTrack("t1"), designTrack("t2")), Playlist("p1", "Mix")))
+        answering.cancel()
+        assertEquals(1, asks)
+        assertTrue(s.seen.none { it.path!!.endsWith("/api/playlists/p1/tracks") })
+        waitFor { synchronized(events) { events.isNotEmpty() } }
+        assertEquals(LibraryEvent.AlreadyIn("Mix"), events.first())
+        job.cancel()
+    }
+
+    @Test fun addWithoutContainsOnTheServerAddsEverything() = withStore { store, s ->
+        s.library()
+        s.answers["/api/playlists/p1/contains"] = 404 to """{"error":"Not Found"}"""
+        s.answers["/api/playlists/p1/tracks"] = 200 to "{}"
+        store.attach(s.client(), "u1")
+        assertTrue(store.add(listOf(designTrack("t1"), designTrack("t2")), Playlist("p1", "Mix")))
+        assertNull(store.duplicateQuestion.value)
+        assertEquals("""{"trackIds":["t1","t2"]}""", s.lastBody("/api/playlists/p1/tracks"))
     }
 
     @Test fun localCopyPerUserAndSignOutClears() {

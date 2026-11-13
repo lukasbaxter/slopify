@@ -171,6 +171,10 @@ suspend fun ApiClient.deletePlaylist(id: String) = send("DELETE", "api/playlists
 suspend fun ApiClient.addToPlaylist(id: String, trackIds: List<String>) =
     send("POST", "api/playlists/$id/tracks", buildJsonObject { putJsonArray("trackIds") { trackIds.forEach { add(it) } } })
 
+/** Which of these songs the playlist already has, each once (§8.2). */
+suspend fun ApiClient.playlistContains(id: String, trackIds: List<String>): List<String> =
+    call<IdsR>("POST", "api/playlists/$id/contains", buildJsonObject { putJsonArray("trackIds") { trackIds.forEach { add(it) } } }).ids
+
 /** Remove positions; sends highest first because positions renumber (§8). */
 suspend fun ApiClient.removeFromPlaylist(id: String, positions: List<Int>) {
     for (p in positions.sortedDescending()) send("DELETE", "api/playlists/$id/tracks/$p")

@@ -38,7 +38,7 @@ struct TrackMenuBuilder {
         return TrackMenu.Actions(
             addToQueue: { t in app.player.addToQueue([t]) },
             newPlaylist: { t in askName(newPlaylistDialog(seed: t)) },
-            addTo: { p, t in Task { await attachedStore().add([t.id], to: p) } },
+            addTo: { p, t in Task { await attachedStore().add([t], to: p) } },
             remove: remove,
             like: { t, _ in like(t) },
             exclude: { t, on in exclude(t, on) },

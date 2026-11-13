@@ -27,7 +27,7 @@ const GUEST_WRITES: [string, RegExp][] = [
   ['POST', /^\/api\/playlists$/],
   ['PATCH', /^\/api\/playlists\/[^/]+$/],
   ['DELETE', /^\/api\/playlists\/[^/]+$/],
-  ['POST', /^\/api\/playlists\/[^/]+\/(tracks|move)$/],
+  ['POST', /^\/api\/playlists\/[^/]+\/(tracks|move|contains)$/],
   ['DELETE', /^\/api\/playlists\/[^/]+\/tracks\/[^/]+$/],
 ];
 

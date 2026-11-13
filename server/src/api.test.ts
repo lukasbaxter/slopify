@@ -194,6 +194,18 @@ describe('likes, playlists, plays, home, prefs', () => {
     const l = (await get('/api/likes?full=1')).json(); expect(Object.keys(l.at).length).toBe(2); expect(l.items[0].id).toBe(ids[1]); // newest first
     await send('DELETE', `/api/likes/${ids[1]}`); expect(Object.keys((await get('/api/likes')).json().at).length).toBe(1);
   });
+  it('playlists: contains names the songs already there, so a client can ask before adding again', async () => {
+    const p = (await send('POST', '/api/playlists', { name: 'Dupes', trackIds: [ids[0], ids[2]] })).json();
+    // Each id once, in the order asked; a song not there and an unknown id are left out.
+    const r = await send('POST', `/api/playlists/${p.id}/contains`, { trackIds: [ids[2], ids[1], ids[0], ids[2], 'nope'] });
+    expect(r.statusCode).toBe(200); expect(r.json()).toEqual({ ids: [ids[2], ids[0]] });
+    // Adding is unchanged: a song already there goes in again.
+    await send('POST', `/api/playlists/${p.id}/tracks`, { trackIds: [ids[0]] });
+    expect((await get(`/api/playlists/${p.id}`)).json().tracks.map((t: any) => t.id)).toEqual([ids[0], ids[2], ids[0]]);
+    expect((await send('POST', `/api/playlists/${p.id}/contains`, { trackIds: [] })).statusCode).toBe(400);
+    expect((await send('POST', '/api/playlists/pl_nope/contains', { trackIds: [ids[0]] })).statusCode).toBe(404);
+    await send('DELETE', `/api/playlists/${p.id}`);
+  });
   it('playlists: create, add, move, remove, rename, delete', async () => {
     const p = (await send('POST', '/api/playlists', { name: 'Road', trackIds: ids.slice(0, 3) })).json();
     await send('POST', `/api/playlists/${p.id}/tracks`, { trackIds: [ids[3]] });

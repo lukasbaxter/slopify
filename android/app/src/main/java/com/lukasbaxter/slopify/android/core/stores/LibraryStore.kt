@@ -9,6 +9,7 @@ import com.lukasbaxter.slopify.android.core.api.deletePlaylist
 import com.lukasbaxter.slopify.android.core.api.followedArtists
 import com.lukasbaxter.slopify.android.core.api.libraryLayout
 import com.lukasbaxter.slopify.android.core.api.likes
+import com.lukasbaxter.slopify.android.core.api.playlistContains
 import com.lukasbaxter.slopify.android.core.api.playlists
 import com.lukasbaxter.slopify.android.core.api.putLibraryLayout
 import com.lukasbaxter.slopify.android.core.api.renameFolder
@@ -26,6 +27,7 @@ import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.PlaylistDetail
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.model.Track
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +43,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -67,6 +71,9 @@ data class LibraryState(
 /** Something the person should hear about; the app words it (core builds no UI text). */
 sealed interface LibraryEvent {
     data class Added(val name: String) : LibraryEvent
+    /** Every song was already there and none was added again. */
+    data class AlreadyIn(val name: String) : LibraryEvent
+    data class AddedSkipping(val name: String, val added: Int, val skipped: Int) : LibraryEvent
     data class Created(val name: String) : LibraryEvent
     data class Deleted(val name: String) : LibraryEvent
     data object PlaylistUpdated : LibraryEvent
@@ -277,19 +284,59 @@ class LibraryStore(
         }
     }
 
-    /** Track menu "Add to playlist": one request, one event. */
-    suspend fun add(trackIds: List<String>, to: Playlist) {
-        val api = api ?: return
-        if (trackIds.isEmpty()) return
-        try {
-            api.addToPlaylist(to.id, trackIds)
-            eventFlow.tryEmit(LibraryEvent.Added(to.name))
+    private val questionFlow = MutableStateFlow<DuplicateQuestion?>(null)
+    /** The "Already added" question on screen, if any (MainShell shows it). */
+    val duplicateQuestion: StateFlow<DuplicateQuestion?> = questionFlow.asStateFlow()
+    /** One add asks at a time; a second waits for the first one's questions. */
+    private val asking = Mutex()
+
+    /**
+     * Every "Add to playlist" (song, album, playlist, queue, radio, mix): asks about songs already
+     * there (API.md 8.2), then one request and one event. True when something was added.
+     */
+    suspend fun add(tracks: List<Track>, to: Playlist): Boolean {
+        val api = api ?: return false
+        if (tracks.isEmpty()) return false
+        val ids = tracks.map { it.id }
+        // A server without `contains` (or a failed ask): go on as if none were there.
+        val existing = try {
+            api.playlistContains(to.id, ids.distinct())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val dups = PlaylistDuplicates.mark(ids, existing)
+        val kept = if (dups.none { it }) tracks else asking.withLock {
+            PlaylistDuplicates.resolve(tracks, dups) { t, left -> ask(t, to.name, left) }
+        }
+        val skipped = tracks.size - kept.size
+        if (kept.isEmpty()) {
+            eventFlow.tryEmit(PlaylistDuplicates.event(to.name, 0, skipped))
+            return false
+        }
+        return try {
+            api.addToPlaylist(to.id, kept.map { it.id })
+            eventFlow.tryEmit(PlaylistDuplicates.event(to.name, kept.size, skipped))
             mutable.update { it.copy(revision = it.revision + (to.id to ((it.revision[to.id] ?: 0) + 1))) }
             refreshPlaylists()
+            true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             eventFlow.tryEmit(LibraryEvent.Failed(LibraryAction.AddToPlaylist, errorText(e)))
+            false
+        }
+    }
+
+    private suspend fun ask(t: Track, name: String, left: Int): PlaylistDuplicates.Answer {
+        val answer = CompletableDeferred<PlaylistDuplicates.Answer>()
+        val q = DuplicateQuestion(t, name, left) { answer.complete(it) }
+        questionFlow.value = q
+        try {
+            return answer.await()
+        } finally {
+            questionFlow.compareAndSet(q, null)
         }
     }
 

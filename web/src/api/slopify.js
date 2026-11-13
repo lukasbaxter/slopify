@@ -511,6 +511,9 @@ export class Slopify {
     const r = await this._fetch('/api/playlists', { method: 'POST', body: JSON.stringify({ name, trackIds: itemIds }) });
     return { Id: r.id, Name: r.name };
   }
+  // The ids of these that the playlist already has (API.md 8.2). A server
+  // without the route: none known, so the add still goes ahead.
+  async playlistContains(playlistId, itemIds) { try { return (await this._fetch(`/api/playlists/${playlistId}/contains`, { method: 'POST', body: JSON.stringify({ trackIds: itemIds }) })).ids || []; } catch { return []; } }
   async addToPlaylist(playlistId, itemIds) { this._evict(`playlist:${playlistId}`); return this._fetch(`/api/playlists/${playlistId}/tracks`, { method: 'POST', body: JSON.stringify({ trackIds: itemIds }), retries: 2 }); }
   async removeFromPlaylist(playlistId, entryIds) {
     this._evict(`playlist:${playlistId}`);

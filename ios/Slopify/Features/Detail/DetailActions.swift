@@ -58,16 +58,13 @@ final class DetailActions {
         nameDialog = menus.newPlaylistDialog(seed: seed)
     }
 
-    /// A page menu's "Add to playlist": one request with every id; failure shows as the banner.
-    func addTo(_ p: Playlist, ids: [String]) {
-        guard let api, !ids.isEmpty else { return }
-        Task {
-            do {
-                try await api.addToPlaylist(p.id, trackIds: ids)
-                ToastCenter.shared.show(L("Added to {name}", ["name": p.name]))
-                self.libraryChanged()
-            } catch {
-                self.error = Self.message(error)
+    /// A page menu's "Add to playlist": the shared add; failure shows as the banner.
+    func addTo(_ p: Playlist, tracks: [Track]) {
+        guard let menus, !tracks.isEmpty else { return }
+        let store = menus.attachedStore()
+        Task { [weak self] in
+            if await store.add(tracks, to: p, onError: { self?.error = Self.message($0) }) {
+                self?.libraryChanged()
             }
         }
     }
@@ -78,7 +75,7 @@ final class DetailActions {
             self?.newPlaylist(seed: tracks.first)
         }]
         sub += playlists.filter { $0.id != id }.map { p in
-            MenuItem(p.name) { [weak self] in self?.addTo(p, ids: tracks.map(\.id)) }
+            MenuItem(p.name) { [weak self] in self?.addTo(p, tracks: tracks) }
         }
         return sub
     }

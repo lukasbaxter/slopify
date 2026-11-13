@@ -1284,12 +1284,9 @@ export default function Library({
               item._radio ? { label: t('Refresh'), icon: MI.radio, onClick: () => onOpenRadio?.({ Id: item._radio, Name: item._radioName }, { refresh: true }) } : null,
               tracks.length ? { label: t('Add to playlist'), icon: MI.plus, sub: [
                 { label: t('New playlist'), icon: MI.plus, onClick: () => onNewPlaylist?.(tracks[0]) },
-                // One POST with every id (the API takes an array), one toast --
-                // not a request and a toast per track.
-                ...playlists.filter((p) => p.Id !== item.Id).map((p) => ({ key: p.Id, label: p.Name, onClick: async () => {
-                  try { await jf.addToPlaylist(p.Id, tracks.map((t) => t.Id)); notify?.(t('Added to {name}', { name: p.Name })); window.dispatchEvent(new CustomEvent('slopify:librarychanged')); }
-                  catch (e) { setErr(e.message); }
-                } })),
+                // All of them in one go (one POST, one toast); songs already
+                // there are asked about first (App.jsx onAddTo).
+                ...playlists.filter((p) => p.Id !== item.Id).map((p) => ({ key: p.Id, label: p.Name, onClick: () => onAddTo?.(p, tracks) })),
               ] } : null,
               lead ? { label: t('Go to artist'), icon: MI.artist, offline: true, onClick: () => onOpenArtistById(lead.Id) } : null,
               kind === 'Album' ? { label: item.UserData?.IsFavorite ? t('Remove from Your Library') : t('Save to Your Library'), icon: item.UserData?.IsFavorite ? MI.heartOn : MI.heart, onClick: () => onFollowAlbum?.(item, !item.UserData?.IsFavorite) } : null,

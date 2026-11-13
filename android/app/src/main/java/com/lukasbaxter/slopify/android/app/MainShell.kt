@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.toSize
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lukasbaxter.slopify.android.design.overlay.ToastCenter
 import com.lukasbaxter.slopify.android.design.overlay.ToastLayout
+import com.lukasbaxter.slopify.android.design.sheets.DuplicateDialogHost
 import com.lukasbaxter.slopify.android.features.account.AccountDrawer
 import com.lukasbaxter.slopify.android.features.home.HomeView
 import com.lukasbaxter.slopify.android.features.library.LibraryView
@@ -42,6 +43,8 @@ import kotlinx.coroutines.CancellationException
 fun MainShell() {
     val nav = LocalAppModel.current.nav
     val s by nav.state.collectAsStateWithLifecycle()
+    // "Already added" for every Add to playlist (LibraryStore.add), above any page or layer.
+    val duplicate by LocalAppModel.current.library.duplicateQuestion.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val zoom = remember { HomeZoomSources() }
     val stacks = remember { Tab.entries.associateWith { t -> PageStack(t, scope).also { if (t == Tab.Home) it.sources = zoom } } }
@@ -105,4 +108,5 @@ fun MainShell() {
         // Composed on open, so it registers above every page handler.
         if (s.drawerOpen) BackHandler { nav.setDrawerOpen(false) }
     }
+    DuplicateDialogHost(duplicate)
 }

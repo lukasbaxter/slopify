@@ -73,7 +73,7 @@ class TrackMenuBuilder(
     fun actions(remove: ((Track) -> Unit)? = null): TrackMenu.Actions = TrackMenu.Actions(
         addToQueue = { t -> app.player.addToQueue(listOf(t)) },
         newPlaylist = { t -> askName(newPlaylistDialog(t)) },
-        addTo = { p, t -> scope.launch { library.add(listOf(t.id), p) } },
+        addTo = { p, t -> scope.launch { library.add(listOf(t), p) } },
         remove = remove,
         like = { t, _ -> like(t) },
         exclude = { t, on -> exclude(t, on) },

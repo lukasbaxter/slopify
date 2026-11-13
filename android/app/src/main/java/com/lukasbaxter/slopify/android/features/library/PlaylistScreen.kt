@@ -37,7 +37,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lukasbaxter.slopify.android.app.Route
-import com.lukasbaxter.slopify.android.core.api.addToPlaylist
 import com.lukasbaxter.slopify.android.core.api.movePlaylistTrack
 import com.lukasbaxter.slopify.android.core.api.playlist
 import com.lukasbaxter.slopify.android.core.api.playlistRecommended
@@ -212,17 +211,8 @@ internal fun PlaylistScreen(id: String) {
 
     fun addRecommended(t: Track) {
         reco = reco.filter { it.id != t.id }
-        ctx.scope.launch {
-            try {
-                app.account.api.addToPlaylist(id, listOf(t.id))
-                load()
-                store.refreshPlaylists()
-            } catch (x: CancellationException) {
-                throw x
-            } catch (x: Exception) {
-                ToastCenter.shared.show(L("Could not add: {error}", "error" to (x.message ?: x.toString())))
-            }
-        }
+        // The shared add: it bumps this playlist's revision (the page reloads) and toasts.
+        ctx.scope.launch { store.add(listOf(t), playlist ?: Playlist(id, name ?: "")) }
     }
 
     fun trackMenu(e: LibraryPlaylistEntry): MenuSheet = menus.sheet(e.track, remove = { remove(e) })
@@ -237,7 +227,7 @@ internal fun PlaylistScreen(id: String) {
         )
         if (list.isNotEmpty()) {
             val sub = mutableListOf(MenuItem(L("New playlist"), Icon.Plus) { nameDialog = menus.newPlaylistDialog(list.first()) })
-            sub += store.state.value.playlists.filter { it.id != id }.map { other -> MenuItem(other.name) { ctx.scope.launch { store.add(list.map { it.id }, other) } } }
+            sub += store.state.value.playlists.filter { it.id != id }.map { other -> MenuItem(other.name) { ctx.scope.launch { store.add(list, other) } } }
             items += MenuItem(L("Add to playlist"), Icon.Plus, sub = sub)
         }
         // "Download as zip" is out (DECISIONS 5). TODO(lead): offline store "Download" rows.

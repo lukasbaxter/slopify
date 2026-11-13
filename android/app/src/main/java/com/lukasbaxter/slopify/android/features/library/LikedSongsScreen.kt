@@ -133,7 +133,7 @@ internal fun LikedSongsScreen() {
         val items = mutableListOf(MenuItem(L("Add to queue"), Icon.Queue, offline = true) { app.player.addToQueue(tracks) })
         if (tracks.isNotEmpty()) {
             val sub = mutableListOf(MenuItem(L("New playlist"), Icon.Plus) { nameDialog = menus.newPlaylistDialog(tracks.first()) })
-            sub += store.state.value.playlists.map { p -> MenuItem(p.name) { ctx.scope.launch { store.add(tracks.map { it.id }, p) } } }
+            sub += store.state.value.playlists.map { p -> MenuItem(p.name) { ctx.scope.launch { store.add(tracks, p) } } }
             items += MenuItem(L("Add to playlist"), Icon.Plus, sub = sub)
         }
         // TODO(lead): offline store: "Download" / "Remove download" rows (OfflineCollectionActions).

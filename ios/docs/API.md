@@ -207,7 +207,7 @@ forced to choose a new one (§3.4).
   then 401s).
 - Guest writes allowed: logout, `POST /api/plays`, `POST /api/stream/warm`, `POST /api/reports`,
   `PATCH /api/prefs`, `PUT|DELETE /api/likes/:id`, `POST /api/playlists`,
-  `PATCH|DELETE /api/playlists/:id`, `POST /api/playlists/:id/tracks|move`,
+  `PATCH|DELETE /api/playlists/:id`, `POST /api/playlists/:id/tracks|move|contains`,
   `DELETE /api/playlists/:id/tracks/:pos`. Every other non-GET is 403
   `Not available in the demo`. `GET /api/users` returns only the guest itself.
 - Detect a guest by `user.name` starting with `"Guest "` (no flag on `/api/auth/me`), or by
@@ -534,7 +534,8 @@ All playlist routes only see **the caller's own** playlists (404 otherwise).
 | GET | `/api/playlists/:id` | - | `{ ...Playlist, tracks: [Track] }` in playlist order. Tracks no longer in the library are skipped (so indexes can differ from server positions, see gotcha) |
 | PATCH | `/api/playlists/:id` | `{ name: string(1-120) }` | `{ ok: true }` (rename only) |
 | DELETE | `/api/playlists/:id` | - | `{ ok: true }` |
-| POST | `/api/playlists/:id/tracks` | `{ trackIds: string[] (1-2000) }` | `{ ok: true }` appended. 400 if total would exceed 10000 |
+| POST | `/api/playlists/:id/tracks` | `{ trackIds: string[] (1-2000) }` | `{ ok: true }` appended, a song already there included (it goes in again). 400 if total would exceed 10000 |
+| POST | `/api/playlists/:id/contains` | `{ trackIds: string[] (1-2000) }` | `{ ids: string[] }`: those of the given ids already in the playlist, each once, in the order given. Read only. Clients ask this before "Add to playlist" (§8.2) |
 | DELETE | `/api/playlists/:id/tracks/:pos` | - | `{ ok: true }`. `pos` = 0-based position; positions renumber after. Delete several from **highest pos first** |
 | POST | `/api/playlists/:id/move` | `{ from: int≥0, to: int≥0 }` | `{ ok: true }` (no-op if out of range) |
 | POST | `/api/playlists/:id/cover` | raw image bytes (jpeg/png/webp/gif/octet-stream), ≤12 MB | `{ ok: true, cover: "<hash>" }`. 400 `not an image`, 413 |
@@ -574,6 +575,23 @@ Every layout change accepts header **`X-Slopify-Rev: <string ≤64>`** (client-c
 The server then sends every socket of the account `{ type: "prefs", prefs: { _libraryLayout: "<rev>" } }`
 (§20). A client that sees a rev it did not write re-fetches `GET /api/library/layout`.
 Without the header the rev is the server timestamp.
+
+### 8.2 Add to playlist: songs already there
+
+Every "Add to playlist" (a song, an album, a playlist, the queue, a radio) goes one way:
+
+1. `POST /api/playlists/:id/contains` with the ids to add. If that fails (a server without it),
+   go on as if none were there; the add itself still reports its own error.
+2. A song is a duplicate when the playlist has it, or when it came earlier in the same batch
+   (an album added twice in one go). Every other song is always added.
+3. No duplicates: add them all, no dialog. Otherwise ask about each duplicate in turn, naming the
+   song: title `Already added`, body `"{song}" is already in {name}.`, buttons `Add anyway`
+   and `Don't add`. Closing the dialog is `Don't add`. With more than one duplicate left the
+   dialog has a `Do this for all` checkbox; ticked, the choice goes for every duplicate left.
+4. One `POST /api/playlists/:id/tracks` with what is kept, in the order given (none when
+   nothing is kept).
+5. Toast: nothing skipped `Added to {name}`; nothing added `Already in {name}`; else
+   `Added {added} to {name}, skipped {skipped} already there`.
 
 ---
 

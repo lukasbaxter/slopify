@@ -141,6 +141,15 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     })();
     return { ok: true };
   });
+  // Which of these songs the playlist already has, so a client can ask before
+  // adding one again (the add itself always appends, duplicates included).
+  // Each id once, in the order given.
+  app.post('/api/playlists/:id/contains', auth, async (req, reply) => {
+    const p = own(req, (req.params as any).id); if (!p) return reply.code(404).send({ error: 'no such playlist' });
+    const b = z.object({ trackIds: z.array(z.string().max(64)).min(1).max(2000) }).safeParse(req.body); if (!b.success) return reply.code(400).send({ error: 'trackIds required' });
+    const have = new Set((db.prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ?').all(p.id) as any[]).map((r) => r.track_id as string));
+    return { ids: [...new Set(b.data.trackIds)].filter((t) => have.has(t)) };
+  });
   app.delete('/api/playlists/:id/tracks/:pos', auth, async (req, reply) => {
     const p = own(req, (req.params as any).id); if (!p) return reply.code(404).send({ error: 'no such playlist' });
     db.transaction(() => { db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND pos = ?').run(p.id, Number((req.params as any).pos)); renumber.run(p.id, p.id); db.prepare('UPDATE playlists SET updated = ? WHERE id = ?').run(Date.now(), p.id); })();

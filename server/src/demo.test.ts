@@ -43,7 +43,10 @@ describe('demo mode', () => {
   it('a guest can like and edit playlists, but not change the server', async () => {
     const g = await guest();
     expect((await app.inject({ method: 'DELETE', url: '/api/likes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', headers: as(g.token) })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'POST', url: '/api/playlists', payload: { name: 'Mine' }, headers: as(g.token) })).statusCode).toBe(200);
+    const mine = await app.inject({ method: 'POST', url: '/api/playlists', payload: { name: 'Mine' }, headers: as(g.token) });
+    expect(mine.statusCode).toBe(200);
+    // Asking which songs a playlist has (before adding one again) is a read, so a guest may.
+    expect((await app.inject({ method: 'POST', url: `/api/playlists/${mine.json().id}/contains`, payload: { trackIds: ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] }, headers: as(g.token) })).json()).toEqual({ ids: [] });
     for (const [method, url] of [['POST', '/api/admin/scan'], ['POST', '/api/auth/password'], ['POST', '/api/invites'], ['DELETE', `/api/users/${g.user.id}`], ['POST', '/api/users/someone/password'], ['PUT', '/api/admin/tasks/scan/schedule'], ['POST', '/api/import/spotify']] as const) {
       const r = await app.inject({ method, url, payload: {}, headers: as(g.token) });
       expect(r.statusCode, `${method} ${url}`).toBe(403);

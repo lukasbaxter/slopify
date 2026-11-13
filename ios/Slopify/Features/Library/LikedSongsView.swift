@@ -175,7 +175,7 @@ struct LikedSongsView: View {
         var items: [MenuItem] = [MenuItem(L("Add to queue"), icon: .queue, offline: true) { ctx.player.addToQueue(tracks) }]
         if !tracks.isEmpty {
             var sub: [MenuItem] = [MenuItem(L("New playlist"), icon: .plus) { nameDialog = menus.newPlaylistDialog(seed: tracks.first) }]
-            sub += ctx.store.playlists.map { p in MenuItem(p.name) { Task { await ctx.store.add(tracks.map(\.id), to: p) } } }
+            sub += ctx.store.playlists.map { p in MenuItem(p.name) { Task { await ctx.store.add(tracks, to: p) } } }
             items.append(MenuItem(L("Add to playlist"), icon: .plus, sub: sub))
         }
         items += download(tracks).menuItems

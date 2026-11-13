@@ -61,16 +61,16 @@ class DetailActions internal constructor(
         nameDialog = builder.newPlaylistDialog(seed)
     }
 
-    /** A page menu's "Add to playlist": one request with every id (the store toasts the outcome). */
-    private fun addTo(p: Playlist, ids: List<String>) {
-        if (ids.isEmpty()) return
-        scope.launch { app.library.add(ids, p) }
+    /** A page menu's "Add to playlist": one request with every song (the store asks about songs already there and toasts the outcome). */
+    private fun addTo(p: Playlist, tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        scope.launch { app.library.add(tracks, p) }
     }
 
     /** "Add to playlist" submenu of a page menu: New playlist (seeded with the first song) + the others. */
     fun playlistSub(tracks: List<Track>, excluding: String? = null): List<MenuItem> =
         listOf(MenuItem(L("New playlist"), Icon.Plus) { newPlaylist(tracks.firstOrNull()) }) +
-            playlists.filter { it.id != excluding }.map { p -> MenuItem(p.name) { addTo(p, tracks.map { it.id }) } }
+            playlists.filter { it.id != excluding }.map { p -> MenuItem(p.name) { addTo(p, tracks) } }
 
     fun share(kind: TrackMenu.ShareKind, id: String, title: String, by: String?) = builder.share(kind, id, title, by)
 

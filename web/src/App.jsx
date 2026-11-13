@@ -1141,16 +1141,20 @@ export default function App() {
   };
 
   const onReorder = async (pl, track, from, to) => {
-    // Optimistic: move in the UI first, then tell Jellyfin.
-    setDetail((d) => {
-      if (!d) return d;
-      const next = [...d.tracks];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return { ...d, tracks: next };
-    });
+    // Optimistic: move in the UI first, then tell the server. An entry's id is
+    // its position, so the rows are numbered again (a second drag or a remove
+    // used the old numbers and hit the wrong song, 11-13).
+    const reorder = (tracks) => {
+      const next = [...tracks];
+      const [m] = next.splice(from, 1);
+      next.splice(to, 0, m);
+      return next.map((t, i) => (t.PlaylistItemId != null ? { ...t, PlaylistItemId: String(i) } : t));
+    };
+    setDetail((d) => (d ? { ...d, tracks: reorder(d.tracks) } : d));
+    // The queue playing this playlist takes the new order now.
+    if (detail?.tracks) player.followContextOrder?.(pl.Id, reorder(detail.tracks));
     try {
-      await jf.movePlaylistItem(pl.Id, track.PlaylistItemId, to);
+      await jf.movePlaylistItem(pl.Id, from, to);
     } catch (e) {
       notify(t('Could not reorder: {error}', { error: e.message }));
       const { items } = await jf.playlistTracks(pl.Id).catch(() => ({ items: null }));

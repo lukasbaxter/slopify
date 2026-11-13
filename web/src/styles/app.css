@@ -414,7 +414,8 @@ input, textarea, select { font-family: inherit; }
 .trackrow:hover { background: var(--tint-hi); }
 .trackrow.active .trackrow-name > span { color: var(--accent-ink); }
 .trackrow.dragging { opacity: .4; }
-.trackrow.dropbefore { box-shadow: inset 0 2px 0 var(--accent); }
+.trackrow.dropbefore, .dropbefore > .trackrow { box-shadow: inset 0 2px 0 var(--accent); }
+.dropafter > .trackrow { box-shadow: inset 0 -2px 0 var(--accent); }
 
 .trackrow-n { color: var(--fg-dim); font-size: 16px; font-variant-numeric: tabular-nums; width: 36px; height: 36px; position: relative; padding: 0; }
 /* Number and hover glyph occupy the SAME box, each centred; only one is visible. */

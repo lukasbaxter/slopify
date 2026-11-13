@@ -945,6 +945,26 @@ export function usePlayer(jf) {
     const [it] = q.splice(from, 1); q.splice(to, 0, it);
     setQueue(q); queueRef.current = q;
   }, []);
+  // The playlist being played was reordered (its page, 11-13): the songs after
+  // the one playing follow the new order at once. Songs added with "Add to
+  // queue" stay first, as they are. Shuffled, the order shows when shuffle
+  // goes off. Only the queue this device plays.
+  const followContextOrder = useCallback((ctxId, tracks) => {
+    if (!ctxId || contextRef.current !== ctxId || activePlayerRef.current || !tracks?.length) return;
+    const inList = new Set(tracks.map((t) => t.Id));
+    if (shuffleRef.current !== 'off') {
+      let k = 0;
+      originalQueueRef.current = originalQueueRef.current.map((t) => (!t._queued && inList.has(t.Id) && k < tracks.length ? tracks[k++] : t));
+      return;
+    }
+    const q = queueRef.current, cur = indexRef.current;
+    const at = tracks.findIndex((t) => t.Id === q[cur]?.Id);
+    if (at < 0) return;
+    const after = q.slice(cur + 1);
+    const next = [...q.slice(0, cur + 1), ...after.filter((t) => t._queued), ...tracks.slice(at + 1), ...after.filter((t) => !t._queued && !inList.has(t.Id))];
+    setQueue(next); queueRef.current = next;
+    originalQueueRef.current = next;
+  }, []);
   const clearQueued = useCallback(() => {
     const act = activePlayerRef.current;
     if (act && relayRef.current) { relayRef.current.command(act, { action: 'queueClear' }); return; }
@@ -3104,7 +3124,7 @@ export function usePlayer(jf) {
 
   return useMemo(
     () => ({
-      device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, clearQueued, webAudio,
+      device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, followContextOrder, clearQueued, webAudio,
       relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relay: relayInstance,
       // The local element's own clock (the visualizer's timing report).
       debugElement: () => (activeEl ? localBaseRef.current + activeEl.currentTime : null),
@@ -3118,7 +3138,7 @@ export function usePlayer(jf) {
       rehome,
     }),
     // eslint-disable-next-line
-    [device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, clearQueued, webAudio,
+    [device, setDevice, adoptActive, nowPlaying, nowPlayingId, external, patchQueue, syncLiked, contextId, addToQueue, removeFromQueue, moveInQueue, followContextOrder, clearQueued, webAudio,
      relayDevices, lanDevices, registerDevices, attachRelay, applyRoster, executeCommand, roster, relayInstance, shownQueue, shownIndex, current, applyRemoteQueue, applySession, relayTarget,
      shownPlaying, shownPosition, shownDuration, shownVolume, error, shownRepeat, shownShuffle,
      cycleRepeat, cycleShuffle, setShuffleRouted, playQueue, toggle, next,

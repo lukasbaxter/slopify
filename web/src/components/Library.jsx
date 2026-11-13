@@ -1576,7 +1576,8 @@ export default function Library({
                 rowHeight={filtered && shown.some((t) => t._snippet) ? (phone ? 84 : 76) : phone ? 64 : 56}
                 getKey={(t, i) => t.PlaylistItemId || `${t.Id}-${i}`}
                 renderRow={(t, i) => (
-                  <div className={overIdx === i && dragIdx != null && !filtered ? 'dropbefore' : ''}>
+                  // The line shows where the song lands: above the row when it moves up, below when it moves down.
+                  <div className={overIdx === i && dragIdx != null && dragIdx !== i && !filtered ? (dragIdx < i ? 'dropafter' : 'dropbefore') : ''}>
                     <TrackRow
                       {...rowProps(shown, i, {
                         showArt: isPlaylist,

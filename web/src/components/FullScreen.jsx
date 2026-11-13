@@ -118,7 +118,7 @@ export function ProgressiveImg({ lo, hi, ...rest }) {
   return <img src={useProgressiveSrc(lo, hi)} {...rest} />;
 }
 
-export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAlbum, onLike, onAddTo, onNewPlaylist, playlists = [], prefs, onUpdatePrefs, onPanel, devices = [], sessionDevice = null }) {
+export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAlbum, onOpenRadio, onLike, onAddTo, onNewPlaylist, playlists = [], prefs, onUpdatePrefs, onPanel, devices = [], sessionDevice = null }) {
   // Phone: the mini bar always opens on the album view (Spotify); lyrics and
   // the visualizer are a tap away. Desktop remembers the last tab.
   const [tab, setTab] = useState(() => (typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches) ? 'album' : (localStorage.getItem('conduit.fsTab') || 'album'));
@@ -227,7 +227,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
     ] } : null,
     { label: liked ? t('Remove from Liked Songs') : t('Add to Liked Songs'), icon: liked ? I.heartOn : I.heart, onClick: toggleLike },
     { sep: true },
-    { label: t('Go to song radio'), icon: G16.radio, onClick: () => { jf.instantMix(nowPlaying.itemId, 100, 'radio').then((items) => { if (items?.length) player.playQueue(items, 0); }).catch(() => {}); } },
+    { label: t('Go to song radio'), icon: G16.radio, onClick: () => onOpenRadio?.({ Id: nowPlaying.itemId, Name: nowPlaying.title, Type: 'Audio', AlbumId: nowPlaying.albumId }) },
     artistsOf.length > 1
       ? { label: t('Go to artist'), icon: G.artist, sub: artistsOf.map((a) => ({ key: a.Id, label: a.Name, onClick: () => goArtist(a.Id) })) }
       : (artistsOf[0] || nowPlaying?.artistId) ? { label: t('Go to artist'), icon: G.artist, onClick: () => goArtist(artistsOf[0]?.Id || nowPlaying.artistId) } : null,

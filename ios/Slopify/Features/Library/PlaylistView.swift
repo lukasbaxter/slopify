@@ -321,7 +321,7 @@ struct PlaylistView: View {
         let title = name ?? ""
         var items: [MenuItem] = [
             MenuItem(L("Add to queue"), icon: .queue, offline: true) { ctx.player.addToQueue(tracks) },
-            MenuItem(L("Go to radio"), icon: .radio) { Task { await ctx.player.startRadio(seedId: id, context: id) } },
+            MenuItem(L("Go to radio"), icon: .radio) { ctx.nav.open(.radio(seedId: id, name: title.isEmpty ? nil : title)) },
         ]
         if !tracks.isEmpty {
             var sub: [MenuItem] = [MenuItem(L("New playlist"), icon: .plus) { nameDialog = menus.newPlaylistDialog(seed: tracks.first) }]

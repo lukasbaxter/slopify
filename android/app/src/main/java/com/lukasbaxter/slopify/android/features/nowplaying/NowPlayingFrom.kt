@@ -33,6 +33,7 @@ data class NowPlayingFrom(val kind: String, val name: String) {
         fun itemId(ctx: String): String = when {
             ctx.startsWith("artist:") -> ctx.removePrefix("artist:")
             ctx.startsWith("mix:") -> ctx.removePrefix("mix:")
+            ctx.startsWith("radio:") -> ctx.removePrefix("radio:")
             else -> ctx
         }
 
@@ -46,6 +47,12 @@ data class NowPlayingFrom(val kind: String, val name: String) {
                 val n = attempt { api.lookup(id) }?.let { field(it.item, "name") }
                 return if (n != null) NowPlayingFrom(L("PLAYING FROM PLAYLIST"), L("{name} Mix", "name" to n))
                 else NowPlayingFrom(L("PLAYING FROM PLAYLIST"), L("Daily Mix"))
+            }
+            if (ctx.startsWith("radio:")) {
+                // Go to radio's playlist: "<seed> Radio" (Player.jsx).
+                val n = if (id.startsWith("pl_")) attempt { api.playlist(id) }?.playlist?.name
+                else attempt { api.lookup(id) }?.let { field(it.item, "name") ?: field(it.item, "title") }
+                return NowPlayingFrom(L("PLAYING FROM PLAYLIST"), if (n.isNullOrEmpty()) L("Playlist") else L("{name} Radio", "name" to n))
             }
             if (id.startsWith("pl_")) {
                 val p = attempt { api.playlist(id) } ?: return fallback

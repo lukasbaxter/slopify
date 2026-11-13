@@ -378,16 +378,6 @@ class SlopifyPlayerTest {
         assertEquals(listOf("a"), queued)
     }
 
-    @Test fun startRadioPlaysTheMixOrShowsTheError() = runTest {
-        val r = makePlayer()
-        r.b.mixes["seed"] = playerTracks("r1", "r2")
-        r.p.startRadio("seed", "mix:seed")
-        assertEquals(Triple("seed", 100, "radio"), r.b.mixCalls.last())
-        assertEquals(listOf("r1", "r2"), r.ids)
-        assertEquals("mix:seed", r.s.context)
-        assertTrue(r.s.isPlaying)
-    }
-
     @Test fun failureShowsErrorAndNewPlayClearsIt() = runTest {
         val r = makePlayer()
         r.p.play(playerTracks("a"))

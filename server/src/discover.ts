@@ -108,6 +108,49 @@ export async function similarInLibrary(db: DB, a: { id: string; name: string }, 
   return remember(`similar:${a.id}`, out);
 }
 
+// ListenBrainz's similar artists (from what people play in one sitting, its
+// labs API), keyed by the artist's MusicBrainz id found by exact name; only
+// the ones this library has, best first, cached a week. [] when offline or
+// unknown (a failure is not cached).
+const LB_SIMILAR = 'https://labs.api.listenbrainz.org/similar-artists/json';
+const LB_ALGO = 'session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30';
+const WEEK = 7 * 24 * 60 * 60 * 1000;
+export async function lbSimilarInLibrary(db: DB, a: { id: string; name: string }, o: { fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<{ id: string; name: string }[]> {
+  const hit = cached(`lbsimilar:${a.id}`, WEEK); if (hit) return hit;
+  const f = o.fetcher || fetch;
+  const json = (url: string) => f(url, { headers: { 'User-Agent': MB_UA, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) })
+    .then(async (r) => { if (!r.ok) throw new Error(`${url.split('?')[0]} ${r.status}`); return r.json() as any; });
+  try {
+    let mbid: string | null = cached(`mbid:${a.id}`, WEEK);
+    if (mbid === null) {
+      const mb = await json(`https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(`artist:"${a.name.replace(/"/g, '')}"`)}&limit=5&fmt=json`);
+      const best = (mb.artists || []).filter((x: any) => norm(x.name) === norm(a.name)).sort((x: any, y: any) => (y.score || 0) - (x.score || 0))[0];
+      mbid = remember(`mbid:${a.id}`, typeof best?.id === 'string' ? best.id : '');
+    }
+    if (!mbid) return remember(`lbsimilar:${a.id}`, []);
+    const rows = await json(`${LB_SIMILAR}?artist_mbids=${encodeURIComponent(mbid)}&algorithm=${LB_ALGO}`);
+    const byName = db.prepare('SELECT id, name FROM artists WHERE name = ? COLLATE NOCASE');
+    const out: { id: string; name: string }[] = []; const seen = new Set([a.id]);
+    for (const r of (Array.isArray(rows) ? rows : []).sort((x: any, y: any) => (Number(y.score) || 0) - (Number(x.score) || 0))) {
+      const h = typeof r?.name === 'string' ? byName.get(r.name) as { id: string; name: string } | undefined : undefined;
+      if (h && !seen.has(h.id)) { seen.add(h.id); out.push({ id: h.id, name: h.name }); }
+    }
+    return remember(`lbsimilar:${a.id}`, out);
+  } catch (e: any) { o.log?.(`lb similar ${a.name}: ${e.message}`); return []; }
+}
+
+// Artists like this one that the library has, for radio: ListenBrainz's and
+// Deezer's lists taken in turn (LB first: real listening sessions), each
+// artist once. Either one alone when the other has nothing.
+export async function relatedInLibrary(db: DB, a: { id: string; name: string }, o: { fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<{ id: string; name: string }[]> {
+  const [lb, dz] = await Promise.all([lbSimilarInLibrary(db, a, o).catch(() => []), similarInLibrary(db, a, o).catch(() => [])]);
+  const out: { id: string; name: string }[] = []; const seen = new Set([a.id]);
+  for (let i = 0; i < Math.max(lb.length, dz.length); i++) {
+    for (const r of [lb[i], dz[i]]) if (r && !seen.has(r.id)) { seen.add(r.id); out.push(r); }
+  }
+  return out;
+}
+
 // An artist's songs in the order people actually play them: worldwide listen
 // counts from ListenBrainz (their open listening data, keyed by the artist's
 // MusicBrainz id, found by exact name; both cached a week), one row per song

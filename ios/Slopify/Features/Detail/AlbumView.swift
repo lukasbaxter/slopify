@@ -120,7 +120,7 @@ struct AlbumView: View {
         let leadId = a.artistId.flatMap { $0.isEmpty ? nil : $0 }
         var items: [MenuItem] = [
             MenuItem(L("Add to queue"), icon: .queue, offline: true) { player.addToQueue(tracks) },
-            MenuItem(L("Go to radio"), icon: .radio) { actions.radio(id) },
+            MenuItem(L("Go to radio"), icon: .radio) { actions.radio(id, name: a.name) },
         ]
         if !tracks.isEmpty { items.append(MenuItem(L("Add to playlist"), icon: .plus, sub: actions.playlistSub(tracks: tracks, excluding: id))) }
         if let leadId { items.append(MenuItem(L("Go to artist"), icon: .artist, offline: true) { app.nav.push(.artist(id: leadId)) }) }

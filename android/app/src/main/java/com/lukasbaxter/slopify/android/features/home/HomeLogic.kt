@@ -2,10 +2,13 @@ package com.lukasbaxter.slopify.android.features.home
 
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
+import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Playlist
+import com.lukasbaxter.slopify.android.core.model.Radio
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.Track
 import com.lukasbaxter.slopify.android.design.L
+import com.lukasbaxter.slopify.android.design.image.CoverSource
 import kotlinx.serialization.Serializable
 
 /** Pure Home rules, ported from web/src/components/Home.jsx and Library.jsx (UI.md 6.1, 6.3; ios HomeLogic.swift). */
@@ -127,6 +130,30 @@ object HomeLogic {
 
     /** `MIX_COLORS[i % 8]`. */
     fun mixColorIndex(i: Int): Int = ((i % 8) + 8) % 8
+
+    /**
+     * A Daily Mix's or radio's subtitle (API.md §14.1): who is in it, "A, B, C and more", else
+     * "<seed> and more"; null with neither.
+     */
+    fun mixSub(artists: List<MixArtist>, fallback: String?): String? {
+        val names = artists.map { it.name }.filter { it.isNotEmpty() }
+        val name = if (names.isNotEmpty()) names.joinToString(", ") else fallback?.takeIf { it.isNotEmpty() }
+        return name?.let { L("{name} and more", "name" to it) }
+    }
+
+    /** A radio's band colour (API.md §14.4): the seed id's UTF-16 code units summed, `% 8`. */
+    fun radioColorIndex(seedId: String): Int = mixColorIndex(seedId.sumOf { it.code })
+
+    /** A radio's cover: the artist's picture, a song's or album's album cover, the playlist's picture. */
+    fun radioArt(seed: Radio.Seed): CoverSource? = when (seed.kind) {
+        "artist" -> CoverSource.ArtistArt(seed.artistId ?: seed.id, null)
+        "track", "album" -> seed.albumId?.let { CoverSource.AlbumArt(it, null) }
+        "playlist" -> CoverSource.PlaylistArt(seed.id, null)
+        else -> null
+    }
+
+    /** A page that starts itself (Go to radio) plays its first answer once per open, never on a return. */
+    fun shouldAutoplay(autoplay: Boolean, alreadyPlayed: Boolean, trackCount: Int): Boolean = autoplay && !alreadyPlayed && trackCount > 0
 
     /** Home.jsx `topSongsSub`. */
     fun topSongsSub(year: Int, currentYear: Int): String =

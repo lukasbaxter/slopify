@@ -256,8 +256,34 @@ data class TopSongYears(val years: List<Year>) {
     data class Year(val year: Int, val songs: Int, val plays: Int, val top: Track? = null)
 }
 
+/** `artists`: who is in a Daily Mix, its artist first (API.md §14.1). */
 @Serializable
-data class Mix(val items: List<Track>, val from: String? = null, val day: String? = null)
+data class Mix(val items: List<Track>, val from: String? = null, val day: String? = null, val artists: List<MixArtist> = emptyList())
+
+@Serializable
+data class MixArtist(val id: String, val name: String = "")
+
+/** One Made For You tile's day (API.md §14.3). */
+@Serializable
+data class DailyMixSummary(val artistId: String, val day: String? = null, val from: String? = null, val artists: List<MixArtist> = emptyList())
+
+@Serializable
+data class DailyMixSummaries(val items: List<DailyMixSummary> = emptyList())
+
+/** The listener's radio playlist of a seed (API.md §14.4). */
+@Serializable
+data class Radio(
+    val id: String,
+    val seed: Seed,
+    val made: Double = 0.0,
+    val from: String? = null,
+    val artists: List<MixArtist> = emptyList(),
+    val items: List<Track> = emptyList(),
+) {
+    /** `kind`: artist, track, album or playlist. */
+    @Serializable
+    data class Seed(val kind: String, val id: String, val name: String = "", val artistId: String? = null, val albumId: String? = null)
+}
 
 @Serializable
 data class LikesMap(val at: Map<String, Double>, val items: List<Track>? = null)

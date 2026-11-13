@@ -93,8 +93,6 @@ interface Player {
     fun play(tracks: List<Track>, startAt: Int = 0, context: String? = null, shuffle: Boolean? = null)
     fun playNext(tracks: List<Track>)
     fun addToQueue(tracks: List<Track>)
-    /** "Go to song radio": a fresh queue from the server's mix of `seedId`. */
-    suspend fun startRadio(seedId: String, context: String?)
 
     fun togglePlay()
     fun setPlaying(playing: Boolean)

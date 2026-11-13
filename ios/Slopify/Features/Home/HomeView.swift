@@ -161,7 +161,7 @@ struct HomeView: View {
         return shelf(L("Made For You"), seeAll: nil) {
             Shelf(items: Array(seeds.enumerated()).map { MixItem(index: $0.offset, artist: $0.element) }, style: .home) { m in
                 let label = L("Daily Mix {n}", ["n": m.index + 1])
-                MediaCard(title: label, subtitle: L("{name} and more", ["name": m.artist.name]), style: .home,
+                MediaCard(title: label, subtitle: store.mixSub(artistId: m.artist.id, seedName: m.artist.name), style: .home,
                           action: { nav.pushFromHome(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name)) }) {
                     HomeMixArt(source: .artist(id: m.artist.id, image: m.artist.image), color: mixColor(m.index), label: label, pixelSize: 150)
                 }

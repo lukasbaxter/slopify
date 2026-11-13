@@ -11,6 +11,7 @@ import { config } from './config.js';
 import { openDb, type DB } from './db.js';
 import { ensureAdmin, registerAuth } from './auth.js';
 import { registerLibrary } from './library.js';
+import { registerRadio } from './radio.js';
 import { registerStream } from './stream.js';
 import { brainTask, isBrain, registerBrain, registerBrainAuth } from './brain.js';
 import { registerSocial } from './social.js';
@@ -94,6 +95,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerAuth(app, db);
   registerDemo(app, db, { enabled: opts.demo ?? config.demo, template: config.adminUser });
   registerLibrary(app, db, cacheDir);
+  registerRadio(app, db);
   const songCache = new SongCache(db, cacheDir, config.songCacheGb * 1e9, (m) => app.log.warn(m));
   // A song the library lists on the NAS but the ingest has not copied yet is read from the SSD drop folder.
   const incoming = config.ingest.incomingDir ? path.resolve(config.ingest.incomingDir) : null;

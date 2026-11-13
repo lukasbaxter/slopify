@@ -7,13 +7,19 @@ struct HomeMenus {
 
     private var player: Player { menus.app.player }
 
-    /// `radioSeed`: the Daily Mix's artist; nil hides "Go to radio" (a Top Songs year has no seed).
-    func mixPage(title: String, art: CoverSource?, tracks: [Track], radioSeed: String?) -> MenuSheet {
+    /// A page's Go to radio seed: the id, and its name for the radio page's title before it loads.
+    struct RadioSeed: Hashable { var id: String; var name: String? }
+
+    /// `radioSeed`: the Daily Mix's artist; nil hides "Go to radio" (a Top Songs year has no seed,
+    /// a radio page is one). `refresh`: a radio page's Refresh.
+    func mixPage(title: String, art: CoverSource?, tracks: [Track], radioSeed: RadioSeed?, refresh: (() -> Void)? = nil) -> MenuSheet {
         var items: [MenuItem] = [
             MenuItem(L("Add to queue"), icon: .queue, offline: true) { if !tracks.isEmpty { player.addToQueue(tracks) } },
         ]
+        if let refresh { items.append(MenuItem(L("Refresh"), icon: .radio) { refresh() }) }
         if let radioSeed {
-            items.append(MenuItem(L("Go to radio"), icon: .radio) { Task { await player.startRadio(seedId: radioSeed, context: nil) } })
+            let nav = menus.app.nav
+            items.append(MenuItem(L("Go to radio"), icon: .radio) { nav.open(.radio(seedId: radioSeed.id, name: radioSeed.name)) })
         }
         if let first = tracks.first {
             let store = menus.attachedStore()

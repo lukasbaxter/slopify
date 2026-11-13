@@ -10,11 +10,11 @@ import type { DB } from './db.js';
 import { libraryVersion } from './db.js';
 import { artPath, nearestBig, nearestSize, renderBig, SIZES } from './artwork.js';
 import { ensureMosaic, playlistCover } from './mosaic.js';
-import { similarInLibrary } from './discover.js';
+import { popularOrder, relatedInLibrary, similarInLibrary } from './discover.js';
 import { albumGenreMap } from './genres.js';
 import { AUDIO_EXT, COVER_EXT, COVER_NAMES, splitArtists } from './scanner.js';
 import { gainDb } from './loudness.js';
-import { brainNext } from './brain.js';
+import { brainNext, dislikedOf } from './brain.js';
 import { dailyMix, DAILY_SIZE } from './dailymix.js';
 
 export type TrackRow = {
@@ -100,24 +100,56 @@ function mixFrom(db: DB, seeds: TrackRow[], limit: number, skip = new Set(seeds.
   return [seeds[0], ...rows.slice(0, limit - 1)];
 }
 
+// Seeded randomness: the same key gives the same draw (a Daily Mix's day),
+// another key another one. No key: Math.random.
+export function rngOf(key?: string): () => number {
+  if (!key) return Math.random;
+  let s = crypto.createHash('sha1').update(key).digest().readUInt32BE(0);
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const shuffleWith = <T>(xs: T[], r: () => number) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const playsOf = (db: DB, uid?: string) => new Map<string, number>(uid ? (db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]).map((r) => [r.track_id, r.n]) : []);
+// Most played first; a tie by id, so the order holds from one day to the next.
+const byPlays = (plays: Map<string, number>) => (a: TrackRow, b: TrackRow) => (plays.get(b.id) || 0) - (plays.get(a.id) || 0) || (a.id < b.id ? -1 : 1);
+
 // Home's Daily Mix for an artist, Spotify-style: the artist (what this
 // listener plays most first), artists like them that the library has (Deezer,
 // cached), then the artist's genres; interleaved so the artist recurs without
 // running back to back, one copy of each song. `sounds`: songs the brain
 // heard as sounding like the artist (CLAP, dailymix.ts), closest first; they
 // take the others' place, Deezer and genres only topping up a short list.
-export async function artistMix(db: DB, artist: { id: string; name: string }, limit: number, uid?: string, opts: { sounds?: string[] } = {}): Promise<TrackRow[]> {
-  const plays = new Map<string, number>();
-  if (uid) for (const r of db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]) plays.set(r.track_id, r.n);
-  const shuffle = <T>(xs: T[]) => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; } return xs; };
+// `day` (a Daily Mix): the day picks the artist's songs and their order. It
+// opens on one of their seven most played, a different one each day, and
+// draws their other favourites from twice as many as it uses, so the same
+// songs do not come back in the same places every morning.
+export async function artistMix(db: DB, artist: { id: string; name: string }, limit: number, uid?: string, opts: { sounds?: string[]; day?: string } = {}): Promise<TrackRow[]> {
+  const plays = playsOf(db, uid);
+  const rnd = rngOf(opts.day ? `${opts.day}|${artist.id}|${uid || ''}` : undefined);
+  const shuffle = <T>(xs: T[]) => shuffleWith(xs, rnd);
   const byArtist = (aid: string) => db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ?`).all(`%"${aid}"%`) as TrackRow[];
-  // theirs: half the ones they play most, the rest at random
-  const all = shuffle(byArtist(artist.id));
-  const played = all.filter((t) => plays.has(t.id)).sort((a, b) => (plays.get(b.id) || 0) - (plays.get(a.id) || 0));
-  const own = [...played.slice(0, Math.ceil(limit * 0.2)), ...all.filter((t) => !played.slice(0, Math.ceil(limit * 0.2)).includes(t))].slice(0, Math.ceil(limit * 0.4));
+  // theirs: the ones they play most (a fifth of the mix), the rest at random
+  const all = shuffle(byArtist(artist.id).sort((a, b) => (a.id < b.id ? -1 : 1)));
+  const played = all.filter((t) => plays.has(t.id)).sort(byPlays(plays));
+  const nFav = Math.ceil(limit * 0.2);
+  let favs = played.slice(0, nFav);
+  if (opts.day && played.length > 1) {
+    const top = played.slice(0, 7);
+    const n = Math.floor(Date.parse(`${opts.day}T00:00:00Z`) / 86400000);
+    const lead = top[((n % top.length) + top.length) % top.length];
+    favs = [lead, ...shuffle(played.slice(0, nFav * 2).filter((t) => t !== lead)).slice(0, nFav - 1)];
+  }
+  let own = [...favs, ...all.filter((t) => !favs.includes(t))].slice(0, Math.ceil(limit * 0.4));
+  if (opts.day) own = [own[0], ...shuffle(own.slice(1))].filter(Boolean);
   const ids = opts.sounds || [];
   const found = ids.length ? new Map((db.prepare(`${TRACK_SELECT} WHERE t.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as TrackRow[]).map((r) => [r.id, r])) : new Map<string, TrackRow>();
-  const heard = ids.map((id) => found.get(id)).filter((t): t is TrackRow => !!t && !(JSON.parse(t.artist_ids) as string[]).includes(artist.id));
+  let heard = ids.map((id) => found.get(id)).filter((t): t is TrackRow => !!t && !(JSON.parse(t.artist_ids) as string[]).includes(artist.id));
+  // The closest few open the mix; with a day, the rest in the day's order.
+  if (opts.day) heard = [...heard.slice(0, 3), ...shuffle(heard.slice(3))];
   const others: TrackRow[] = [];
   if (heard.length < limit - own.length) {
     let similar: { id: string; name: string }[] = [];
@@ -129,31 +161,38 @@ export async function artistMix(db: DB, artist: { id: string; name: string }, li
     for (const t of all) for (const g of JSON.parse(t.genres) as string[]) genres.set(g, (genres.get(g) || 0) + 1);
     for (const [g] of [...genres].sort((a, b) => b[1] - a[1]).slice(0, 3)) others.push(...db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.artist_ids NOT LIKE ? ORDER BY RANDOM() LIMIT 40`).all(`%${JSON.stringify(g)}%`, `%"${artist.id}"%`) as TrackRow[]);
   }
-  // The brain's picks closest first (the mix opens on what sounds most like them), the rest shuffled after.
   return interleave(own, [...heard, ...shuffle(others)], limit);
 }
 
-// Radio from an artist, an album or a playlist: three sources, mixed.
-//   - related artists: Deezer's list, the ones this library has;
+// Radio from an artist, a song, an album or a playlist (Go to radio, radio.ts
+// keeps it as the listener's radio playlist). Three sources:
 //   - the brain (CLAP + the model trained on this house's listening),
 //     seeded with the songs themselves and the related artists' songs;
-//   - for an artist, the artist's own songs (what they play most first).
-// `ask` is the brain (radio mode) or null when it is off or slow: then the
-// older mixes (artistMix / mixForSet) answer instead.
+//   - related artists the library has: ListenBrainz's similar artists and
+//     Deezer's related ones (relatedInLibrary, cached);
+//   - the seed's own artist: their other songs, what they play most first.
+// `ask` is the brain (radio mode); null from it (off, slow, down) means the
+// related artists and the seed's genres fill in. arrangeRadio orders it all.
 export type RadioAsk = (seeds: string[], n: number, exclude: string[]) => Promise<string[] | null>;
-const shuffled = <T>(xs: T[]) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+export type RadioKind = 'artist' | 'track' | 'album' | 'playlist';
+export type RelatedOf = (a: { id: string; name: string }) => Promise<{ id: string; name: string }[]>;
+type RadioOpts = { uid?: string; related?: RelatedOf };
+const shuffled = <T>(xs: T[]) => shuffleWith(xs, Math.random);
 const byArtistId = (db: DB, aid: string) => db.prepare(`${TRACK_SELECT} WHERE t.artist_ids LIKE ?`).all(`%"${aid}"%`) as TrackRow[];
+const artistsOf = (t: TrackRow) => JSON.parse(t.artist_ids) as string[];
+const artistRow = (db: DB, aid: string) => db.prepare('SELECT id, name FROM artists WHERE id = ?').get(aid) as { id: string; name: string } | undefined;
 // Brain picks and related artists' songs, two to one.
 function blend(brain: TrackRow[], related: TrackRow[]): TrackRow[] {
   const out: TrackRow[] = []; let i = 0, j = 0;
   while (i < brain.length || j < related.length) { if (i < brain.length) out.push(brain[i++]); if (i < brain.length) out.push(brain[i++]); if (j < related.length) out.push(related[j++]); }
   return out;
 }
-async function relatedSongs(db: DB, artists: { id: string; name: string }[], perArtist: number, skip: Set<string>) {
-  const lists = await Promise.all(artists.map((a) => similarInLibrary(db, a).catch(() => [] as { id: string; name: string }[])));
+async function relatedSongs(db: DB, artists: { id: string; name: string }[], perArtist: number, skip: Set<string>, related: RelatedOf, maxArtists = 12) {
+  const lists = await Promise.all(artists.map((a) => related(a).catch(() => [] as { id: string; name: string }[])));
   const seen = new Set(artists.map((a) => a.id)); const out: TrackRow[][] = [];
-  for (const list of lists) for (const r of list.slice(0, 8)) {
-    if (seen.has(r.id)) continue; seen.add(r.id);
+  // Each seed artist's list in turn, so a set's artists all get theirs.
+  for (let k = 0; out.length < maxArtists && lists.some((l) => l[k]); k++) for (const list of lists) {
+    const r = list[k]; if (!r || seen.has(r.id) || out.length >= maxArtists) continue; seen.add(r.id);
     out.push(shuffled(byArtistId(db, r.id).filter((t) => !skip.has(t.id))).slice(0, perArtist));
   }
   // Round-robin, so every related artist comes up early.
@@ -161,42 +200,141 @@ async function relatedSongs(db: DB, artists: { id: string; name: string }[], per
   for (let k = 0; k < perArtist; k++) for (const l of out) if (l[k]) flat.push(l[k]);
   return flat;
 }
-
-export async function artistRadio(db: DB, artist: { id: string; name: string }, limit: number, uid: string, ask: RadioAsk): Promise<TrackRow[]> {
-  const plays = new Map<string, number>((db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]).map((r) => [r.track_id, r.n]));
-  const all = shuffled(byArtistId(db, artist.id));
-  const played = all.filter((t) => plays.has(t.id)).sort((a, b) => (plays.get(b.id) || 0) - (plays.get(a.id) || 0));
-  const top = played.slice(0, Math.ceil(limit * 0.2));
-  const own = [...top, ...all.filter((t) => !top.includes(t))].slice(0, Math.ceil(limit * 0.4));
-  const theirs = new Set(all.map((t) => t.id));
-  const related = await relatedSongs(db, [artist], 3, theirs);
-  // Seeds: their most played (else any) songs, then one per related artist.
-  const seeds = [...(played.length ? played : all).slice(0, 6), ...related.slice(0, 6)].map((t) => t.id);
-  const ids = seeds.length ? await ask(seeds, limit, [...theirs]) : null;
-  if (!ids) return artistMix(db, artist, limit, uid);
-  const brain = tracksRows(db, ids).filter((t) => !theirs.has(t.id));
-  return interleave(own, blend(brain, related), limit);
+// Songs of the seed's genres by other artists, for a list still short.
+function genreSongs(db: DB, from: TrackRow[], notArtists: Set<string>, n: number): TrackRow[] {
+  const genres = new Map<string, number>();
+  for (const t of from) for (const g of JSON.parse(t.genres) as string[]) genres.set(g, (genres.get(g) || 0) + 1);
+  const out: TrackRow[] = [];
+  for (const [g] of [...genres].sort((a, b) => b[1] - a[1]).slice(0, 3)) out.push(...db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? ORDER BY RANDOM() LIMIT ?`).all(`%${JSON.stringify(g)}%`, n) as TrackRow[]);
+  if (out.length < n) out.push(...db.prepare(`${TRACK_SELECT} ORDER BY RANDOM() LIMIT ?`).all(n) as TrackRow[]);
+  return shuffled(out.filter((t) => !artistsOf(t).some((a) => notArtists.has(a))));
 }
 
-export async function setRadio(db: DB, id: string, limit: number, ask: RadioAsk): Promise<TrackRow[] | null> {
+// The radio's order: it opens on the seed song, the seed's artists come
+// back every `every` songs (a quarter for an artist), no artist plays twice
+// in a row, any other artist at most `perArtist` times, one copy of each
+// song (a remaster or live take of the same title counts as one), nothing in
+// `skip` (dislikes). It stops short rather than break those rules.
+export function arrangeRadio(lead: TrackRow | null, seedSongs: TrackRow[], others: TrackRow[], limit: number,
+  o: { every?: number; perArtist?: number; skip?: Set<string>; seedArtists?: Set<string> } = {}): TrackRow[] {
+  const every = Math.max(2, o.every ?? 4), perArtist = o.perArtist ?? 3, skip = o.skip ?? new Set<string>();
+  const seedArtists = o.seedArtists ?? new Set(lead ? artistsOf(lead) : []);
+  const out: TrackRow[] = []; const ids = new Set<string>(), keys = new Set<string>(); const count = new Map<string, number>();
+  const keyOf = (t: TrackRow) => `${t.artist.toLowerCase()}|${t.title.toLowerCase().replace(/\s*[([].*$/, '').replace(/\s+-\s+.*$/, '').trim()}`;
+  const used = (t: TrackRow) => skip.has(t.id) || ids.has(t.id) || keys.has(keyOf(t));
+  const capOk = (t: TrackRow) => artistsOf(t).every((a) => seedArtists.has(a) || (count.get(a) || 0) < perArtist);
+  const place = (t: TrackRow) => { out.push(t); ids.add(t.id); keys.add(keyOf(t)); for (const a of artistsOf(t)) count.set(a, (count.get(a) || 0) + 1); };
+  const take = (q: TrackRow[]) => {
+    const prev = new Set(out.length ? artistsOf(out[out.length - 1]) : []);
+    for (let i = 0; i < q.length; i++) {
+      const t = q[i];
+      if (used(t)) { q.splice(i--, 1); continue; }
+      if (artistsOf(t).some((a) => prev.has(a)) || !capOk(t)) continue;
+      q.splice(i, 1); return t;
+    }
+    return null;
+  };
+  const mine = [...seedSongs], rest = [...others];
+  if (lead && !skip.has(lead.id)) place(lead);
+  while (out.length < limit) {
+    const theirs = out.length % every === 0;
+    const t = theirs ? take(mine) ?? take(rest) : take(rest) ?? null;
+    // Out of others: the seed's own songs may fill in, still never two in a row.
+    const u = t ?? (theirs ? null : take(mine));
+    if (!u) break;
+    place(u);
+  }
+  return out;
+}
+
+export async function buildRadio(db: DB, seed: { kind: RadioKind; id: string }, limit: number, ask: RadioAsk, o: RadioOpts = {}): Promise<{ tracks: TrackRow[]; from: 'brain' | 'own' } | null> {
+  const related: RelatedOf = o.related ?? ((a) => relatedInLibrary(db, a));
+  const plays = playsOf(db, o.uid);
+  const skip = new Set(o.uid ? dislikedOf(db, o.uid) : []);
+  let lead: TrackRow | null, own: TrackRow[], exclude: Set<string>, main: { id: string; name: string }[], seeds: (rel: TrackRow[]) => string[], every: number, perRelated: number;
+  if (seed.kind === 'artist') {
+    const artist = artistRow(db, seed.id); if (!artist) return null;
+    const all = shuffled(byArtistId(db, artist.id));
+    if (!all.length) return null;
+    const played = all.filter((t) => plays.has(t.id)).sort(byPlays(plays));
+    // Nothing of theirs played here: the world's favourites (ListenBrainz) lead.
+    const ranked = played.length ? played : await popularOrder(db, artist).then((ids) => { const by = new Map(all.map((t) => [t.id, t])); return ids.map((x) => by.get(x)!).filter(Boolean); }).catch(() => all);
+    const top = (ranked.length ? ranked : all).slice(0, 5);
+    lead = top[Math.floor(Math.random() * top.length)];
+    // Their favourites and the rest, half and half, after the lead.
+    const favs = shuffled(ranked.slice(0, Math.ceil(limit * 0.3)).filter((t) => t !== lead));
+    const rest = shuffled(all.filter((t) => t !== lead && !favs.includes(t)));
+    own = []; for (let i = 0; own.length < all.length - 1 && (i < favs.length || i < rest.length); i++) { if (favs[i]) own.push(favs[i]); if (rest[i]) own.push(rest[i]); }
+    exclude = new Set(all.map((t) => t.id));
+    main = [artist];
+    seeds = (rel) => [...(ranked.length ? ranked : all).slice(0, 6), ...rel.slice(0, 6)].map((t) => t.id);
+    every = 4; perRelated = 3;
+  } else if (seed.kind === 'track') {
+    lead = (db.prepare(`${TRACK_SELECT} WHERE t.id = ?`).get(seed.id) as TrackRow | undefined) ?? null;
+    if (!lead) return null;
+    const first = artistRow(db, artistsOf(lead)[0] || '');
+    const theirs = first ? byArtistId(db, first.id) : [];
+    // Their eight most played (in a new order each time), then the rest.
+    const mine = theirs.filter((t) => t.id !== lead!.id), played = mine.filter((t) => plays.has(t.id)).sort(byPlays(plays));
+    own = [...shuffled(played.slice(0, 8)), ...shuffled(mine.filter((t) => !played.slice(0, 8).includes(t)))];
+    exclude = new Set([lead.id, ...theirs.map((t) => t.id)]);
+    main = first ? [first] : [];
+    seeds = () => [lead!.id];
+    every = 5; perRelated = 3;
+  } else {
+    const songs = (seed.kind === 'album'
+      ? db.prepare(`${TRACK_SELECT} WHERE t.album_id = ?`).all(seed.id)
+      : db.prepare(`${TRACK_SELECT} JOIN playlist_tracks p ON p.track_id = t.id WHERE p.playlist_id = ? ORDER BY p.pos`).all(seed.id)) as TrackRow[];
+    if (!songs.length) return null;
+    const inSet = new Set(songs.map((t) => t.id));
+    const pick = shuffled(songs.filter((t) => !skip.has(t.id)));
+    lead = pick[0] ?? songs[0];
+    // The set's main artists (most songs first): their songs outside it recur.
+    const n = new Map<string, number>();
+    for (const t of songs) for (const a of artistsOf(t)) n.set(a, (n.get(a) || 0) + 1);
+    main = [...n].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([aid]) => artistRow(db, aid)).filter((a): a is { id: string; name: string } => !!a);
+    own = shuffled(main.flatMap((a) => byArtistId(db, a.id)).filter((t) => !inSet.has(t.id)));
+    exclude = new Set([...inSet, ...own.map((t) => t.id)]);
+    const l = lead;
+    seeds = () => [l, ...pick.filter((t) => t !== l).slice(0, 14)].map((t) => t.id);
+    every = 5; perRelated = 2;
+  }
+  const rel = await relatedSongs(db, main, perRelated, exclude, related);
+  const asked = await ask(seeds(rel), Math.ceil(limit * 1.6), [...exclude]);
+  const brain = asked ? tracksRows(db, asked).filter((t) => !exclude.has(t.id)) : [];
+  let others = asked ? blend(brain, rel) : [...rel];
+  // No brain, or a short answer: more of the related artists, then the genres.
+  const mainIds = new Set([...main.map((a) => a.id), ...(lead ? artistsOf(lead) : [])]);
+  const have = () => new Set(others.map((t) => t.id));
+  if (others.length < limit) { const h = have(); others = [...others, ...shuffled(await relatedSongs(db, main, 6, exclude, related)).filter((t) => !h.has(t.id))]; }
+  if (others.length < limit * 1.2) { const h = have(); others = [...others, ...genreSongs(db, [lead!, ...own.slice(0, 20)], mainIds, limit * 2).filter((t) => !exclude.has(t.id) && !h.has(t.id))]; }
+  const tracks = arrangeRadio(lead, own, others, limit, { every, skip, seedArtists: seed.kind === 'artist' || seed.kind === 'track' ? new Set([...mainIds]) : new Set(main.map((a) => a.id)) });
+  return { tracks, from: asked ? 'brain' : 'own' };
+}
+
+// The older entry points (the ?mode=radio mix, "Play" on an artist card).
+export async function artistRadio(db: DB, artist: { id: string; name: string }, limit: number, uid: string, ask: RadioAsk, o: Omit<RadioOpts, 'uid'> = {}): Promise<TrackRow[]> {
+  return (await buildRadio(db, { kind: 'artist', id: artist.id }, limit, ask, { ...o, uid }))?.tracks ?? [];
+}
+export async function setRadio(db: DB, id: string, limit: number, ask: RadioAsk, o: RadioOpts = {}): Promise<TrackRow[] | null> {
   const album = db.prepare('SELECT 1 FROM albums WHERE id = ?').get(id);
-  const songs = (album
-    ? db.prepare(`${TRACK_SELECT} WHERE t.album_id = ?`).all(id)
-    : db.prepare(`${TRACK_SELECT} JOIN playlist_tracks p ON p.track_id = t.id WHERE p.playlist_id = ? ORDER BY p.pos`).all(id)) as TrackRow[];
-  if (!songs.length) return null;
-  const inSet = new Set(songs.map((t) => t.id));
-  const lead = songs[Math.floor(Math.random() * songs.length)];
-  // The set's main artists (most songs first) and the artists related to them.
-  const count = new Map<string, number>();
-  for (const t of songs) for (const a of JSON.parse(t.artist_ids) as string[]) count.set(a, (count.get(a) || 0) + 1);
-  const main = [...count].sort((a, b) => b[1] - a[1]).slice(0, 4)
-    .map(([aid]) => db.prepare('SELECT id, name FROM artists WHERE id = ?').get(aid) as { id: string; name: string } | undefined).filter((a): a is { id: string; name: string } => !!a);
-  const related = await relatedSongs(db, main, 2, inSet);
-  const seeds = [lead, ...shuffled(songs.filter((t) => t !== lead)).slice(0, 14)].map((t) => t.id);
-  const ids = await ask(seeds, limit, [...inSet]);
-  if (!ids) return mixForSet(db, id, limit);
-  const brain = tracksRows(db, ids).filter((t) => !inSet.has(t.id));
-  return interleave([lead], blend(brain, related), limit);
+  return (await buildRadio(db, { kind: album ? 'album' : 'playlist', id }, limit, ask, o))?.tracks ?? null;
+}
+
+// The brain in radio mode for one listener, minus what their queue holds.
+export const radioAskFor = (app: FastifyInstance, db: DB, uid: string): RadioAsk => (seeds, n, exclude) => {
+  const queue = ((app as any).sessionOf?.(uid)?.queue || []) as string[];
+  return brainNext(db, { user: uid, mode: 'radio', seeds, n, exclude: [...exclude, ...queue.slice(-500)].slice(-2000) }, { log: (m) => app.log.info(m) });
+};
+
+// Who a mix or a radio is: its seed artist first, then the artists with the
+// most songs in its first `within` (what its page shows), up to `n`.
+export function mixArtists(db: DB, ids: string[], seedArtist: string | null, n = 3, within = 50): { id: string; name: string }[] {
+  const rows = tracksRows(db, ids.slice(0, within));
+  const count = new Map<string, { n: number; at: number }>();
+  rows.forEach((t, i) => { for (const a of artistsOf(t).slice(0, 1)) { const c = count.get(a); count.set(a, { n: (c?.n || 0) + 1, at: c?.at ?? i }); } });
+  const order = [...count].sort((x, y) => y[1].n - x[1].n || x[1].at - y[1].at).map(([a]) => a).filter((a) => a !== seedArtist);
+  return [...(seedArtist ? [seedArtist] : []), ...order].slice(0, n).map((a) => artistRow(db, a)).filter((a): a is { id: string; name: string } => !!a);
 }
 
 function tracksRows(db: DB, ids: string[]): TrackRow[] {
@@ -300,10 +438,9 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const artists = (db.prepare(`SELECT * FROM artists WHERE ${where('name')} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(artistOut);
     return { tracks, albums, artists };
   });
-  const radioAsk = (uid: string): RadioAsk => (seeds, n, exclude) => {
-    const queue = ((app as any).sessionOf?.(uid)?.queue || []) as string[];
-    return brainNext(db, { user: uid, mode: 'radio', seeds, n, exclude: [...exclude, ...queue.slice(-500)].slice(-2000) }, { log: (m) => app.log.info(m) });
-  };
+  const radioAsk = (uid: string) => radioAskFor(app, db, uid);
+  const todaysMix = (artist: { id: string; name: string }, me: string, tzo: unknown) =>
+    dailyMix(db, artist.id, me, (sounds, day) => artistMix(db, artist, DAILY_SIZE, me, { sounds, day }), { tzo, log: (m) => app.log.info(m) });
   app.get('/api/tracks/:id/mix', auth, async (req, reply) => {
     const id = (req.params as any).id as string; const limit = Math.min(200, Number((req.query as any).limit) || 100);
     // An artist seeds Home's Daily Mixes.
@@ -314,8 +451,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
       // the Daily Mix (Home's tile, its page, a pinned artist) is the day's.
       if (me && (req.query as any).mode === 'radio') return { items: (await artistRadio(db, artist, limit, me, radioAsk(me))).map(trackOut) };
       if (!me || (req.query as any).mode) return { items: (await artistMix(db, artist, limit, me)).map(trackOut) };
-      const m = await dailyMix(db, artist.id, me, (sounds) => artistMix(db, artist, DAILY_SIZE, me, { sounds }), { tzo: (req.query as any).tzo, log: (m) => app.log.info(m) });
-      return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day };
+      const m = await todaysMix(artist, me, (req.query as any).tzo);
+      return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day, artists: mixArtists(db, m.ids, artist.id) };
     }
     // A song: the brain first (smart shuffle and autoplay land here when the
     // queue runs out; ?mode=radio for a song's radio), its own mix otherwise.
@@ -336,6 +473,19 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const items = mixFor(db, id, limit) || mixForSet(db, id, limit);
     if (!items) return reply.code(404).send({ error: 'no such track' });
     return { items: items.map(trackOut) };
+  });
+  // Home's Made For You tiles: today's mix of each seed artist (made now if
+  // it is a new day), and who is in it, so a tile reads as today's.
+  app.get('/api/daily-mixes', auth, async (req) => {
+    const me = (req as any).user.id as string;
+    const ids = [...new Set(String((req.query as any).ids || '').split(',').filter((x) => /^[0-9a-f]{32}$/.test(x)))].slice(0, 12);
+    const items = await Promise.all(ids.map(async (id) => {
+      const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
+      if (!artist) return null;
+      const m = await todaysMix(artist, me, (req.query as any).tzo);
+      return { artistId: id, day: m.day, from: m.from, artists: mixArtists(db, m.ids, id) };
+    }));
+    return { items: items.filter(Boolean) };
   });
   // Search page tiles: one per canonical genre (genres.ts), covers from the
   // genre's most played albums, biggest shelves first.

@@ -7,6 +7,8 @@ import com.lukasbaxter.slopify.android.core.model.Artist
 import com.lukasbaxter.slopify.android.core.model.ArtistDetail
 import com.lukasbaxter.slopify.android.core.model.BrowseTile
 import com.lukasbaxter.slopify.android.core.model.Created
+import com.lukasbaxter.slopify.android.core.model.DailyMixSummaries
+import com.lukasbaxter.slopify.android.core.model.DailyMixSummary
 import com.lukasbaxter.slopify.android.core.model.DeviceToken
 import com.lukasbaxter.slopify.android.core.model.Discography
 import com.lukasbaxter.slopify.android.core.model.DownloadScope
@@ -30,6 +32,7 @@ import com.lukasbaxter.slopify.android.core.model.Lyrics
 import com.lukasbaxter.slopify.android.core.model.Mix
 import com.lukasbaxter.slopify.android.core.model.Ok
 import com.lukasbaxter.slopify.android.core.model.Page
+import com.lukasbaxter.slopify.android.core.model.Radio
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.PlaylistDetail
 import com.lukasbaxter.slopify.android.core.model.Prefs
@@ -245,6 +248,15 @@ suspend fun ApiClient.myLyricJobs(): List<LyricJob> = get<LyricJobs>("api/lyrics
 
 suspend fun ApiClient.mix(id: String, limit: Int? = null, mode: String? = null): Mix =
     get("api/tracks/$id/mix", mapOf("limit" to limit?.toString(), "mode" to mode, "tzo" to tzo()))
+
+/** Go to radio (§14.4): the listener's radio playlist of an artist, song, album or own playlist. */
+suspend fun ApiClient.radio(seedId: String, refresh: Boolean = false): Radio =
+    request("POST", "api/radio/$seedId", mapOf("refresh" to if (refresh) "1" else null), null, Radio.serializer(), null)
+
+/** Home's Made For You tiles (§14.3): today's mix of each seed artist and who is in it. */
+suspend fun ApiClient.dailyMixes(ids: List<String>): List<DailyMixSummary> =
+    if (ids.isEmpty()) emptyList()
+    else get<DailyMixSummaries>("api/daily-mixes", mapOf("ids" to ids.take(12).joinToString(","), "tzo" to tzo())).items
 
 /** Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s. */
 suspend fun ApiClient.radar(): List<Release> = get<RadarR>("api/radar", timeout = 120.0).releases ?: emptyList()

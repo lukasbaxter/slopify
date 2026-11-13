@@ -4,6 +4,7 @@ import com.lukasbaxter.slopify.android.core.api.ApiClient
 import com.lukasbaxter.slopify.android.core.api.ApiError
 import com.lukasbaxter.slopify.android.core.api.albums
 import com.lukasbaxter.slopify.android.core.api.artists
+import com.lukasbaxter.slopify.android.core.api.dailyMixes
 import com.lukasbaxter.slopify.android.core.api.home
 import com.lukasbaxter.slopify.android.core.api.playlists
 import com.lukasbaxter.slopify.android.core.api.radar
@@ -12,6 +13,7 @@ import com.lukasbaxter.slopify.android.core.attempt
 import com.lukasbaxter.slopify.android.core.auth.Account
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
+import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
@@ -44,6 +46,8 @@ data class HomeSnapshot(
     val playlists: List<Playlist> = emptyList(),
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
+    /** Who is in each Daily Mix today, by seed artist (API.md §14.3): the tiles' and pages' subtitles. */
+    val mixArtists: Map<String, List<MixArtist>> = emptyMap(),
 ) {
     val shortcuts: List<HomeLogic.Shortcut> get() = HomeLogic.shortcuts(recent, playlists, albums)
     val mixSeeds: List<HomeLogic.RankedArtist> get() = HomeLogic.mixSeeds(topArtists, artists)
@@ -114,8 +118,11 @@ class HomeStore(
         }
         inflight = job
         job.join()
+        // Today's Daily Mixes, once the seeds are known (they come from the lists above).
+        val mixes = scope.launch { loadMixes(api) }
+        mixes.join()
         if (inflight === job) inflight = null
-        if (job.isCancelled || forKey != key) return
+        if (job.isCancelled || mixes.isCancelled || forKey != key) return
         loadedAt = now()
         persist()
     }
@@ -133,6 +140,15 @@ class HomeStore(
                 ),
             )
         }
+    }
+
+    /** The fresh answer replaces the kept one, so a new day's tiles never show yesterday's mix. */
+    private suspend fun loadMixes(api: ApiClient) {
+        val ids = data.mixSeeds.map { it.id }
+        if (ids.isEmpty()) return
+        val got = attempt { api.dailyMixes(ids) } ?: return
+        currentCoroutineContext().ensureActive()
+        mutable.update { it.copy(data = it.data.copy(mixArtists = got.associate { m -> m.artistId to m.artists })) }
     }
 
     private suspend fun loadYears(api: ApiClient) {

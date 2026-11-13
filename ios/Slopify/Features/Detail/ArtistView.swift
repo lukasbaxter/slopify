@@ -219,7 +219,7 @@ struct ArtistView: View {
         var items: [MenuItem] = [
             MenuItem(L("Add to queue"), icon: .queue, offline: true) { player.addToQueue(tracks) },
             MenuItem(following ? L("Unfollow") : L("Follow"), icon: .follow) { toggleFollow() },
-            MenuItem(L("Go to radio"), icon: .radio) { actions.radio(id) },
+            MenuItem(L("Go to radio"), icon: .radio) { actions.radio(id, name: a.name) },
         ]
         if !tracks.isEmpty { items.append(MenuItem(L("Add to playlist"), icon: .plus, sub: actions.playlistSub(tracks: tracks))) }
         items.append(MenuItem(L("Share"), icon: .share) { actions.share(.artist, id: id, title: a.name, by: nil) })

@@ -8,6 +8,7 @@ import { SessionLink } from './api/session.js';
 import GeneratePlaylist from './components/GeneratePlaylist.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Library, { LIKED_ID } from './components/Library.jsx';
+import { mixSub, radioColor } from './components/Home.jsx';
 import Player, { PlayingElsewhereBar, sessionDeviceOf } from './components/Player.jsx';
 import RightPanel from './components/RightPanel.jsx';
 import FullScreen from './components/FullScreen.jsx';
@@ -967,6 +968,26 @@ export default function App() {
   // 150) and cached so a reopen paints at once. No Filters=IsFavorite query,
   // so nothing can "vanish" between an optimistic row and a server list.
   const likedRows = (ids) => ids.map((id) => likedCacheRef.current.get(id)).filter(Boolean);
+  // Go to radio (an artist, song, album or playlist): the listener's radio
+  // playlist (server: radio.ts, kept a day), opened as a page like a Daily
+  // Mix's and started from the top. refresh: a new one now.
+  const openRadio = async (seed, { refresh = false } = {}) => {
+    if (!seed?.Id) return;
+    const id = `radio:${seed.Id}`;
+    const art = (artId) => jf.imageUrl(artId, { maxHeight: 464, full: true });
+    const page = (name, artId, sub) => ({ Id: id, Name: name ? t('{name} Radio', { name }) : '', Type: 'Playlist', _mix: true, _radio: seed.Id, _radioName: name, _art: art(artId), _color: radioColor(seed.Id), _sub: sub });
+    setView('home');
+    setDetail({ item: page(seed.Name, seed.Type === 'Audio' && seed.AlbumId ? seed.AlbumId : seed.Id, null), tracks: [], kind: 'Playlist', loading: true });
+    try {
+      const r = await jf.radio(seed.Id, { refresh });
+      const artId = r.seed.kind === 'track' || r.seed.kind === 'album' ? r.seed.albumId || r.seed.id : r.seed.id;
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, item: page(r.seed.name, artId, mixSub(r.artists)), tracks: r.items, loading: false } : d));
+      if (r.items.length) player.playQueue(r.items, 0, id);
+    } catch (e) {
+      if (!e.offline) notify(e.message, 4000);
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d));
+    }
+  };
   const openLiked = async () => {
     const item = { Id: LIKED_ID, Name: t('Liked Songs'), Type: 'Playlist' };
     setView('home');
@@ -1699,6 +1720,7 @@ export default function App() {
           likedCount={likedCount}
           onOpenArtistById={openArtistById}
           onOpenAlbumById={openAlbumById}
+          onOpenRadio={openRadio}
           onExclude={onExclude}
           onDownload={onDownload}
           seeAll={seeAll}
@@ -1808,7 +1830,7 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
         onFullScreen={openFullScreen}
       />
       <PlayingElsewhereBar player={player} />
-      {fullScreen && <FullScreen player={player} jf={jf} onClose={closeFullScreen} onOpenArtist={leaveFullScreenTo(openArtistById)} onOpenAlbum={leaveFullScreenTo(openAlbumById)} onLike={onLike} onAddTo={onAddTo} onNewPlaylist={onNewPlaylistWithTrack} playlists={playlists} prefs={prefs} onUpdatePrefs={updatePrefs} onPanel={setPanel} devices={[...devices, ...player.relayDevices, ...player.lanDevices]} sessionDevice={sessionDeviceOf(player, [...devices, ...player.relayDevices, ...player.lanDevices])} />}
+      {fullScreen && <FullScreen player={player} jf={jf} onClose={closeFullScreen} onOpenArtist={leaveFullScreenTo(openArtistById)} onOpenAlbum={leaveFullScreenTo(openAlbumById)} onOpenRadio={leaveFullScreenTo(openRadio)} onLike={onLike} onAddTo={onAddTo} onNewPlaylist={onNewPlaylistWithTrack} playlists={playlists} prefs={prefs} onUpdatePrefs={updatePrefs} onPanel={setPanel} devices={[...devices, ...player.relayDevices, ...player.lanDevices]} sessionDevice={sessionDeviceOf(player, [...devices, ...player.relayDevices, ...player.lanDevices])} />}
     </div>
   );
 }

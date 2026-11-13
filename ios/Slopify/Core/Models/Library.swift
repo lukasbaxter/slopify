@@ -290,6 +290,37 @@ struct Mix: Codable, Sendable {
     var items: [Track]
     var from: String?
     var day: String?
+    /// A Daily Mix: who is in it, the seed artist first (§14.1).
+    var artists: [MixArtist]?
+}
+
+/// An artist named in a mix or radio (§14.1, §14.3, §14.4).
+struct MixArtist: Codable, Hashable, Sendable { var id: String; var name: String }
+
+/// Home's Made For You tile: today's Daily Mix of one seed artist (§14.3).
+struct DailyMixSummary: Codable, Hashable, Sendable {
+    var artistId: String
+    var day: String
+    var from: String?
+    var artists: [MixArtist]
+}
+
+/// Go to radio: the listener's radio playlist of one seed (§14.4).
+struct Radio: Codable, Sendable {
+    struct Seed: Codable, Hashable, Sendable {
+        /// `artist` | `track` | `album` | `playlist`
+        var kind: String
+        var id: String
+        var name: String
+        var artistId: String?
+        var albumId: String?
+    }
+    var id: String
+    var seed: Seed
+    var made: Double?
+    var from: String?
+    var artists: [MixArtist]?
+    var items: [Track]
 }
 
 struct LikesMap: Codable, Sendable {

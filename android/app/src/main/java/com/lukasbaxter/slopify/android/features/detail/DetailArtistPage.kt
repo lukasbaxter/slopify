@@ -148,7 +148,7 @@ internal fun DetailArtistPage(id: String) {
         val items = buildList {
             add(MenuItem(L("Add to queue"), Icon.Queue, offline = true) { app.player.addToQueue(tracks) })
             add(MenuItem(if (following) L("Unfollow") else L("Follow"), Icon.Follow) { toggleFollow() })
-            add(MenuItem(L("Go to radio"), Icon.Radio) { actions.radio(id) })
+            add(MenuItem(L("Go to radio"), Icon.Radio) { actions.radio(id, a.name) })
             if (tracks.isNotEmpty()) add(MenuItem(L("Add to playlist"), Icon.Plus, sub = actions.playlistSub(tracks)))
             add(MenuItem(L("Share"), Icon.Share) { actions.share(TrackMenu.ShareKind.Artist, id, a.name, null) })
         }

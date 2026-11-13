@@ -869,8 +869,11 @@ The one endpoint behind radio, autoplay, smart shuffle and Daily Mixes. `:id` ca
 Behaviour:
 
 - **Artist id, no `mode`** → that artist's **Daily Mix** for the user's local day (stable all
-  day, 100 songs): `{ items: [Track], from: "brain"|"own", day: "YYYY-MM-DD" }` (**UNSURE** day
-  format; it is a string compared lexically).
+  day, 100 songs): `{ items: [Track], from: "brain"|"own", day: "YYYY-MM-DD", artists: [{ id, name }] }`.
+  The day picks the artist's own songs: it opens on one of their seven most played (a different
+  one each day) and their songs come in a new order. `artists`: who is in it, the seed artist
+  first, then the artists with the most songs in its first 50 (at most 3): the tile and page
+  subtitle is `L("{name} and more", name: artists' names joined by ", ")`.
 - Artist id, `mode=radio` → fresh artist radio. Other `mode` → fresh artist mix. `{ items }`.
 - Track id → the brain recommender (if configured) first: `{ items: [seed, ...], from: "brain" }`
   (the seed track is first). Without the brain: local mix `{ items }` (seed first).
@@ -885,7 +888,9 @@ How the web uses it:
 |---|---|
 | Song radio | `/api/tracks/<trackId>/mix?limit=100&mode=radio` |
 | Artist/album/playlist radio | `/api/tracks/<id>/mix?limit=100&mode=radio` |
-| Daily Mix tile | `/api/tracks/<artistId>/mix?tzo=...` |
+| Daily Mix tile (play) | `/api/tracks/<artistId>/mix?tzo=...` |
+| Daily Mix tiles (subtitles) | `/api/daily-mixes?ids=<artistIds>&tzo=...` (§14.3) |
+| Go to radio / Go to song radio | `POST /api/radio/<id>` (§14.4), not this endpoint |
 | Autoplay at queue end | `/api/tracks/<lastTrackId>/mix?limit=25&mode=continue` (drop the seed, append) |
 | Smart shuffle | `/api/tracks/<currentId>/mix?limit=N&mode=smart`, blended into the queue, marked |
 
@@ -902,6 +907,53 @@ How the web uses it:
 
 Radar `Release`: `{ album_id, artist, title, rtype, year, date, image, total_tracks, secondary, artistId, artistName, inLibrary: albumId|null, localName: string|null, requestStatus }`
 (snake_case upstream fields).
+
+### 14.3 `GET /api/daily-mixes?ids=&tzo=` (auth): Home's Made For You tiles
+
+`ids`: the tiles' seed artists, comma separated (at most 12). For each one the server makes
+today's Daily Mix if it is a new day for the listener (`tzo` as in §14.1), so the tile and its
+page always show the same day. `{ items: [{ artistId, day: "YYYY-MM-DD", from, artists: [{ id, name }] }] }`,
+unknown ids left out. `artists` as in §14.1. The web adds `day=<local YYYY-MM-DD>` to this and
+to the Daily Mix URLs so its service worker never answers a new day with yesterday's copy;
+the server ignores it.
+
+### 14.4 `POST /api/radio/:id?refresh=1` (auth): Go to radio
+
+Go to radio (artist, album, own playlist) and Go to song radio (track) make the listener's
+**radio playlist** of that seed: 50 songs, kept per listener and seed. Going to the same radio
+again within a day answers the kept one; older than a day, or `?refresh=1`, it is made again
+(one per seed, never piling up). It is not a playlist of theirs: `/api/playlists` and Your
+Library never list it and it cannot be edited; "Add to playlist" keeps its songs. Guests in
+demo mode may make radios.
+
+```json
+{ "id": "radio:<seedId>", "made": 1794553562334, "from": "brain",
+  "seed": { "kind": "artist", "id": "<seedId>", "name": "Drake", "artistId": "<artistId>", "albumId": null },
+  "artists": [{ "id": "...", "name": "Drake" }, { "id": "...", "name": "Future" }],
+  "items": [Track] }
+```
+
+- `seed.kind`: `artist` | `track` | `album` | `playlist` (only the caller's own; someone else's is a 404).
+  `artistId`: the artist it reads as (a song's or album's first artist; null for a playlist).
+  `albumId`: a song's or album's album (its cover), else null.
+- `items`: at most 50, the caller's dislikes already left out. Order: it opens on the seed
+  (an artist: one of their most played; a song: that song; an album or playlist: one of its
+  songs, none of the others again), the seed's artist comes back about every 4th song
+  (every 5th for a song, album or playlist), no artist twice in a row, any other artist at
+  most 3 times, one copy of each song.
+- Sources: the brain (radio mode) leads; related artists from ListenBrainz's similar artists
+  (labs API, by MusicBrainz id) and Deezer's related artists, the ones the library has, cached;
+  the seed's genres fill a short list. No brain, no ListenBrainz or no internet still gives a
+  list (`from: "own"`).
+- `artists`: as in §14.1 (the seed's artist first; a playlist has none first).
+- 404 `no such item` (unknown id, someone else's playlist), `nothing to play` (an empty set).
+
+Clients: open the radio's page at once and start it from the top (context `radio:<seedId>`).
+The page is drawn like a Daily Mix page: title `L("{name} Radio", name: seed.name)`, the mix
+composite cover (an artist: their picture; a song or album: the album cover, `albumId`; a
+playlist: its picture) with the title in the band, colour `MIX_COLORS[(sum of the seed id's UTF-16 code units) % 8]`, owner line
+"Made for you", subtitle from `artists`. Its menu: Add to queue, Refresh (`?refresh=1`, then
+play from the top), Add to playlist. No Go to radio on a radio page.
 
 ---
 
@@ -1560,6 +1612,8 @@ Of the remaining 115, about 22 are admin-only. Plus `GET /healthz` and `GET /api
 | 69 | POST | /api/stream/warm | auth | 12.4 |
 | 70 | GET | /api/download/:id | auth | 13 |
 | 71 | GET | /api/tracks/:id/mix | auth | 14.1 |
+| 71a | GET | /api/daily-mixes | auth | 14.3 |
+| 71b | POST | /api/radio/:id | auth | 14.4 |
 | 72 | GET | /api/radar | auth | 14.2 |
 | 73 | GET | /api/ai/status | auth | 14.2 |
 | 74 | POST | /api/ai/playlists | auth | 14.2 |

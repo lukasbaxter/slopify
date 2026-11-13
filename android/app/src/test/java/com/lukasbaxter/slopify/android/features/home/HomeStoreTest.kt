@@ -128,4 +128,19 @@ class HomeStoreTest {
             assertTrue(store.data.radar.isEmpty())
         }
     }
+
+    @Test fun dailyMixTilesNameTodaysArtists() = runTest {
+        StubServer().use { s ->
+            s.serve(mapOf("/api/daily-mixes" to """{"items":[{"artistId":"b","day":"2026-11-13","from":"brain","artists":[{"id":"b","name":"High"},{"id":"q","name":"Q"}]}]}"""))
+            val store = HomeStore(backgroundScope)
+            store.load(s.client())
+            val req = s.seen.single { it.requestUrl!!.encodedPath == "/api/daily-mixes" }
+            assertEquals("b,a", req.requestUrl!!.queryParameter("ids"))
+            assertEquals(listOf("High", "Q"), store.data.mixArtists["b"]!!.map { it.name })
+            // A new answer replaces the kept one.
+            s.serve(mapOf("/api/daily-mixes" to """{"items":[{"artistId":"b","day":"2026-11-14","artists":[{"id":"b","name":"High"},{"id":"r","name":"R"}]}]}"""))
+            store.load(s.client())
+            assertEquals(listOf("High", "R"), store.data.mixArtists["b"]!!.map { it.name })
+        }
+    }
 }

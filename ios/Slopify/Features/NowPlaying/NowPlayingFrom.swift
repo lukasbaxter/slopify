@@ -25,6 +25,7 @@ struct NowPlayingFrom: Equatable, Sendable {
     static func itemId(_ ctx: String) -> String {
         if ctx.hasPrefix("artist:") { return String(ctx.dropFirst(7)) }
         if ctx.hasPrefix("mix:") { return String(ctx.dropFirst(4)) }
+        if ctx.hasPrefix("radio:") { return String(ctx.dropFirst(6)) }
         return ctx
     }
 
@@ -40,6 +41,14 @@ struct NowPlayingFrom: Equatable, Sendable {
                 return NowPlayingFrom(kind: L("PLAYING FROM PLAYLIST"), name: L("{name} Mix", ["name": n]))
             }
             return NowPlayingFrom(kind: L("PLAYING FROM PLAYLIST"), name: L("Daily Mix"))
+        }
+        if ctx.hasPrefix("radio:") {
+            // Go to radio's playlist: "<seed> Radio" (Player.jsx).
+            let n: String?
+            if id.hasPrefix("pl_") { n = (try? await api.playlist(id))?.playlist.name }
+            else if let it = try? await api.lookup(id) { n = it.item["name"]?.string ?? it.item["title"]?.string } else { n = nil }
+            guard let n, !n.isEmpty else { return NowPlayingFrom(kind: L("PLAYING FROM PLAYLIST"), name: L("Playlist")) }
+            return NowPlayingFrom(kind: L("PLAYING FROM PLAYLIST"), name: L("{name} Radio", ["name": n]))
         }
         if id.hasPrefix("pl_") {
             if let p = try? await api.playlist(id) { return NowPlayingFrom(kind: L("PLAYING FROM PLAYLIST"), name: p.playlist.name) }

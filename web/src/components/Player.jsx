@@ -48,6 +48,11 @@ export function usePlayingFrom(player, jf) {
       jf.itemById(seedId).then((it) => set({ kind: t('PLAYING FROM PLAYLIST'), name: it?.Name ? t('{name} Mix', { name: it.Name }) : t('Daily Mix') })).catch(() => set({ kind: t('PLAYING FROM PLAYLIST'), name: t('Daily Mix') }));
       return () => { alive = false; };
     }
+    if (id.startsWith('radio:')) {
+      // Go to radio's playlist: "<seed> Radio".
+      jf.itemById(id.slice(6)).then((it) => set({ kind: t('PLAYING FROM PLAYLIST'), name: it?.Name ? t('{name} Radio', { name: it.Name }) : t('Playlist') })).catch(() => set(null));
+      return () => { alive = false; };
+    }
     jf.itemById(ctxItemId(ctx)).then((it) => {
       if (!it) { set(null); return; }
       const kind = it.Type === 'MusicArtist' ? t('PLAYING FROM ARTIST') : it.Type === 'MusicAlbum' ? t('PLAYING FROM ALBUM') : t('PLAYING FROM PLAYLIST');

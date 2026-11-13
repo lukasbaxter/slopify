@@ -20,6 +20,7 @@ const GUEST_WRITES: [string, RegExp][] = [
   ['POST', /^\/api\/plays$/],
   ['POST', /^\/api\/stream\/warm$/],
   ['POST', /^\/api\/reports$/],
+  ['POST', /^\/api\/radio\/[^/]+$/],
   ['PATCH', /^\/api\/prefs$/],
   ['PUT', /^\/api\/likes\/[^/]+$/],
   ['DELETE', /^\/api\/likes\/[^/]+$/],
@@ -66,7 +67,7 @@ export function removeStaleGuests(db: DB, now = Date.now()) {
     .all(`${GUEST_PREFIX}%`, now - GUEST_TTL) as { id: string }[]).map((r) => r.id);
   db.transaction(() => {
     for (const id of stale) {
-      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs', 'library_folders', 'library_order']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs', 'library_folders', 'library_order', 'radios']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
       db.prepare('DELETE FROM users WHERE id = ?').run(id);
     }
   })();

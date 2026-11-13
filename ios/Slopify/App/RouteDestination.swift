@@ -9,6 +9,7 @@ struct RouteDestination: View {
         case let .playlist(id): PlaylistView(id: id)
         case .likedSongs: LikedSongsView()
         case let .dailyMix(a, n, s): DailyMixView(artistId: a, number: n, seedName: s)
+        case let .radio(id, name): RadioView(seedId: id, name: name)
         case let .topSongs(y, c): TopSongsView(year: y, colorIndex: c)
         case let .genre(n): GenreView(name: n)
         case .charts: SearchBrowsePage(kind: .charts)

@@ -47,9 +47,9 @@ final class DetailActions {
 
     // MARK: Actions
 
-    func radio(_ seedId: String) {
-        guard let app else { return }
-        Task { await app.player.startRadio(seedId: seedId, context: nil) }
+    /// Go to radio: the seed's radio page (it starts playing as it opens).
+    func radio(_ seedId: String, name: String?) {
+        app?.nav.open(.radio(seedId: seedId, name: name))
     }
 
     /// "New playlist" from a page menu, seeded with the first song (shared prompt).

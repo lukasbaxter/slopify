@@ -367,6 +367,14 @@ class NowPlayingFromTest {
         assertEquals("al1", NowPlayingFrom.itemId("al1"))
     }
 
+    @Test fun aRadioIsNamedAfterItsSeed() = runTest {
+        assertEquals("ar9", NowPlayingFrom.itemId("radio:ar9"))
+        com.lukasbaxter.slopify.android.core.StubServer().use { s ->
+            s.answers["/api/items/ar9"] = 200 to """{"kind":"artist","item":{"id":"ar9","name":"Drake"}}"""
+            assertEquals(NowPlayingFrom("PLAYING FROM PLAYLIST", "Drake Radio"), NowPlayingFrom.resolve("radio:ar9", s.client()))
+        }
+    }
+
     @Test fun withoutAnApiFallsBack() = runTest {
         assertEquals(NowPlayingFrom.fallback, NowPlayingFrom.resolve("al1", null))
     }

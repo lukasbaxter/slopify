@@ -233,7 +233,7 @@ internal fun PlaylistScreen(id: String) {
         val title = name ?: ""
         val items = mutableListOf(
             MenuItem(L("Add to queue"), Icon.Queue, offline = true) { app.player.addToQueue(list) },
-            MenuItem(L("Go to radio"), Icon.Radio) { ctx.scope.launch { app.player.startRadio(id, id) } },
+            MenuItem(L("Go to radio"), Icon.Radio) { app.nav.open(Route.Radio(id, name)) },
         )
         if (list.isNotEmpty()) {
             val sub = mutableListOf(MenuItem(L("New playlist"), Icon.Plus) { nameDialog = menus.newPlaylistDialog(list.first()) })

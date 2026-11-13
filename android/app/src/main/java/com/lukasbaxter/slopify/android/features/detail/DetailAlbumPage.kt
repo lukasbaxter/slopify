@@ -116,7 +116,7 @@ internal fun DetailAlbumPage(id: String, highlightTrack: String?) {
         val leadId = a.artistId?.takeIf { it.isNotEmpty() }
         val items = buildList {
             add(MenuItem(L("Add to queue"), Icon.Queue, offline = true) { app.player.addToQueue(tracks) })
-            add(MenuItem(L("Go to radio"), Icon.Radio) { actions.radio(id) })
+            add(MenuItem(L("Go to radio"), Icon.Radio) { actions.radio(id, a.name) })
             if (tracks.isNotEmpty()) add(MenuItem(L("Add to playlist"), Icon.Plus, sub = actions.playlistSub(tracks, excluding = id)))
             if (leadId != null) add(MenuItem(L("Go to artist"), Icon.Artist, offline = true) { app.nav.push(Route.Artist(leadId)) })
             add(MenuItem(if (saved) L("Remove from Your Library") else L("Save to Your Library"), if (saved) Icon.HeartFilled else Icon.Heart) { toggleSave() })

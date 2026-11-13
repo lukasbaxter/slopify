@@ -19,8 +19,9 @@ export const DAILY_SIZE = 100;
 const KEEP_MS = 30 * 86400_000; // mixes of artists not asked for in a month go
 
 export type DailyMix = { ids: string[]; from: 'brain' | 'own'; day: string };
-// Makes the mix's songs; `sounds` = the brain's picks, closest first.
-export type MakeMix = (sounds?: string[]) => Promise<{ id: string }[]>;
+// Makes the mix's songs; `sounds` = the brain's picks, closest first; `day`
+// = the listener's day it is for (the day picks the artist's own songs).
+export type MakeMix = (sounds?: string[], day?: string) => Promise<{ id: string }[]>;
 type BrainOpts = { url?: string; key?: string; timeoutMs?: number; fetcher?: typeof fetch };
 
 // The listener's calendar day at `now`, YYYY-MM-DD.
@@ -70,7 +71,7 @@ export async function dailyMix(db: DB, artistId: string, uid: string, make: Make
         const seed = crypto.createHash('sha1').update(key).digest().readUInt32BE(0);
         sounds = await brainSimilar(db, { user: uid, seeds, n: DAILY_SIZE, exclude: seeds, seed }, { ...o.brainOpts, log: o.log });
       }
-      const ids = (await make(sounds ?? undefined)).map((t) => t.id).slice(0, DAILY_SIZE);
+      const ids = (await make(sounds ?? undefined, day)).map((t) => t.id).slice(0, DAILY_SIZE);
       const from = sounds ? 'brain' : 'own';
       db.prepare(`INSERT INTO daily_mixes (user_id, artist_id, day, tzo, track_ids, source, made) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, artist_id) DO UPDATE SET day = excluded.day, tzo = excluded.tzo, track_ids = excluded.track_ids, source = excluded.source, made = excluded.made`)

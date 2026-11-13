@@ -114,6 +114,17 @@ enum HomeLogic {
         return out
     }
 
+    /// Spotify's mix subtitle, "A, B, C and more", from who is in a mix or radio (§14.1); nil without names.
+    static func mixSub(_ artists: [MixArtist]?) -> String? {
+        let names = (artists ?? []).map(\.name).filter { !$0.isEmpty }
+        return names.isEmpty ? nil : L("{name} and more", ["name": names.joined(separator: ", ")])
+    }
+
+    /// A Daily Mix tile's (and its page's) subtitle: today's artists (§14.3), else the seed alone.
+    static func dailyMixSub(seedName: String, summary: DailyMixSummary?) -> String? {
+        mixSub(summary?.artists) ?? (seedName.isEmpty ? nil : L("{name} and more", ["name": seedName]))
+    }
+
     /// Daily Mix seeds: the first 6 top artists, or the first 6 library artists without plays.
     static func mixSeeds(topArtists: [RankedArtist], libraryArtists: [Artist]) -> [RankedArtist] {
         if !topArtists.isEmpty { return Array(topArtists.prefix(6)) }

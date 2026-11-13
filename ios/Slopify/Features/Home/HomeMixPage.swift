@@ -9,8 +9,13 @@ struct HomeMixPage: View {
     var sub: String?
     var color: RGB
     var art: CoverSource?
-    var radioSeed: String?
-    var load: @MainActor (APIClient) async throws -> [Track]
+    /// The page's "Go to radio" seed; nil hides it.
+    var radioSeed: HomeMenus.RadioSeed?
+    /// A radio page (Go to radio, §14.4): it plays from the top once it has loaded (once per
+    /// open), and its ⋯ has Refresh.
+    var radio = false
+    /// `refresh`: make it again (a radio's Refresh); a Daily Mix ignores it.
+    var load: @MainActor (APIClient, _ refresh: Bool) async throws -> [Track]
 
     @Environment(AppModel.self) private var app
     @Environment(Account.self) private var account
@@ -23,6 +28,7 @@ struct HomeMixPage: View {
     @State private var failure: HomeMixPageFailure?
     @State private var menu: MenuSheet?
     @State private var nameDialog: NameDialog?
+    @State private var autoplay = HomeMixAutoplay()
 
     private var hero: RGB { ColorMath.heroTint(color) }
     private var isContext: Bool { player.context == context }
@@ -36,7 +42,8 @@ struct HomeMixPage: View {
                 Text(HomeLogic.mixStats(sub: sub, totalMs: tracks.reduce(0) { $0 + $1.durationMs }))
             }
             ActionRow(heroColor: hero) {
-                IconButton(.dots24, label: L("More options")) { menu = menus.mixPage(title: title, art: art, tracks: tracks, radioSeed: radioSeed) }
+                IconButton(.dots24, label: L("More options")) { menu = menus.mixPage(title: title, art: art, tracks: tracks, radioSeed: radioSeed,
+                                                                                         refresh: radio ? { Task { await fetch(refresh: true) } } : nil) }
             } trailing: {
                 let shuffleOn = player.shuffle != .off
                 IconButton(on: shuffleOn, label: shuffleOn ? L("Disable shuffle") : L("Enable shuffle"), action: {
@@ -50,7 +57,7 @@ struct HomeMixPage: View {
         }
         .contextMenuSheet($menu)
         .nameDialog($nameDialog)
-        .task(id: context) { await fetch() }
+        .task(id: context) { await fetch(refresh: false) }
     }
 
     @ViewBuilder private var rows: some View {
@@ -76,13 +83,15 @@ struct HomeMixPage: View {
     private var trackMenus: TrackMenuBuilder { TrackMenuBuilder(app: app) { nameDialog = $0 } }
     private var menus: HomeMenus { HomeMenus(menus: trackMenus) }
 
-    private func fetch() async {
+    private func fetch(refresh: Bool) async {
         loading = true
         do {
-            let items = try await load(account.api)
+            let items = try await load(account.api, refresh)
             guard !Task.isCancelled else { return }
             tracks = StreamPolicy.dropDisliked(items, prefs: account.prefs)
             failure = nil
+            // A radio starts as it opens, and again after Refresh; never on coming back to it.
+            if radio, autoplay.shouldPlay(count: tracks.count, refresh: refresh) { player.play(tracks, startAt: 0, context: context) }
         } catch {
             guard !Task.isCancelled else { return }
             failure = HomeMixPageFailure(error)
@@ -100,6 +109,16 @@ struct HomeMixPage: View {
     private func playRow(_ i: Int) {
         if player.current?.id == tracks[i].id { player.togglePlay(); return }
         player.play(tracks, startAt: i, context: context)
+    }
+}
+
+/// When a radio page plays by itself: its first load with songs, and every Refresh.
+struct HomeMixAutoplay: Equatable {
+    private(set) var played = false
+    mutating func shouldPlay(count: Int, refresh: Bool) -> Bool {
+        guard count > 0, refresh || !played else { return false }
+        played = true
+        return true
     }
 }
 

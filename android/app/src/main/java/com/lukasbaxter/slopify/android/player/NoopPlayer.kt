@@ -52,7 +52,6 @@ class NoopPlayer : Player {
         )
     }
 
-    override suspend fun startRadio(seedId: String, context: String?) = Unit
     override fun togglePlay() = Unit
     override fun setPlaying(playing: Boolean) = Unit
     override fun next() = skipTo(mutable.value.index + 1)

@@ -10,7 +10,7 @@ import { vibrantColor } from '../api/colors.js';
 import { LANGUAGES, userLanguage, t, N_ } from '../i18n.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
-import Home, { topSongsSub, rankTopArtists } from './Home.jsx';
+import Home, { topSongsSub, rankTopArtists, mixSub } from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
@@ -193,7 +193,7 @@ export function releaseType(album) {
 export default function Library({
   jf, player, view, albums, artists, playlists, detail, setDetail, query, setQuery,
   onLike, onAddTo, onNewPlaylist, onRemoveFromPlaylist, onReorder, onOpenPlaylist, onOpenLiked, likedCount,
-  onOpenArtistById, onOpenAlbumById, onExclude, onDownload,
+  onOpenArtistById, onOpenAlbumById, onOpenRadio, onExclude, onDownload,
   seeAll, setSeeAll, onEditPlaylist, onDeletePlaylist, me, onView, onOpenProfile,
   prefs, onUpdatePrefs, onUploadAvatar, avatarV, onFollowAlbum, onOpenSettings, notify, onRegeneratePlaylist,
 }) {
@@ -229,12 +229,12 @@ export default function Library({
   }, [jf]);
   // A Daily Mix as a page: Jellyfin's instant mix seeded from the artist,
   // shown like a playlist (list, play, shuffle) rather than played blind.
-  const openMix = async (seed, n, color) => {
+  const openMix = async (seed, n, color, sub = null) => {
     const id = `mix:${seed.Id}`;
-    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: t('{name} and more', { name: seed.Name }) }, tracks: [], kind: 'Playlist', loading: true });
+    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _seed: seed.Id, _seedName: seed.Name, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: sub || mixSub(null, seed.Name) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.instantMix(seed.Id, 50);
-      setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, item: { ...d.item, _sub: mixSub(items.artists, seed.Name) }, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   // Your Top Songs <year>: the year's most played songs (server ranks the
@@ -567,6 +567,8 @@ export default function Library({
     } catch (e) { setErr(e.message); }
   };
 
+
+  // Play on an artist card: their radio straight into the queue (Go to radio opens its page).
   const startMix = async (it) => {
     try {
       const items = await jf.instantMix(it.Id, 100, 'radio');
@@ -594,7 +596,7 @@ export default function Library({
     onLike, playlists, onAddTo, onNewPlaylist,
     onOpenArtist: onOpenArtistById, onOpenAlbum: onOpenAlbumById,
     onAddToQueue: (t) => player.addToQueue([t]),
-    onRadio: (t) => startMix(t),
+    onRadio: (t) => onOpenRadio?.(t),
     onExclude, onDownload,
     snippet: tracks[i]._snippet || null, snippetAt: tracks[i]._snippetAt ?? null,
     onPlayAt: (t, at) => player.playQueue(tracks, i, ctx, at),
@@ -1276,7 +1278,10 @@ export default function Library({
             const heroItems = [
               { label: t('Add to queue'), icon: MI.queue, offline: true, onClick: () => all((t) => player.addToQueue(t)) },
               isArtist ? { label: isFollowed ? t('Unfollow') : t('Follow'), icon: MI.follow, onClick: () => toggleFollow(item) } : null,
-              !isLiked ? { label: t('Go to radio'), icon: MI.radio, onClick: () => startMix(item) } : null,
+              // A Daily Mix's radio is its artist's; a radio page refreshes instead; Top Songs has none.
+              !isLiked && !item._mix ? { label: t('Go to radio'), icon: MI.radio, onClick: () => onOpenRadio?.(item) } : null,
+              item._seed ? { label: t('Go to radio'), icon: MI.radio, onClick: () => onOpenRadio?.({ Id: item._seed, Name: item._seedName, Type: 'MusicArtist' }) } : null,
+              item._radio ? { label: t('Refresh'), icon: MI.radio, onClick: () => onOpenRadio?.({ Id: item._radio, Name: item._radioName }, { refresh: true }) } : null,
               tracks.length ? { label: t('Add to playlist'), icon: MI.plus, sub: [
                 { label: t('New playlist'), icon: MI.plus, onClick: () => onNewPlaylist?.(tracks[0]) },
                 // One POST with every id (the API takes an array), one toast --

@@ -159,7 +159,7 @@ const background = (job) => new Promise((done) => { bgQueue.push([job, done]); b
 let lastWrite = 0;
 const WRITE_FRESH_MS = 8000;
 // Posts that change nothing the pages show (a play logged, a stream warmed): not writes here.
-const NOT_WRITES = /\/api\/(plays|stream|lyrics|reports|auth|relay|ai\/|jobs)/;
+const NOT_WRITES = /\/api\/(plays|stream|lyrics|reports|auth|relay|ai\/|jobs|radio)/;
 // How long the server gets before the kept copy is used: a good link
 // answers inside it, so the page is fresh there; a bad one does not wait.
 const API_GRACE_MS = 350;

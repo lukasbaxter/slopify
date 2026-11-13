@@ -77,7 +77,7 @@ class TrackMenuBuilder(
         remove = remove,
         like = { t, _ -> like(t) },
         exclude = { t, on -> exclude(t, on) },
-        radio = { t -> scope.launch { app.player.startRadio(t.id, null) } },
+        radio = { t -> app.nav.open(Route.Radio(t.id, t.title)) },
         openArtist = { id -> app.nav.open(Route.Artist(id)) },
         openAlbum = { id -> app.nav.open(Route.Album(id)) },
         syncLyrics = { t -> scope.launch { app.lyricJobs.sync(t, app.account.api) } },

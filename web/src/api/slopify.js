@@ -45,6 +45,8 @@ const savedAlbums = new Set();
 // Artists this account follows, so any artist row knows its Follow state.
 const followedArtists = new Set();
 const people = (names, ids) => (names || []).map((n, i) => ({ Name: n, Id: (ids || [])[i] || null })).filter((a) => a.Id);
+// The listener's calendar day, YYYY-MM-DD (the server's Daily Mix day).
+export const localDay = (now = Date.now()) => new Date(now - new Date(now).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 export const rowTrack = (t) => ({
   Id: t.id, Name: t.title, Type: 'Audio',
   Artists: t.artists || [], ArtistItems: people(t.artists, t.artistIds),
@@ -431,11 +433,29 @@ export class Slopify {
   }
   // mode (continue / smart / radio) tells the server's recommender why it is asked.
   // An artist's is their Daily Mix, kept for the listener's local day (tzo).
+  // The day rides in the URL too: the service worker keeps answers by URL, and
+  // a new day's first open waited 350 ms, then got yesterday's mix (sw.js).
   async instantMix(itemId, limit = 100, mode = '') {
-    const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}${mode ? `&mode=${mode}` : ''}&tzo=${new Date().getTimezoneOffset()}`);
+    const r = await this._fetch(`/api/tracks/${itemId}/mix?limit=${limit}${mode ? `&mode=${mode}` : `&day=${localDay()}`}&tzo=${new Date().getTimezoneOffset()}`);
     const out = (r.items || []).map(rowTrack);
     const dis = this._dislikes || {};
-    return out.filter((t) => !dis[t.Id]);
+    const items = out.filter((t) => !dis[t.Id]);
+    // Who is in today's mix (a Daily Mix only), for its page's subtitle.
+    if (!mode && Array.isArray(r.artists)) items.artists = r.artists;
+    return items;
+  }
+  // Home's Made For You tiles: today's mix of each seed artist and who is in it.
+  async dailyMixes(artistIds) {
+    if (!artistIds.length) return [];
+    const r = await this._fetch(`/api/daily-mixes?ids=${artistIds.join(',')}&day=${localDay()}&tzo=${new Date().getTimezoneOffset()}`);
+    return r.items || [];
+  }
+  // Go to radio: the listener's radio playlist of an artist, song, album or
+  // playlist (kept a day by the server; refresh makes a new one).
+  async radio(seedId, { refresh = false } = {}) {
+    const r = await this._fetch(`/api/radio/${seedId}${refresh ? '?refresh=1' : ''}`, { method: 'POST' });
+    const dis = this._dislikes || {};
+    return { ...r, items: (r.items || []).map(rowTrack).filter((t) => !dis[t.Id]) };
   }
   // "Exclude from your taste profile": kept in the account prefs.
   async setDislike(itemId, disliked) {

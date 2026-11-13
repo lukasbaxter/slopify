@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,8 @@ import kotlin.coroutines.cancellation.CancellationException
  *
  * - `context`: player context, `mix:<artistId>` or `top:<year>`.
  * - `radioSeed`: the Daily Mix's artist; null hides "Go to radio".
+ * - `autoplay`: play the first answer from the top, once per open (Go to radio's page).
+ * - `refresh`: a Refresh menu item that loads anew and plays from the top (a radio).
  */
 @Composable
 internal fun HomeMixPage(
@@ -68,6 +71,9 @@ internal fun HomeMixPage(
     color: RGB,
     art: CoverSource?,
     radioSeed: String?,
+    radioName: String? = null,
+    autoplay: Boolean = false,
+    refresh: (suspend (ApiClient) -> List<Track>)? = null,
     load: suspend (ApiClient) -> List<Track>,
 ) {
     val app = LocalAppModel.current
@@ -79,6 +85,7 @@ internal fun HomeMixPage(
     var failure by remember(context) { mutableStateOf<HomeMixPageFailure?>(null) }
     var menu by remember { mutableStateOf<MenuSheet?>(null) }
     var dialog by remember { mutableStateOf<NameDialog?>(null) }
+    var autoplayed by rememberSaveable(context) { mutableStateOf(false) }
     val menus = rememberTrackMenuBuilder { dialog = it }
 
     val hero = remember(color) { ColorMath.heroTint(color) }
@@ -90,6 +97,10 @@ internal fun HomeMixPage(
             val items = load(app.account.api)
             tracks = StreamPolicy.dropDisliked(items, app.account.prefs.value)
             failure = null
+            if (HomeLogic.shouldAutoplay(autoplay, autoplayed, tracks.size)) {
+                autoplayed = true
+                player.play(tracks, startAt = 0, context = context)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -121,7 +132,20 @@ internal fun HomeMixPage(
         item(key = "actions") {
             ActionRow(hero, leading = {
                 IconButton(Icon.Dots24, L("More options")) {
-                    menu = homeMixMenu(app, menus, { dialog = it }, scope, title, art, tracks, radioSeed)
+                    val reload = refresh?.let { r ->
+                        suspend {
+                            try {
+                                tracks = StreamPolicy.dropDisliked(r(app.account.api), app.account.prefs.value)
+                                failure = null
+                                if (tracks.isNotEmpty()) player.play(tracks, startAt = 0, context = context)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                failure = HomeMixPageFailure.of(e)
+                            }
+                        }
+                    }
+                    menu = homeMixMenu(app, menus, { dialog = it }, scope, title, art, tracks, radioSeed, radioName, reload)
                 }
             }) {
                 val shuffleOn = ps.shuffle != ShuffleMode.Off
@@ -185,14 +209,17 @@ private fun homeMixMenu(
     art: CoverSource?,
     tracks: List<Track>,
     radioSeed: String?,
+    radioName: String?,
+    refresh: (suspend () -> Unit)?,
 ): MenuSheet {
     val player = app.player
     val items = mutableListOf(
         MenuItem(L("Add to queue"), Icon.Queue, offline = true) { if (tracks.isNotEmpty()) player.addToQueue(tracks) },
     )
     if (radioSeed != null) {
-        items += MenuItem(L("Go to radio"), Icon.Radio) { scope.launch { player.startRadio(radioSeed, null) } }
+        items += MenuItem(L("Go to radio"), Icon.Radio) { app.nav.open(Route.Radio(radioSeed, radioName)) }
     }
+    if (refresh != null) items += MenuItem(L("Refresh"), Icon.Radio) { scope.launch { refresh() } }
     tracks.firstOrNull()?.let { first ->
         val library = app.library
         if (library.playlists.isEmpty()) scope.launch { library.refreshPlaylists() }

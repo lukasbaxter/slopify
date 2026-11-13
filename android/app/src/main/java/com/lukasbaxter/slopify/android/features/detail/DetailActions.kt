@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import com.lukasbaxter.slopify.android.app.AppModel
 import com.lukasbaxter.slopify.android.app.LocalAppModel
+import com.lukasbaxter.slopify.android.app.Route
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Track
 import com.lukasbaxter.slopify.android.design.L
@@ -50,8 +51,9 @@ class DetailActions internal constructor(
         menu = builder.sheet(t)
     }
 
-    fun radio(seedId: String) {
-        scope.launch { app.player.startRadio(seedId, null) }
+    /** Go to radio: the seed's radio playlist page (API.md §14.4). */
+    fun radio(seedId: String, name: String?) {
+        app.nav.open(Route.Radio(seedId, name))
     }
 
     /** "New playlist" from a page menu, seeded with the first song (shared prompt). */

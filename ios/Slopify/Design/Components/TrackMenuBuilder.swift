@@ -42,7 +42,7 @@ struct TrackMenuBuilder {
             remove: remove,
             like: { t, _ in like(t) },
             exclude: { t, on in exclude(t, on) },
-            radio: { t in Task { await app.player.startRadio(seedId: t.id, context: nil) } },
+            radio: { t in app.nav.open(.radio(seedId: t.id, name: t.title)) },
             openArtist: { id in app.nav.open(.artist(id: id)) },
             openAlbum: { id in app.nav.open(.album(id: id)) },
             syncLyrics: { t in Task { await LyricJobStore.shared.sync(t, api: app.account.api) } },

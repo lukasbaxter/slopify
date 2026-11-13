@@ -158,7 +158,7 @@ export function registerAuth(app: FastifyInstance, db: DB) {
     const r = db.transaction(() => {
       const r = db.prepare('DELETE FROM users WHERE id = ?').run(id);
       if (!r.changes) return r;
-      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs', 'play_events', 'daily_mixes', 'spotify_pending', 'my_requests']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+      for (const t of ['likes', 'album_likes', 'artist_follows', 'playlists', 'plays', 'prefs', 'play_events', 'daily_mixes', 'radios', 'spotify_pending', 'my_requests']) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
       for (const t of ['lyric_jobs', 'reports']) db.prepare(`UPDATE ${t} SET user_id = NULL WHERE user_id = ?`).run(id);
       db.prepare('DELETE FROM kv WHERE k IN (?, ?, ?)').run(`session:${id}`, `session:${id}:queue`, `explore:${id}`);
       return r;

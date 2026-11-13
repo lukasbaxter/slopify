@@ -16,6 +16,12 @@ sealed interface Route {
      */
     @Serializable data class DailyMix(val artistId: String, val number: Int, val seedName: String) : Route
 
+    /**
+     * Go to radio's page (API.md §14.4): the listener's radio playlist of an artist, song, album or
+     * playlist. `nameHint`: the seed's name, for the title before the server answers.
+     */
+    @Serializable data class Radio(val seedId: String, val nameHint: String? = null) : Route
+
     /** `colorIndex`: the tile's place on Home's Your Top Songs shelf. */
     @Serializable data class TopSongs(val year: Int, val colorIndex: Int) : Route
     @Serializable data class Genre(val name: String) : Route

@@ -295,6 +295,15 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE library_folders ADD COLUMN cover_hash TEXT;
   `,
+  // 35: Go to radio's playlists (radio.ts): one per listener and seed (an
+  // artist, song, album or playlist), its songs kept until it is refreshed.
+  `
+  CREATE TABLE radios (
+    user_id TEXT NOT NULL, seed_id TEXT NOT NULL, kind TEXT NOT NULL,
+    track_ids TEXT NOT NULL, source TEXT NOT NULL, made INTEGER NOT NULL,
+    PRIMARY KEY (user_id, seed_id)
+  );
+  `,
 ];
 
 export type DB = Database.Database;

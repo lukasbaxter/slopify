@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PlayGlyph, Heart, LikedCover, usePhone } from './TrackRow.jsx';
 import { t } from '../i18n.js';
 import { radar as relayRadar } from '../api/search.js';
+import { localDay } from '../api/slopify.js';
 
 // The whole ranking, most played first: Show all lists it, Home's shelf the first 16.
 export function rankTopArtists(tracks) {
@@ -40,7 +41,11 @@ function greeting() {
 
 // Spotify's Daily Mix tiles: artist photo up top, a solid colour band with the
 // label at the bottom. One palette entry per mix, rotating.
-const MIX_COLORS = ['#e8115b', '#1e3264', '#8d67ab', '#e13300', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07'];
+export const MIX_COLORS = ['#e8115b', '#1e3264', '#8d67ab', '#e13300', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07'];
+// A radio's colour: the same for a seed on every device (API.md 14.4).
+export const radioColor = (seedId) => { let n = 0; for (let i = 0; i < String(seedId).length; i++) n += String(seedId).charCodeAt(i); return MIX_COLORS[n % MIX_COLORS.length]; };
+// "Drake, Future, Travis Scott and more": who is in today's mix or a radio.
+export const mixSub = (artists, fallback) => (artists?.length ? t('{name} and more', { name: artists.map((a) => a.name).join(', ') }) : fallback ? t('{name} and more', { name: fallback }) : null);
 
 export const topSongsSub = (year) => year === new Date().getFullYear() ? t('Your most played songs of {year} so far', { year }) : t('The songs you played most in {year}', { year });
 
@@ -188,6 +193,22 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
 
   // Daily Mixes are seeded from the artists you actually play most.
   const mixSeeds = (topArtists.length ? topArtists : artists).slice(0, 6);
+  // Who is in each seed's mix today (the server makes a new day's mixes on
+  // this ask), so the tiles change with the day like the mixes do.
+  const [mixInfo, setMixInfo] = useState(() => jf?.persisted('home.mixInfo') || {});
+  const seedKey = mixSeeds.map((a) => a.Id).join(',');
+  useEffect(() => {
+    if (!jf || !seedKey) return undefined;
+    let alive = true;
+    jf.dailyMixes(seedKey.split(',')).then((items) => {
+      if (!alive) return;
+      const next = Object.fromEntries(items.map((m) => [m.artistId, { day: m.day, artists: m.artists || [] }]));
+      setMixInfo(next); jf._persist('home.mixInfo', next);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [jf, seedKey, fresh]);
+  // A kept answer from an earlier day says nothing about today's mix.
+  const mixSubOf = (a) => mixSub(mixInfo[a.Id]?.day >= localDay() ? mixInfo[a.Id].artists : null, a.Name);
 
   // Phone: the chip row sticks to the top; once the page has scrolled it gets
   // a solid background (the home gradient scrolls away underneath). A class
@@ -236,9 +257,9 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
 
         {showMusic && <Shelf title={t('Made For You')}>
           {mixSeeds.map((a, i) => (
-            <MixTile key={a.Id} label={t('Daily Mix {n}', { n: i + 1 })} sub={t('{name} and more', { name: a.Name })}
+            <MixTile key={a.Id} label={t('Daily Mix {n}', { n: i + 1 })} sub={mixSubOf(a)}
               image={jf.imageUrl(a.Id, { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
-              onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length])} onPlay={() => playMix(a)} />
+              onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length], mixSubOf(a))} onPlay={() => playMix(a)} />
           ))}
         </Shelf>}
 

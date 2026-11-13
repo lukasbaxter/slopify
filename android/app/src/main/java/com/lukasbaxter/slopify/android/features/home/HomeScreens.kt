@@ -51,6 +51,7 @@ import com.lukasbaxter.slopify.android.app.SeeAllKind
 import com.lukasbaxter.slopify.android.app.Tab
 import com.lukasbaxter.slopify.android.core.api.mix
 import com.lukasbaxter.slopify.android.core.api.topSongs
+import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.design.L
 import com.lukasbaxter.slopify.android.design.components.CardStyle
@@ -174,15 +175,19 @@ fun HomeView() {
 /** An artist's Daily Mix (UI.md 6.3.6): `GET /api/tracks/{artistId}/mix?limit=50&tzo=`, dislikes dropped. */
 @Composable
 fun DailyMixView(artistId: String, number: Int, seedName: String) {
-    homeStore()
+    val st by homeStore().state.collectAsStateWithLifecycle()
+    // The same day's artists as its Home tile; the mix's own answer fills in when Home has none.
+    var fromMix by remember(artistId) { mutableStateOf<List<MixArtist>>(emptyList()) }
+    val artists = st.data.mixArtists[artistId]?.takeIf { it.isNotEmpty() } ?: fromMix
     HomeMixPage(
         context = "mix:$artistId",
         title = L("Daily Mix {n}", "n" to number),
-        sub = if (seedName.isEmpty()) null else L("{name} and more", "name" to seedName),
+        sub = HomeLogic.mixSub(artists, seedName),
         color = homeMixColor(number - 1),
         art = CoverSource.ArtistArt(artistId, null),
         radioSeed = artistId,
-    ) { api -> api.mix(artistId, limit = 50).items }
+        radioName = seedName.ifEmpty { null },
+    ) { api -> api.mix(artistId, limit = 50).also { fromMix = it.artists }.items }
 }
 
 /** Your Top Songs {year} (UI.md 6.3.6): `GET /api/top-songs/{year}?tzo=`, shown like a Daily Mix. */
@@ -222,7 +227,7 @@ private fun HomeSection(s: HomeLogic.Section, data: HomeSnapshot) {
         HomeLogic.Section.MadeForYou -> HomeShelf(L("Made For You"), null) {
             Shelf(data.mixSeeds.withIndex().toList(), style = CardStyle.Home) { (i, a) ->
                 val label = L("Daily Mix {n}", "n" to i + 1)
-                MediaCard(label, L("{name} and more", "name" to a.name), style = CardStyle.Home, onClick = {
+                MediaCard(label, HomeLogic.mixSub(data.mixArtists[a.id].orEmpty(), a.name) ?: "", style = CardStyle.Home, onClick = {
                     nav.pushFromHome(Route.DailyMix(a.id, i + 1, a.name))
                 }) {
                     HomeMixArt(CoverSource.ArtistArt(a.id, a.image), homeMixColor(i), label, pixelSize = 150.dp)

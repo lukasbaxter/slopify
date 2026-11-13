@@ -283,20 +283,6 @@ class SlopifyPlayer(
         localAdd(tracks)
     }
 
-    /** Radio from a track/artist/album/playlist id (API.md §14). */
-    override suspend fun startRadio(seedId: String, context: String?) {
-        val backend = backend ?: return
-        try {
-            val items = StreamPolicy.dropDisliked(backend.mix(seedId, 100, "radio").items, prefs())
-            if (items.isEmpty()) return
-            play(items, 0, context, null)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = e.message ?: e.toString()
-        }
-    }
-
     // Transport
 
     override fun togglePlay() {

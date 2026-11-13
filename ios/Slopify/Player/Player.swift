@@ -225,18 +225,6 @@ final class Player {
         localAdd(tracks)
     }
 
-    /// Radio from a track/artist/album/playlist id (API.md §14).
-    func startRadio(seedId: String, context: String?) async {
-        guard let backend else { return }
-        do {
-            let items = StreamPolicy.dropDisliked(try await backend.mix(seedId, limit: 100, mode: "radio").items, prefs: prefs())
-            guard !items.isEmpty else { return }
-            play(items, startAt: 0, context: context)
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
     // MARK: - Transport
 
     func togglePlay() {

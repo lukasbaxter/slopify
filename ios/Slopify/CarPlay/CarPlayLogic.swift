@@ -99,8 +99,8 @@ enum CarPlayLogic {
             art: nil, glyph: .liked, target: .liked)
     }
 
-    static func mixRow(_ seed: HomeLogic.RankedArtist, number: Int) -> Row {
-        Row(title: L("Daily Mix {n}", ["n": number]), subtitle: L("{name} and more", ["name": seed.name]),
+    static func mixRow(_ seed: HomeLogic.RankedArtist, number: Int, summary: DailyMixSummary? = nil) -> Row {
+        Row(title: L("Daily Mix {n}", ["n": number]), subtitle: HomeLogic.dailyMixSub(seedName: seed.name, summary: summary),
             art: .artist(id: seed.id, image: seed.image), glyph: .mix,
             target: .mix(artistId: seed.id, number: number, seedName: seed.name))
     }
@@ -152,7 +152,7 @@ enum CarPlayLogic {
         for s in HomeLogic.sections(filter: .all, counts: counts) {
             switch s {
             case .madeForYou:
-                out.append(Section(title: L("Made For You"), rows: mixSeeds.prefix(perSection).enumerated().map { mixRow($0.element, number: $0.offset + 1) }))
+                out.append(Section(title: L("Made For You"), rows: mixSeeds.prefix(perSection).enumerated().map { mixRow($0.element, number: $0.offset + 1, summary: d.mixSummaries?[$0.element.id]) }))
             case .topSongs:
                 out.append(Section(title: L("Your Top Songs"), rows: d.topYears.prefix(perSection).map { topSongsRow($0, currentYear: currentYear) }))
             case .recent:

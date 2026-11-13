@@ -178,6 +178,18 @@ extension APIClient {
         return try await get("api/tracks/\(id)/mix", ["limit": limit.map(String.init), "mode": mode, "tzo": String(tzo)])
     }
 
+    /// Go to radio (§14.4): the listener's radio of `seedId`, made or reused; `refresh` makes it again.
+    func radio(_ seedId: String, refresh: Bool = false) async throws -> Radio {
+        try await request("POST", "api/radio/\(seedId)", query: ["refresh": refresh ? "1" : nil], body: Optional<Int>.none, timeout: 60)
+    }
+
+    /// Home's Made For You tiles (§14.3): today's Daily Mix of each seed artist.
+    func dailyMixes(ids: [String]) async throws -> [DailyMixSummary] {
+        guard !ids.isEmpty else { return [] }
+        let tzo = -TimeZone.current.secondsFromGMT() / 60
+        return try await (get("api/daily-mixes", ["ids": ids.prefix(12).joined(separator: ","), "tzo": String(tzo)]) as Items<DailyMixSummary>).items
+    }
+
     /// Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s.
     func radar() async throws -> [Release] {
         struct R: Decodable { var releases: [Release]? }

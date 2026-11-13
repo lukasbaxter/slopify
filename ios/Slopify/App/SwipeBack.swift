@@ -148,7 +148,19 @@ final class SwipeBackPan: UIPanGestureRecognizer, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        mode == .block || mode == .backstop
+        switch mode {
+        case .block: return true
+        // Alongside the pop it backs up, scrolling and the other pans; not the page's taps, so the
+        // button a back swipe started on fails instead of firing as the finger lifts over it.
+        case .backstop: return other is SwipeBackPan || other.view is UIScrollView || other === navigation?.interactivePopGestureRecognizer
+            || isContentPop(other)
+        default: return false
+        }
+    }
+
+    private func isContentPop(_ g: UIGestureRecognizer) -> Bool {
+        if #available(iOS 26.0, *) { return g === navigation?.interactiveContentPopGestureRecognizer }
+        return false
     }
 
     private var decided: SwipeBack.Action? {

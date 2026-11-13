@@ -65,12 +65,11 @@ enum NowPlayingMath {
 
     // MARK: Now playing swipe down
 
-    /// Swipe down closes from anywhere on the Album tab. On the Lyrics tab only a swipe that starts
-    /// on the header (chevron, title, artist) closes it; one on the lyric lines never does
-    /// (owner's rule, overrides UI.md 3.2.5). `startY` and `headerBottom` in the same space.
-    static func swipeDismissAllowed(lyricsShowing: Bool, startY: CGFloat, headerBottom: CGFloat) -> Bool {
-        !lyricsShowing || startY <= headerBottom
-    }
+    enum SwipeDown: Equatable { case close, showCover }
+
+    /// Swipe down does what the chevron does (owner 11-13): on the Album tab it closes now
+    /// playing; on the Lyrics tab, once the lines are at their top, it goes back to the cover.
+    static func swipeDown(lyricsShowing: Bool) -> SwipeDown { lyricsShowing ? .showCover : .close }
 
     // MARK: Lyrics backdrop
     // The web uses blur(60px) brightness(.32) saturate(1.3) (mobile-nowplaying.css:83). Native is

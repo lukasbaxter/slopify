@@ -56,9 +56,13 @@ class GestureTestCase: XCTestCase {
     /// Opens the fixture playlist from Your Library and waits for its page.
     func openPlaylist(_ name: String = "Gesture Mix") {
         openLibrary()
-        let row = app.staticTexts[name].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "playlist \(name) not in the library")
-        row.tap()
+        // Played fixtures put it on Home too, under the Library tab: tap the one on screen.
+        let matches = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", name))
+        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 15), "playlist \(name) not in the library")
+        sleep(1)
+        let row = matches.allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(row, "playlist \(name) not on screen")
+        row?.tap()
         XCTAssertTrue(backButton.waitForExistence(timeout: 10), "playlist page did not open")
     }
 

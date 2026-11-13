@@ -26,6 +26,21 @@ final class SwipeBackTests: GestureTestCase {
         XCTAssertTrue(waitGone(backButton), "swipe right mid-page did not go back on a Search page")
     }
 
+    /// A back swipe that starts on the playlist cover never opens "Edit details" (11-13: it
+    /// flashed it, the finger lifts over the cover as the page moves with it). Short of popping
+    /// the page springs back, so a stray tap would leave the dialog open.
+    func testBackSwipeOnPlaylistCoverDoesNotOpenEditor() {
+        openPlaylist()
+        let cover = app.buttons["Choose photo"].firstMatch
+        XCTAssertTrue(cover.waitForExistence(timeout: 10))
+        let start = point(on: cover, 0.3, 0.5)
+        drag(start, moved(start, 50, 4), velocity: .default)
+        sleep(1)
+        XCTAssertFalse(app.staticTexts["Edit details"].exists, "a swipe on the cover opened Edit details")
+        cover.tap()
+        XCTAssertTrue(app.staticTexts["Edit details"].waitForExistence(timeout: 5), "a tap on the cover did not open Edit details")
+    }
+
     /// Library -> playlist scrolled down: swipe right on the top bar goes back.
     func testLibraryPageSwipesBackWhenScrolled() {
         openPlaylist()
@@ -135,6 +150,43 @@ final class SwipeDownTests: GestureTestCase {
         let start = point(on: new, 0.5, 0.5)
         drag(start, moved(start, -30, 220), velocity: .default)
         XCTAssertTrue(waitGone(new), "swipe down did not close the sub-sheet")
+    }
+
+    /// A sheet taller than the screen (the app icons): once scrolled down, a swipe down scrolls
+    /// back up instead of closing it (11-13: it closed). Only at the top does it close.
+    func testTallSheetScrollsBackUpBeforeClosing() {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Guest'")).firstMatch.tap()
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'App icon'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        drag(point(0.5, 0.7), point(0.5, 0.3), velocity: .default)
+        row.tap()
+        let first = app.buttons["Slopify"].firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 5), "the icon sheet did not open")
+        let last = app.buttons["Neon RGB ring"].firstMatch
+        for _ in 0..<4 where !last.isHittable { drag(point(0.5, 0.75), point(0.5, 0.35), velocity: .default) }
+        XCTAssertTrue(last.isHittable, "the icon sheet did not scroll down")
+        XCTAssertFalse(first.isHittable, "the first icon is still on screen after scrolling down")
+        for _ in 0..<3 where !first.isHittable {
+            let start = point(0.5, 0.5)
+            drag(start, moved(start, 10, 200), velocity: .fast)
+            XCTAssertTrue(last.exists, "a swipe down while scrolled closed the sheet instead of scrolling up")
+        }
+        XCTAssertTrue(first.isHittable, "swipes down did not scroll the icon sheet back to the top")
+    }
+
+    /// Lyrics at their top: a swipe down from mid-screen goes back to the cover, like the
+    /// chevron there; now playing stays open (11-13).
+    func testLyricsSwipeDownAtTopShowsCover() {
+        startPlayback()
+        openNowPlaying()
+        app.buttons["Lyrics"].firstMatch.tap()
+        XCTAssertTrue(waitGone(npQueueButton), "the lyrics did not open")
+        let start = point(0.5, 0.45)
+        drag(start, moved(start, 10, 200), velocity: .default)
+        XCTAssertTrue(npQueueButton.waitForExistence(timeout: 4), "a swipe down on the lyrics did not go back to the cover")
     }
 
     /// The device sheet closes with a flick down from its middle.

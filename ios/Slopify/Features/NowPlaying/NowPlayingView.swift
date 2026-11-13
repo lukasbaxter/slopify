@@ -17,8 +17,6 @@ struct NowPlayingView: View {
     @State private var tab: Tab = .album
     @State private var npColor: RGB?
     @State private var backdropScrim: Double = 0
-    /// Bottom of the top row (global), where a lyrics-tab swipe may start.
-    @State private var headerBottom: CGFloat = 0
     @State private var from: NowPlayingFrom = .fallback
     // Swipe down to close, swipe the art to skip.
     @State private var drag: CGFloat = 0
@@ -56,11 +54,14 @@ struct NowPlayingView: View {
             // Nothing inside may widen the page past the screen.
             .frame(width: g.size.width, height: g.size.height)
             .offset(y: drag)
-            .swipeToDismiss(offset: $drag, distance: Gestures.nowPlayingDismissDistance, rubberBand: false, canBegin: { p in
+            // The lyric lines' scroll view holds it back until they are at their top.
+            .swipeToDismiss(offset: $drag, distance: Gestures.nowPlayingDismissDistance, rubberBand: false, canBegin: { _ in
                 !scrubbing && menu == nil && !showDevices
-                    && NowPlayingMath.swipeDismissAllowed(lyricsShowing: tab == .lyrics, startY: p.y, headerBottom: headerBottom)
             }) {
-                SwipeDismiss.slideOut($drag, to: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom) { close() }
+                switch NowPlayingMath.swipeDown(lyricsShowing: tab == .lyrics) {
+                case .close: SwipeDismiss.slideOut($drag, to: g.size.height + g.safeAreaInsets.top + g.safeAreaInsets.bottom) { close() }
+                case .showCover: withAnimation(Motion.snapBack) { drag = 0; tab = .album }
+                }
             }
         }
         // The web unmounts now playing as the queue opens: hide it under the queue so the queue's
@@ -154,10 +155,6 @@ struct NowPlayingView: View {
         .padding(.top, 4)
         .padding(.horizontal, 16)
         .frame(minHeight: 56)
-        .background(GeometryReader { g in
-            Color.clear.onAppear { headerBottom = g.frame(in: .global).maxY }
-                .onChange(of: g.frame(in: .global).maxY) { _, y in headerBottom = y }
-        })
     }
 
     // MARK: Stage (.fs-stage)

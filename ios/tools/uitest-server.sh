@@ -11,7 +11,7 @@ if ! curl -sf "$BASE/healthz" >/dev/null 2>&1; then
   [ -f "$ROOT/server/dist/index.js" ] || (cd "$ROOT" && npm run build -w server >/dev/null)
   rm -rf "$DATA"; mkdir -p "$DATA"
   (cd "$ROOT" && DEMO=1 NODE_ENV=test SAVE_TO_LIBRARY=0 SPEAKERS=0 MUSIC_DIR=fixtures/music DATA_DIR="$DATA" \
-    PORT=$PORT LOG_LEVEL=warn LOGIN_RATE_MAX=100000 RATE_MAX=1000000 nohup node server/dist/index.js >"$DATA/server.log" 2>&1 &)
+    PORT=$PORT LOG_LEVEL=warn LOGIN_RATE_MAX=100000 RATE_MAX=1000000 nohup node server/dist/index.js &) >"$DATA/server.log" 2>&1 </dev/null
   for _ in $(seq 60); do curl -sf "$BASE/healthz" >/dev/null 2>&1 && break; sleep 0.5; done
 fi
 python3 - "$BASE" <<'PY'

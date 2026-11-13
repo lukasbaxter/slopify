@@ -36,14 +36,9 @@ final class NowPlayingLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(width(b, proposed: 250), 250.5)
     }
 
-    func testSwipeDismissRegions() {
-        // Album tab: anywhere.
-        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: false, startY: 600, headerBottom: 115))
-        // Lyrics tab: only from the header (chevron, title, artist), never from the lines.
-        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 80, headerBottom: 115))
-        XCTAssertTrue(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 115, headerBottom: 115))
-        XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 116, headerBottom: 115))
-        XCTAssertFalse(NowPlayingMath.swipeDismissAllowed(lyricsShowing: true, startY: 500, headerBottom: 115))
+    func testSwipeDownMatchesTheChevron() {
+        XCTAssertEqual(NowPlayingMath.swipeDown(lyricsShowing: false), .close)
+        XCTAssertEqual(NowPlayingMath.swipeDown(lyricsShowing: true), .showCover)
     }
 
     /// The queue (and every sheet) uses the shared rule: header always (no scroll view under

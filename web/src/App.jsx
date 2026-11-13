@@ -973,7 +973,8 @@ export default function App() {
   const likedRows = (ids) => ids.map((id) => likedCacheRef.current.get(id)).filter(Boolean);
   // Go to radio (an artist, song, album or playlist): the listener's radio
   // playlist (server: radio.ts, kept a day), opened as a page like a Daily
-  // Mix's and started from the top. refresh: a new one now.
+  // Mix's. It does not start by itself (owner, 11-13): its play button does.
+  // refresh: a new one now.
   const openRadio = async (seed, { refresh = false } = {}) => {
     if (!seed?.Id) return;
     const id = `radio:${seed.Id}`;
@@ -985,7 +986,6 @@ export default function App() {
       const r = await jf.radio(seed.Id, { refresh });
       const artId = r.seed.kind === 'track' || r.seed.kind === 'album' ? r.seed.albumId || r.seed.id : r.seed.id;
       setDetail((d) => (d && d.item?.Id === id ? { ...d, item: page(r.seed.name, artId, mixSub(r.artists)), tracks: r.items, loading: false } : d));
-      if (r.items.length) player.playQueue(r.items, 0, id);
     } catch (e) {
       if (!e.offline) notify(e.message, 4000);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d));
@@ -1861,6 +1861,12 @@ pos=${Math.round(player.position)} playing=${player.playing} vol=${player.volume
         onPanel={setPanel}
         onLike={onLike}
         onFullScreen={openFullScreen}
+        playlists={playlists}
+        onAddTo={onAddTo}
+        onNewPlaylist={onNewPlaylistWithTrack}
+        onOpenRadio={openRadio}
+        onExclude={onExclude}
+        onDownload={onDownload}
       />
       <PlayingElsewhereBar player={player} />
       {fullScreen && <FullScreen player={player} jf={jf} onClose={closeFullScreen} onOpenArtist={leaveFullScreenTo(openArtistById)} onOpenAlbum={leaveFullScreenTo(openAlbumById)} onOpenRadio={leaveFullScreenTo(openRadio)} onLike={onLike} onAddTo={onAddTo} onNewPlaylist={onNewPlaylistWithTrack} playlists={playlists} prefs={prefs} onUpdatePrefs={updatePrefs} onPanel={setPanel} devices={[...devices, ...player.relayDevices, ...player.lanDevices]} sessionDevice={sessionDeviceOf(player, [...devices, ...player.relayDevices, ...player.lanDevices])} />}

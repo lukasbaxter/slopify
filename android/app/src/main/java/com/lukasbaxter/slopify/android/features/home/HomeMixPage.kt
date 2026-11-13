@@ -9,7 +9,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -60,8 +59,7 @@ import kotlin.coroutines.cancellation.CancellationException
  *
  * - `context`: player context, `mix:<artistId>` or `top:<year>`.
  * - `radioSeed`: the Daily Mix's artist; null hides "Go to radio".
- * - `autoplay`: play the first answer from the top, once per open (Go to radio's page).
- * - `refresh`: a Refresh menu item that loads anew and plays from the top (a radio).
+ * - `refresh`: a Refresh menu item that loads anew (a radio). Nothing starts by itself (owner 11-13).
  */
 @Composable
 internal fun HomeMixPage(
@@ -72,7 +70,6 @@ internal fun HomeMixPage(
     art: CoverSource?,
     radioSeed: String?,
     radioName: String? = null,
-    autoplay: Boolean = false,
     refresh: (suspend (ApiClient) -> List<Track>)? = null,
     load: suspend (ApiClient) -> List<Track>,
 ) {
@@ -85,7 +82,6 @@ internal fun HomeMixPage(
     var failure by remember(context) { mutableStateOf<HomeMixPageFailure?>(null) }
     var menu by remember { mutableStateOf<MenuSheet?>(null) }
     var dialog by remember { mutableStateOf<NameDialog?>(null) }
-    var autoplayed by rememberSaveable(context) { mutableStateOf(false) }
     val menus = rememberTrackMenuBuilder { dialog = it }
 
     val hero = remember(color) { ColorMath.heroTint(color) }
@@ -97,10 +93,6 @@ internal fun HomeMixPage(
             val items = load(app.account.api)
             tracks = StreamPolicy.dropDisliked(items, app.account.prefs.value)
             failure = null
-            if (HomeLogic.shouldAutoplay(autoplay, autoplayed, tracks.size)) {
-                autoplayed = true
-                player.play(tracks, startAt = 0, context = context)
-            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -137,7 +129,6 @@ internal fun HomeMixPage(
                             try {
                                 tracks = StreamPolicy.dropDisliked(r(app.account.api), app.account.prefs.value)
                                 failure = null
-                                if (tracks.isNotEmpty()) player.play(tracks, startAt = 0, context = context)
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {

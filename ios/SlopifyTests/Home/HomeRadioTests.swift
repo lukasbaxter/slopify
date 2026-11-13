@@ -63,14 +63,6 @@ final class HomeRadioTests: XCTestCase {
         XCTAssertEqual(HomeRadioLogic.art(.init(kind: "playlist", id: "pl_1", name: "P", artistId: nil, albumId: nil)), .playlist(id: "pl_1", cover: nil))
     }
 
-    func testARadioPlaysOnceAsItOpensAndAgainOnRefresh() {
-        var a = HomeMixAutoplay()
-        XCTAssertFalse(a.shouldPlay(count: 0, refresh: false), "nothing loaded yet")
-        XCTAssertTrue(a.shouldPlay(count: 50, refresh: false))
-        XCTAssertFalse(a.shouldPlay(count: 50, refresh: false), "coming back to the page")
-        XCTAssertTrue(a.shouldPlay(count: 50, refresh: true))
-    }
-
     func testHomeShowsTodaysSummaryAndAFreshAnswerReplacesTheKeptOne() async throws {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.protocolClasses = [HomeStubProtocol.self]

@@ -28,7 +28,6 @@ struct HomeMixPage: View {
     @State private var failure: HomeMixPageFailure?
     @State private var menu: MenuSheet?
     @State private var nameDialog: NameDialog?
-    @State private var autoplay = HomeMixAutoplay()
 
     private var hero: RGB { ColorMath.heroTint(color) }
     private var isContext: Bool { player.context == context }
@@ -90,8 +89,6 @@ struct HomeMixPage: View {
             guard !Task.isCancelled else { return }
             tracks = StreamPolicy.dropDisliked(items, prefs: account.prefs)
             failure = nil
-            // A radio starts as it opens, and again after Refresh; never on coming back to it.
-            if radio, autoplay.shouldPlay(count: tracks.count, refresh: refresh) { player.play(tracks, startAt: 0, context: context) }
         } catch {
             guard !Task.isCancelled else { return }
             failure = HomeMixPageFailure(error)
@@ -109,16 +106,6 @@ struct HomeMixPage: View {
     private func playRow(_ i: Int) {
         if player.current?.id == tracks[i].id { player.togglePlay(); return }
         player.play(tracks, startAt: i, context: context)
-    }
-}
-
-/// When a radio page plays by itself: its first load with songs, and every Refresh.
-struct HomeMixAutoplay: Equatable {
-    private(set) var played = false
-    mutating func shouldPlay(count: Int, refresh: Bool) -> Bool {
-        guard count > 0, refresh || !played else { return false }
-        played = true
-        return true
     }
 }
 

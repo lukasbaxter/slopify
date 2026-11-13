@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test';
 import { login, waitForLibrary } from './helpers';
 
 // Go to radio opens the listener's radio playlist as a page ("<artist>
-// Radio") and starts it from the top; going again within the day is the same
-// radio, not a new one (server: radio.ts). Before, it only replaced the queue.
-test('Go to radio on an artist opens their radio page and plays it', async ({ page }, info) => {
+// Radio"); going again within the day is the same radio, not a new one
+// (server: radio.ts). It does not start by itself (owner, 11-13): the page's
+// play button starts it.
+test('Go to radio on an artist opens their radio page without playing it', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium', 'desktop menus');
   await login(page);
   await page.goto('/?debug=1'); await waitForLibrary(page);
@@ -19,9 +20,15 @@ test('Go to radio on an artist opens their radio page and plays it', async ({ pa
   await page.locator('.iconbtn.more').first().click();
   await page.locator('.ctxmenu button', { hasText: 'Go to radio' }).click();
   await expect(page.locator('h1', { hasText: 'The Fixture Band Radio' }).first()).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => (window as any).__player.contextId)).not.toBe(`radio:${band.id}`);
+  await expect(page.locator('.player button[title="Pause"]')).toHaveCount(0);
+  expect(made).toHaveLength(1);
+  // The page's play button starts it.
+  await page.locator('.actions .playbtn, .actions button[title="Play"]').first().click();
   await expect(page.locator('.player button[title="Pause"]').first()).toBeVisible({ timeout: 20000 });
   expect(await page.evaluate(() => (window as any).__player.contextId)).toBe(`radio:${band.id}`);
-  expect(made).toHaveLength(1);
   // Its menu refreshes it instead of offering the radio again.
   await page.locator('.iconbtn.more').first().click();
   await expect(page.locator('.ctxmenu button', { hasText: 'Refresh' })).toBeVisible();

@@ -4,9 +4,7 @@ import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Radio
 import com.lukasbaxter.slopify.android.design.image.CoverSource
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Radio page and Daily Mix subtitle rules (API.md §14.1, §14.4). */
@@ -29,12 +27,5 @@ class HomeRadioLogicTest {
         assertEquals(CoverSource.AlbumArt("al", null), HomeLogic.radioArt(Radio.Seed("track", "t", "X", "ar", "al")))
         assertEquals(CoverSource.AlbumArt("al", null), HomeLogic.radioArt(Radio.Seed("album", "al", "X", "ar", "al")))
         assertEquals(CoverSource.PlaylistArt("pl_1", null), HomeLogic.radioArt(Radio.Seed("playlist", "pl_1", "X")))
-    }
-
-    @Test fun autoplaysOncePerOpen() {
-        assertTrue(HomeLogic.shouldAutoplay(autoplay = true, alreadyPlayed = false, trackCount = 3))
-        assertFalse(HomeLogic.shouldAutoplay(autoplay = true, alreadyPlayed = true, trackCount = 3))
-        assertFalse(HomeLogic.shouldAutoplay(autoplay = true, alreadyPlayed = false, trackCount = 0))
-        assertFalse(HomeLogic.shouldAutoplay(autoplay = false, alreadyPlayed = false, trackCount = 3))
     }
 }

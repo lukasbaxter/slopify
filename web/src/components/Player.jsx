@@ -5,7 +5,8 @@ import Marquee from './Marquee.jsx';
 const NOT_A_SWIPE = '.devicemenu, .ctxmenu, .ctxmenu-scrim, input, .dm-volume';
 import QualityBadge, { useQuality } from './QualityBadge.jsx';
 import DevicePicker, { useThrottledVolume, DeviceIcon } from './DevicePicker.jsx';
-import { usePhone, Heart, ShuffleGlyph, ArtistLinks } from './TrackRow.jsx';
+import { usePhone, Heart, ShuffleGlyph, ArtistLinks, useTrackMenu } from './TrackRow.jsx';
+import ContextMenu from './ContextMenu.jsx';
 import { vibrantColor } from '../api/colors.js';
 import { seekHover } from '../api/seekHover.js';
 import { useLiked } from '../api/likes.js';
@@ -192,9 +193,17 @@ export function sessionDeviceOf(player, devices) {
     : device;
 }
 
-export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist, panel, onPanel, onLike, onFullScreen }) {
+export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist, panel, onPanel, onLike, onFullScreen,
+  playlists = [], onAddTo, onNewPlaylist, onOpenRadio, onExclude, onDownload }) {
   const quality = useQuality(player, jf);
   const phone = usePhone();
+  // Right-click (two-finger click) on the cover or title: the song's menu, as on its row.
+  const [nowMenu, setNowMenu] = useState(null);
+  const menuTrack = player.current && player.current.Id === player.nowPlayingId ? player.current : null;
+  const nowMenuItems = useTrackMenu(menuTrack, {
+    onAddToQueue: (t) => player.addToQueue([t]), playlists, onNewPlaylist, onAddTo, onLike, onExclude, onDownload, jf,
+    onRadio: onOpenRadio, onOpenArtist, onOpenAlbum,
+  });
   const elsewhere = elsewhereLabel(player);
   const { current, nowPlaying, playing, duration, volume, device, error, roster, relay, repeat, shuffle } = player;
   const position = usePlayhead(player);
@@ -264,6 +273,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
           {error}
         </div>
       )}
+      {nowMenu && menuTrack && <ContextMenu x={nowMenu.x} y={nowMenu.y} items={nowMenuItems} onClose={() => setNowMenu(null)} />}
 
       <div
         className="player-row"
@@ -273,7 +283,7 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
         onClick={(e) => { if (e.target.closest('button, input, a, [role=button]')) return; if (window.matchMedia('(max-width: 760px)').matches) onFullScreen?.(); }}
         onTouchStart={phone ? onTouchStart : undefined} onTouchMove={phone ? onTouchMove : undefined} onTouchEnd={phone ? onTouchEnd : undefined} onTouchCancel={phone ? onTouchEnd : undefined}
       >
-        <div className="player-now" ref={nowRef}>
+        <div className="player-now" ref={nowRef} onContextMenu={phone || !menuTrack ? undefined : (e) => { e.preventDefault(); setNowMenu({ x: e.clientX, y: e.clientY }); }}>
           {art ? (
             <img
               // Keyed by the image so a track change never shows the previous cover next to the new title.

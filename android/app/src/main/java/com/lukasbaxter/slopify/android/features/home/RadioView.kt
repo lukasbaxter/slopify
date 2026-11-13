@@ -12,7 +12,8 @@ import com.lukasbaxter.slopify.android.design.theme.Theme
 
 /**
  * Go to radio's page (API.md §14.4): `POST /api/radio/{seedId}` makes or reuses the listener's
- * radio playlist of the seed, drawn like a Daily Mix page and started from the top once.
+ * radio playlist of the seed, drawn like a Daily Mix page. It does not start by itself (owner
+ * 11-13): its play button does.
  * Refresh (⋯) asks for a new one.
  */
 @Composable
@@ -27,7 +28,6 @@ fun RadioView(seedId: String, nameHint: String?) {
         color = Theme.Fixed.mixPalette[HomeLogic.radioColorIndex(seedId)],
         art = radio?.let { HomeLogic.radioArt(it.seed) },
         radioSeed = null,
-        autoplay = true,
         refresh = { api -> api.radio(seedId, refresh = true).also { radio = it }.items },
     ) { api -> api.radio(seedId).also { radio = it }.items }
 }

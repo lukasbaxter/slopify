@@ -966,12 +966,12 @@ demo mode may make radios.
 - `artists`: as in §14.1 (the seed's artist first; a playlist has none first).
 - 404 `no such item` (unknown id, someone else's playlist), `nothing to play` (an empty set).
 
-Clients: open the radio's page at once and start it from the top (context `radio:<seedId>`).
+Clients: open the radio's page at once. It does not start by itself; its play button plays it
+from the top (context `radio:<seedId>`).
 The page is drawn like a Daily Mix page: title `L("{name} Radio", name: seed.name)`, the mix
 composite cover (an artist: their picture; a song or album: the album cover, `albumId`; a
 playlist: its picture) with the title in the band, colour `MIX_COLORS[(sum of the seed id's UTF-16 code units) % 8]`, owner line
-"Made for you", subtitle from `artists`. Its menu: Add to queue, Refresh (`?refresh=1`, then
-play from the top), Add to playlist. No Go to radio on a radio page.
+"Made for you", subtitle from `artists`. Its menu: Add to queue, Refresh (`?refresh=1`), Add to playlist. No Go to radio on a radio page.
 
 ---
 

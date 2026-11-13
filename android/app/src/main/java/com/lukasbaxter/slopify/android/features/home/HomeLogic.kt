@@ -152,9 +152,6 @@ object HomeLogic {
         else -> null
     }
 
-    /** A page that starts itself (Go to radio) plays its first answer once per open, never on a return. */
-    fun shouldAutoplay(autoplay: Boolean, alreadyPlayed: Boolean, trackCount: Int): Boolean = autoplay && !alreadyPlayed && trackCount > 0
-
     /** Home.jsx `topSongsSub`. */
     fun topSongsSub(year: Int, currentYear: Int): String =
         if (year == currentYear) L("Your most played songs of {year} so far", "year" to year)

@@ -187,27 +187,19 @@ export function offlineMenu(items, playable = true) {
   return kept.filter((it, i) => !it.sep || (i > 0 && i < kept.length - 1 && !kept[i - 1].sep));
 }
 
-export default function TrackRow({
-  track, n, active, isPlaying = false, onPlay, onRowOpen, onToggle, onLike, playlists = [], onAddTo, onNewPlaylist,
-  onRemove, draggable = false, onDragStart, onDragOver, onDrop, showArt = false, jf,
-  onOpenArtist, onOpenAlbum, hideArtists = false, subtitle = null,
-  onAddToQueue, onExclude, onRadio, onDownload, hideAlbum = false, snippet = null, snippetAt = null, onPlayAt, highlight = false,
-}) {
-  // {x, y} while the context menu is open (from the dots button or a right-click).
-  const [menu, setMenu] = useState(null);
+/**
+ * A song's menu (Spotify's row menu, top to bottom; submenus open on hover).
+ * Shared by the track rows and the player bar's cover, so a right-click on
+ * either shows the same menu. Offline, only what works without the server.
+ */
+export function useTrackMenu(track, { onAddToQueue, playlists = [], onNewPlaylist, onAddTo, onRemove, onLike, onExclude, onRadio, onOpenArtist, onOpenAlbum, jf, onDownload } = {}) {
   const lyricJob = useLyricJob(track?.Id);
-  const phone = usePhone();
-  const touch = useTouch();
-  // From the like store, never from the row's UserData (which can be stale).
-  const liked = useLiked(track.Id);
-  const kept = useDownloaded(track.Id);
-  // Offline, only downloaded songs can play: the rest grey out (Spotify's way).
+  const liked = useLiked(track?.Id);
+  const kept = useDownloaded(track?.Id);
   const offline = useOfflineMode();
-  const unavailable = offline && !kept;
+  if (!track) return [];
   const excluded = track.UserData?.Likes === false;
   const artistsOf = track.ArtistItems?.length ? track.ArtistItems : (track.Artists || []).map((n2) => ({ Name: n2 }));
-
-  // Spotify's row menu, top to bottom. Submenus open on hover.
   const allItems = [
     onAddToQueue ? { label: t('Add to queue'), icon: I.queue, onClick: () => onAddToQueue(track) } : null,
     { label: t('Add to playlist'), icon: I.plus, sub: [
@@ -231,9 +223,28 @@ export default function TrackRow({
     onDownload ? { sep: true } : null,
     onDownload ? { label: t('Download'), icon: I.down, sub: FORMATS.map((f) => ({ key: f.id, label: t(f.label), onClick: () => onDownload(track, f.id) })) } : null,
   ];
-  // Offline: only what works without the server (queueing a downloaded
-  // song, going to its artist or album).
-  const menuItems = offline ? offlineMenu(allItems, kept) : allItems;
+  return offline ? offlineMenu(allItems, kept) : allItems;
+}
+
+export default function TrackRow({
+  track, n, active, isPlaying = false, onPlay, onRowOpen, onToggle, onLike, playlists = [], onAddTo, onNewPlaylist,
+  onRemove, draggable = false, onDragStart, onDragOver, onDrop, showArt = false, jf,
+  onOpenArtist, onOpenAlbum, hideArtists = false, subtitle = null,
+  onAddToQueue, onExclude, onRadio, onDownload, hideAlbum = false, snippet = null, snippetAt = null, onPlayAt, highlight = false,
+}) {
+  // {x, y} while the context menu is open (from the dots button or a right-click).
+  const [menu, setMenu] = useState(null);
+  const phone = usePhone();
+  const touch = useTouch();
+  // From the like store, never from the row's UserData (which can be stale).
+  const liked = useLiked(track.Id);
+  const kept = useDownloaded(track.Id);
+  // Offline, only downloaded songs can play: the rest grey out (Spotify's way).
+  const offline = useOfflineMode();
+  const unavailable = offline && !kept;
+  const artistsOf = track.ArtistItems?.length ? track.ArtistItems : (track.Artists || []).map((n2) => ({ Name: n2 }));
+
+  const menuItems = useTrackMenu(track, { onAddToQueue, playlists, onNewPlaylist, onAddTo, onRemove, onLike, onExclude, onRadio, onOpenArtist, onOpenAlbum, jf, onDownload });
   const openMenuAt = (e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); };
 
   return (

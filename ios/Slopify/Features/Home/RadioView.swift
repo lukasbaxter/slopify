@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Go to radio's page (API.md §14.4): the listener's radio of an artist, song, album or playlist,
-/// drawn like a Daily Mix page. It starts playing from the top as it opens.
+/// drawn like a Daily Mix page. It does not start by itself (owner 11-13): its play button does.
 struct RadioView: View {
     let seedId: String
     /// The seed's name from the caller, for the title before the radio loads.

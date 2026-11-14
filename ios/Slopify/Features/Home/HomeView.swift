@@ -65,7 +65,17 @@ struct HomeView: View {
             store.use(key: HomeStore.key(for: account))
             await refresh(force: false)
         }
+        // A song that has played 8 s is in the play log (the server counts it then): ask for
+        // the shortcuts again, so what was just picked shows without a relaunch.
+        .task(id: PlayedKey(id: app.player.current?.id, playing: app.player.isPlaying)) {
+            guard app.player.current != nil, app.player.isPlaying else { return }
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+            await store.reloadHome(api: account.api)
+        }
     }
+
+    private struct PlayedKey: Hashable { var id: String?; var playing: Bool }
 
     private func refresh(force: Bool) async {
         await store.load(api: account.api, maxAge: force ? 0 : 60)

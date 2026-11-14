@@ -328,7 +328,7 @@ export class Slopify {
     const all = await this._artists();
     return { items: all.slice(startIndex, limit ? startIndex + limit : undefined), total: all.length };
   }
-  _home() { return this._cachedFor('home', 3 * 60 * 1000, () => this._fetch('/api/home')); }
+  _home() { return this._cachedFor('home', 5 * 1000, () => this._fetch('/api/home')); }
   // Home's shortcuts: the latest album, playlist and artist picked and played from.
   recentPicks() {
     return this._home().then((h) => (h.recents || []).map((r) => (r.kind === 'playlist' ? { kind: 'playlist', item: rowPlaylist(r) }

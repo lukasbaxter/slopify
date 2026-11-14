@@ -164,6 +164,18 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
       setRecentArtists(ra); jf._persist('home.recentArtists', ra);
     }).catch(() => {});
   }, [jf, fresh]);
+  // A song that has played 8 s is in the play log: the shortcuts (what was
+  // picked last) are asked for again, so the pick shows without a reload.
+  const playingId = player?.nowPlayingId, isPlaying = !!player?.playing;
+  // One ask per song, 10 s after it shows as playing here; a later song does
+  // not put it off (short songs would never get there).
+  const askedRef = useRef(new Map());
+  useEffect(() => {
+    const asked = askedRef.current;
+    if (!jf || !playingId || !isPlaying || asked.has(playingId)) return;
+    asked.set(playingId, setTimeout(() => { asked.delete(playingId); jf._evict('home'); setFresh((n) => n + 1); }, 10000));
+  }, [jf, playingId, isPlaying]);
+  useEffect(() => () => { for (const tm of askedRef.current.values()) clearTimeout(tm); askedRef.current.clear(); }, []);
   // A newer answer than the kept one Home opened with (sw.js 'api-fresh'): load again.
   useEffect(() => {
     const on = (e) => { if (/^\/api\/(home|top-songs|tracks\/top)/.test(e.detail)) { jf?._evict('home'); setFresh((n) => n + 1); } };

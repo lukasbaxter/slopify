@@ -90,6 +90,12 @@ final class HomeStore {
         }
     }
 
+    /// After a play is logged: the shortcuts (what was picked last) and the play-ranked lists again.
+    func reloadHome(api: APIClient) async {
+        await loadHome(api)
+        persist()
+    }
+
     private func loadHome(_ api: APIClient) async {
         guard let h = try? await api.home(), !Task.isCancelled else { return }
         data.recent = Array(h.recentAlbums.prefix(16))

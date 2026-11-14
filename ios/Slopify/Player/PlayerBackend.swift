@@ -141,6 +141,8 @@ enum SessionReports {
         var device: OutputDevice
         var artUrl: String?
         var now: Double
+        var context: String? = nil
+        var picked = false
     }
 
     static func nowPlaying(_ s: LocalState) -> NowPlaying {
@@ -151,7 +153,8 @@ enum SessionReports {
                           artists: credits.isEmpty ? [NameId(Id: t.artistIds.first, Name: t.albumArtist)] : credits,
                           liked: s.liked, device: s.device, queueIndex: s.index, playing: s.playing, held: s.playing && s.held,
                           position: max(0, s.position), duration: s.duration, volume: s.volume,
-                          repeat: s.repeatMode.rawValue, shuffle: s.shuffle.rawValue, at: s.now, serverAt: nil)
+                          repeat: s.repeatMode.rawValue, shuffle: s.shuffle.rawValue, at: s.now, serverAt: nil,
+                          ctx: s.context, picked: s.picked)
     }
 
     /// Index into a published queue for a NowPlaying (§20.6: trust `queueIndex` only when it

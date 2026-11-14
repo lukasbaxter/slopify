@@ -146,7 +146,25 @@ struct LibraryInfo: Codable, Sendable {
     var artists: Int?
 }
 
+/// One of Home's shortcuts as the server lists them (`recents`): the latest album, playlist or
+/// artist the listener picked and played a song from, newest first (server: playsrc.ts).
+struct HomePick: Codable, Hashable, Sendable {
+    var kind: String
+    var id: String
+    var name: String
+    var artist: String?
+    var artistId: String?
+    var year: Int?
+    var trackCount: Int?
+    var cover: String?
+    var image: String?
+    var userId: String?
+    var aiPrompt: String?
+}
+
 struct HomeData: Codable, Sendable {
+    /// Missing from a server older than schema 36.
+    var recents: [HomePick]?
     var recentAlbums: [Album]
     var topTracks: [Track]
     var newestAlbums: [Album]

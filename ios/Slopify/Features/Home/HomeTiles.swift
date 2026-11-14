@@ -20,6 +20,7 @@ struct HomeShortcutTile: View {
         case .liked: L("Liked Songs")
         case .album(let a): HomeLogic.tileTitle(a.name)
         case .playlist(let p): HomeLogic.tileTitle(p.name)
+        case .artist(let a): HomeLogic.tileTitle(a.name)
         }
     }
 
@@ -51,6 +52,7 @@ struct HomeShortcutTile: View {
             case .liked: L("Liked Songs")
             case .album(let a): HomeLogic.tileTitle(a.name)
             case .playlist(let p): HomeLogic.tileTitle(p.name)
+            case .artist(let a): HomeLogic.tileTitle(a.name)
             }
         }
 
@@ -59,6 +61,7 @@ struct HomeShortcutTile: View {
             case .liked: LikedCover(heart: 0.45, radius: 0)
             case .album(let a): CoverImage(.init(a), size: 56, shape: .rounded(0), placeholder: .none)
             case .playlist(let p): CoverImage(.init(p), size: 56, shape: .rounded(0), placeholder: .none)
+            case .artist(let a): CoverImage(.artist(id: a.id, image: a.image), size: 56, shape: .rounded(0), placeholder: .none)
             }
         }
     }
@@ -95,7 +98,7 @@ struct HomeMixArt: View {
             Text(label)
                 .font(.system(size: large ? 16 : 14, weight: .bold))
                 .tracking(-0.2)
-                .foregroundStyle(Color.white)
+                .foregroundStyle(color.ink)
                 .lineLimit(1)
                 .padding(.vertical, large ? 10 : 6).padding(.horizontal, large ? 14 : 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -113,11 +116,11 @@ struct HomeMixArt: View {
     }
 }
 
-/// The hero's mix mark (`.hero-avatar.mixmark`): a 20 pt disc in the raw mix colour with a white note.
+/// The hero's mix mark (`.hero-avatar.mixmark`): a 20 pt disc in the raw mix colour with a note in its ink.
 struct HomeMixMark: View {
     var color: RGB
     var body: some View {
         Circle().fill(color.color)
-            .overlay { IconView(.musicNote, size: 12).foregroundStyle(Color.white) }
+            .overlay { IconView(.musicNote, size: 12).foregroundStyle(color.ink) }
     }
 }

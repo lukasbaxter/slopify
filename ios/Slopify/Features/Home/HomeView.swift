@@ -130,6 +130,7 @@ struct HomeView: View {
         case .liked: .likedSongs
         case .album(let a): .album(id: a.id)
         case .playlist(let p): .playlist(id: p.id)
+        case .artist(let a): .artist(id: a.id)
         }
     }
 
@@ -141,6 +142,7 @@ struct HomeView: View {
                     case .liked: nav.pushFromHome(.likedSongs)
                     case .album(let a): nav.pushFromHome(.album(id: a.id))
                     case .playlist(let p): nav.pushFromHome(.playlist(id: p.id))
+                    case .artist(let a): nav.pushFromHome(.artist(id: a.id))
                     }
                 } onLongPress: {
                     let m = CardMenuBuilder(app: app)
@@ -148,6 +150,7 @@ struct HomeView: View {
                     case .liked: menu = m.likedSongs()
                     case .album(let a): menu = m.album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
                     case .playlist(let p): menu = m.playlist(p.id, name: p.name)
+                    case .artist(let a): menu = m.artist(a.id, name: a.name)
                     }
                 }
                 .homeZoomSource(Self.route(s))
@@ -178,7 +181,7 @@ struct HomeView: View {
                 let label = L("Your Top Songs {year}", ["year": y.year.year])
                 MediaCard(title: label, subtitle: HomeLogic.topSongsSub(y.year.year, currentYear: year), style: .home,
                           action: { nav.pushFromHome(.topSongs(year: y.year.year, colorIndex: y.index)) }) {
-                    HomeMixArt(source: y.year.top.map { CoverSource.album(id: $0.albumId, art: $0.cover) }, color: mixColor(y.index), label: label, pixelSize: 150)
+                    HomeMixArt(source: y.year.top.map { CoverSource.album(id: $0.albumId, art: $0.cover) }, color: Theme.Fixed.topPalette[HomeLogic.mixColorIndex(y.index)], label: label, pixelSize: 150)
                 }
                 .homeZoomSource(.topSongs(year: y.year.year, colorIndex: y.index))
             }

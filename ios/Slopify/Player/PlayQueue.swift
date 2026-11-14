@@ -32,6 +32,9 @@ struct PlayQueue: Codable, Equatable, Sendable {
     var original: [QueueEntry] = []
     var index = 0
     var context: String?
+    /// The one song picked by itself, with no context (web `pickedRef`): the play log counts it
+    /// as its album for Home's shortcuts.
+    var picked: String?
     var shuffle: Player.Shuffle = .off
     var repeatMode: Player.Repeat = .off
 
@@ -44,6 +47,7 @@ struct PlayQueue: Codable, Equatable, Sendable {
         let rows = list.map { QueueEntry(track: $0) }
         let i = rows.indices.contains(start) ? start : 0
         context = ctx
+        picked = (ctx ?? "").isEmpty && rows.count == 1 ? rows[0].track.id : nil
         original = rows
         if shuffle != .off, rows.count > 1 {
             var rest = rows; let chosen = rest.remove(at: i)
@@ -61,6 +65,7 @@ struct PlayQueue: Codable, Equatable, Sendable {
         index = rows.isEmpty ? 0 : min(max(0, i), rows.count - 1)
         original = (orig?.isEmpty == false ? orig : nil) ?? rows
         context = ctx
+        picked = nil
     }
 
     /// web `addToQueue`: after the current song and anything already queued that way,

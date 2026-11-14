@@ -11,6 +11,8 @@ final class HomeStore {
 
     struct Snapshot: Codable, Sendable {
         var recent: [Album] = []
+        /// Home's shortcuts, as the server lists them. Optional: older kept copies lack it.
+        var picks: [HomePick]? = nil
         var topArtists: [HomeLogic.RankedArtist] = []
         var recentArtists: [HomeLogic.RankedArtist] = []
         var topYears: [TopSongYears.Year] = []
@@ -39,7 +41,7 @@ final class HomeStore {
 
     // MARK: Derived
 
-    var shortcuts: [HomeLogic.Shortcut] { HomeLogic.shortcuts(recent: data.recent, playlists: data.playlists, albums: data.albums) }
+    var shortcuts: [HomeLogic.Shortcut] { HomeLogic.shortcuts(picks: data.picks ?? [], playlists: data.playlists, albums: data.albums) }
     var mixSeeds: [HomeLogic.RankedArtist] { HomeLogic.mixSeeds(topArtists: data.topArtists, libraryArtists: data.artists) }
     var radarShelf: [Release] { Array(data.radar.prefix(16)) }
     /// A Daily Mix's subtitle, the same on its tile and its page.
@@ -91,6 +93,7 @@ final class HomeStore {
     private func loadHome(_ api: APIClient) async {
         guard let h = try? await api.home(), !Task.isCancelled else { return }
         data.recent = Array(h.recentAlbums.prefix(16))
+        data.picks = h.recents ?? []
         data.topArtists = HomeLogic.rankTopArtists(h.topTracks)
         // /api/home has no last-played date per track, so this stays empty exactly as on the web.
         data.recentArtists = HomeLogic.recentArtists(h.topTracks) { _ in nil }

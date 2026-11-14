@@ -37,6 +37,10 @@ struct NowPlaying: Codable, Hashable, Sendable {
     var at: Double?
     /// Added by the server on relay. Use this for clock math.
     var serverAt: Double?
+    /// What this was picked from, for the play log (server: playsrc.ts): the queue's context,
+    /// and whether this one song was picked by itself (it then counts as its album).
+    var ctx: String?
+    var picked: Bool?
 }
 
 struct QueueItem: Codable, Hashable, Sendable {

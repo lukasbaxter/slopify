@@ -34,7 +34,7 @@ final class HomeStoreTests: XCTestCase {
     override func setUp() {
         HomeStubProtocol.failing = []
         HomeStubProtocol.bodies = [
-            "/api/home": #"{"recentAlbums":[{"id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"topTracks":[\#(track("1", "Low", "a", plays: 1)),\#(track("2", "High", "b", plays: 9))],"newestAlbums":[]}"#,
+            "/api/home": #"{"recents":[{"kind":"album","id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"recentAlbums":[{"id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"topTracks":[\#(track("1", "Low", "a", plays: 1)),\#(track("2", "High", "b", plays: 9))],"newestAlbums":[]}"#,
             "/api/top-songs": #"{"years":[{"year":2026,"songs":40,"plays":300,"top":null}]}"#,
             "/api/radar": #"{"releases":[{"album_id":"m1","title":"New","rtype":"EP","date":"2026-11-01","image":null,"artistId":"b","artistName":"High","inLibrary":null,"localName":null,"requestStatus":null}]}"#,
             "/api/playlists": #"{"items":[{"id":"pl_1","name":"Mine","userId":"u","created":1,"updated":1,"trackCount":2,"cover":null,"aiPrompt":null}]}"#,

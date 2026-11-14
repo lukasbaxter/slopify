@@ -83,3 +83,8 @@ struct RGB: Hashable, Sendable, CustomStringConvertible {
 private extension String {
     func prefixed(_ p: String) -> String { p + self }
 }
+
+extension RGB {
+    /// The label colour that reads on a band of this colour (Home.jsx `inkOn`): dark on the bright ones.
+    var ink: Color { luminance > 0.28 ? RGB(hex: 0x121212).color : Color.white }
+}

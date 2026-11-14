@@ -20,11 +20,22 @@ enum HomeLogic {
         case liked
         case album(Album)
         case playlist(Playlist)
+        case artist(RankedArtist)
         var id: String {
             switch self {
             case .liked: "__liked__"
             case .album(let a): "al:" + a.id
             case .playlist(let p): "pl:" + p.id
+            case .artist(let a): "ar:" + a.id
+            }
+        }
+        /// The bare id, as the web compares them across kinds.
+        var itemId: String? {
+            switch self {
+            case .liked: nil
+            case .album(let a): a.id
+            case .playlist(let p): p.id
+            case .artist(let a): a.id
             }
         }
     }
@@ -98,19 +109,29 @@ enum HomeLogic {
         return out.isEmpty ? name : out
     }
 
-    /// Liked Songs first, then recent albums, playlists, then library albums not yet there; 8 max.
-    static func shortcuts(recent: [Album], playlists: [Playlist], albums: [Album]) -> [Shortcut] {
+    /// Home.jsx `shortcuts`: Liked Songs first, then the latest album, playlist and artist the
+    /// listener picked and played from (never what autoplay went on to), then (a new account)
+    /// playlists and library albums not yet there; 8 max.
+    static func shortcuts(picks: [HomePick], playlists: [Playlist], albums: [Album]) -> [Shortcut] {
         var out: [Shortcut] = [.liked]
-        for a in recent { if out.count >= 8 { break }; out.append(.album(a)) }
-        for p in playlists { if out.count >= 8 { break }; out.append(.playlist(p)) }
-        for a in albums {
-            if out.count >= 8 { break }
-            // The web compares bare ids across kinds (`o.item?.Id === a.Id`).
-            let taken = out.contains {
-                switch $0 { case .album(let x): x.id == a.id; case .playlist(let p): p.id == a.id; case .liked: false }
-            }
-            if !taken { out.append(.album(a)) }
+        func add(_ s: Shortcut) {
+            guard out.count < 8, let id = s.itemId, !id.isEmpty, !out.contains(where: { $0.itemId == id }) else { return }
+            out.append(s)
         }
+        for p in picks {
+            switch p.kind {
+            case "playlist":
+                add(.playlist(playlists.first { $0.id == p.id }
+                    ?? Playlist(id: p.id, name: p.name, userId: p.userId, created: nil, updated: nil, trackCount: p.trackCount, cover: p.cover, aiPrompt: p.aiPrompt)))
+            case "artist": add(.artist(RankedArtist(id: p.id, name: p.name, image: p.image)))
+            case "album":
+                add(.album(Album(id: p.id, name: p.name, artist: p.artist ?? "", artistId: p.artistId, year: p.year, trackCount: p.trackCount,
+                                 durationMs: nil, cover: p.cover, addedAt: nil, likedAt: nil)))
+            default: break
+            }
+        }
+        for p in playlists { add(.playlist(p)) }
+        for a in albums { add(.album(a)) }
         return out
     }
 
@@ -150,7 +171,7 @@ enum HomeLogic {
         return out
     }
 
-    /// `MIX_COLORS[i % 8]`.
+    /// `MIX_COLORS[i % 8]` (and `TOP_COLORS[i % 8]`: both palettes have 8).
     static func mixColorIndex(_ i: Int) -> Int { ((i % 8) + 8) % 8 }
 
     /// Home.jsx `topSongsSub`.

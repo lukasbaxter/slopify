@@ -160,6 +160,8 @@ struct Theme: Hashable, Sendable {
         static let sheetScrim = Color.black.opacity(0.6)
         /// Home mix tiles (Home.jsx:43).
         static let mixPalette: [RGB] = [0xe8115b, 0x1e3264, 0x8d67ab, 0xe13300, 0x148a08, 0x0d73ec, 0x7d4b32, 0xba5d07].map { RGB(hex: $0) }
+        /// Your Top Songs has a scheme of its own (Home.jsx `TOP_COLORS`): bright, cyan then yellow.
+        static let topPalette: [RGB] = [0x22d3ee, 0xfde047, 0xf472b6, 0xa3e635, 0xfb923c, 0xa78bfa, 0x34d399, 0xf87171].map { RGB(hex: $0) }
         /// Liked Songs tile gradient, 135deg (app.css:469-473).
         static let likedGradient = [RGB(hex: 0x450af5).color, RGB(hex: 0xc4efd9).color]
         static let likedHero = RGB(hex: 0x5038a0)

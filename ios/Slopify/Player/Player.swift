@@ -547,6 +547,7 @@ final class Player {
                 guard let self, let first = await self.fetch([chosen]).first else { return }
                 self.localPlay([first], at: 0, context: ctx, startAt: startAt ?? 0)
                 guard ids.count > 1 else { return }
+                self.mutate { $0.picked = nil } // one of a list, not a song picked by itself
                 let all = await self.fetch(ids)
                 guard self.model.current?.track.id == chosen, !all.isEmpty else { return }
                 let at = max(0, all.firstIndex { $0.id == chosen } ?? 0)
@@ -1010,7 +1011,8 @@ final class Player {
         link.report(SessionReports.nowPlaying(.init(
             track: cur, index: model.index, playing: isPlaying, held: isLoading, position: positionNow(),
             duration: duration > 0 ? duration : cur.duration, volume: volume, repeatMode: model.repeatMode, shuffle: model.shuffle,
-            liked: liked(cur.id), device: .local(output.id == "local" ? output.name : "This Phone"), artUrl: artURL(cur.id), now: now)))
+            liked: liked(cur.id), device: .local(output.id == "local" ? output.name : "This Phone"), artUrl: artURL(cur.id), now: now,
+            context: model.context, picked: model.picked == cur.id)))
     }
 
     private func artURL(_ id: String) -> String? {

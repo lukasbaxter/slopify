@@ -58,14 +58,26 @@ final class HomeLogicTests: XCTestCase {
     }
 
     func testShortcutsOrderAndCap() {
-        let recent = [homeAlbum("r1"), homeAlbum("r2")]
+        // What was picked and played from (owner, 11-14), newest first: an album, an artist,
+        // a playlist; then playlists and library albums not yet there.
+        func pick(_ kind: String, _ id: String) -> HomePick { HomePick(kind: kind, id: id, name: "N\(id)") }
+        let picks = [pick("album", "r1"), pick("artist", "a1"), pick("playlist", "p2")]
         let pls = [homePlaylist("p1"), homePlaylist("p2")]
         let lib = [homeAlbum("r1"), homeAlbum("l1"), homeAlbum("l2"), homeAlbum("l3"), homeAlbum("l4")]
-        let s = HomeLogic.shortcuts(recent: recent, playlists: pls, albums: lib)
-        XCTAssertEqual(s.map(\.id), ["__liked__", "al:r1", "al:r2", "pl:p1", "pl:p2", "al:l1", "al:l2", "al:l3"])
-        XCTAssertEqual(HomeLogic.shortcuts(recent: [], playlists: [], albums: []).map(\.id), ["__liked__"])
-        let tenRecent = (0..<10).map { homeAlbum("x\($0)") }
-        XCTAssertEqual(HomeLogic.shortcuts(recent: tenRecent, playlists: pls, albums: lib).count, 8)
+        let s = HomeLogic.shortcuts(picks: picks, playlists: pls, albums: lib)
+        XCTAssertEqual(s.map(\.id), ["__liked__", "al:r1", "ar:a1", "pl:p2", "pl:p1", "al:l1", "al:l2", "al:l3"])
+        // A picked playlist is the library's own row (its real name), not the bare pick.
+        if case .playlist(let p) = s[3] { XCTAssertEqual(p.name, "Pp2") } else { XCTFail("a playlist") }
+        XCTAssertEqual(HomeLogic.shortcuts(picks: [], playlists: [], albums: []).map(\.id), ["__liked__"])
+        let ten = (0..<10).map { pick("album", "x\($0)") }
+        XCTAssertEqual(HomeLogic.shortcuts(picks: ten, playlists: pls, albums: lib).count, 8)
+    }
+
+    func testTopSongsColoursStartCyanThenYellowWithDarkLabels() {
+        XCTAssertEqual(Theme.Fixed.topPalette[HomeLogic.mixColorIndex(0)], RGB(hex: 0x22d3ee))
+        XCTAssertEqual(Theme.Fixed.topPalette[HomeLogic.mixColorIndex(9)], RGB(hex: 0xfde047))
+        XCTAssertTrue(Theme.Fixed.topPalette.allSatisfy { $0.luminance > 0.28 })    // dark labels
+        XCTAssertTrue(Theme.Fixed.mixPalette.allSatisfy { $0.luminance <= 0.28 })   // Daily Mix keeps white
     }
 
     func testMixSeedsFallBackToLibraryArtists() {

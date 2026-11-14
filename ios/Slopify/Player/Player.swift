@@ -462,7 +462,9 @@ final class Player {
         var i = SessionReports.queueIndex(np, in: items) ?? items.firstIndex { $0.Id == np.itemId } ?? -1
         if i < 0 { rows = [QueueEntry(track: Track(nowPlaying: np))]; i = 0 }
         mutate { q in
-            q.adopt(rows, index: i, context: nil)
+            // What it was playing from comes along (the report carries it), so a resumed
+            // song still counts for the album or playlist it was picked from.
+            q.adopt(rows, index: i, context: np.ctx)
             if let r = np.repeat.flatMap(Repeat.init(rawValue:)) { q.repeatMode = r }
             if let s = np.shuffle.flatMap(Shuffle.init(rawValue:)) { q.shuffle = s }
         }
@@ -527,7 +529,7 @@ final class Player {
         let from = link.playhead(np)
         leaveMirror()
         mutate { q in
-            q.adopt(rows, index: t.index, context: nil)
+            q.adopt(rows, index: t.index, context: np.ctx)
             if let r = np.repeat.flatMap(Repeat.init(rawValue:)) { q.repeatMode = r }
             if let s = np.shuffle.flatMap(Shuffle.init(rawValue:)) { q.shuffle = s }
         }

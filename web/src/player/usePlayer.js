@@ -288,6 +288,9 @@ export function usePlayer(jf) {
   // The one song picked by itself (from search, say), with no context: the
   // play log counts it as its album for Home's shortcuts (server: playsrc.ts).
   const pickedRef = useRef(null);
+  // The queue is only the stand-in a fresh page shows (the last song this
+  // account played) until the remembered session arrives: that replaces it.
+  const placeholderRef = useRef(false);
   const [roster, setRoster] = useState({ players: [], lanDevices: [] });
   // Queues published by my other clients, keyed by clientId. The active
   // player's is what the queue panel shows while mirroring.
@@ -582,7 +585,10 @@ export function usePlayer(jf) {
     // player vanishes (a reload of the playing browser): what it has locally
     // is whatever it played hours ago, not something to fall back to. Only a
     // client that was on its own queue weighs its saved playhead against it.
-    if (!wasMirroringRef.current) {
+    // The stand-in a fresh page shows is not "its own queue": its playhead
+    // was written a moment ago and used to outrank the session it stood in for
+    // whenever that arrived second.
+    if (!wasMirroringRef.current && !placeholderRef.current) {
       if (queueRef.current.length && loadedRef.current) return;
       const mine = (jf && jf.persisted('playhead')) || {};
       if (queueRef.current.length && (mine.at || 0) >= (s.at || 0)) return;
@@ -596,9 +602,14 @@ export function usePlayer(jf) {
              RunTimeTicks: Math.round((np.duration || 0) * 10_000_000), _partial: true }];
       i = 0;
     }
+    placeholderRef.current = false;
     setQueue(q); queueRef.current = q;
     setIndex(i); indexRef.current = i;
     originalQueueRef.current = q;
+    // What it was playing from comes along (the report carries it), so a
+    // resumed song still counts for the album or playlist it was picked from.
+    const sctx = typeof np.ctx === 'string' && np.ctx ? np.ctx : null;
+    setContextId(sctx); contextRef.current = sctx; pickedRef.current = null;
     if (['off', 'all', 'one'].includes(np.repeat)) { repeatRef.current = np.repeat; setRepeat(np.repeat); }
     if (['off', 'on', 'smart'].includes(np.shuffle)) { shuffleRef.current = np.shuffle; setShuffle(np.shuffle); }
     const dur = np.duration || ticksToSeconds(q[i].RunTimeTicks);
@@ -860,6 +871,7 @@ export function usePlayer(jf) {
       setExternal(null);
       setContextId(ctx);
       pickedRef.current = !ctx && solo ? tracks[startIndex]?.Id || null : null;
+      placeholderRef.current = false;
       // With shuffle on, keep the chosen track first and scramble the rest.
       originalQueueRef.current = tracks;
       let order = tracks;
@@ -2420,6 +2432,7 @@ export function usePlayer(jf) {
       // session (newer, with a real playhead) replaces it when it arrives.
       jf.lastPlayedTrack().then((t) => {
         if (!t || queueRef.current.length) return;
+        placeholderRef.current = true;
         setQueue([t]); queueRef.current = [t];
         setIndex(0); indexRef.current = 0;
         originalQueueRef.current = [t];
@@ -2604,6 +2617,7 @@ export function usePlayer(jf) {
     // already normalizes by it.
     setContextId(ctx); contextRef.current = ctx;
     pickedRef.current = null;
+    placeholderRef.current = false;
     originalQueueRef.current = tracks;
     setQueue(tracks);
     setIndex(startIndex);

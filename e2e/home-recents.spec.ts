@@ -28,7 +28,9 @@ test('a song played from an album page reports the album, and Home then leads wi
   const songs = (await (await page.request.get(`/api/albums/${album.id}`, { headers: h })).json()).tracks as { id: string }[];
   await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
-  const row = page.locator('.trackrow').nth(0);
+  // Not the row the remembered session is on: a tap there resumes that session (whatever it
+  // was picked from) instead of picking the song from this page.
+  const row = page.locator('.trackrow:not(.active)').first();
   if (isMobile) await row.click(); else await row.dblclick();
   await expect.poll(() => seen.has(album.id), { timeout: 20000 }).toBe(true);
   expect((await page.request.post('/api/plays', { headers: h, data: { trackId: songs[0].id, client: 'web', ctx: album.id } })).ok()).toBe(true);
@@ -58,4 +60,32 @@ test('a song played from a playlist page reports the playlist, and Home then lea
   } finally {
     await page.request.delete(`/api/playlists/${id}`, { headers: h }).catch(() => {});
   }
+});
+
+// A song left playing and picked up again elsewhere (a relaunch, another
+// device) still counts for where it was picked from: the session a page
+// opens on carries the album, and Play reports it. It used to come back with
+// no context, so the resumed song never reached the shortcuts.
+test('a session resumed in a fresh page still reports the album it was picked from', async ({ page, browser, isMobile }) => {
+  test.skip(isMobile, 'one layout is enough');
+  await login(page); await waitForLibrary(page);
+  const h = await auth(page);
+  const album = (await (await page.request.get('/api/albums?limit=100', { headers: h })).json()).items.find((a: any) => a.name === 'Analytical');
+  await page.locator('.card, .shortcut', { hasText: 'Analytical' }).first().click();
+  await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
+  await page.locator('.trackrow').nth(0).dblclick();
+  await expect(page.locator('.player button[title="Pause"], .player button[aria-label="Pause"]').first()).toBeVisible({ timeout: 20000 });
+  await page.waitForTimeout(2500); // a report or two reach the server
+  await page.close();
+
+  const ctx2 = await browser.newContext();
+  const page2 = await ctx2.newPage();
+  try {
+    const seen = reportedContexts(page2);
+    await login(page2); await waitForLibrary(page2);
+    const play = page2.locator('.player button[title="Play"], .player button[aria-label="Play"]').first();
+    await expect(play).toBeVisible({ timeout: 20000 });
+    await play.click();
+    await expect.poll(() => [...seen].join(','), { timeout: 20000 }).toContain(album.id);
+  } finally { await ctx2.close(); }
 });

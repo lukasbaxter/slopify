@@ -9,6 +9,7 @@ import type { DB } from '../db.js';
 import { mixFor, tracksByIds } from '../library.js';
 import type { Discovery, Speaker } from './discovery.js';
 import { BluOSTransport, transportFor, type Transport } from './transports.js';
+import { playSrc } from '../playsrc.js';
 
 const NAV = new Set(['next', 'previous', 'skipTo']);
 
@@ -235,6 +236,7 @@ export class ServerPlayer {
     // A mirror that never got this session's queue sends only the current
     // song; switching speakers must not throw the rest of the queue away.
     const keep = ids.length === 1 && this.queue.some((r) => r.Id === ids[0]);
+    if (!keep) { this.ctx = typeof cmd.ctx === 'string' && cmd.ctx ? cmd.ctx : null; this.pickedId = null; }
     const rows = keep ? this.queue : this.markQueued(this.rowsFor(ids), ids, cmd.queued);
     const idx = keep ? this.queue.findIndex((r) => r.Id === ids[0]) : Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     // The chosen track first (the speaker starts within a second), the rest around it.
@@ -271,6 +273,8 @@ export class ServerPlayer {
     }
     const ids: string[] = Array.isArray(cmd.trackIds) ? cmd.trackIds : [];
     const rows = this.rowsFor(ids); if (!rows.length) return;
+    this.ctx = typeof cmd.ctx === 'string' && cmd.ctx ? cmd.ctx : null;
+    this.pickedId = !this.ctx && ids.length === 1 ? ids[0] : null;
     const idx = Math.min(Math.max(0, cmd.index | 0), rows.length - 1);
     let order = rows, start = idx;
     if (this.shuffle === 'on' && rows.length > 1) { order = [rows[idx], ...shuffled(rows.filter((_, i) => i !== idx))]; start = 0; }
@@ -446,11 +450,15 @@ export class ServerPlayer {
     this.playLogTimer = setTimeout(() => { this.playLogTimer = null; if (this.playing && this.current?.Id === trackId) this.logPlay(trackId); }, 8000);
   }
   private cancelLogPlay() { if (this.playLogTimer) clearTimeout(this.playLogTimer); this.playLogTimer = null; }
+  // What the queue was picked from (the sender's context), and the one song
+  // picked by itself, for the play log (playsrc.ts).
+  private ctx: string | null = null;
+  private pickedId: string | null = null;
   private logPlay(trackId: string) {
     const db = this.d.db;
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(this.uid) as any;
     const dup = last && last.track_id === trackId && (last.at >= this.listenAt || (!this.listenFromTop && Date.now() - last.at < 60000));
-    if (!dup) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(this.uid, trackId, Date.now(), this.device?.name || 'speaker'); this.d.scrobble?.(trackId, Date.now()); }
+    if (!dup) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client, src) VALUES (?, ?, ?, ?, ?)').run(this.uid, trackId, Date.now(), this.device?.name || 'speaker', playSrc(db, this.uid, trackId, this.ctx, this.pickedId === trackId)); this.d.scrobble?.(trackId, Date.now()); }
   }
   private async skipTo(i: number) {
     if (!this.queue[i]) return;

@@ -43,6 +43,14 @@ function greeting() {
 // label at the bottom. One palette entry per mix, rotating.
 export const MIX_COLORS = ['#e8115b', '#1e3264', '#8d67ab', '#e13300', '#148a08', '#0d73ec', '#7d4b32', '#ba5d07'];
 // A radio's colour: the same for a seed on every device (API.md 14.4).
+// Your Top Songs has a scheme of its own: bright, starting cyan then yellow.
+export const TOP_COLORS = ['#22d3ee', '#fde047', '#f472b6', '#a3e635', '#fb923c', '#a78bfa', '#34d399', '#f87171'];
+// The label colour that reads on a band of this colour: dark on the bright ones.
+export const inkOn = (hex) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return '#fff';
+  const n = parseInt(m[1], 16), lin = (c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255) > 0.28 ? '#121212' : '#fff';
+};
 export const radioColor = (seedId) => { let n = 0; for (let i = 0; i < String(seedId).length; i++) n += String(seedId).charCodeAt(i); return MIX_COLORS[n % MIX_COLORS.length]; };
 // "Drake, Future, Travis Scott and more": who is in today's mix or a radio.
 export const mixSub = (artists, fallback) => (artists?.length ? t('{name} and more', { name: artists.map((a) => a.name).join(', ') }) : fallback ? t('{name} and more', { name: fallback }) : null);
@@ -53,7 +61,7 @@ function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder }) {
   return (
     <div className="card mixcard" onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.()}>
-      <div className="card-art mixart" style={{ '--mix': color }}>
+      <div className="card-art mixart" style={{ '--mix': color, '--mix-ink': inkOn(color) }}>
         {image ? <FadeImg src={image} /> : <div className="ph" />}
         <div className="mixband">{label}</div>
         {!placeholder && (
@@ -126,6 +134,7 @@ function Card({ title, subtitle, image, round, onOpen, onPlay, noPlay }) {
  */
 export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs }) {
   const [recent, setRecent] = useState(() => jf?.persisted('home.recent') || []);
+  const [picks, setPicks] = useState(() => jf?.persisted('home.picks') || []);
   const [radar, setRadar] = useState(() => jf?.persisted('home.radar') || []);
   const [topArtists, setTopArtists] = useState(() => jf?.persisted('home.topArtists') || []);
   const [recentArtists, setRecentArtists] = useState(() => jf?.persisted('home.recentArtists') || []);
@@ -137,6 +146,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
   useEffect(() => {
     if (!jf) return;
     jf.recentlyPlayedAlbums({ limit: 16 }).then((r) => { setRecent(r.items); jf._persist('home.recent', r.items); }).catch(() => {});
+    jf.recentPicks().then((r) => { setPicks(r); jf._persist('home.picks', r); }).catch(() => {});
     jf.topSongYears().then((y) => { setTopYears(y); jf._persist('home.topYears', y); }).catch(() => {});
     // Release Radar: new albums, EPs and singles from the artists you like (server: discover.ts).
     relayRadar(jf).then((r) => { const rel = (r.releases || []).slice(0, 16); setRadar(rel); jf._persist('home.radar', rel); }).catch(() => {});
@@ -182,14 +192,22 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
     if (items.length) player.playQueue(items, 0, p.Id);
   };
 
-  // Shortcuts: Liked Songs first, then recent albums and playlists, to 8.
+  const playArtist = async (a) => {
+    const { items } = await jf.tracks({ artistId: a.Id, limit: 200 });
+    if (items.length) player.playQueue(items, 0, `artist:${a.Id}`);
+  };
+
+  // Shortcuts: Liked Songs first, then the latest album, playlist and artist
+  // you picked and played from (not what autoplay went on to), to 8; a new
+  // account's are filled up from its playlists and the library.
   const shortcuts = useMemo(() => {
     const out = [{ kind: 'liked' }];
-    for (const a of recent) { if (out.length >= 8) break; out.push({ kind: 'album', item: a }); }
-    for (const p of playlists) { if (out.length >= 8) break; out.push({ kind: 'playlist', item: p }); }
-    for (const a of albums) { if (out.length >= 8) break; if (!out.some((o) => o.item?.Id === a.Id)) out.push({ kind: 'album', item: a }); }
+    const add = (kind, item) => { if (out.length < 8 && item?.Id && !out.some((o) => o.item?.Id === item.Id)) out.push({ kind, item }); };
+    for (const p of picks) add(p.kind, p.kind === 'playlist' ? playlists.find((x) => x.Id === p.item.Id) || p.item : p.item);
+    for (const p of playlists) add('playlist', p);
+    for (const a of albums) add('album', a);
     return out;
-  }, [recent, playlists, albums]);
+  }, [picks, playlists, albums]);
 
   // Daily Mixes are seeded from the artists you actually play most.
   const mixSeeds = (topArtists.length ? topArtists : artists).slice(0, 6);
@@ -249,6 +267,9 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           ) : s.kind === 'playlist' ? (
             <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
               onOpen={() => onOpenPlaylist(s.item)} onPlay={() => playPlaylist(s.item)} />
+          ) : s.kind === 'artist' ? (
+            <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
+              onOpen={() => onOpenArtist(s.item.Id)} onPlay={() => playArtist(s.item)} />
           ) : (
             <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
               onOpen={() => onOpen(s.item)} onPlay={() => playAlbum(s.item)} />
@@ -267,8 +288,8 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           <Shelf title={t('Your Top Songs')}>
             {topYears.map((y, i) => (
               <MixTile key={y.year} label={t('Your Top Songs {year}', { year: y.year })} sub={topSongsSub(y.year)}
-                image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={MIX_COLORS[i % MIX_COLORS.length]}
-                onOpen={() => onOpenTopSongs(y, MIX_COLORS[i % MIX_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
+                image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={TOP_COLORS[i % TOP_COLORS.length]}
+                onOpen={() => onOpenTopSongs(y, TOP_COLORS[i % TOP_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
             ))}
           </Shelf>
         )}

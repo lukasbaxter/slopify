@@ -304,6 +304,14 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, seed_id)
   );
   `,
+  // 36: what a play was picked from (playsrc.ts): 'album:<id>', 'playlist:<id>'
+  // or 'artist:<id>' when the listener chose that and the song is part of it,
+  // NULL for what followed by itself (autoplay, a mix, radio). Home's
+  // shortcuts are the latest of these.
+  `
+  ALTER TABLE plays ADD COLUMN src TEXT;
+  CREATE INDEX plays_user_src ON plays(user_id, src, at) WHERE src IS NOT NULL;
+  `,
 ];
 
 export type DB = Database.Database;

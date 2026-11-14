@@ -827,7 +827,7 @@ input[type="range"]:disabled { opacity: .4; }
 .mixart img { object-position: top; }
 .mixband {
   position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 12px;
-  background: var(--mix, #1e3264); color: #fff; font-size: 15px; font-weight: 700;
+  background: var(--mix, #1e3264); color: var(--mix-ink, #fff); font-size: 15px; font-weight: 700;
   letter-spacing: -.2px; border-radius: 0 0 var(--r-art) var(--r-art);
 }
 .mixart .ph { background: linear-gradient(160deg, color-mix(in srgb, var(--mix) 55%, #000), var(--mix)); }

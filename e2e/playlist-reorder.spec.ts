@@ -9,12 +9,20 @@ import { login, waitForLibrary } from './helpers';
 //    the positions they were loaded with);
 //  - the queue playing that playlist follows the new order at once.
 const token = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('slopify.session') || '{}').token || '');
+// The playlists made here are deleted again: left behind, they took Home's
+// shortcut tiles from the albums the specs after this one open there (the
+// run stayed red from the day this spec was added).
+const made: { page: Page, id: string, h: Record<string, string> }[] = [];
+test.afterEach(async () => {
+  for (const m of made.splice(0)) await m.page.request.delete(`/api/playlists/${m.id}`, { headers: m.h }).catch(() => {});
+});
 async function setup(page: Page) {
   const h = { Authorization: `Bearer ${await token(page)}` };
   const album = (await (await page.request.get('/api/albums?limit=100', { headers: h })).json()).items.find((a: any) => a.name === 'First Light');
   const songs = (await (await page.request.get(`/api/albums/${album.id}`, { headers: h })).json()).tracks.slice(0, 5) as { id: string, title: string }[];
   const name = `Reorder ${Date.now()}`;
   const id = (await (await page.request.post('/api/playlists', { headers: h, data: { name, trackIds: songs.map((s) => s.id) } })).json()).id as string;
+  made.push({ page, id, h });
   const serverIds = async () => ((await (await page.request.get(`/api/playlists/${id}`, { headers: h })).json()).tracks as any[]).map((t) => t.id);
   return { songs, name, serverIds };
 }

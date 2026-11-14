@@ -9,6 +9,7 @@ import { playlistId } from './ids.js';
 import { tracksByIds } from './library.js';
 import { storeArtwork } from './artwork.js';
 import { playlistCover } from './mosaic.js';
+import { playSrc, recentSrcs } from './playsrc.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -171,13 +172,13 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
 
   // --- plays + home ---
   app.post('/api/plays', auth, async (req, reply) => {
-    const b = z.object({ trackId: z.string().regex(/^[0-9a-f]{32}$/), at: z.number().optional(), client: z.string().max(80).optional() }).safeParse(req.body);
+    const b = z.object({ trackId: z.string().regex(/^[0-9a-f]{32}$/), at: z.number().optional(), client: z.string().max(80).optional(), ctx: z.string().max(80).nullish(), picked: z.boolean().optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'trackId required' });
     const at = b.data.at ?? Date.now();
     // The same track again within 60 s is the same play.
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(uid(req)) as any;
     if (last && last.track_id === b.data.trackId && Math.abs(at - last.at) < 60000) return { ok: true, dup: true };
-    db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid(req), b.data.trackId, at, b.data.client ?? null);
+    db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client, src) VALUES (?, ?, ?, ?, ?)').run(uid(req), b.data.trackId, at, b.data.client ?? null, playSrc(db, uid(req), b.data.trackId, b.data.ctx, b.data.picked === true));
     if (b.data.client !== 'import' && b.data.client !== 'offline') (app as any).scrobbleStart?.(uid(req), b.data.trackId, at);
     return { ok: true };
   });
@@ -191,7 +192,25 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     const plays = new Map(top.map((r) => [r.track_id, r.n]));
     const newest = db.prepare('SELECT * FROM albums ORDER BY added_at DESC, sort_name LIMIT 24').all() as any[];
     const out = (a: any) => ({ id: a.id, name: a.name, artist: a.artist, artistId: a.artist_id, year: a.year, trackCount: a.track_count, cover: a.cover_hash });
-    return { recentAlbums: recentAlbumIds.map((id) => byId.get(id)).filter(Boolean).map(out), topTracks: tracksByIds(db, top.map((r) => r.track_id)).map((t) => ({ ...t, plays: plays.get(t.id) })), newestAlbums: newest.map(out) };
+    // Home's shortcuts: the latest album, playlist and artist the listener
+    // picked and played from (playsrc.ts), not whatever played last. Under
+    // them, the albums of the history from before plays carried that.
+    const srcs = recentSrcs(db, u, 24);
+    const recents: any[] = [];
+    for (const s of srcs) {
+      if (s.kind === 'album') { const a = db.prepare('SELECT * FROM albums WHERE id = ?').get(s.id) as any; if (a) recents.push({ kind: 'album', ...out(a) }); }
+      else if (s.kind === 'playlist') { const p = onePl.get(s.id, u) as any; if (p) recents.push({ kind: 'playlist', ...plOut(p) }); }
+      else if (s.kind === 'artist') { const a = db.prepare('SELECT id, name, image_hash FROM artists WHERE id = ?').get(s.id) as any; if (a) recents.push({ kind: 'artist', id: a.id, name: a.name, image: a.image_hash }); }
+    }
+    const firstSrc = (db.prepare('SELECT MIN(at) AS at FROM plays WHERE user_id = ? AND src IS NOT NULL').get(u) as any)?.at as number | null;
+    const older = firstSrc == null ? recentAlbumIds : (db.prepare(`SELECT t.album_id AS id, MAX(p.at) AS last FROM plays p JOIN tracks t ON t.id = p.track_id WHERE p.user_id = ? AND p.at < ? GROUP BY t.album_id ORDER BY last DESC LIMIT 8`).all(u, firstSrc) as any[]).map((r) => r.id);
+    for (const id of older) {
+      if (recents.length >= 24) break;
+      if (recents.some((r) => r.kind === 'album' && r.id === id)) continue;
+      const a = byId.get(id) || db.prepare('SELECT * FROM albums WHERE id = ?').get(id) as any;
+      if (a) recents.push({ kind: 'album', ...out(a) });
+    }
+    return { recents, recentAlbums: recentAlbumIds.map((id) => byId.get(id)).filter(Boolean).map(out), topTracks: tracksByIds(db, top.map((r) => r.track_id)).map((t) => ({ ...t, plays: plays.get(t.id) })), newestAlbums: newest.map(out) };
   });
   // Your Top Songs <year>: the most played songs of each calendar year, from
   // the account's own plays only (live and imported Spotify history alike),

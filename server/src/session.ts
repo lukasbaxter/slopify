@@ -24,6 +24,7 @@ import { linkedGroups, ServerPlayer } from './speakers/player.js';
 import { BluOSTransport } from './speakers/transports.js';
 import { speakerGroups } from './speakers/groups.js';
 import { SpeakerStates } from './speakers/state.js';
+import { playSrc } from './playsrc.js';
 
 export type Device = { id: string; name: string; kind: string } | null;
 export type Session = {
@@ -262,9 +263,9 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
   // (a second device, a reconnect mid-song), unless that log is from before
   // this listen began (listenStart: when it was at 0, from the reported
   // position; a short song on repeat-one is a new play every time round).
-  const logPlay = (uid: string, trackId: string, client: string, listenStart = -Infinity) => {
+  const logPlay = (uid: string, trackId: string, client: string, listenStart = -Infinity, ctx: unknown = null, picked = false) => {
     const last = db.prepare('SELECT track_id, at FROM plays WHERE user_id = ? ORDER BY at DESC LIMIT 1').get(uid) as any;
-    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000 && last.at >= listenStart - 2000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client) VALUES (?, ?, ?, ?)').run(uid, trackId, Date.now(), client); (app as any).scrobbleStart?.(uid, trackId, Date.now()); }
+    if (!(last && last.track_id === trackId && Date.now() - last.at < 60000 && last.at >= listenStart - 2000)) { db.prepare('INSERT OR IGNORE INTO plays (user_id, track_id, at, client, src) VALUES (?, ?, ?, ?, ?)').run(uid, trackId, Date.now(), client, playSrc(db, uid, trackId, ctx, picked)); (app as any).scrobbleStart?.(uid, trackId, Date.now()); }
   };
   // How each song went (skips, play length): for the brain's learning.
   const insEvent = db.prepare('INSERT INTO play_events (user_id, track_id, at, ms_played, end_ms, duration_ms, reason, shuffle, client) VALUES (@user_id, @track_id, @at, @ms_played, @end_ms, @duration_ms, @reason, @shuffle, @client)');
@@ -540,7 +541,7 @@ export function registerSession(app: FastifyInstance, db: DB, opts: SessionOptio
             l.pos = posMs;
             if (np.playing) {
               if (l.since == null) l.since = now;
-              else if (now - l.since >= 8000 && !l.logged) { l.logged = true; logPlay(me.uid, id, me.name, np.position != null && Number.isFinite(Number(np.position)) ? now - posMs : -Infinity); }
+              else if (now - l.since >= 8000 && !l.logged) { l.logged = true; logPlay(me.uid, id, me.name, np.position != null && Number.isFinite(Number(np.position)) ? now - posMs : -Infinity, np.ctx, np.picked === true); }
             }
           }
         }

@@ -329,6 +329,11 @@ export class Slopify {
     return { items: all.slice(startIndex, limit ? startIndex + limit : undefined), total: all.length };
   }
   _home() { return this._cachedFor('home', 3 * 60 * 1000, () => this._fetch('/api/home')); }
+  // Home's shortcuts: the latest album, playlist and artist picked and played from.
+  recentPicks() {
+    return this._home().then((h) => (h.recents || []).map((r) => (r.kind === 'playlist' ? { kind: 'playlist', item: rowPlaylist(r) }
+      : r.kind === 'artist' ? { kind: 'artist', item: rowArtist(r) } : { kind: 'album', item: rowAlbum(r) })));
+  }
   recentlyPlayedAlbums({ limit = 8 } = {}) { return this._home().then((h) => ({ items: (h.recentAlbums || []).slice(0, limit).map(rowAlbum) })); }
   topTracks({ limit = 50 } = {}) { return this._home().then((h) => (h.topTracks || []).slice(0, limit).map(rowTrack)); }
   recentlyAddedAlbums({ limit = 8 } = {}) { return this._home().then((h) => ({ items: (h.newestAlbums || []).slice(0, limit).map(rowAlbum) })); }
@@ -612,9 +617,9 @@ export class Slopify {
   // Plays are logged from the session socket while it is connected; this is
   // the fallback for a client playing with no socket.
   // A play the server cannot hear about now (offline) is kept and sent later (api/offline.js).
-  reportStart(itemId) {
+  reportStart(itemId, { ctx = null, picked = false } = {}) {
     const at = Date.now();
-    return this._fetch('/api/plays', { method: 'POST', body: JSON.stringify({ trackId: itemId, at, client: 'web' }) })
+    return this._fetch('/api/plays', { method: 'POST', body: JSON.stringify({ trackId: itemId, at, client: 'web', ctx: typeof ctx === 'string' ? ctx : null, picked }) })
       .catch(() => { if (isOffline()) addPlay(itemId, at).catch(() => {}); return null; });
   }
   reportProgress() { return Promise.resolve(null); }

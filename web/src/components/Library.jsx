@@ -10,7 +10,7 @@ import { vibrantColor } from '../api/colors.js';
 import { LANGUAGES, userLanguage, t, N_ } from '../i18n.js';
 import { QUALITIES, THEME_PRESETS, DEFAULT_THEME, themeEquals, CROSSFADES, crossfadeLabel } from '../api/prefs.js';
 import { search as relaySearch, browse as relayBrowse, discography as relayDiscography, similar as relaySimilar, requestAlbum as relayRequest, radar as relayRadar, globalSearch as relayGlobal } from '../api/search.js';
-import Home, { topSongsSub, rankTopArtists, mixSub } from './Home.jsx';
+import Home, { topSongsSub, rankTopArtists, mixSub, inkOn } from './Home.jsx';
 import History from './History.jsx';
 import Downloads from './Downloads.jsx';
 import { AdminSettings } from './AdminSettings.jsx';
@@ -1160,7 +1160,7 @@ export default function Library({
                 <LikedCover />
               ) : phone && item._mix ? (
                 /* The page cover is the Home card's composite: photo with the mix-name band. */
-                <div className="hero-cover mixart" style={{ '--mix': item._color }}>
+                <div className="hero-cover mixart" style={{ '--mix': item._color, '--mix-ink': inkOn(item._color) }}>
                   <img src={item._art} alt="" />
                   <div className="mixband">{item.Name}</div>
                 </div>
@@ -1215,7 +1215,7 @@ export default function Library({
                         <button className="rowlink strong" onClick={onOpenProfile}>{me?.Name || t('You')}</button>
                       </span>
                     )}
-                    {item._mix && <span className="hero-owner"><span className="hero-avatar mixmark" style={{ '--mix': item._color }}><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6 3v7.4A2.5 2.5 0 1 0 7.5 12.7V5.2l6-1.5v5.7A2.5 2.5 0 1 0 15 11.7V1.5L6 3z" /></svg></span><b>{t('Made for you')}</b></span>}
+                    {item._mix && <span className="hero-owner"><span className="hero-avatar mixmark" style={{ '--mix': item._color, '--mix-ink': inkOn(item._color) }}><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6 3v7.4A2.5 2.5 0 1 0 7.5 12.7V5.2l6-1.5v5.7A2.5 2.5 0 1 0 15 11.7V1.5L6 3z" /></svg></span><b>{t('Made for you')}</b></span>}
                     <span className="hero-stats">
                       {kind === 'Album'
                         ? [t(releaseType({ ...item, ChildCount: item.ChildCount ?? tracks.length, RunTimeTicks: item.RunTimeTicks || totalTicks })), item.ProductionYear].filter(Boolean).join(' • ')

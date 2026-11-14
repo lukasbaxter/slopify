@@ -285,6 +285,9 @@ export function usePlayer(jf) {
   const [external, setExternal] = useState(null);
   const [contextId, setContextId] = useState(null);
   const contextRef = useRef(null);
+  // The one song picked by itself (from search, say), with no context: the
+  // play log counts it as its album for Home's shortcuts (server: playsrc.ts).
+  const pickedRef = useRef(null);
   const [roster, setRoster] = useState({ players: [], lanDevices: [] });
   // Queues published by my other clients, keyed by clientId. The active
   // player's is what the queue panel shows while mirroring.
@@ -707,7 +710,7 @@ export function usePlayer(jf) {
           if (swapped) {
             loadedRef.current = track.Id;
             const id = track.Id;
-            setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
+            setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id, { ctx: contextRef.current, picked: pickedRef.current === id }); }, 8000);
             return;
           }
         }
@@ -782,7 +785,7 @@ export function usePlayer(jf) {
       // A play counts after 8 s on the same track (the socket path applies
       // the same rule); a song skipped past never enters history.
       const id = track.Id;
-      setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
+      setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id, { ctx: contextRef.current, picked: pickedRef.current === id }); }, 8000);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jf, metaFor, remote, volume, trackCache]
@@ -827,7 +830,7 @@ export function usePlayer(jf) {
   // --- public controls ----------------------------------------------------
 
   const playQueue = useCallback(
-    async (tracks, startIndex = 0, ctx = null, startAt = 0) => {
+    async (tracks, startIndex = 0, ctx = null, startAt = 0, solo = tracks.length === 1) => {
       // Offline: only downloaded songs play, here (no other device can be
       // reached). A tap on one that is not downloaded does nothing.
       const off = isOffline();
@@ -856,6 +859,7 @@ export function usePlayer(jf) {
       setError(null);
       setExternal(null);
       setContextId(ctx);
+      pickedRef.current = !ctx && solo ? tracks[startIndex]?.Id || null : null;
       // With shuffle on, keep the chosen track first and scramble the rest.
       originalQueueRef.current = tracks;
       let order = tracks;
@@ -2337,7 +2341,7 @@ export function usePlayer(jf) {
     anchorAt(0, true);
     loadedRef.current = plan.next.Id;
     const id = plan.next.Id;
-    setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id); }, 8000);
+    setTimeout(() => { if (loadedRef.current === id && playingRef.current) jf.reportStart(id, { ctx: contextRef.current, picked: pickedRef.current === id }); }, 8000);
     mediaLog(`${plan.fade ? `crossfade ${plan.fade.toFixed(1)} s` : `gapless (lead ${(leadRef.current * 1000).toFixed(0)} ms)`} into ${id.slice(0, 6)}`);
     return true;
   };
@@ -2599,6 +2603,7 @@ export function usePlayer(jf) {
     // The sender's context (null if it had none): set now, the start below
     // already normalizes by it.
     setContextId(ctx); contextRef.current = ctx;
+    pickedRef.current = null;
     originalQueueRef.current = tracks;
     setQueue(tracks);
     setIndex(startIndex);
@@ -2680,7 +2685,7 @@ export function usePlayer(jf) {
         // problem with that can never stop the song itself.
         const [first] = await fetchByIds(jf, [chosenId], fields);
         if (!first) return;
-        await playQueueRef.current([first], 0, cmd.ctx || null, cmd.startAt || 0);
+        await playQueueRef.current([first], 0, cmd.ctx || null, cmd.startAt || 0, cmd.trackIds.length === 1);
         if (cmd.trackIds.length <= 1) return;
         const tracks = await fetchByIds(jf, cmd.trackIds, fields).catch(() => []);
         // Still on that song? Then fill the queue in around it, respecting shuffle.
@@ -2798,6 +2803,8 @@ export function usePlayer(jf) {
       // on Node" when the session is on a speaker rather than on a client.
       device: { id: device.id, kind: device.kind, name: device.name },
       queueIndex: index,
+      // What this was picked from, for the play log (server: playsrc.ts).
+      ctx: contextRef.current || null, picked: pickedRef.current === current.Id,
       // held: playing, but not heard yet (loading, seeking, rebuffering):
       // mirrors keep the playhead still until it is (session.js playheadOf).
       playing, held: !!(playing && anchorRef.current.held), position: Math.max(0, (positionNowRef.current ? positionNowRef.current() : position) - (playing && !anchorRef.current.held ? outputLagRef.current() : 0)), duration, volume, repeat, shuffle, at: Date.now(),

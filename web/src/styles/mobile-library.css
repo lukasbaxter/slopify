@@ -99,7 +99,7 @@
   .hero-owner b { font-size: 13px; }
   .hero-avatar { width: 20px; height: 20px; margin-right: 0; }
   .hero-avatar.initial { display: grid; place-items: center; border-radius: 50%; background: #535353; color: #fff; font-size: 11px; font-weight: 700; }
-  .hero-avatar.mixmark { display: grid; place-items: center; border-radius: 50%; background: var(--mix, #1e3264); color: #fff; }
+  .hero-avatar.mixmark { display: grid; place-items: center; border-radius: 50%; background: var(--mix, #1e3264); color: var(--mix-ink, #fff); }
   /* Mix page: the Home card's composite (photo + mix-name band), 208pt. */
   .hero .hero-cover.mixart { position: relative; width: 208px; height: 208px; border-radius: 4px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
   .hero .hero-cover.mixart img { width: 208px; height: 208px; box-shadow: none; }

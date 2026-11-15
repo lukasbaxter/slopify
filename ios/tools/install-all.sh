@@ -7,7 +7,9 @@
 set -u
 app=$1
 hours=${2:-24}
+export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 xcrun="xcrun"
+[ -d "$app" ] || { echo "no app at $app"; exit 1; }
 state=$(dirname "$app")/../../../install-all
 mkdir -p "$state"
 state=$(cd "$state" && pwd)
@@ -32,8 +34,10 @@ done_ids=" "
 deadline=$(( $(date +%s) + hours * 3600 ))
 while :; do
   left=0
+  seen=0
   while read -r id name; do
     [ -n "$id" ] || continue
+    seen=$((seen + 1))
     case "$done_ids" in *" $id "*) continue ;; esac
     if $xcrun devicectl device install app --device "$id" --timeout 120 "$app" >"$state/last.log" 2>&1; then
       echo "$(date '+%H:%M:%S') installed on $name"
@@ -44,6 +48,7 @@ while :; do
     fi
   done < <(paired)
   said=1
+  [ "$seen" -gt 0 ] || { echo "no paired iPhone found (pair one in Xcode once, over the cable)"; exit 1; }
   [ "$left" -gt 0 ] || { echo "every paired phone is up to date"; exit 0; }
   [ "$(date +%s)" -lt "$deadline" ] || { echo "gave up on $left phone(s) after ${hours}h"; exit 1; }
   sleep 30

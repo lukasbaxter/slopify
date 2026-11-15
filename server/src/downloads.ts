@@ -407,6 +407,9 @@ const loose = (s: string) => String(s || '').normalize('NFKC').toLowerCase().rep
 // A folder name any filesystem takes: no separators or control characters, no trailing dot or space.
 export const safeName = (s: string) => ([...String(s || '')].map((c) => (c === '/' || c === '\\' || c.charCodeAt(0) < 32 ? '_' : c)).join('').replace(/[. ]+$/, '').trim() || 'Unknown');
 
+// How a give-up reason starts when the download is kept aside for a person:
+// the retry chore leaves those alone.
+export const KEPT_ASIDE = 'downloaded, but';
 export type FailedImport = { album_id: number; artist: string; title: string; folder: string };
 export async function rescueFailedImports(db: DB, list: FailedImport[], o: {
   dir: string; // the failed_imports folder
@@ -441,18 +444,36 @@ export async function rescueFailedImports(db: DB, list: FailedImport[], o: {
       const audio = files.filter((f) => AUDIO.test(f));
       done++;
       if (!there || !audio.length) {
-        // Nothing to shelve: let the downloader have another go.
         if (there) await fsp.rm(src, { recursive: true, force: true });
+        // Shelved on an earlier run that was cut short before the album was
+        // taken off the list (Lidarr timing out): finish that, do not fetch
+        // it a second time.
+        if (o.inLibrary(it.artist, it.title, 1)) {
+          await o.unmonitor(it.album_id); await o.clear(it.album_id);
+          out.already++; log(`${name}: in the library, no longer wanted`);
+          continue;
+        }
+        // Nothing to shelve: let the downloader have another go.
         await o.clear(it.album_id);
         out.discarded++; log(`${name}: the failed download is gone or empty, searching again`);
         continue;
       }
       const dest = path.join(o.musicDir, safeName(it.artist), safeName(it.title));
-      const destHas = await fsp.readdir(dest).then((l) => l.some((f) => AUDIO.test(f)), () => false);
-      const here = !!o.inLibrary(it.artist, it.title, audio.length);
-      // A folder of that name with other songs in it (a few singles, say):
-      // not merged by a chore; a person decides.
-      if (!here && destHas) { out.left++; log(`${name}: ${dest} already holds other songs, left in failed_imports`); continue; }
+      const destSongs = await fsp.readdir(dest).then((l) => l.filter((f) => AUDIO.test(f)).length, () => 0);
+      // In the library by name, or its folder already holds about as many
+      // songs as this download (files Lidarr lost track of).
+      const here = !!o.inLibrary(it.artist, it.title, audio.length) || destSongs >= Math.max(1, Math.floor(audio.length * 0.8));
+      // Its folder holds only part of it (a few singles, say): two copies of
+      // those songs is worse than a short album, so nothing is merged. The
+      // download stays where it is for a person, and the album stops taking
+      // a place in the line.
+      if (!here && destSongs) {
+        await o.unmonitor(it.album_id);
+        db.prepare(`INSERT INTO download_watch (lidarr_id, first_seen, done, progress_at, gave_up, reason) VALUES (?, ?, 0, ?, ?, ?)
+          ON CONFLICT(lidarr_id) DO UPDATE SET gave_up = excluded.gave_up, reason = excluded.reason`).run(it.album_id, Date.now(), Date.now(), Date.now(), `${KEPT_ASIDE} ${destSongs} of its ${audio.length} songs are in the library already`);
+        out.left++; log(`${name}: ${dest} holds ${destSongs} of its ${audio.length} songs, left in failed_imports and no longer wanted`);
+        continue;
+      }
       if (here) {
         await o.unmonitor(it.album_id);
         await fsp.rm(src, { recursive: true, force: true });

@@ -877,7 +877,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       // Not the ones that kept arriving as a different album: that loop
       // starts again the moment they are wanted.
       const rows = cap > 0 ? db.prepare(`SELECT lidarr_id FROM download_watch WHERE gave_up IS NOT NULL AND gave_up < ? AND done = 0
-        AND reason NOT LIKE 'downloads kept turning out%' ORDER BY gave_up LIMIT ?`).all(before, cap) as { lidarr_id: number }[] : [];
+        AND reason NOT LIKE 'downloads kept turning out%' AND reason NOT LIKE 'downloaded, but%' ORDER BY gave_up LIMIT ?`).all(before, cap) as { lidarr_id: number }[] : [];
       let n = 0;
       for (const r of rows) {
         try {

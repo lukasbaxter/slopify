@@ -281,7 +281,7 @@ describe('downloads', () => {
     put('Remy - Dup (2020)', ['01 - a.flac']);
     put('Adema - Kill (2007)', ['01 - ok.flac', '08 - broken.flac']);
     put('SOB - Wrong (2018)', ['01 - x.mp3', '02 - y.mp3']);
-    put('Tjay - Single (2021)', ['01 - s.flac']);
+    put('Tjay - Single (2021)', ['01 - s.flac', '02 - t.flac', '03 - u.flac']);
     fs.mkdirSync(path.join(musicDir, 'Tjay', 'Single'), { recursive: true }); fs.writeFileSync(path.join(musicDir, 'Tjay', 'Single', 'other.flac'), 'x');
     fs.mkdirSync(path.join(root, 'staging', 'keep'), { recursive: true }); fs.writeFileSync(path.join(root, 'staging', 'keep', 'a.flac'), 'x');
     const list = [
@@ -302,15 +302,33 @@ describe('downloads', () => {
       scan: async (rel) => { scanned.push(rel); }, unmonitor: async (id) => { off.push(id); }, clear: async (id) => { cleared.push(id); },
     });
     expect(r).toEqual({ shelved: 1, already: 1, discarded: 3, left: 2 });
+    // Part of it is in its folder already: kept aside, off the list, and the reason says so.
+    expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 5').get() as any).reason).toBe('downloaded, but 1 of its 3 songs are in the library already');
     // Shelved: every file moved (the cover too), scanned, no longer wanted.
     expect(fs.readdirSync(path.join(musicDir, 'Amy', 'Back to Black')).sort()).toEqual(['01 - Rehab.flac', '02 - You Know.flac', 'cover.jpg']);
     expect(scanned).toEqual([path.join('Amy', 'Back to Black')]);
     // Already here: copy dropped, no longer wanted. Broken or not this artist: dropped, still wanted, searched again.
-    expect(off.sort()).toEqual([1, 2]);
+    expect(off.sort()).toEqual([1, 2, 5]);
     expect(cleared.sort()).toEqual([1, 2, 3, 4, 6]);
     expect(fs.readdirSync(dir).sort()).toEqual(['Tjay - Single (2021)']); // a folder of that name with other songs: left for a person
     expect(fs.readdirSync(path.join(musicDir, 'Tjay', 'Single'))).toEqual(['other.flac']);
     expect(fs.existsSync(path.join(root, 'staging', 'keep', 'a.flac'))).toBe(true); // never outside failed_imports
+    // A run cut short after the move (Lidarr timed out): the next one finds the folder gone and
+    // the album in the library, and takes it off the list instead of fetching it again.
+    const off2: number[] = []; const cleared2: number[] = [];
+    const r2 = await rescueFailedImports(db, [{ album_id: 1, artist: 'Amy', title: 'Back to Black', folder: 'Amy - Back to Black (2006)' }] as any, {
+      dir, musicDir, inLibrary: (artist) => artist === 'Amy', plays: async () => true, artistOf: async () => 'Amy',
+      scan: async () => {}, unmonitor: async (id) => { off2.push(id); }, clear: async (id) => { cleared2.push(id); },
+    });
+    expect(r2.already).toBe(1); expect(off2).toEqual([1]); expect(cleared2).toEqual([1]);
+    // Its folder holding about as many songs counts as here, whatever the names say.
+    put('Amy - Back to Black (2006)', ['01 - Rehab.flac', '02 - You Know.flac']);
+    const r3 = await rescueFailedImports(db, [{ album_id: 1, artist: 'Amy', title: 'Back to Black', folder: 'Amy - Back to Black (2006)' }] as any, {
+      dir, musicDir, inLibrary: () => false, plays: async () => true, artistOf: async () => 'Amy',
+      scan: async () => { throw new Error('must not scan'); }, unmonitor: async () => {}, clear: async () => {},
+    });
+    expect(r3.already).toBe(1);
+    expect(fs.existsSync(path.join(dir, 'Amy - Back to Black (2006)'))).toBe(false);
   });
 
   it('watcher: with the fallback on, Soulseek misses go to Lidarr\'s indexers once before giving up', async () => {

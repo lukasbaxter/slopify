@@ -121,7 +121,7 @@ export function soularrClient(opts: { log?: string; url?: string; fetcher?: type
     // Lidarr album ids Soularr skips because their import failed once.
     async failedImports(): Promise<Set<number>> {
       if (!url) return new Set();
-      const r = await f(`${url}/api/failed-imports`, { signal: AbortSignal.timeout(5000) });
+      const r = await f(`${url}/api/failed-imports`, { signal: AbortSignal.timeout(20000) });
       if (!r.ok) throw new Error(`Soularr failed-imports ${r.status}`);
       const j = await r.json() as any;
       const list: any[] = Array.isArray(j) ? j : Object.values(j || {});
@@ -130,7 +130,7 @@ export function soularrClient(opts: { log?: string; url?: string; fetcher?: type
     // The same, with the folder each download was put aside in.
     async failedImportList(): Promise<{ album_id: number; artist: string; title: string; folder: string }[]> {
       if (!url) return [];
-      const r = await f(`${url}/api/failed-imports`, { signal: AbortSignal.timeout(5000) });
+      const r = await f(`${url}/api/failed-imports`, { signal: AbortSignal.timeout(20000) });
       if (!r.ok) throw new Error(`Soularr failed-imports ${r.status}`);
       const j = await r.json() as any;
       const list: any[] = Array.isArray(j) ? j : Object.values(j || {});
@@ -139,7 +139,7 @@ export function soularrClient(opts: { log?: string; url?: string; fetcher?: type
     },
     async clearFailedImport(albumId: number) {
       if (!url) return false;
-      const r = await f(`${url}/api/failed-imports/${albumId}`, { method: 'DELETE', signal: AbortSignal.timeout(5000) });
+      const r = await f(`${url}/api/failed-imports/${albumId}`, { method: 'DELETE', signal: AbortSignal.timeout(20000) });
       if (!r.ok && r.status !== 404) throw new Error(`Soularr failed-imports ${r.status}`);
       cache = null;
       return true;

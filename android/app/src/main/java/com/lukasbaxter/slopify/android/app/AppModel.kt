@@ -16,6 +16,8 @@ import com.lukasbaxter.slopify.android.core.storage.KeystoreSecureStore
 import com.lukasbaxter.slopify.android.core.storage.SecureStore
 import com.lukasbaxter.slopify.android.core.storage.SharedPrefsStore
 import com.lukasbaxter.slopify.android.core.stores.Connectivity
+import com.lukasbaxter.slopify.android.core.stores.GenerateEvent
+import com.lukasbaxter.slopify.android.core.stores.GeneratePlaylistStore
 import com.lukasbaxter.slopify.android.core.stores.LibraryStore
 import com.lukasbaxter.slopify.android.core.stores.Likes
 import com.lukasbaxter.slopify.android.core.stores.LyricJobStore
@@ -66,6 +68,8 @@ class AppModel(
     val themeStore = ThemeStore(account, scope)
     /** Your Library's data (playlists, saved albums, followed artists, layout) for every screen. */
     val library = LibraryStore(scope, cacheDir)
+    /** The "Generated playlist (AI)" dialog and its server job (outlives the dialog: Hide). */
+    val generate = GeneratePlaylistStore(scope)
 
     private val libraryChangedFlow = MutableSharedFlow<Prefs?>(extraBufferCapacity = 8)
     /**
@@ -91,6 +95,7 @@ class AppModel(
             libraryChanged.collect { patch -> library.remoteChange((patch?.get("_libraryLayout") as? JsonPrimitive)?.contentOrNull) }
         }
         scope.launch { library.events.collect { ToastCenter.shared.show(it.toastText()) } }
+        scope.launch { generate.events.collect { generateDone(it) } }
         likes.attach(account.api)
         player.likes = likes
         player.attach(account, session)
@@ -112,6 +117,26 @@ class AppModel(
 
     /** Tell other devices this one changed the library (prefs signal). */
     fun libraryChangedHere() = session.sendPrefs(mapOf("_libraryChanged" to JsonPrimitive(System.currentTimeMillis())))
+
+    /**
+     * A generated playlist is ready, or failed after Hide (App.jsx:1785-1805): refresh Your
+     * Library, tell the other devices, then open the playlist and / or toast.
+     */
+    private suspend fun generateDone(e: GenerateEvent) {
+        when (e) {
+            is GenerateEvent.Failed -> ToastCenter.shared.show(GenerateDone.failedText(e.error))
+            is GenerateEvent.Done -> {
+                val r = e.result
+                library.refreshPlaylists()
+                libraryChangedHere()
+                val plan = GenerateDone.plan(r, e.hidden, onScreen = nav.state.value.top?.route == Route.Playlist(r.playlistId))
+                // The old songs never linger: an open page of it reloads, its kept copy goes.
+                if (r.regenerated) library.playlistChanged(r.playlistId)
+                if (plan.open) nav.open(Route.Playlist(r.playlistId))
+                plan.toast?.let { ToastCenter.shared.show(it) }
+            }
+        }
+    }
 
     /** Signed in: on launch, after sign-in, and on every foreground. */
     suspend fun start() {
@@ -138,6 +163,7 @@ class AppModel(
         session.disconnect()
         nav.reset()
         likes.reset()
+        generate.reset()
         library.attach(account.api, null)
         connectivity.reset()
     }

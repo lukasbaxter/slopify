@@ -260,10 +260,11 @@ internal fun LibraryScreen() {
                     }
                 },
             ))
-            // TODO(lead): "Regenerate" (AI playlists) needs the Generate dialog (UI.md 6.4); left out until it exists.
-            LibraryEntry.Kind.Playlist -> MenuSheet(items = listOf(
+            LibraryEntry.Kind.Playlist -> MenuSheet(items = listOfNotNull(
                 queue, play, MenuItem.separator,
                 MenuItem(if (isPinned) L("Unpin playlist") else L("Pin playlist")) { ctx.togglePin(e.id) },
+                // Generated playlists only (Sidebar.jsx:221): the Generate dialog on this one.
+                LibraryMenus.regenerate(e.playlist) { app.generate.open(app.account.api, it) },
                 MenuItem(L("Edit details")) {
                     store.pendingEditDetails.value = e.id
                     app.nav.push(Route.Playlist(e.id))
@@ -275,11 +276,12 @@ internal fun LibraryScreen() {
         }
     }
 
-    // Create (5.2.10). TODO(lead): "Generated playlist (AI)" opens the Generate dialog (UI.md 6.4); left out until it exists.
+    // Create (5.2.10): a playlist, a generated one (the Generate dialog, UI.md 6.4) or a folder.
     fun openCreate() {
-        menu = MenuSheet(items = listOf(
-            MenuItem(L("Playlist"), Icon.Playlist) { naming = LibraryNaming(LibraryNaming.Kind.Playlist) },
-            MenuItem(L("Folder"), Icon.Folder) { naming = LibraryNaming(LibraryNaming.Kind.Folder) },
+        menu = MenuSheet(items = LibraryMenus.create(
+            onPlaylist = { naming = LibraryNaming(LibraryNaming.Kind.Playlist) },
+            onGenerate = { app.generate.open(app.account.api) },
+            onFolder = { naming = LibraryNaming(LibraryNaming.Kind.Folder) },
         ))
     }
 

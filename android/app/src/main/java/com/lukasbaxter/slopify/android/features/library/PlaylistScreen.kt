@@ -232,7 +232,8 @@ internal fun PlaylistScreen(id: String) {
         }
         // "Download as zip" is out (DECISIONS 5). TODO(lead): offline store "Download" rows.
         items += MenuItem.separator
-        // TODO(lead): "Regenerate" for AI playlists needs the Generate dialog (UI.md 6.4).
+        // Generated playlists only (Library.jsx:1303): the Generate dialog on this one.
+        LibraryMenus.regenerate(p ?: st.playlists.firstOrNull { it.id == id }, Icon.Sparkle) { app.generate.open(app.account.api, it) }?.let { items += it }
         items += MenuItem(L("Edit details"), Icon.Edit) { openEdit() }
         items += MenuItem(L("Delete"), Icon.Trash, danger = true) {
             confirm = ConfirmDialog(L("Delete \"{name}\"?", "name" to title), L("Delete"), destructive = true) {

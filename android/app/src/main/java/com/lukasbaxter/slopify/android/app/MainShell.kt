@@ -24,6 +24,7 @@ import com.lukasbaxter.slopify.android.design.overlay.ToastLayout
 import com.lukasbaxter.slopify.android.design.sheets.DuplicateDialogHost
 import com.lukasbaxter.slopify.android.features.account.AccountDrawer
 import com.lukasbaxter.slopify.android.features.home.HomeView
+import com.lukasbaxter.slopify.android.features.library.GeneratePlaylistHost
 import com.lukasbaxter.slopify.android.features.library.LibraryView
 import com.lukasbaxter.slopify.android.features.nowplaying.MiniPlayer
 import com.lukasbaxter.slopify.android.features.nowplaying.NowPlayingView
@@ -109,4 +110,5 @@ fun MainShell() {
         if (s.drawerOpen) BackHandler { nav.setDrawerOpen(false) }
     }
     DuplicateDialogHost(duplicate)
+    GeneratePlaylistHost()
 }

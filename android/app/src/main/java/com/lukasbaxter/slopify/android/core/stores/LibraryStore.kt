@@ -375,6 +375,10 @@ class LibraryStore(
         }
     }
 
+    /** A playlist's songs were replaced on the server (Regenerate): forget its kept page, an open one reloads. */
+    fun playlistChanged(id: String) =
+        mutable.update { it.copy(details = it.details - id, revision = it.revision + (id to ((it.revision[id] ?: 0) + 1))) }
+
     fun remember(d: PlaylistDetail) = mutable.update { it.copy(details = it.details + (d.playlist.id to d)) }
 
     // Liked Songs

@@ -286,6 +286,37 @@ struct LyricJob: Codable, Hashable, Sendable {
 
 struct LyricJobs: Codable, Sendable { var jobs: [LyricJob] }
 
+/// `GET /api/ai/status`: can this server generate playlists, and if not, why.
+struct AIStatus: Codable, Sendable, Equatable { var ok: Bool; var reason: String? }
+
+/// A generated-playlist job (API.md 14.2, 18.4): polled until `state` leaves queued/running.
+struct GenerateJob: Codable, Sendable {
+    struct Stage: Codable, Hashable, Sendable { var key: String; var label: String; var state: String; var detail: String? }
+    struct Info: Codable, Sendable {
+        var stages: [Stage]?
+        var leftMs: Double?
+        var title: String?
+        var vibe: String?
+        var found: Int?
+        var foundNew: Int?
+    }
+    struct Result: Codable, Sendable {
+        var playlistId: String
+        var name: String
+        var regenerated: Bool?
+        var count: Int?
+        /// Songs it asked to be downloaded; they are added as they arrive.
+        var requested: Int?
+    }
+    var id: String
+    var state: String
+    var step: String?
+    var progress: Double?
+    var info: Info?
+    var result: Result?
+    var error: String?
+}
+
 struct FolderCover: Codable, Sendable { var ok: Bool?; var cover: String? }
 
 struct LibraryLayout: Codable, Sendable {

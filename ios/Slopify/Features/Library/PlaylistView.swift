@@ -27,6 +27,7 @@ struct PlaylistView: View {
     @State private var menu: MenuSheet?
     @State private var nameDialog: NameDialog?
     @State private var confirm: ConfirmDialog?
+    @State private var generating: GenerateRequest?
     @State private var editing: LibraryEditDetails?
     @State private var drag = LibraryDragController()
     @State private var listWidth: CGFloat = 0
@@ -45,6 +46,8 @@ struct PlaylistView: View {
         .contextMenuSheet($menu)
         .nameDialog($nameDialog)
         .confirmDialog($confirm)
+        // Regenerated in place: `store.touch` loads this page again, nothing to open.
+        .generateDialog($generating, api: account.api) { _ in }
         .overlayCover(item: $editing) { e, close in
             LibraryEditDetailsDialog(edit: e, close: close) { name, jpeg in
                 guard let p = playlist else { return }
@@ -327,7 +330,9 @@ struct PlaylistView: View {
         // "Download as zip" is out (DECISIONS 5).
         items += download.menuItems
         items.append(.separator)
-        // TODO(lead): "Regenerate" for AI playlists needs the Generate dialog (UI.md 6.4).
+        if let prompt = p?.aiPrompt ?? ctx.store.playlists.first(where: { $0.id == id })?.aiPrompt, !prompt.isEmpty {
+            items.append(MenuItem(L("Regenerate"), icon: .sparkle) { generating = GenerateRequest(playlistId: id, prompt: prompt) })
+        }
         items.append(MenuItem(L("Edit details"), icon: .edit) { openEdit() })
         items.append(MenuItem(L("Delete"), icon: .trash, danger: true) {
             confirm = ConfirmDialog(message: L("Delete \"{name}\"?", ["name": title]), confirm: L("Delete"), destructive: true) {

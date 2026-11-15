@@ -243,6 +243,15 @@ extension APIClient {
     }
     func retryDownload(_ id: Int) async throws { try await send("POST", "api/downloads/\(id)/retry") }
 
+    // §14.2, §18.4 generated playlists (a server job, polled)
+    func aiStatus() async throws -> AIStatus { try await get("api/ai/status") }
+    /// `playlistId`: Regenerate, new songs in that playlist instead of a new one.
+    func generatePlaylist(prompt: String, playlistId: String? = nil) async throws -> GenerateJob {
+        struct B: Encodable { var prompt: String; var playlistId: String? }
+        return try await send("POST", "api/ai/playlists", body: B(prompt: prompt, playlistId: playlistId))
+    }
+    func job(_ id: String) async throws -> GenerateJob { try await get("api/jobs/\(id)") }
+
     // §17 speakers
     func speakerVolume(_ id: String, level: Int) async throws {
         struct B: Encodable { var level: Int }

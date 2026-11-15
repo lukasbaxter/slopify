@@ -25,6 +25,7 @@ struct LibraryView: View {
     @State private var settled = false
     @State private var menu: MenuSheet?
     @State private var naming: LibraryNaming?
+    @State private var generating: GenerateRequest?
     @State private var confirm: ConfirmDialog?
     @State private var drag = LibraryDragController()
     @State private var gridFrames: [String: CGRect] = [:]
@@ -58,6 +59,7 @@ struct LibraryView: View {
             LibraryNamingPage(naming: n, close: close) { n, name in submitNaming(n, name, arrangement: arrangement) }
         }
         .confirmDialog($confirm)
+        .generateDialog($generating, api: account.api) { id in nav.push(.playlist(id: id)) }
         .photosPicker(isPresented: Binding(get: { photoFolder != nil }, set: { if !$0 && photoItem == nil { photoFolder = nil } }),
                       selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in uploadFolderPhoto(item) }
@@ -450,9 +452,13 @@ struct LibraryView: View {
                 },
             ])
         case .playlist:
-            // TODO(lead): "Regenerate" (AI playlists) needs the Generate dialog (UI.md 6.4); left out until it exists.
-            return MenuSheet(items: [queue, play, .separator,
-                MenuItem(pinned ? L("Unpin playlist") : L("Pin playlist")) { ctx.togglePin(e.id) },
+            var items: [MenuItem] = [queue, play, .separator,
+                MenuItem(pinned ? L("Unpin playlist") : L("Pin playlist")) { ctx.togglePin(e.id) }]
+            // Library.jsx:1303: only a playlist the brain made can be made again.
+            if let prompt = e.playlist?.aiPrompt, !prompt.isEmpty {
+                items.append(MenuItem(L("Regenerate")) { generating = GenerateRequest(playlistId: e.id, prompt: prompt) })
+            }
+            items += [
                 MenuItem(L("Edit details")) {
                     store.pendingEditDetails = e.id
                     ctx.nav.push(.playlist(id: e.id))
@@ -462,18 +468,18 @@ struct LibraryView: View {
                         if let p = e.playlist { Task { _ = await store.deletePlaylist(p) } }
                     }
                 },
-            ])
+            ]
+            return MenuSheet(items: items)
         }
     }
 
     // MARK: - Create (5.2.10)
 
     private func openCreate() {
-        // TODO(lead): "Generated playlist (AI)" opens the Generate dialog (UI.md 6.4); left out until it exists.
-        menu = MenuSheet(items: [
-            MenuItem(L("Playlist"), icon: .playlist) { naming = LibraryNaming(kind: .playlist) },
-            MenuItem(L("Folder"), icon: .folder) { naming = LibraryNaming(kind: .folder) },
-        ])
+        menu = MenuSheet(items: LibraryCreate.items(
+            playlist: { naming = LibraryNaming(kind: .playlist) },
+            generate: { generating = GenerateRequest() },
+            folder: { naming = LibraryNaming(kind: .folder) }))
     }
 
     private func submitNaming(_ n: LibraryNaming, _ name: String, arrangement _: LibraryArrangement) {
@@ -539,4 +545,17 @@ enum LibraryOpenFolders {
 private struct LibraryFramesKey: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+
+
+/// The "+" sheet (Sidebar.jsx createItems): a plain playlist, one the brain generates from a
+/// description, or a folder.
+enum LibraryCreate {
+    static func items(playlist: @escaping () -> Void, generate: @escaping () -> Void, folder: @escaping () -> Void) -> [MenuItem] {
+        [
+            MenuItem(L("Playlist"), icon: .playlist, action: playlist),
+            MenuItem(L("Generated playlist (AI)"), icon: .sparkle, action: generate),
+            MenuItem(L("Folder"), icon: .folder, action: folder),
+        ]
+    }
 }

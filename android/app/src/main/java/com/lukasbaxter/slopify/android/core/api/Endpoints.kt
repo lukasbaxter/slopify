@@ -1,6 +1,7 @@
 package com.lukasbaxter.slopify.android.core.api
 
 import com.lukasbaxter.slopify.android.core.attempt
+import com.lukasbaxter.slopify.android.core.model.AiStatus
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.AlbumDetail
 import com.lukasbaxter.slopify.android.core.model.Artist
@@ -40,10 +41,12 @@ import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.SearchResults
 import com.lukasbaxter.slopify.android.core.model.ServerAddresses
 import com.lukasbaxter.slopify.android.core.model.ServerInfo
+import com.lukasbaxter.slopify.android.core.model.ServerJob
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.model.Track
 import com.lukasbaxter.slopify.android.core.model.TopSongYears
 import com.lukasbaxter.slopify.android.core.model.User
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -264,6 +267,36 @@ suspend fun ApiClient.dailyMixes(ids: List<String>): List<DailyMixSummary> =
 
 /** Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s. */
 suspend fun ApiClient.radar(): List<Release> = get<RadarR>("api/radar", timeout = 120.0).releases ?: emptyList()
+
+/** Whether this server can generate playlists (§14.2): `ok`, else `reason`. */
+suspend fun ApiClient.aiStatus(): AiStatus = get("api/ai/status")
+
+/**
+ * Generated playlist (§14.2): starts the job. With `playlistId` (Regenerate) the songs of that
+ * playlist are replaced instead of a new one being made. Follow it with [job].
+ */
+suspend fun ApiClient.generatePlaylist(prompt: String, playlistId: String? = null): ServerJob =
+    call("POST", "api/ai/playlists", buildJsonObject { put("prompt", prompt); playlistId?.let { put("playlistId", it) } })
+
+// §18.4 jobs
+
+/**
+ * One job (§18.4). Like the web (`retries: 2`), a 5xx, a timeout or no connection is tried
+ * again up to `retries` times, waiting `retryDelayMs * attempt` in between.
+ */
+suspend fun ApiClient.job(id: String, retries: Int = 2, retryDelayMs: Long = 800): ServerJob {
+    var attempt = 0
+    while (true) {
+        try {
+            return get("api/jobs/$id")
+        } catch (e: ApiError) {
+            val transient = e is ApiError.Offline || (e is ApiError.Http && e.status >= 500)
+            if (!transient || attempt >= retries) throw e
+            attempt += 1
+            delay(retryDelayMs * attempt)
+        }
+    }
+}
 
 // §15 history
 

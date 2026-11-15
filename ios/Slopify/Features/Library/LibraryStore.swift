@@ -74,6 +74,9 @@ final class LibraryStore {
         persist()
     }
 
+    /// A playlist's songs changed some other way (regenerated): pages showing it load again.
+    func touch(_ id: String) { revision[id, default: 0] += 1; details[id] = nil }
+
     func refreshPlaylists() async {
         guard let api, let pl = try? await api.playlists() else { return }
         playlists = pl

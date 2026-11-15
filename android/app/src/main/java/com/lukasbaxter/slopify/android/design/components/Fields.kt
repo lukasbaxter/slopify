@@ -28,6 +28,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lukasbaxter.slopify.android.design.L
@@ -49,6 +50,10 @@ fun SlopifyTextField(
     placeholder: String = "",
     singleLine: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+    /** A text area (the Generate dialog, UI.md 6.4): at least this many lines tall. */
+    minLines: Int = 1,
+    fontSize: TextUnit = 15.sp,
+    enabled: Boolean = true,
     onSubmit: (() -> Unit)? = null,
 ) {
     val theme = LocalTheme.current
@@ -57,13 +62,15 @@ fun SlopifyTextField(
     BasicTextField(
         value, onValueChange,
         modifier = modifier.fillMaxWidth(),
+        enabled = enabled,
         singleLine = singleLine,
-        textStyle = TextStyle(fontSize = 15.sp, color = theme.fg),
+        minLines = minLines,
+        textStyle = TextStyle(fontSize = fontSize, color = theme.fg),
         cursorBrush = SolidColor(theme.fg),
         keyboardOptions = keyboardOptions,
         keyboardActions = KeyboardActions(onDone = { onSubmit?.invoke() }),
         interactionSource = interaction,
-        decorationBox = { inner -> FieldDecoration(value.text.isEmpty(), placeholder, focused, inner) },
+        decorationBox = { inner -> FieldDecoration(value.text.isEmpty(), placeholder, focused, inner, fontSize) },
     )
 }
 
@@ -94,14 +101,14 @@ fun SlopifyTextField(
 }
 
 @Composable
-private fun FieldDecoration(empty: Boolean, placeholder: String, focused: Boolean, inner: @Composable () -> Unit) {
+private fun FieldDecoration(empty: Boolean, placeholder: String, focused: Boolean, inner: @Composable () -> Unit, fontSize: TextUnit = 15.sp) {
     val theme = LocalTheme.current
     Box(
         Modifier.background(theme.field, RoundedCornerShape(Radius.art))
             .border(1.dp, if (focused) theme.fg else Theme.Fixed.textFieldBorder, RoundedCornerShape(Radius.art))
             .padding(vertical = 12.dp, horizontal = 14.dp),
     ) {
-        if (empty && placeholder.isNotEmpty()) Text(placeholder, fontSize = 15.sp, color = theme.fgSub)
+        if (empty && placeholder.isNotEmpty()) Text(placeholder, fontSize = fontSize, color = theme.fgSub)
         inner()
     }
 }

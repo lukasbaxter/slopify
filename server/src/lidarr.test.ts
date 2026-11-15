@@ -201,6 +201,21 @@ describe('lidarr client', () => {
     expect(state.artists[0].monitored).toBe(true);
   }, 20000);
 
+  it('a request for a brand-new artist waits out a lookup Lidarr does not answer in time while the artist is refreshed', async () => {
+    const { state, fetcher } = fakeLidarr();
+    let stalls = 1;
+    const slow: any = async (url: string, init?: any) => {
+      const u = new URL(url);
+      if (state.artists.length && u.pathname.endsWith('/album') && u.searchParams.get('foreignAlbumId') && stalls-- > 0) {
+        throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      }
+      return fetcher(url, init);
+    };
+    const r = await client(slow).request('mb-worlds'); // album lookup hands over a new artist
+    expect(r.status).toBe('queued');
+    expect(state.albums[0].monitored).toBe(true);
+  }, 20000);
+
   it('retry fires AlbumSearch', async () => {
     const { state, fetcher } = fakeLidarr();
     const l = client(fetcher);

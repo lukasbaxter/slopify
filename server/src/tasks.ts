@@ -355,6 +355,10 @@ async function room(lidarr: Lidarr, target: number, soularr?: Soularr): Promise<
   return target - (await lidarr.wantedCount(skip));
 }
 
+// Discovery hands the line back after this many failed requests in a row,
+// or this long in one run (see the task).
+const DISCOVERY_GIVE_UP_AFTER = 4;
+const DISCOVERY_MAX_MS = 20 * 60 * 1000;
 // Discovery: albums asked for from an artist new to the library, and how many
 // library artists (beyond the played ones) a run looks around.
 export const ALBUMS_PER_NEW_ARTIST = 2;
@@ -496,9 +500,22 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       for (const [k, t] of seen) if (Date.now() - t > 90 * 86400000) seen.delete(k);
       const haveArtist = db.prepare('SELECT 1 FROM artists WHERE name = ? COLLATE NOCASE');
       let n = 0, full = false;
+      // Scheduled chores run one at a time, so a run that cannot get
+      // anywhere must hand the line back: with Lidarr's metadata service
+      // down, one run walked hundreds of artists for hours, every request
+      // timing out, while Fill in discographies (which needs no lookups)
+      // waited behind it and the wanted list ran dry.
+      let failed = 0, halted = '';
+      const started = Date.now();
+      const spent = () => {
+        if (!halted && failed >= DISCOVERY_GIVE_UP_AFTER) halted = `stopped: ${failed} requests in a row failed`;
+        if (!halted && Date.now() - started > DISCOVERY_MAX_MS) halted = 'stopped: out of time for one run';
+        if (halted) full = true;
+        return Boolean(halted);
+      };
       // One candidate artist: its best album, queued if Lidarr knows it.
       const consider = async (cand: { id: number; name: string }, why: string) => {
-        if (haveArtist.get(cand.name) || seen.has(norm(cand.name))) return;
+        if (spent() || haveArtist.get(cand.name) || seen.has(norm(cand.name))) return;
         const albums = await deezer(`/artist/${cand.id}/albums?limit=15`);
         // Its first two albums as Deezer lists them: one album is a thin
         // introduction, and the rest of the shelf follows once the artist is
@@ -518,9 +535,11 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
           const hit = exact || (asked.size ? undefined : found.find((r) => norm(r.artist) === norm(cand.name)));
           if (!hit || asked.has(hit.album_id) || releaseInLibrary(db, hit.artist, hit.title) || givenUp(db).has(hit.album_id)) continue;
           asked.add(hit.album_id);
-          const req = await lidarr.request(hit.album_id);
+          // Lidarr not answering is not the candidate's fault: left marked
+          // seen, it was buried for 90 days without ever being queued.
+          const req = await lidarr.request(hit.album_id).catch((e: any) => { if (!e?.status) seen.delete(norm(cand.name)); throw e; });
           if (req.status === 'queued') {
-            n++; ctx.log(`${hit.artist} - ${hit.title} (${why})`);
+            n++; failed = 0; ctx.log(`${hit.artist} - ${hit.title} (${why})`);
             // See room(): a concurrent run may be filling the list too.
             if (n % 5 === 0 && (await room(lidarr, choreTarget, o.soularr)) <= 0) full = true;
           }
@@ -529,11 +548,13 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       const stop = (e: any, where: string) => {
         if (e.deezer) { kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen))); throw new Error(`${e.message}; stopped after ${n} queued`); }
         ctx.log(`${where}: ${e.message}`);
+        failed++; spent();
       };
       // Around what gets played: the most played artists of the last year
       // and their related artists. A wide circle, or a library that already
       // has the close neighbours runs dry within days.
       const around = async (top: { name: string }) => {
+        if (spent()) return;
         ctx.step(`Around ${top.name}`, n / cap);
         try {
           const s = await deezer(`/search/artist?q=${encodeURIComponent(top.name)}&limit=3`);
@@ -586,7 +607,8 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         } catch (e: any) { stop(e, 'genres'); }
       }
       kvSet(db, 'task:discovery:seen', JSON.stringify(Object.fromEntries(seen)));
-      return n ? `${n} albums queued from artists similar to what gets played` : 'nothing new worth queueing';
+      const tail = halted ? `; ${halted}` : '';
+      return n ? `${n} albums queued from artists similar to what gets played${tail}` : halted || 'nothing new worth queueing';
     },
   };
 

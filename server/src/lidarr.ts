@@ -371,9 +371,15 @@ export function lidarrClient(opts: LidarrOptions) {
           await api('/album', { method: 'POST', body: JSON.stringify({ ...look, artistId: artist.id, artist, monitored: false, addOptions: { searchForNewAlbum: false } }), timeoutMs: 60000 });
           log(`lidarr: added ${look.title} (Various Artists)`);
         }
-        const until = Date.now() + 30000;
-        album = await albumByForeign(fid);
-        while (!album && Date.now() < until) { await new Promise((r) => setTimeout(r, 2000)); album = await albumByForeign(fid); }
+        // While a new artist's first refresh runs, Lidarr can hold this
+        // lookup past its timeout (20 s measured, then 20 ms on the next
+        // ask). No answer in time is "not yet", not a failure: thrown, every
+        // request for a new artist died here and discovery crawled for
+        // hours queueing nothing. An error ANSWER still throws.
+        const peek = () => albumByForeign(fid).catch((e: any) => { if (e?.status) throw e; return null; });
+        const until = Date.now() + 90000;
+        album = await peek();
+        while (!album && Date.now() < until) { await new Promise((r) => setTimeout(r, 2000)); album = await peek(); }
         if (!album) throw new Error('Lidarr is still fetching the artist, try again shortly');
       }
       const out = { id: album.id as number, album_id: fid, artist: album.artist?.artistName || '', title: album.title as string };

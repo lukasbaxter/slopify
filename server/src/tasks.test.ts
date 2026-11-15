@@ -281,6 +281,33 @@ describe('built-in chores', () => {
     expect(requested).toEqual(['mb-Migration', 'mb-Fragments']);
   }, 20000);
 
+  it('discovery hands the line back when Lidarr keeps failing, and does not bury the artists it could not ask for', async () => {
+    const db = tmpdb('discovery-down');
+    seed(db);
+    const dz: Record<string, any> = {
+      '/search/artist?q=Tycho&limit=3': { data: [{ id: 1, name: 'Tycho' }] },
+      '/artist/1/related?limit=50': { data: [{ id: 2, name: 'Bonobo' }] },
+      '/genre': { data: [1, 2, 3, 4, 5, 6].map((id) => ({ id, name: `Genre ${id}` })) },
+    };
+    const fetcher: any = async (url: string) => {
+      const p = String(url).replace('https://api.deezer.com', '');
+      const chart = /^\/chart\/(\d+)\/artists/.exec(p);
+      if (chart) return { ok: true, json: async () => ({ data: [{ id: 100 + Number(chart[1]), name: `Chart Artist ${chart[1]}` }] }) };
+      if (/^\/artist\/\d+\/albums/.test(p)) return { ok: true, json: async () => ({ data: [{ title: 'First', record_type: 'album' }] }) };
+      return { ok: true, json: async () => dz[p] ?? { data: [] } };
+    };
+    let asked = 0;
+    const lidarr: any = {
+      enabled: true, wantedCount: async () => 0, statuses: async () => new Map(),
+      search: async (q: string) => [{ album_id: `mb-${q}`, artist: q.replace(' First', ''), title: 'First' }],
+      request: async () => { asked++; throw new Error('The operation was aborted due to timeout'); },
+    };
+    const discovery = builtinTasks(adminApp() as any, { ...opts(db, lidarr), fetcher }).find((t) => t.id === 'discovery')!;
+    expect(await discovery.run(ctxOf(discovery))).toBe('stopped: 4 requests in a row failed');
+    expect(asked).toBe(4);
+    expect(Object.keys(JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'task:discovery:seen'").get() as any)?.v || '{}'))).toEqual([]);
+  }, 20000);
+
   it('retry puts a few long-given-up albums and unfound imported songs back in line, the oldest first', async () => {
     const db = tmpdb('retry');
     seed(db);

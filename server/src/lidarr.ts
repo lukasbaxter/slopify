@@ -99,6 +99,17 @@ const stateOf = (a: any, queue: Map<number, QueueEntry>): AlbumState => ({
 // Milliseconds per Lidarr step of one Downloads answer (its debug line).
 export type Timings = { activity?: number; chunks: number[] };
 
+// How long a Lidarr call may take. Anything that answers with albums costs
+// Lidarr a statistics pass over its whole track table whenever its data has
+// just changed: a steady 19.8 s at 4 million tracks, for every such call,
+// for as long as its daily library rescan runs (over an hour). At the old
+// 20 s for everything those calls failed on and off, the download watcher's
+// whole run with them, and the wanted list sat inflated until the rescan ended.
+export function lidarrTimeout(path: string, method?: string, asked?: number): number {
+  if (asked) return asked;
+  return path.startsWith('/album') && (!method || method === 'GET') ? 60000 : 20000;
+}
+
 export function lidarrClient(opts: LidarrOptions) {
   const base = (opts.url || '').replace(/\/+$/, '');
   const f = opts.fetcher ?? fetch;
@@ -111,7 +122,7 @@ export function lidarrClient(opts: LidarrOptions) {
     const ask = () => f(`${base}/api/v1${p}`, {
       ...init,
       headers: { 'X-Api-Key': opts.apiKey, ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers },
-      signal: AbortSignal.timeout(init?.timeoutMs ?? 20000),
+      signal: AbortSignal.timeout(lidarrTimeout(p, init?.method, init?.timeoutMs)),
     });
     // Lidarr now and then holds a read for some 20 s (while it imports or
     // refreshes) and answers the same one in milliseconds right after. A

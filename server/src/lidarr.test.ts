@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
-import { lidarrClient, registerLidarrHook, titleQuery } from './lidarr.js';
+import { lidarrClient, lidarrTimeout, registerLidarrHook, titleQuery } from './lidarr.js';
 
 // A tiny Lidarr: answers the API routes the client uses, remembers what was
 // POSTed/PUT so the tests can assert the protocol.
@@ -247,6 +247,15 @@ describe('lidarr client', () => {
     await expect(l.unmonitor(7)).rejects.toThrow(/timeout/);
     expect(puts).toBe(1);
   }, 20000);
+
+  it('album reads get a minute (Lidarr takes 20 s for each while it rescans); other calls and explicit timeouts keep theirs', () => {
+    expect(lidarrTimeout('/album?albumIds=1')).toBe(60000);
+    expect(lidarrTimeout('/album/7', 'GET')).toBe(60000);
+    expect(lidarrTimeout('/album?foreignAlbumId=x')).toBe(60000);
+    expect(lidarrTimeout('/album/7', 'PUT')).toBe(20000);
+    expect(lidarrTimeout('/wanted/missing?page=1')).toBe(20000);
+    expect(lidarrTimeout('/album/lookup?term=x', 'GET', 30000)).toBe(30000);
+  });
 
   it('retry fires AlbumSearch', async () => {
     const { state, fetcher } = fakeLidarr();

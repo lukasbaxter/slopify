@@ -320,12 +320,24 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   // kept: library presence and request state change by the minute, so they
   // are flagged fresh on every look.
   const RADAR_TTL = 6 * 60 * 60 * 1000;
+  // A rebuild walks every liked artist through Lidarr, four at a time.
+  // While Lidarr is busy (its daily library rescan: 20 s for every answer
+  // that holds albums) that kept four of its cores pinned for hours, its
+  // imports waiting behind it; and a rebuild that came to nothing was begun
+  // again at the next look at Home. So: a rebuild stops once Lidarr keeps
+  // answering slowly, the kept list stays, and the next try waits an hour.
+  const RADAR_SLOW_MS = 8000;
+  const RADAR_SLOW_LIMIT = 6;
+  const RADAR_RETRY_MS = 60 * 60 * 1000;
+  let radarTriedAt = 0;
   const radarSaved = (): { at: number; releases: any[] } | null => {
     const row = db.prepare("SELECT v FROM kv WHERE k = 'radar'").get() as { v: string } | undefined;
     try { return row ? JSON.parse(row.v) : null; } catch { return null; }
   };
   let radarBuild: Promise<any[]> | null = null;
   const buildRadar = () => radarBuild ??= (async () => {
+    radarTriedAt = Date.now();
+    let slow = 0, busy = false;
     // Everyone with any listening or likes (deleted accounts' rows go with them).
     const users = (db.prepare('SELECT user_id id FROM plays UNION SELECT user_id FROM likes UNION SELECT user_id FROM album_likes UNION SELECT user_id FROM artist_follows').all() as { id: string }[]).map((u) => u.id);
     const byId = new Map<string, { id: string; name: string }>();
@@ -340,6 +352,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     await Promise.all(Array.from({ length: 4 }, async () => {
       while (queue.length) {
         const a = queue.shift()!;
+        const began = Date.now();
         try {
           const d = await discography(a.id, a.name);
           if (!d.artist) failed++; // discography() turns a Lidarr error into no artist
@@ -352,8 +365,11 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
             out.push(r);
           }
         } catch { failed++; /* one artist failing must not sink the radar */ }
+        if (Date.now() - began <= RADAR_SLOW_MS) slow = 0;
+        else if (++slow >= RADAR_SLOW_LIMIT) { busy = true; queue.length = 0; }
       }
     }));
+    if (busy) { log('radar: Lidarr is busy, the list stays as it is for now'); return radarSaved()?.releases || []; }
     // Lidarr down: every artist failed, which is no news. The list stays.
     if (failed && failed === top.length) return radarSaved()?.releases || [];
     out.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
@@ -361,10 +377,11 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     return out;
   })().finally(() => { radarBuild = null; });
   const radarStale = (saved: { at: number } | null) => !saved || Date.now() - saved.at >= RADAR_TTL;
-  const refreshRadar = () => { if (radarStale(radarSaved())) buildRadar().catch((e) => log(`radar: ${e?.message || e}`)); };
+  const radarMayTry = () => Date.now() - radarTriedAt >= RADAR_RETRY_MS;
+  const refreshRadar = () => { if (radarStale(radarSaved()) && radarMayTry()) buildRadar().catch((e) => log(`radar: ${e?.message || e}`)); };
   const radarRaw = async (): Promise<any[]> => {
     const saved = radarSaved();
-    if (!saved) return buildRadar();
+    if (!saved) return radarBuild || (radarMayTry() ? buildRadar() : []);
     refreshRadar();
     return saved.releases;
   };

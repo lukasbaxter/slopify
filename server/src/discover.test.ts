@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
@@ -136,6 +136,46 @@ describe('release radar', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(kept().releases[0].album_id).toBe('old');
     await app.close();
+  });
+});
+
+describe('release radar and a busy Lidarr', () => {
+  it('a rebuild stops once Lidarr keeps answering slowly, keeps the list, and is not begun again within the hour', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-busy-')));
+    const track = db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES (?, ?, 0, 0, 'Song', ?, ?, ?, ?, 'Album', ?, 0)`);
+    for (let i = 0; i < 40; i++) {
+      const id = `busy-artist-${i}`, name = `Busy ${i}`;
+      db.prepare('INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?)').run(id, name, name.toLowerCase());
+      db.prepare('INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES (?, ?, ?, ?, ?, 1, 0, ?)').run(`al-${i}`, 'Album', id, name, `/m/${i}`, 'album');
+      track.run(`t-${i}`, `/m/${i}/01.flac`, name, JSON.stringify([name]), JSON.stringify([id]), `al-${i}`, name);
+      db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', `t-${i}`, Date.now());
+    }
+    db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at: Date.now() - 7 * 3600e3, releases: [{ album_id: 'old', artistId: 'busy-artist-0', artistName: 'Busy 0', title: 'old', rtype: 'album', date: '2026-01-01' }] }));
+    let clock = Date.now();
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    let calls = 0;
+    // Every answer takes Lidarr 20 seconds.
+    const lidarr: any = { enabled: true, statuses: async () => new Map(), discography: async () => { calls++; clock += 20000; return { artist: null, releases: [] }; } };
+    const app = Fastify();
+    app.decorate('requireUser', async () => {});
+    registerDiscover(app, db, { lidarr });
+    try {
+      expect((await app.inject({ url: '/api/radar' })).json().releases[0].album_id).toBe('old');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(calls).toBeGreaterThanOrEqual(6);
+      expect(calls).toBeLessThan(12); // not all 40 artists
+      const after = calls;
+      clock += 10 * 60 * 1000;
+      await app.inject({ url: '/api/radar' });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(calls).toBe(after); // ten minutes later: not begun again
+      expect(JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'radar'").get() as any).v).releases[0].album_id).toBe('old');
+      clock += 60 * 60 * 1000;
+      await app.inject({ url: '/api/radar' });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(calls).toBeGreaterThan(after); // an hour on: tried again
+    } finally { now.mockRestore(); await app.close(); }
   });
 });
 

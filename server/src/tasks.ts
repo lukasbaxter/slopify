@@ -286,6 +286,7 @@ export type ChoreOptions = {
 // A file replaced is a new track id (ids are the audio's own hash): carry
 // the listener's traces over and drop what belonged to the old bytes.
 import { searchKey, type Soularr } from './soularr.js';
+import { rescueFailedImports } from './downloads.js';
 import { remapTrackId } from './remap.js';
 import { decodeLength } from './damage.js';
 export { remapTrackId };
@@ -795,6 +796,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       { key: 'giveUpH', label: 'Give up after', type: 'number', min: 1, max: 24 * 14, unit: 'hours', default: 12, help: 'With no new song in this long an album comes off the wanted list. Retry puts it back.' },
       { key: 'giveUpTries', label: 'Or after this many searches', type: 'number', min: 0, max: 100, default: 4, help: 'An album Soulseek searched this many times without a usable result comes off the list at once, so it stops being searched every few minutes. 0: only the hours above count.' },
       { key: 'fallback', label: "Try Lidarr's indexers first", type: 'toggle', default: o.indexerFallback ?? true, help: "Before giving up on an album Soulseek never found, search it once with the indexers set up in Lidarr (torrents, usenet). Off: Soulseek only." },
+      { key: 'rescue', label: 'Shelve downloads Lidarr refuses', type: 'toggle', default: true, help: 'A finished download Lidarr will not import (another edition than the one it expects) is moved into the library as it is, after checking that every song plays and is by the right artist. Off: it stays in failed_imports and the album is skipped.' },
       { key: 'clean', label: 'Clear spent downloads', type: 'toggle', default: true },
     ],
     run: async (ctx) => {
@@ -811,9 +813,29 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         const up = !!st?.lastResultsAt && Date.now() - st.lastResultsAt < SOULSEEK_QUIET_MS;
         const tries = st && up ? (artist: string, title: string, since: number) =>
           (st.fails.get(searchKey(artist, title)) ?? st.fails.get(searchKey('', title)) ?? []).filter((t) => t >= since).length : null;
+        // The library has this album when it holds most of its songs, not
+        // when one single of it is here.
+        const holds = (artist: string, title: string, songs: number) => {
+          const hit = releaseInLibrary(db, artist, title);
+          return !!hit && ((db.prepare('SELECT COUNT(*) n FROM tracks WHERE album_id = ?').get(hit.id) as any).n as number) >= Math.max(1, Math.floor(songs * 0.8));
+        };
         const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log, searchedAt, fallback: ctx.setting<boolean>('fallback'),
-          tries, giveUpTries: ctx.setting<number>('giveUpTries'), fallbackMs: INDEXER_WAIT_MS });
-        out.push(`${r.watching} wanted${r.handedOver.length ? `, ${r.handedOver.length} handed to Lidarr's indexers` : ''}${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
+          tries, giveUpTries: ctx.setting<number>('giveUpTries'), fallbackMs: INDEXER_WAIT_MS, inLibrary: holds });
+        out.push(`${r.watching} wanted${r.here.length ? `, ${r.here.length} were in the library already` : ''}${r.handedOver.length ? `, ${r.handedOver.length} handed to Lidarr's indexers` : ''}${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
+        const scanFolders = (app as any).scanFolders as ((rel: string[]) => Promise<any>) | undefined;
+        if (ctx.setting('rescue') && o.soularr?.canClear && o.slskdDownloadsDir && scanFolders) {
+          ctx.step('Shelving downloads Lidarr refused');
+          try {
+            const lidarr = o.lidarr; const soularr = o.soularr;
+            const s = await rescueFailedImports(db, await soularr.failedImportList(), {
+              dir: path.join(o.slskdDownloadsDir, 'failed_imports'), musicDir: o.musicDir, inLibrary: holds,
+              plays: async (file) => { const d = await decodeLength(file); return d.errors === 0 && d.ms > 0; },
+              artistOf: async (file) => { try { const m = await parseFile(file); return [m.common.albumartist, m.common.artist, ...(m.common.artists || [])].filter(Boolean).join(' '); } catch { return null; } },
+              scan: (rel) => scanFolders([rel]), unmonitor: (id) => lidarr.unmonitor(id), clear: (id) => soularr.clearFailedImport(id), log: ctx.log,
+            });
+            if (s.shelved || s.already || s.discarded) out.push(`refused downloads: ${s.shelved} shelved, ${s.already} already here, ${s.discarded} thrown away to fetch again${s.left ? `, ${s.left} left` : ''}`);
+          } catch (e: any) { ctx.log(`refused downloads: ${e.message}`); }
+        }
       } else out.push('Lidarr is not configured');
       if (o.slskdDownloadsDir && ctx.setting('clean')) {
         // Never inside (or around) the library, the drop folder, the state or

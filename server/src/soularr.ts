@@ -127,6 +127,16 @@ export function soularrClient(opts: { log?: string; url?: string; fetcher?: type
       const list: any[] = Array.isArray(j) ? j : Object.values(j || {});
       return new Set(list.map((x) => Number(x.album_id)).filter(Boolean));
     },
+    // The same, with the folder each download was put aside in.
+    async failedImportList(): Promise<{ album_id: number; artist: string; title: string; folder: string }[]> {
+      if (!url) return [];
+      const r = await f(`${url}/api/failed-imports`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) throw new Error(`Soularr failed-imports ${r.status}`);
+      const j = await r.json() as any;
+      const list: any[] = Array.isArray(j) ? j : Object.values(j || {});
+      return list.filter((x) => Number(x.album_id) && x.folder_path)
+        .map((x) => ({ album_id: Number(x.album_id), artist: String(x.artist || ''), title: String(x.title || ''), folder: String(x.folder_path).split('/').filter(Boolean).pop()! }));
+    },
     async clearFailedImport(albumId: number) {
       if (!url) return false;
       const r = await f(`${url}/api/failed-imports/${albumId}`, { method: 'DELETE', signal: AbortSignal.timeout(5000) });

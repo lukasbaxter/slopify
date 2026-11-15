@@ -242,7 +242,11 @@ export const WRONG_ROUNDS = 2;
 // it held a place in the line). The caller leaves `tries` out while Soulseek
 // itself looks down, so an outage never empties the wanted list.
 export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void; searchedAt?: ((artist: string, title: string) => number | null) | null; fallback?: boolean;
-  tries?: ((artist: string, title: string, since: number) => number) | null; giveUpTries?: number; fallbackMs?: number }) {
+  tries?: ((artist: string, title: string, since: number) => number) | null; giveUpTries?: number; fallbackMs?: number;
+  // The library already holds this album (about `total` songs of it): Lidarr
+  // lost track of its files, wants it again, and every new download collides
+  // with what is on disk (one album was imported 19 times in a day).
+  inLibrary?: ((artist: string, title: string, total: number) => unknown) | null }) {
   const now = opts.now ?? Date.now();
   const log = opts.log ?? (() => {});
   const rows = await lidarr.all();
@@ -258,11 +262,20 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
   const wantedIds = new Set(rows.filter((a) => a.monitored).map((a) => a.id));
   const requested = new Set((db.prepare('SELECT DISTINCT lidarr_id FROM my_requests').all() as any[]).map((r) => r.lidarr_id));
   const history = new Map<number, Promise<{ albumId: number; album: string; at: number }[]>>();
-  let watching = 0; const gaveUp: string[] = [];
+  let watching = 0; const gaveUp: string[] = []; const here: string[] = [];
   for (const a of rows) {
     if (!a.monitored || (a.total > 0 && a.done >= a.total)) continue;
     // Lidarr's own download clients (torrents) report their own failures.
     if (a.queue?.state === 'downloading') continue;
+    if (a.done === 0 && a.total > 0 && opts.inLibrary?.(a.artist, a.title, a.total)) {
+      try {
+        await lidarr.unmonitor(a.id);
+        db.prepare('DELETE FROM download_watch WHERE lidarr_id = ?').run(a.id);
+        here.push(`${a.artist} - ${a.title}`);
+        log(`${a.artist} - ${a.title}: already in the library, no longer wanted`);
+      } catch (e: any) { log(`${a.artist} - ${a.title}: could not unmonitor: ${e.message}`); }
+      continue;
+    }
     watching++;
     const w = get.get(a.id) as any;
     if (!w) { ins.run(a.id, a.album_id, now, a.done, now); continue; }
@@ -319,7 +332,7 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
   for (const r of db.prepare('SELECT lidarr_id FROM download_watch WHERE gave_up IS NULL').all() as any[]) {
     if (!keep.has(r.lidarr_id)) db.prepare('DELETE FROM download_watch WHERE lidarr_id = ?').run(r.lidarr_id);
   }
-  return { watching, gaveUp, handedOver };
+  return { watching, gaveUp, handedOver, here };
 }
 
 // Release groups the watcher gave up on: the chores must not queue them again.
@@ -375,4 +388,105 @@ export async function cleanStaging(dir: string, opts: { now?: number; staleMs?: 
     }
   } catch { /* none */ }
   return { removed, bytes, failed };
+}
+
+// A download Lidarr refused to import (another edition than the one it
+// monitors, a looser match than it accepts) used to be the end of the road:
+// Soularr put the folder aside and skipped the album for good, the album
+// stayed on the wanted list, and the music sat in failed_imports (123 albums,
+// 27 GB by 11-15). This library is scanned from the files themselves, so
+// such a download is shelved here directly:
+//  - the album is in the library already: the copy is spent, the album no
+//    longer wanted;
+//  - a file does not decode, or the files are not by this artist: thrown
+//    away and searched for again (another peer may have a good copy);
+//  - otherwise the folder moves into the library as <Artist>/<Album>, is
+//    scanned, and the album comes off the wanted list.
+const AUDIO = /\.(flac|mp3|m4a|aac|ogg|opus|wav|aiff?|wv|ape)$/i;
+const loose = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+// A folder name any filesystem takes: no separators or control characters, no trailing dot or space.
+export const safeName = (s: string) => ([...String(s || '')].map((c) => (c === '/' || c === '\\' || c.charCodeAt(0) < 32 ? '_' : c)).join('').replace(/[. ]+$/, '').trim() || 'Unknown');
+
+export type FailedImport = { album_id: number; artist: string; title: string; folder: string };
+export async function rescueFailedImports(db: DB, list: FailedImport[], o: {
+  dir: string; // the failed_imports folder
+  musicDir: string;
+  inLibrary: (artist: string, title: string, songs: number) => unknown; // the library holds this album (about this many songs of it)
+  plays: (file: string) => Promise<boolean>; // decodes front to back
+  artistOf: (file: string) => Promise<string | null>; // its artist tags, joined
+  scan: (rel: string) => Promise<unknown>;
+  unmonitor: (albumId: number) => Promise<unknown>;
+  clear: (albumId: number) => Promise<unknown>;
+  log?: (m: string) => void; max?: number;
+}) {
+  const log = o.log ?? (() => {});
+  const out = { shelved: 0, already: 0, discarded: 0, left: 0 };
+  let done = 0;
+  for (const it of list) {
+    if (done >= (o.max ?? 25)) { out.left++; continue; }
+    const name = `${it.artist} - ${it.title}`;
+    const src = path.join(o.dir, it.folder);
+    // Never outside failed_imports, whatever the downloader wrote down.
+    if (path.dirname(path.resolve(src)) !== path.resolve(o.dir)) { out.left++; continue; }
+    try {
+      const files: string[] = [];
+      const walk = async (p: string) => {
+        for (const e of await fsp.readdir(p, { withFileTypes: true })) {
+          const q = path.join(p, e.name);
+          if (e.isDirectory()) await walk(q); else files.push(q);
+        }
+      };
+      let there = true;
+      try { await walk(src); } catch { there = false; }
+      const audio = files.filter((f) => AUDIO.test(f));
+      done++;
+      if (!there || !audio.length) {
+        // Nothing to shelve: let the downloader have another go.
+        if (there) await fsp.rm(src, { recursive: true, force: true });
+        await o.clear(it.album_id);
+        out.discarded++; log(`${name}: the failed download is gone or empty, searching again`);
+        continue;
+      }
+      const dest = path.join(o.musicDir, safeName(it.artist), safeName(it.title));
+      const destHas = await fsp.readdir(dest).then((l) => l.some((f) => AUDIO.test(f)), () => false);
+      const here = !!o.inLibrary(it.artist, it.title, audio.length);
+      // A folder of that name with other songs in it (a few singles, say):
+      // not merged by a chore; a person decides.
+      if (!here && destHas) { out.left++; log(`${name}: ${dest} already holds other songs, left in failed_imports`); continue; }
+      if (here) {
+        await o.unmonitor(it.album_id);
+        await fsp.rm(src, { recursive: true, force: true });
+        await o.clear(it.album_id);
+        out.already++; log(`${name}: already in the library, the second download is dropped`);
+        continue;
+      }
+      let good = true;
+      for (const f of audio) if (!(await o.plays(f))) { good = false; log(`${name}: ${path.basename(f)} does not play`); break; }
+      if (good) {
+        const want = loose(it.artist);
+        let by = 0;
+        for (const f of audio) { const a = loose(await o.artistOf(f) || ''); if (a && (a.includes(want) || want.includes(a))) by++; }
+        if (by * 2 < audio.length) { good = false; log(`${name}: the files are not by ${it.artist}`); }
+      }
+      if (!good) {
+        await fsp.rm(src, { recursive: true, force: true });
+        await o.clear(it.album_id);
+        out.discarded++;
+        continue;
+      }
+      await fsp.mkdir(dest, { recursive: true });
+      for (const f of files) {
+        const to = path.join(dest, path.relative(src, f));
+        await fsp.mkdir(path.dirname(to), { recursive: true });
+        // Across filesystems (staging on one disk, the library on a share): copy, then drop.
+        try { await fsp.rename(f, to); } catch { await fsp.copyFile(f, to); await fsp.rm(f, { force: true }); }
+      }
+      await fsp.rm(src, { recursive: true, force: true });
+      await o.scan(path.relative(o.musicDir, dest));
+      await o.unmonitor(it.album_id);
+      await o.clear(it.album_id);
+      out.shelved++; log(`${name}: Lidarr would not import it, shelved from the download (${audio.length} songs)`);
+    } catch (e: any) { out.left++; log(`${name}: ${e.message}`); }
+  }
+  return out;
 }

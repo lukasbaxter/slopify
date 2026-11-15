@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { ADDING_GRACE_MS, cleanStaging, downloadOut, givenUp, recordRequest, registerDownloads, STUCK_MS, watchDownloads } from './downloads.js';
+import { ADDING_GRACE_MS, cleanStaging, downloadOut, givenUp, recordRequest, registerDownloads, rescueFailedImports, STUCK_MS, watchDownloads } from './downloads.js';
 import type { AlbumState } from './lidarr.js';
 
 const album = (o: Partial<AlbumState>): AlbumState => ({
@@ -251,6 +251,66 @@ describe('downloads', () => {
     expect(asked).toEqual([8]);
     expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 1 * H })).gaveUp).toEqual([]);
     expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 1.6 * H })).gaveUp).toEqual(['A - T']);
+  });
+
+  it('watcher: an album the library already holds comes off the wanted list instead of being downloaded again', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw-here-')));
+    const t0 = 1_800_000_000_000;
+    const off: number[] = [];
+    const lidarr: any = {
+      enabled: true,
+      all: async () => [album({ id: 11, album_id: 'mb11', done: 0, total: 16 }), album({ id: 12, album_id: 'mb12', done: 0, total: 10, title: 'Other' })],
+      importsSince: async () => [],
+      unmonitor: async (id: number) => { off.push(id); },
+    };
+    // 16 songs wanted and the library has them; of "Other" it has one single.
+    const inLibrary = (_a: string, title: string, total: number) => (title === 'T' ? total === 16 : false);
+    const r = await watchDownloads(db, lidarr, { giveUpMs: 12 * 3600e3, now: t0, inLibrary });
+    expect(r.here).toEqual(['A - T']);
+    expect(off).toEqual([11]);
+    expect(r.watching).toBe(1);
+    expect(givenUp(db).size).toBe(0); // not a give-up: nothing to try again later
+  });
+
+  it('a download Lidarr refused is shelved from the files, dropped when the library has it, and thrown away when it does not play', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-rescue-db-')));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-rescue-'));
+    const dir = path.join(root, 'staging', 'failed_imports'); const musicDir = path.join(root, 'music');
+    const put = (folder: string, files: string[]) => { fs.mkdirSync(path.join(dir, folder), { recursive: true }); for (const f of files) fs.writeFileSync(path.join(dir, folder, f), f); };
+    put('Amy - Back to Black (2006)', ['01 - Rehab.flac', '02 - You Know.flac', 'cover.jpg']);
+    put('Remy - Dup (2020)', ['01 - a.flac']);
+    put('Adema - Kill (2007)', ['01 - ok.flac', '08 - broken.flac']);
+    put('SOB - Wrong (2018)', ['01 - x.mp3', '02 - y.mp3']);
+    put('Tjay - Single (2021)', ['01 - s.flac']);
+    fs.mkdirSync(path.join(musicDir, 'Tjay', 'Single'), { recursive: true }); fs.writeFileSync(path.join(musicDir, 'Tjay', 'Single', 'other.flac'), 'x');
+    fs.mkdirSync(path.join(root, 'staging', 'keep'), { recursive: true }); fs.writeFileSync(path.join(root, 'staging', 'keep', 'a.flac'), 'x');
+    const list = [
+      { album_id: 1, artist: 'Amy', title: 'Back to Black', folder: 'Amy - Back to Black (2006)' },
+      { album_id: 2, artist: 'Remy', title: 'Dup', folder: 'Remy - Dup (2020)' },
+      { album_id: 3, artist: 'Adema', title: 'Kill', folder: 'Adema - Kill (2007)' },
+      { album_id: 4, artist: 'SOB', title: 'Wrong', folder: 'SOB - Wrong (2018)' },
+      { album_id: 5, artist: 'Tjay', title: 'Single', folder: 'Tjay - Single (2021)' },
+      { album_id: 6, artist: 'Gone', title: 'Gone', folder: 'Gone (2000)' },
+      { album_id: 7, artist: 'Evil', title: 'Evil', folder: '../keep' },
+    ];
+    const scanned: string[] = []; const off: number[] = []; const cleared: number[] = [];
+    const r = await rescueFailedImports(db, list as any, {
+      dir, musicDir,
+      inLibrary: (artist) => artist === 'Remy',
+      plays: async (f) => !f.includes('broken'),
+      artistOf: async (f) => (f.includes('SOB') ? 'Somebody Else' : path.basename(path.dirname(f)).split(' - ')[0]),
+      scan: async (rel) => { scanned.push(rel); }, unmonitor: async (id) => { off.push(id); }, clear: async (id) => { cleared.push(id); },
+    });
+    expect(r).toEqual({ shelved: 1, already: 1, discarded: 3, left: 2 });
+    // Shelved: every file moved (the cover too), scanned, no longer wanted.
+    expect(fs.readdirSync(path.join(musicDir, 'Amy', 'Back to Black')).sort()).toEqual(['01 - Rehab.flac', '02 - You Know.flac', 'cover.jpg']);
+    expect(scanned).toEqual([path.join('Amy', 'Back to Black')]);
+    // Already here: copy dropped, no longer wanted. Broken or not this artist: dropped, still wanted, searched again.
+    expect(off.sort()).toEqual([1, 2]);
+    expect(cleared.sort()).toEqual([1, 2, 3, 4, 6]);
+    expect(fs.readdirSync(dir).sort()).toEqual(['Tjay - Single (2021)']); // a folder of that name with other songs: left for a person
+    expect(fs.readdirSync(path.join(musicDir, 'Tjay', 'Single'))).toEqual(['other.flac']);
+    expect(fs.existsSync(path.join(root, 'staging', 'keep', 'a.flac'))).toBe(true); // never outside failed_imports
   });
 
   it('watcher: with the fallback on, Soulseek misses go to Lidarr\'s indexers once before giving up', async () => {

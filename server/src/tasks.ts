@@ -313,6 +313,17 @@ export async function verifyFlac(file: string, durationMs: number): Promise<bool
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Does a song play front to back: it decodes to (about) the length its
+// header states, and the decoder reported no damage in the audio itself.
+// What it says about an embedded picture ("Invalid picture type", "Unknown
+// attached picture mimetype") is not damage: counted as such, good albums
+// were thrown away and fetched again (11-15).
+const DAMAGE = /invalid sync|invalid data|corrupt|error while decoding|failed to read frame|crc mismatch|header missing|truncat|invalid residual/i;
+export function playsThrough(d: { ms: number; errors: number; message: string }, statedMs: number): boolean {
+  if (d.ms <= 0) return false;
+  if (statedMs > 0 && d.ms < statedMs * 0.97 - 1500) return false;
+  return !d.message.split(/\n| (?=\[)/).some((l) => DAMAGE.test(l) && !/picture/i.test(l));
+}
 // No Soulseek search has returned anything for this long: treat Soulseek as down.
 export const SOULSEEK_QUIET_MS = 30 * 60000;
 // Lidarr's indexers answer a search within minutes (a grab shows up in its
@@ -829,7 +840,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
             const lidarr = o.lidarr; const soularr = o.soularr;
             const s = await rescueFailedImports(db, await soularr.failedImportList(), {
               dir: path.join(o.slskdDownloadsDir, 'failed_imports'), musicDir: o.musicDir, inLibrary: holds,
-              plays: async (file) => { const d = await decodeLength(file); return d.errors === 0 && d.ms > 0; },
+              plays: async (file) => { let stated = 0; try { stated = ((await parseFile(file, { duration: true })).format.duration ?? 0) * 1000; } catch { return false; } return playsThrough(await decodeLength(file), stated); },
               artistOf: async (file) => { try { const m = await parseFile(file); return [m.common.albumartist, m.common.artist, ...(m.common.artists || [])].filter(Boolean).join(' '); } catch { return null; } },
               scan: (rel) => scanFolders([rel]), unmonitor: (id) => lidarr.unmonitor(id), clear: (id) => soularr.clearFailedImport(id), log: ctx.log,
             });

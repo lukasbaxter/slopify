@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import Fastify from 'fastify';
 import { openDb } from './db.js';
-import { registerTasks, builtinTasks, isStudio, isDue, prevPoint, parseSchedule, remapTrackId, type TaskDef, type Schedule } from './tasks.js';
+import { registerTasks, builtinTasks, playsThrough, isStudio, isDue, prevPoint, parseSchedule, remapTrackId, type TaskDef, type Schedule } from './tasks.js';
 import { slskdFind } from './explore.js';
 
 // The flac chore talks to slskd; the tests only care that it does not.
@@ -184,6 +184,15 @@ describe('built-in chores', () => {
   });
   // A run context serving the task's declared setting defaults.
   const ctxOf = (t: TaskDef) => ({ step: () => {}, log: () => {}, setting: (k: string) => t.settings?.find((x) => x.key === k)?.default as any });
+
+  it('a song plays through when it decodes to its stated length without damage; what the decoder says about a picture is not damage', () => {
+    const picture = '[flac @ 0x55751e9fe8c0] Invalid picture type: 255. [flac @ 0x55751e9fe8c0] Unknown attached picture mimetype: application/octet-stream.';
+    expect(playsThrough({ ms: 180000, errors: 2, message: picture }, 180400)).toBe(true);
+    expect(playsThrough({ ms: 180000, errors: 0, message: '' }, 0)).toBe(true);
+    expect(playsThrough({ ms: 30000, errors: 0, message: '' }, 192000)).toBe(false); // a preview whose header says 3:12
+    expect(playsThrough({ ms: 0, errors: 1, message: 'Failed to read frame size' }, 0)).toBe(false);
+    expect(playsThrough({ ms: 180000, errors: 3, message: '[flac @ 0x1] invalid sync code [flac @ 0x1] Invalid data found when processing input' }, 180000)).toBe(false);
+  });
 
   it('isStudio: albums and 4+ track EPs, never secondary-typed variants', () => {
     expect(isStudio({ rtype: 'Album', secondary: [], total_tracks: 10 })).toBe(true);

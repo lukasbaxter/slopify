@@ -76,16 +76,17 @@ function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder }) {
   );
 }
 
-function Shortcut({ title, image, onOpen, onPlay, liked }) {
+// round: an artist. Artists are circles everywhere, on these tiles too.
+function Shortcut({ title, image, onOpen, onPlay, liked, round }) {
   return (
     <div className="shortcut" onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.()}>
       {liked ? (
         <LikedCover className="shortcut-art" />
       ) : image ? (
-        <FadeImg className="shortcut-art" src={image} />
+        <FadeImg className={`shortcut-art${round ? ' round' : ''}`} src={image} />
       ) : (
-        <div className="shortcut-art ph" />
+        <div className={`shortcut-art ph${round ? ' round' : ''}`} />
       )}
       <span className="shortcut-title">{tileTitle(title)}</span>
       <button className="card-play shortcut-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
@@ -298,7 +299,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
             <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
               onOpen={() => onOpenPlaylist(s.item)} onPlay={() => playPlaylist(s.item)} />
           ) : s.kind === 'artist' ? (
-            <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
+            <Shortcut key={s.item.Id} round title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}
               onOpen={() => onOpenArtist(s.item.Id)} onPlay={() => playArtist(s.item)} />
           ) : (
             <Shortcut key={s.item.Id} title={s.item.Name} image={jf.imageUrl(s.item.Id, { maxHeight: 128 })}

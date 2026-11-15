@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -85,7 +85,8 @@ internal fun HomeShortcutTile(shortcut: HomeLogic.Shortcut, modifier: Modifier =
                 is HomeLogic.Shortcut.PlaylistTile ->
                     CoverImage(CoverSource.of(shortcut.playlist), 56.dp, Modifier.fillMaxSize(), shape = CoverShape.Rounded(0.dp), placeholder = CoverPlaceholder.None)
                 is HomeLogic.Shortcut.ArtistTile ->
-                    CoverImage(CoverSource.ArtistArt(shortcut.artist.id, shortcut.artist.image), 56.dp, Modifier.fillMaxSize(), shape = CoverShape.Rounded(0.dp), placeholder = CoverPlaceholder.None)
+                    // Artists are circles everywhere: here one set 4 dp in from the tile's edge.
+                    CoverImage(CoverSource.ArtistArt(shortcut.artist.id, shortcut.artist.image), 48.dp, Modifier.padding(4.dp).fillMaxSize(), shape = CoverShape.Circle, placeholder = CoverPlaceholder.None)
             }
         }
         Text(

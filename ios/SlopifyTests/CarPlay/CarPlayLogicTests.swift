@@ -202,3 +202,29 @@ final class CarPlayLogicTests: XCTestCase {
         XCTAssertEqual(CarPlayLogic.imagePixels(CGSize(width: 44, height: 40), scale: 0), 44)
     }
 }
+
+/// Artists are circles everywhere, in the car's lists too.
+final class CarPlayArtistShapeTests: XCTestCase {
+    func testOnlyArtistPicturesAreRound() {
+        XCTAssertTrue(CarPlayLogic.isRound(.artist(id: "a", image: nil)))
+        XCTAssertFalse(CarPlayLogic.isRound(.album(id: "a", art: nil)))
+        XCTAssertFalse(CarPlayLogic.isRound(.playlist(id: "p", cover: nil)))
+        XCTAssertFalse(CarPlayLogic.isRound(nil))
+        XCTAssertTrue(CarPlayLogic.isRound(CarPlayLogic.artistRow(id: "a", name: "A", image: nil).art))
+    }
+
+    @MainActor func testRoundFitClearsTheCorners() {
+        let solid = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { c in UIColor.red.setFill(); c.fill(CGRect(x: 0, y: 0, width: 40, height: 40)) }
+        func alpha(_ img: UIImage, _ x: Int, _ y: Int) -> UInt8 {
+            var px = [UInt8](repeating: 0, count: 4)
+            let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.draw(img.cgImage!, in: CGRect(x: -x, y: -(img.cgImage!.height - 1 - y), width: img.cgImage!.width, height: img.cgImage!.height))
+            return px[3]
+        }
+        let size = CGSize(width: 20, height: 20)
+        let round = CarPlayArtwork.fit(solid, to: size, scale: 1, round: true)
+        XCTAssertEqual(alpha(round, 0, 0), 0)
+        XCTAssertEqual(alpha(round, 10, 10), 255)
+        XCTAssertEqual(alpha(CarPlayArtwork.fit(solid, to: size, scale: 1), 0, 0), 255)
+    }
+}

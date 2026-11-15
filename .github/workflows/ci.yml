@@ -15,6 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # One version everywhere (tools/set-version.mjs writes them all).
+      - run: node tools/set-version.mjs --check
       - id: areas
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

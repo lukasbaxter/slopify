@@ -61,7 +61,8 @@ struct HomeShortcutTile: View {
             case .liked: LikedCover(heart: 0.45, radius: 0)
             case .album(let a): CoverImage(.init(a), size: 56, shape: .rounded(0), placeholder: .none)
             case .playlist(let p): CoverImage(.init(p), size: 56, shape: .rounded(0), placeholder: .none)
-            case .artist(let a): CoverImage(.artist(id: a.id, image: a.image), size: 56, shape: .rounded(0), placeholder: .none)
+            // Artists are circles everywhere: here one set 4 pt in from the tile's edge.
+            case .artist(let a): CoverImage(.artist(id: a.id, image: a.image), size: 48, shape: .circle, placeholder: .none).frame(width: 48, height: 48)
             }
         }
     }

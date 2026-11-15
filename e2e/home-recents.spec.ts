@@ -104,3 +104,21 @@ test('Home asks for /api/home once per load, not once per shelf', async ({ page 
   await page.waitForTimeout(4000);
   expect(asked).toBe(1);
 });
+
+// Artists are circles everywhere (owner, 11-15): the artist shortcut was the
+// one artist picture drawn as a square.
+test('an artist among the shortcuts is drawn as a circle', async ({ page, isMobile }) => {
+  await login(page); await waitForLibrary(page);
+  const h = await auth(page);
+  const artist = (await (await page.request.get('/api/artists?limit=100', { headers: h })).json()).items.find((a: any) => a.name === 'Ada Lovelace');
+  const song = (await (await page.request.get(`/api/artists/${artist.id}`, { headers: h })).json()).tracks[0] as { id: string };
+  expect((await page.request.post('/api/plays', { headers: h, data: { trackId: song.id, client: 'web', ctx: `artist:${artist.id}` } })).ok()).toBe(true);
+  await page.reload(); await waitForLibrary(page);
+  await goHome(page, isMobile);
+  const art = page.locator('.shortcut', { hasText: 'Ada Lovelace' }).first().locator('.shortcut-art');
+  await expect(art).toBeVisible({ timeout: 25000 });
+  expect(await art.evaluate((el) => getComputedStyle(el).borderRadius)).toBe('50%');
+  // An album next to it keeps its square.
+  const other = page.locator('.shortcut-art:not(.round)').first();
+  expect(await other.evaluate((el) => getComputedStyle(el).borderRadius)).not.toBe('50%');
+});

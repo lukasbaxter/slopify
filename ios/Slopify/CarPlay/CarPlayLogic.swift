@@ -94,6 +94,12 @@ enum CarPlayLogic {
         Row(title: name, subtitle: L("Artist"), art: .artist(id: id, image: image), glyph: .artist, target: .artist(id: id, name: name))
     }
 
+    /// Artists are circles everywhere, in the car's lists too.
+    static func isRound(_ src: CoverSource?) -> Bool {
+        if case .artist = src { return true }
+        return false
+    }
+
     static func likedRow(count: Int?) -> Row {
         Row(title: L("Liked Songs"), subtitle: count.map { L("Playlist • {n} songs", ["n": $0]) } ?? L("Playlist"),
             art: nil, glyph: .liked, target: .liked)

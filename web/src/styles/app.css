@@ -817,6 +817,8 @@ input[type="range"]:disabled { opacity: .4; }
 .shortcut:hover { background: rgba(var(--fg-rgb),0.12); }
 .shortcut-art { width: 64px; height: 64px; object-fit: cover; flex: none; border-radius: 4px 0 0 4px; background: var(--card-hover); }
 .shortcut-art.ph { background: var(--card-hover); }
+/* An artist: a circle set in from the tile's edge. After the phone rules in the cascade by specificity. */
+.shortcut .shortcut-art.round { border-radius: 50%; transform: scale(.86); }
 .shortcut-title { font-size: 16px; font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 56px; }
 .shortcut .shortcut-play { position: absolute; right: 8px; top: 50%; bottom: auto; transform: translateY(-50%) translateY(8px); width: 48px; height: 48px; }
 .shortcut:hover .shortcut-play { opacity: 1; transform: translateY(-50%); }

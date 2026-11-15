@@ -113,6 +113,10 @@ jobs:
       # The whole history and tags: the notes list the commits since the last tag.
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # The tag and the version in the files must be the same number, or
+      # Settings and the apps would name a different release than this one.
+      - if: startsWith(github.ref, 'refs/tags/v')
+        run: node tools/set-version.mjs --check "${GITHUB_REF_NAME#v}"
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
       - run: ls -la out

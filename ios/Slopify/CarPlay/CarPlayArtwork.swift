@@ -37,10 +37,10 @@ final class CarPlayArtwork {
     func load(_ src: CoverSource?, api: APIClient, into item: CPListItem) {
         guard let url = url(src, api: api) else { return }
         if let hit = small.object(forKey: url as NSURL) { item.setImage(hit); return }
-        let target = CPListItem.maximumImageSize, scale = scale
+        let target = CPListItem.maximumImageSize, scale = scale, round = CarPlayLogic.isRound(src)
         Task { [weak self, weak item] in
             guard let img = await ImageLoader.shared.image(url) else { return }
-            let fitted = await Task.detached(priority: .utility) { Self.fit(img, to: target, scale: scale) }.value
+            let fitted = await Task.detached(priority: .utility) { Self.fit(img, to: target, scale: scale, round: round) }.value
             guard let self else { return }
             self.small.setObject(fitted, forKey: url as NSURL)
             item?.setImage(fitted)
@@ -51,8 +51,8 @@ final class CarPlayArtwork {
         src?.url(api, size: CarPlayLogic.imagePixels(CPListItem.maximumImageSize, scale: scale))
     }
 
-    /// Aspect-fill into the list image box.
-    nonisolated private static func fit(_ img: UIImage, to size: CGSize, scale: CGFloat) -> UIImage {
+    /// Aspect-fill into the list image box; `round` cuts it to a circle (artists).
+    nonisolated static func fit(_ img: UIImage, to size: CGSize, scale: CGFloat, round: Bool = false) -> UIImage {
         guard size.width > 0, size.height > 0, img.size.width > 0, img.size.height > 0 else { return img }
         let f = UIGraphicsImageRendererFormat()
         f.scale = scale
@@ -60,6 +60,12 @@ final class CarPlayArtwork {
         let k = max(size.width / img.size.width, size.height / img.size.height)
         let drawn = CGSize(width: img.size.width * k, height: img.size.height * k)
         let origin = CGPoint(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2)
-        return UIGraphicsImageRenderer(size: size, format: f).image { _ in img.draw(in: CGRect(origin: origin, size: drawn)) }
+        return UIGraphicsImageRenderer(size: size, format: f).image { _ in
+            if round {
+                let d = min(size.width, size.height)
+                UIBezierPath(ovalIn: CGRect(x: (size.width - d) / 2, y: (size.height - d) / 2, width: d, height: d)).addClip()
+            }
+            img.draw(in: CGRect(origin: origin, size: drawn))
+        }
     }
 }

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Slopify",
     "slug": "slopify",
-    "version": "0.1.0",
+    "version": "0.1.198",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

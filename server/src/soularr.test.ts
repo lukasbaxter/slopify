@@ -39,6 +39,19 @@ describe('Soularr log', () => {
     expect(st.next).toBe(t('2026-10-07T19:47:34Z') + st.interval!);
   });
 
+  it('counts the searches that came back with nothing usable, and knows when Soulseek last answered', () => {
+    const st = parseSoularrLog(LOG, t('2026-10-07T19:49:00Z'));
+    // Searched twice; the first had not finished in the log, the second matched a release the peers refused: one failed try.
+    expect(st.fails.get(searchKey('Olly Murs', '24 HRS (acoustic)'))).toEqual([t('2026-10-07T12:46:37-07:00')]);
+    expect(st.fails.get(searchKey('Sacconi Quartet', 'Schubert: Death and the Maiden / Beethoven: Quartet Op. 131'))).toHaveLength(1);
+    // A match wipes the count.
+    expect(st.fails.get(searchKey('Fontaines D.C.', 'Roman Holiday'))).toBeUndefined();
+    expect(st.lastResultsAt).toBe(t('2026-10-07T12:47:22-07:00'));
+    // The same album failing on round after round adds up.
+    const again = LOG + LOG.replaceAll('2026-10-07T12:4', '2026-10-07T13:4').replaceAll('2026-10-07T12:5', '2026-10-07T13:5');
+    expect(parseSoularrLog(again, t('2026-10-07T21:00:00Z')).fails.get(searchKey('Olly Murs', '24 HRS (acoustic)'))).toHaveLength(2);
+  });
+
   it('is checking while its lines are fresh', () => {
     expect(parseSoularrLog(LOG, t('2026-10-07T19:47:50Z')).checking).toBe(true);
   });

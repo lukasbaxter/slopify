@@ -216,6 +216,88 @@ describe('built-in chores', () => {
     expect(await backlog.run(ctxOf(backlog))).toContain('0 artists'); // done for 14 days
   });
 
+  it('backlog reaches artists nobody has played, after the played ones, and does not put a failed lookup at the head of every run', async () => {
+    const db = tmpdb('backlog-all');
+    seed(db);
+    // On the shelf, never played: what discovery brings in.
+    db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('ar2', 'Bonobo', 'bonobo'), ('ar3', 'Broken Name', 'broken')").run();
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al2', 'Migration', 'ar2', 'Bonobo', '/m2', 1, 0, 'migration'), ('al3', 'X', 'ar3', 'Broken Name', '/m3', 1, 0, 'x'), ('al4', 'Y', 'ar3', 'Broken Name', '/m4', 1, 0, 'y')").run();
+    const requested: string[] = []; const looked: string[] = [];
+    const lidarr: any = {
+      enabled: true, wantedCount: async () => 0, statuses: async () => new Map(),
+      discography: async (name: string) => {
+        looked.push(name);
+        if (name === 'Broken Name') throw new Error('lidarr 503');
+        return { artist: { name, image: null }, releases: name === 'Bonobo' ? [{ album_id: 'mb-north', artist: 'Bonobo', title: 'The North Borders', rtype: 'Album', year: '2013', date: '2013', image: null, total_tracks: 13, secondary: [] }] : [] };
+      },
+      request: async (fid: string) => { requested.push(fid); return { id: 1, album_id: fid, artist: 'Bonobo', title: fid, status: 'queued' }; },
+    };
+    const backlog = builtinTasks(adminApp() as any, opts(db, lidarr)).find((t) => t.id === 'backlog')!;
+    expect(await backlog.run(ctxOf(backlog))).toContain('1 albums queued');
+    expect(looked).toEqual(['Tycho', 'Broken Name', 'Bonobo']); // played first, then the shelf by how much of each is here
+    expect(requested).toEqual(['mb-north']);
+    looked.length = 0;
+    await backlog.run(ctxOf(backlog));
+    expect(looked).toEqual([]); // the failed one waits a few days too
+  });
+
+  it('the chores leave the reserved places on the wanted list for people', async () => {
+    const db = tmpdb('reserve');
+    seed(db);
+    const lidarr: any = { enabled: true, wantedCount: async () => 20, statuses: async () => new Map(), discography: async () => ({ artist: null, releases: [] }) };
+    const reserved = builtinTasks(adminApp() as any, { ...opts(db, lidarr), requestReserve: 5 }).find((t) => t.id === 'backlog')!;
+    expect(await reserved.run(ctxOf(reserved))).toContain('full');
+    const open = builtinTasks(adminApp() as any, opts(db, lidarr)).find((t) => t.id === 'backlog')!;
+    expect(await open.run(ctxOf(open))).not.toContain('full');
+  });
+
+  it('discovery asks for two albums of an artist new to the library', async () => {
+    const db = tmpdb('discovery-two');
+    seed(db);
+    const dz: Record<string, any> = {
+      '/search/artist?q=Tycho&limit=3': { data: [{ id: 1, name: 'Tycho' }] },
+      '/artist/1/related?limit=50': { data: [{ id: 2, name: 'Bonobo' }] },
+      '/artist/2/albums?limit=15': { data: [{ title: 'Migration', record_type: 'album' }, { title: 'Bambro', record_type: 'single' }, { title: 'Fragments', record_type: 'album' }, { title: 'Black Sands', record_type: 'album' }] },
+      '/genre': { data: [] },
+    };
+    const fetcher: any = async (url: string) => ({ ok: true, json: async () => dz[String(url).replace('https://api.deezer.com', '')] ?? { data: [] } });
+    const requested: string[] = [];
+    const lidarr: any = {
+      enabled: true, wantedCount: async () => 0, statuses: async () => new Map(),
+      search: async (q: string) => [{ album_id: `mb-${q.replace('Bonobo ', '')}`, artist: 'Bonobo', title: q.replace('Bonobo ', '') }],
+      request: async (fid: string) => { requested.push(fid); return { id: requested.length, album_id: fid, artist: 'Bonobo', title: fid, status: 'queued' }; },
+    };
+    const discovery = builtinTasks(adminApp() as any, { ...opts(db, lidarr), fetcher }).find((t) => t.id === 'discovery')!;
+    expect(await discovery.run(ctxOf(discovery))).toContain('2 albums queued');
+    expect(requested).toEqual(['mb-Migration', 'mb-Fragments']);
+  }, 20000);
+
+  it('retry puts a few long-given-up albums and unfound imported songs back in line, the oldest first', async () => {
+    const db = tmpdb('retry');
+    seed(db);
+    const D = 86400000; const now = Date.now();
+    const watch = db.prepare('INSERT INTO download_watch (lidarr_id, album_id, first_seen, done, progress_at, gave_up, reason) VALUES (?, ?, 0, 0, 0, ?, ?)');
+    watch.run(1, 'mb1', now - 40 * D, 'nothing matching found on Soulseek in 4 searches');
+    watch.run(2, 'mb2', now - 50 * D, 'downloads kept turning out to be a different album ("X")');
+    watch.run(3, 'mb3', now - 30 * D, 'nothing matching found on Soulseek in 13 hours');
+    watch.run(4, 'mb4', now - 2 * D, 'nothing matching found on Soulseek in 13 hours');
+    watch.run(5, 'mb5', now - 25 * D, 'nothing matching found on Soulseek in 13 hours');
+    watch.run(6, 'mb6', now - 24 * D, 'nothing matching found on Soulseek in 13 hours');
+    const pend = db.prepare("INSERT INTO spotify_pending (user_id, kind, playlist_id, at, artist, title, state, tries, created) VALUES ('u1', 'like', '', 0, 'A', ?, ?, 3, ?)");
+    pend.run('old miss', 'notfound', now - 40 * D); pend.run('fresh miss', 'notfound', now - D); pend.run('asked', 'requested', now - 40 * D);
+    const monitored: number[] = [];
+    const lidarr: any = { enabled: true, wantedCount: async () => 0, monitor: async (id: number) => { monitored.push(id); } };
+    const retry = builtinTasks(adminApp() as any, opts(db, lidarr)).find((t) => t.id === 'retry')!;
+    expect(await retry.run(ctxOf(retry))).toBe('3 albums back in line; 1 imported songs asked for again');
+    expect(monitored).toEqual([1, 3, 5]); // oldest first, three a run; never the wrong-album loop or the recent one
+    expect((db.prepare('SELECT lidarr_id FROM download_watch ORDER BY lidarr_id').all() as any[]).map((r) => r.lidarr_id)).toEqual([2, 4, 6]);
+    expect((db.prepare("SELECT title, state, tries FROM spotify_pending ORDER BY id").all() as any[]).map((r) => `${r.title}:${r.state}:${r.tries}`)).toEqual(['old miss:new:0', 'fresh miss:notfound:3', 'asked:requested:3']);
+    // A full list takes no album back.
+    const full: any = { enabled: true, wantedCount: async () => 25, monitor: async () => { throw new Error('must not'); } };
+    const retry2 = builtinTasks(adminApp() as any, opts(db, full)).find((t) => t.id === 'retry')!;
+    expect(await retry2.run(ctxOf(retry2))).toContain('the wanted list is full');
+  });
+
   it('discovery and backlog stand down when the wanted list is at target, and without Lidarr', async () => {
     const db = tmpdb('room');
     seed(db);

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { usePlayhead } from '../player/playhead.js';
+import { usePlayhead, useSmoothSeek } from '../player/playhead.js';
 import Marquee from './Marquee.jsx';
 import { Lyrics } from './RightPanel.jsx';
 import Visualizer, { EQ_STYLES, GRADIENTS, GRADIENT_NAMES, DEFAULT_VIZ, loadVizSettings, unlockShadowAudio } from './Visualizer.jsx';
@@ -192,6 +192,8 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
   ];
   const { nowPlaying, playing, duration, shuffle, repeat, volume } = player;
   const position = usePlayhead(player);
+  const seekRef = useRef(null);
+  useSmoothSeek(seekRef, player, player.duration || 0, scrub != null);
   // Same 120 ms throttle as SheetVolume when the session is on a speaker;
   // the local device keeps its instant slider.
   const remoteVol = Boolean(sessionDevice?.kind && sessionDevice.kind !== 'local');
@@ -315,7 +317,7 @@ export default function FullScreen({ player, jf, onClose, onOpenArtist, onOpenAl
         {/* Progress across the top of the block, above the album thumb and the controls. */}
         <div className="fs-seek">
           <span>{fmt(scrub ?? (position || 0))}</span>
-          <input type="range" min="0" max={Math.max(1, duration || 0)} value={Math.min(scrub ?? (position || 0), duration || 0)}
+          <input ref={seekRef} type="range" min="0" step="any" max={Math.max(1, duration || 0)} value={Math.min(scrub ?? (position || 0), duration || 0)}
             onChange={onScrubMove} onInput={onScrubMove} onPointerDown={onScrubStart} onTouchStart={onScrubTouchStart} onTouchMove={onScrubTouchMove} onKeyDown={onScrubStart}
             onPointerUp={onScrubEnd} onTouchEnd={onScrubEnd} onKeyUp={onScrubEnd}
             style={{ '--pct': `${duration ? ((scrub ?? position) / duration) * 100 : 0}%` }} {...seekHover} />

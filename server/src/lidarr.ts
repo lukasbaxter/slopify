@@ -479,6 +479,19 @@ export function lidarrClient(opts: LidarrOptions) {
       cache.delete('activity');
     },
 
+    // Want an album again without searching the indexers: back on the wanted
+    // list, where the Soulseek watcher finds it on its next round.
+    async monitor(albumId: number) {
+      const a = await api(`/album/${albumId}`);
+      if (!a) throw new Error('no such album');
+      const artistId = a.artistId ?? a.artist?.id;
+      await refreshDone(artistId);
+      const ar = await api(`/artist/${artistId}`);
+      if (!ar?.monitored) await api(`/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...ar, monitored: true, monitorNewItems: 'none' }) });
+      await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: true }) });
+      cache.delete('activity');
+    },
+
     // Ask Lidarr's own indexers (whatever the host set up: torrents,
     // usenet) for an album, without touching its monitored state.
     async searchIndexers(albumId: number) {

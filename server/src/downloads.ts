@@ -234,8 +234,15 @@ export const WRONG_ROUNDS = 2;
 // seen after the album was queued; an album still waiting its turn is never
 // given up. Without it (no Soularr log) the clock runs from the queueing.
 // fallback: an album Soulseek never found goes to Lidarr's own indexers
-// once (one more give-up period) before it is given up.
-export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void; searchedAt?: ((artist: string, title: string) => number | null) | null; fallback?: boolean }) {
+// once (fallbackMs, else one more give-up period) before it is given up.
+// tries: how many Soulseek searches for an album came back with nothing
+// usable since a moment. giveUpTries of those and the album is done with
+// Soulseek at once, instead of being searched again every few minutes for
+// the whole give-up period (one album was searched 192 times in a day while
+// it held a place in the line). The caller leaves `tries` out while Soulseek
+// itself looks down, so an outage never empties the wanted list.
+export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: number; now?: number; log?: (m: string) => void; searchedAt?: ((artist: string, title: string) => number | null) | null; fallback?: boolean;
+  tries?: ((artist: string, title: string, since: number) => number) | null; giveUpTries?: number; fallbackMs?: number }) {
   const now = opts.now ?? Date.now();
   const log = opts.log ?? (() => {});
   const rows = await lidarr.all();
@@ -284,19 +291,21 @@ export async function watchDownloads(db: DB, lidarr: Lidarr, opts: { giveUpMs: n
         }
         since = s == null ? null : Math.max(s, w.progress_at);
       }
+      const tried = opts.tries && opts.giveUpTries ? opts.tries(a.artist, a.title, w.first_seen) : 0;
+      const outOfTries = !!opts.giveUpTries && tried >= opts.giveUpTries;
       if (w.fallback_at != null) {
-        if (now - w.fallback_at > opts.giveUpMs) reason = `nothing found on Soulseek, nor by Lidarr's indexers in ${hours(now - w.fallback_at)}`;
-      } else if (since != null && now - since > opts.giveUpMs) {
+        if (now - w.fallback_at > (opts.fallbackMs ?? opts.giveUpMs)) reason = `nothing found on Soulseek, nor by Lidarr's indexers in ${hours(now - w.fallback_at)}`;
+      } else if (outOfTries || (since != null && now - since > opts.giveUpMs)) {
         if (opts.fallback && lidarr.searchIndexers) {
           try {
             await lidarr.searchIndexers(a.id);
             markFallback.run(now, a.id);
             handedOver.push(`${a.artist} - ${a.title}`);
-            log(`${a.artist} - ${a.title}: nothing on Soulseek in ${hours(now - since)}, asked Lidarr's indexers`);
+            log(`${a.artist} - ${a.title}: nothing on Soulseek in ${outOfTries ? `${tried} searches` : hours(now - (since ?? now))}, asked Lidarr's indexers`);
             continue;
           } catch (e: any) { log(`${a.artist} - ${a.title}: indexer search failed: ${e.message}`); }
         }
-        reason = `nothing matching found on Soulseek in ${hours(now - since)}`;
+        reason = outOfTries ? `nothing matching found on Soulseek in ${tried} searches` : `nothing matching found on Soulseek in ${hours(now - (since ?? now))}`;
       }
     }
     if (!reason) continue;

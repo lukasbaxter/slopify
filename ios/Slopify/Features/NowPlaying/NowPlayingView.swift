@@ -224,7 +224,8 @@ struct NowPlayingView: View {
     // MARK: Seek bar (.fs-seek)
 
     private var seek: some View {
-        TimelineView(.periodic(from: .now, by: player.isPlaying && scrub == nil ? 0.25 : 3600)) { _ in
+        // Every frame while it plays: the bar glides instead of stepping four times a second.
+        TimelineView(.animation(minimumInterval: nil, paused: !(player.isPlaying && scrub == nil))) { _ in
             // Read the tick so a paused seek redraws, but never `.id` it: a new identity every
             // 0.5 s cancels the drag in progress (owner, 11-11: the handle let go mid-drag).
             let _ = player.progressTick

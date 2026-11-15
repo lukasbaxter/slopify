@@ -236,7 +236,8 @@ export async function requestPending(db: DB, lidarr: Lidarr, log: (m: string) =>
 // Puts what arrived in its place: a liked song in Liked Songs (at its
 // Spotify order), a playlist song back at its position (or the end, if the
 // playlist was edited since), a saved album in saved albums. Rows older than
-// 60 days are dropped: whatever has not come by then is not coming.
+// a year are dropped (the retry chore asks for the missing ones again in
+// turn until then).
 // `since`: only songs that could match a track added or changed from then on.
 // Every pending row through matchTrack is ~16 s of blocked event loop with
 // 5,800 rows (2026-10-27: each FLAC upgrade's folder scan froze every
@@ -244,8 +245,9 @@ export async function requestPending(db: DB, lidarr: Lidarr, log: (m: string) =>
 // match before can only match now through a touched track, and matchTrack
 // needs the artist to match loosely, so rows whose artist matches no touched
 // track are skipped; the rest still go through the whole library.
+export const PENDING_KEEP_MS = 365 * 86400000;
 export function fillPending(db: DB, log: (m: string) => void = () => {}, opts: { since?: number } = {}) {
-  db.prepare('DELETE FROM spotify_pending WHERE created < ?').run(Date.now() - 60 * 86400000);
+  db.prepare('DELETE FROM spotify_pending WHERE created < ?').run(Date.now() - PENDING_KEEP_MS);
   let rows = db.prepare('SELECT * FROM spotify_pending').all() as any[];
   if (!rows.length) return 0;
   if (opts.since != null) {

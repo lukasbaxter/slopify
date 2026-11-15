@@ -9,8 +9,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.199"
-    CURRENT_PROJECT_VERSION: "1199"
+    MARKETING_VERSION: "0.1.200"
+    CURRENT_PROJECT_VERSION: "1200"
 configFiles:
   Debug: Local.xcconfig
   Release: Local.xcconfig

@@ -211,6 +211,48 @@ describe('downloads', () => {
     expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 6').get() as any).reason).toBe('nothing matching found on Soulseek in 13 hours');
   });
 
+  it('watcher: an album Soulseek searched a few times for nothing is given up at once, not searched for another half day', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw-tries-')));
+    const t0 = 1_800_000_000_000; const H = 3600e3; const M = 60e3;
+    let monitored = true;
+    const lidarr: any = {
+      enabled: true,
+      all: async () => (monitored ? [album({ id: 7, album_id: 'mb7', done: 0, total: 8 })] : []),
+      importsSince: async () => [],
+      unmonitor: async () => { monitored = false; },
+    };
+    let fails: number[] = [t0 - H]; // a failed search from before it was queued never counts
+    const o = { giveUpMs: 12 * H, searchedAt: () => t0 + 5 * M, giveUpTries: 4, tries: (_a: string, _t: string, since: number) => fails.filter((x) => x >= since).length };
+    await watchDownloads(db, lidarr, { ...o, now: t0 });
+    fails = [t0 - H, t0 + 5 * M, t0 + 20 * M, t0 + 35 * M];
+    expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 40 * M })).gaveUp).toEqual([]); // three tries: still in line
+    // Soulseek looks down (the caller passes no tries): only the hours count.
+    fails.push(t0 + 50 * M);
+    expect((await watchDownloads(db, lidarr, { ...o, tries: null, now: t0 + 55 * M })).gaveUp).toEqual([]);
+    const r = await watchDownloads(db, lidarr, { ...o, now: t0 + 55 * M });
+    expect(r.gaveUp).toEqual(['A - T']);
+    expect((db.prepare('SELECT reason FROM download_watch WHERE lidarr_id = 7').get() as any).reason).toBe('nothing matching found on Soulseek in 4 searches');
+  });
+
+  it('watcher: after the indexers were asked, the wait is the short one', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw-fbwait-')));
+    const t0 = 1_800_000_000_000; const H = 3600e3;
+    let monitored = true; const asked: number[] = [];
+    const lidarr: any = {
+      enabled: true,
+      all: async () => (monitored ? [album({ id: 8, album_id: 'mb8', done: 0, total: 8 })] : []),
+      importsSince: async () => [],
+      searchIndexers: async (id: number) => { asked.push(id); },
+      unmonitor: async () => { monitored = false; },
+    };
+    const o = { giveUpMs: 12 * H, searchedAt: () => t0 + 1, fallback: true, giveUpTries: 4, tries: () => 4, fallbackMs: H };
+    await watchDownloads(db, lidarr, { ...o, now: t0 });
+    expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 0.5 * H })).handedOver).toEqual(['A - T']);
+    expect(asked).toEqual([8]);
+    expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 1 * H })).gaveUp).toEqual([]);
+    expect((await watchDownloads(db, lidarr, { ...o, now: t0 + 1.6 * H })).gaveUp).toEqual(['A - T']);
+  });
+
   it('watcher: with the fallback on, Soulseek misses go to Lidarr\'s indexers once before giving up', async () => {
     const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dlw5-')));
     const t0 = 1_800_000_000_000; const H = 3600e3;

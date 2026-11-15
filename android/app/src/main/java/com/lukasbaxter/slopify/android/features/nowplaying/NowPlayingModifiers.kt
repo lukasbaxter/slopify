@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -125,9 +126,13 @@ internal fun Modifier.npSwipeDown(
     }
 }
 
-/** The live playhead (seconds), re-read every `intervalMs` while playing; the reported position when paused. */
+/**
+ * The live playhead (seconds) while playing; the reported position when paused. Re-read on every
+ * frame (`intervalMs` 0, the default), so bars glide instead of stepping four times a second;
+ * a caller that only shows whole seconds can pass an interval.
+ */
 @Composable
-internal fun rememberNowPlayingPosition(intervalMs: Long = 250): Double {
+internal fun rememberNowPlayingPosition(intervalMs: Long = 0): Double {
     val player = LocalAppModel.current.player
     val state by player.state.collectAsStateWithLifecycle()
     val progress by player.progress.collectAsStateWithLifecycle()
@@ -136,7 +141,7 @@ internal fun rememberNowPlayingPosition(intervalMs: Long = 250): Double {
         now = player.positionNow()
         if (!state.isPlaying) return@LaunchedEffect
         while (true) {
-            delay(intervalMs)
+            if (intervalMs > 0) delay(intervalMs) else withFrameNanos { }
             now = player.positionNow()
         }
     }

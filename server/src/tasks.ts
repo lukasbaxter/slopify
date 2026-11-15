@@ -273,6 +273,7 @@ export type ChoreOptions = {
   headsEnabled: boolean; headSeconds: number; pauseMs: number;
   enrichEveryH: number;
   wantedTarget: number;
+  requestReserve?: number;
   discoveryPerRun: number;
   backlogEveryH: number; backlogPerRun: number; backlogArtistsPerRun: number;
   flacPerRun: number;
@@ -311,6 +312,12 @@ export async function verifyFlac(file: string, durationMs: number): Promise<bool
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// No Soulseek search has returned anything for this long: treat Soulseek as down.
+export const SOULSEEK_QUIET_MS = 30 * 60000;
+// Lidarr's indexers answer a search within minutes (a grab shows up in its
+// queue): an album they have nothing for is given up after this, not after
+// another half day of Soulseek searches.
+export const INDEXER_WAIT_MS = 60 * 60000;
 const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 // Studio releases worth shelving whole: albums, and EPs with real weight.
@@ -336,6 +343,19 @@ async function room(lidarr: Lidarr, target: number, soularr?: Soularr): Promise<
   return target - (await lidarr.wantedCount(skip));
 }
 
+// Discovery: albums asked for from an artist new to the library, and how many
+// library artists (beyond the played ones) a run looks around.
+export const ALBUMS_PER_NEW_ARTIST = 2;
+export const LIBRARY_ARTISTS_PER_RUN = 20;
+// Fill in discographies looks at an artist again after this long: played
+// artists often (new releases), the rest of the shelf seldom, and one whose
+// lookup failed soon, but not on every run (it would hold the front of the
+// line and the artists behind it would never be reached).
+export const PLAYED_KEEP_MS = 6 * 3600000;
+export const BACKLOG_RECHECK_MS = 14 * 86400000;
+export const BACKLOG_RECHECK_UNPLAYED_MS = 60 * 86400000;
+export const BACKLOG_RETRY_FAILED_MS = 3 * 86400000;
+
 // How hard a chore leans on the NAS: a pause between files.
 const PACE = (def: string): TaskSetting => ({
   key: 'pace', label: 'Pace', type: 'select', default: def,
@@ -346,6 +366,9 @@ const paceMs = (pace: string, normal: number) => (pace === 'gentle' ? Math.max(2
 
 export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
   const db = o.db;
+  // The chores fill the wanted list this far and no further: the last few
+  // places stay free for people, so a request never waits behind a full list.
+  const choreTarget = o.wantedTarget - Math.max(0, o.requestReserve ?? 0);
   const f = o.fetcher ?? fetch;
   // Deezer answers rate limits with a 200 whose body is {error: ...}; read
   // as data that looks like an empty result and the run quietly does
@@ -367,10 +390,20 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     }
     return j;
   };
-  const topPlayedArtists = (sinceMs: number, limit: number) => db.prepare(`
+  // Half a second over a long play history (137k plays), and the server
+  // answers nothing meanwhile: asked once, then kept for PLAYED_KEEP_MS, not
+  // run again by every chore that starts every few minutes.
+  const playedKept = new Map<number, { at: number; rows: { id: string; name: string }[] }>();
+  const topPlayedArtists = (sinceMs: number, limit: number) => {
+    const kept = playedKept.get(sinceMs);
+    if (kept && Date.now() - kept.at < PLAYED_KEEP_MS) return kept.rows.slice(0, limit);
+    const rows = db.prepare(`
     SELECT a.id, a.name, COUNT(*) n FROM plays p JOIN tracks t ON t.id = p.track_id
     JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
-    WHERE p.at > ? GROUP BY a.id ORDER BY n DESC LIMIT ?`).all(Date.now() - sinceMs, limit) as { id: string; name: string }[];
+    WHERE p.at > ? GROUP BY a.id ORDER BY n DESC`).all(Date.now() - sinceMs) as { id: string; name: string }[];
+    playedKept.set(sinceMs, { at: Date.now(), rows });
+    return rows.slice(0, limit);
+  };
 
   const scan: TaskDef = {
     id: 'scan', name: 'Scan library', schedule: { mode: 'daily', at: '04:00' }, watchDir: o.musicDir,
@@ -445,7 +478,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
-      const cap = Math.min(await room(lidarr, o.wantedTarget, o.soularr), ctx.setting<number>('perRun'));
+      const cap = Math.min(await room(lidarr, choreTarget, o.soularr), ctx.setting<number>('perRun'));
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const seen = new Map<string, number>(Object.entries(JSON.parse(kvGet(db, 'task:discovery:seen') || '{}')));
       for (const [k, t] of seen) if (Date.now() - t > 90 * 86400000) seen.delete(k);
@@ -455,20 +488,30 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       const consider = async (cand: { id: number; name: string }, why: string) => {
         if (haveArtist.get(cand.name) || seen.has(norm(cand.name))) return;
         const albums = await deezer(`/artist/${cand.id}/albums?limit=15`);
-        const best = (albums.data || []).find((a: any) => a.record_type === 'album');
-        if (!best) { seen.set(norm(cand.name), Date.now()); return; }
-        const found = await lidarr.search(`${cand.name} ${best.title}`);
-        // Only now was the candidate really evaluated: marked seen any
-        // earlier, a thrown Deezer/Lidarr call would bury it for 90 days
-        // without it ever having had its chance.
-        seen.set(norm(cand.name), Date.now());
-        const hit = found.find((r) => norm(r.artist) === norm(cand.name) && norm(r.title) === norm(best.title)) || found.find((r) => norm(r.artist) === norm(cand.name));
-        if (!hit || releaseInLibrary(db, hit.artist, hit.title) || givenUp(db).has(hit.album_id)) return;
-        const req = await lidarr.request(hit.album_id);
-        if (req.status === 'queued') {
-          n++; ctx.log(`${hit.artist} - ${hit.title} (${why})`);
-          // See room(): a concurrent run may be filling the list too.
-          if (n % 5 === 0 && (await room(lidarr, o.wantedTarget, o.soularr)) <= 0) full = true;
+        // Its first two albums as Deezer lists them: one album is a thin
+        // introduction, and the rest of the shelf follows once the artist is
+        // in the library (Fill in discographies).
+        const picks = (albums.data || []).filter((a: any) => a.record_type === 'album').slice(0, ALBUMS_PER_NEW_ARTIST);
+        if (!picks.length) { seen.set(norm(cand.name), Date.now()); return; }
+        const asked = new Set<string>();
+        for (const best of picks) {
+          if (n >= cap || full) break;
+          const found = await lidarr.search(`${cand.name} ${best.title}`);
+          // Only now was the candidate really evaluated: marked seen any
+          // earlier, a thrown Deezer/Lidarr call would bury it for 90 days
+          // without it ever having had its chance.
+          seen.set(norm(cand.name), Date.now());
+          const exact = found.find((r) => norm(r.artist) === norm(cand.name) && norm(r.title) === norm(best.title));
+          // No exact title: any album of theirs will do, but only for the first pick.
+          const hit = exact || (asked.size ? undefined : found.find((r) => norm(r.artist) === norm(cand.name)));
+          if (!hit || asked.has(hit.album_id) || releaseInLibrary(db, hit.artist, hit.title) || givenUp(db).has(hit.album_id)) continue;
+          asked.add(hit.album_id);
+          const req = await lidarr.request(hit.album_id);
+          if (req.status === 'queued') {
+            n++; ctx.log(`${hit.artist} - ${hit.title} (${why})`);
+            // See room(): a concurrent run may be filling the list too.
+            if (n % 5 === 0 && (await room(lidarr, choreTarget, o.soularr)) <= 0) full = true;
+          }
         }
       };
       const stop = (e: any, where: string) => {
@@ -478,19 +521,35 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       // Around what gets played: the most played artists of the last year
       // and their related artists. A wide circle, or a library that already
       // has the close neighbours runs dry within days.
-      for (const top of topPlayedArtists(365 * 86400000, 200)) {
-        if (n >= cap || full) break;
+      const around = async (top: { name: string }) => {
         ctx.step(`Around ${top.name}`, n / cap);
         try {
           const s = await deezer(`/search/artist?q=${encodeURIComponent(top.name)}&limit=3`);
           const dz = (s.data || []).find((x: any) => norm(x.name) === norm(top.name));
-          if (!dz) continue;
-          const rel = await deezer(`/artist/${dz.id}/related?limit=25`);
+          if (!dz) return;
+          const rel = await deezer(`/artist/${dz.id}/related?limit=50`);
           for (const cand of rel.data || []) {
             if (n >= cap || full) break;
             await consider(cand, `similar to ${top.name}`);
           }
         } catch (e: any) { stop(e, top.name); }
+      };
+      const top = topPlayedArtists(365 * 86400000, 500);
+      for (const a of top) {
+        if (n >= cap || full) break;
+        await around(a);
+      }
+      // Then around what the library holds but nobody has played much: a
+      // different handful of its artists each run, so the circle keeps
+      // widening after the played artists' neighbours are all known.
+      if (n < cap && !full) {
+        const played = new Set(top.map((a) => a.id));
+        const shelf = (db.prepare(`SELECT a.id, a.name FROM artists a WHERE a.id IN (SELECT artist_id FROM albums) AND a.name NOT IN ('Various Artists', 'Unknown Artist')
+          ORDER BY RANDOM() LIMIT ?`).all(LIBRARY_ARTISTS_PER_RUN * 2) as { id: string; name: string }[]).filter((a) => !played.has(a.id)).slice(0, LIBRARY_ARTISTS_PER_RUN);
+        for (const a of shelf) {
+          if (n >= cap || full) break;
+          await around(a);
+        }
       }
       // Then breadth: Deezer's chart artists per genre, the genres this
       // library has least of first.
@@ -504,10 +563,10 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
             if (n >= cap || full) break;
             ctx.step(`${g.name} charts`, n / cap);
             try {
-              const chart = await deezer(`/chart/${g.id}/artists?limit=50`);
+              const chart = await deezer(`/chart/${g.id}/artists?limit=100`);
               let fromGenre = 0;
               for (const cand of chart.data || []) {
-                if (n >= cap || full || fromGenre >= 3) break; // spread a run across genres
+                if (n >= cap || full || fromGenre >= 5) break; // spread a run across genres
                 const before = n; await consider(cand, `${g.name} charts`); fromGenre += n - before;
               }
             } catch (e: any) { stop(e, g.name); }
@@ -528,21 +587,31 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
       { key: 'perRun', label: 'Albums per run', type: 'number', min: 1, max: 100, default: o.backlogPerRun },
       { key: 'artistsPerRun', label: 'Artists per run', type: 'number', min: 1, max: 50, default: o.backlogArtistsPerRun },
     ],
-    description: 'Queue missing studio albums and EPs of the most played artists, a few at a time',
+    description: 'Queue missing studio albums and EPs of every artist in the library, the most played first, a few at a time',
     run: async (ctx) => {
       const lidarr = o.lidarr;
       if (!lidarr?.enabled) return 'Lidarr is not configured';
-      const cap = Math.min(await room(lidarr, o.wantedTarget, o.soularr), ctx.setting<number>('perRun'));
+      const cap = Math.min(await room(lidarr, choreTarget, o.soularr), ctx.setting<number>('perRun'));
       if (cap <= 0) return 'the wanted list is full, nothing added';
       const done = JSON.parse(kvGet(db, 'task:backlog:done') || '{}') as Record<string, number>;
       const pending = await lidarr.statuses();
       const quit = givenUp(db); // the download watcher already gave up on these
       let n = 0, artists = 0, full = false;
-      for (const a of topPlayedArtists(10 * 365 * 86400000, 500)) {
+      // Every album artist in the library: the played ones first, most
+      // played first, then the rest by how much of them is here. It used to
+      // stop at the 500 most played, so an artist discovery had brought in
+      // (one album, never played yet) never got the rest of their albums.
+      const played = topPlayedArtists(10 * 365 * 86400000, 1000000);
+      const playedIds = new Set(played.map((a) => a.id));
+      const rest = (db.prepare(`SELECT a.id, a.name, COUNT(*) n FROM albums al JOIN artists a ON a.id = al.artist_id
+        WHERE a.name NOT IN ('Various Artists', 'Unknown Artist') GROUP BY a.id ORDER BY n DESC, a.name`).all() as { id: string; name: string }[]).filter((a) => !playedIds.has(a.id));
+      const due = (id: string, every: number) => !done[id] || Date.now() - done[id] >= every;
+      for (const a of [...played, ...rest]) {
         if (artists >= ctx.setting<number>('artistsPerRun') || n >= cap || full) break;
-        if (done[a.id] && Date.now() - done[a.id] < 14 * 86400000) continue;
+        const every = playedIds.has(a.id) ? BACKLOG_RECHECK_MS : BACKLOG_RECHECK_UNPLAYED_MS;
+        if (!due(a.id, every)) continue;
         ctx.step(a.name, n / cap);
-        let complete = true;
+        let complete = true, failed = false;
         try {
           const d = await lidarr.discography(a.name);
           for (const r of d.releases) {
@@ -552,12 +621,14 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
             if (req.status === 'queued') {
               n++; ctx.log(`${a.name} - ${r.title}`);
               // See room(): a concurrent run may be filling the list too.
-              if (n % 5 === 0 && (await room(lidarr, o.wantedTarget, o.soularr)) <= 0) full = true;
+              if (n % 5 === 0 && (await room(lidarr, choreTarget, o.soularr)) <= 0) full = true;
             }
           }
-        } catch (e: any) { ctx.log(`${a.name}: ${e.message}`); complete = false; }
+        } catch (e: any) { ctx.log(`${a.name}: ${e.message}`); complete = false; failed = true; }
         artists++;
         if (complete) done[a.id] = Date.now();
+        // Looked at again in a few days, not at the head of every run.
+        else if (failed) done[a.id] = Date.now() - every + BACKLOG_RETRY_FAILED_MS;
       }
       kvSet(db, 'task:backlog:done', JSON.stringify(done));
       return n ? `${n} albums queued across ${artists} artists` : `nothing missing for the ${artists} artists checked`;
@@ -722,6 +793,7 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     description: 'Give up on albums that never turn up or keep arriving as the wrong album, and clear spent files from the download folder',
     settings: [
       { key: 'giveUpH', label: 'Give up after', type: 'number', min: 1, max: 24 * 14, unit: 'hours', default: 12, help: 'With no new song in this long an album comes off the wanted list. Retry puts it back.' },
+      { key: 'giveUpTries', label: 'Or after this many searches', type: 'number', min: 0, max: 100, default: 4, help: 'An album Soulseek searched this many times without a usable result comes off the list at once, so it stops being searched every few minutes. 0: only the hours above count.' },
       { key: 'fallback', label: "Try Lidarr's indexers first", type: 'toggle', default: o.indexerFallback ?? true, help: "Before giving up on an album Soulseek never found, search it once with the indexers set up in Lidarr (torrents, usenet). Off: Soulseek only." },
       { key: 'clean', label: 'Clear spent downloads', type: 'toggle', default: true },
     ],
@@ -733,7 +805,14 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         // "not found". Without its log, the clock runs from the queueing.
         const st = o.soularr?.enabled ? o.soularr.status() : null;
         const searchedAt = st ? (artist: string, title: string) => (st.searches.get(searchKey(artist, title)) ?? st.searches.get(searchKey('', title)))?.at ?? null : null;
-        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log, searchedAt, fallback: ctx.setting<boolean>('fallback') });
+        // Failed tries only count while Soulseek is answering: with no search
+        // returning anything in the last half hour it may be Soulseek that is
+        // down, and the hours rule alone decides.
+        const up = !!st?.lastResultsAt && Date.now() - st.lastResultsAt < SOULSEEK_QUIET_MS;
+        const tries = st && up ? (artist: string, title: string, since: number) =>
+          (st.fails.get(searchKey(artist, title)) ?? st.fails.get(searchKey('', title)) ?? []).filter((t) => t >= since).length : null;
+        const r = await watchDownloads(db, o.lidarr, { giveUpMs: ctx.setting<number>('giveUpH') * 3600000, log: ctx.log, searchedAt, fallback: ctx.setting<boolean>('fallback'),
+          tries, giveUpTries: ctx.setting<number>('giveUpTries'), fallbackMs: INDEXER_WAIT_MS });
         out.push(`${r.watching} wanted${r.handedOver.length ? `, ${r.handedOver.length} handed to Lidarr's indexers` : ''}${r.gaveUp.length ? `, gave up on ${r.gaveUp.join('; ')}` : ''}`);
       } else out.push('Lidarr is not configured');
       if (o.slskdDownloadsDir && ctx.setting('clean')) {
@@ -750,6 +829,58 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
         if (c.removed) out.push(`cleared ${c.removed} spent folders (${(c.bytes / 1e9).toFixed(1)} GB)`);
         if (c.failed.length) out.push(`failed imports waiting in ${path.join(o.slskdDownloadsDir, 'failed_imports')}: ${c.failed.map((x) => x.name).join('; ')} (${(c.failed.reduce((t, x) => t + x.bytes, 0) / 1e9).toFixed(1)} GB)`);
         }
+      }
+      return out.join('; ');
+    },
+  };
+
+  // What was given up on is not gone for good: someone starts sharing it,
+  // a release gets added. A few a day go back in line, the longest-waiting
+  // first, and only into places the list has free. Slow on purpose: these
+  // already failed once, and each one takes a place a new album could have.
+  const retry: TaskDef = {
+    id: 'retry', name: 'Try again for what was not found', schedule: { mode: 'daily', at: '05:30' },
+    description: 'Put a few albums the downloader gave up on, and a few songs a Spotify import could not find, back in line',
+    settings: [
+      { key: 'perRun', label: 'Albums per run', type: 'number', min: 0, max: 50, default: 3 },
+      { key: 'songsPerRun', label: 'Imported songs per run', type: 'number', min: 0, max: 100, default: 10 },
+      { key: 'afterDays', label: 'Wait before trying again', type: 'number', min: 1, max: 365, unit: 'days', default: 21 },
+    ],
+    run: async (ctx) => {
+      const lidarr = o.lidarr;
+      if (!lidarr?.enabled) return 'Lidarr is not configured';
+      const out: string[] = [];
+      const cap = Math.min(await room(lidarr, choreTarget, o.soularr), ctx.setting<number>('perRun'));
+      const before = Date.now() - ctx.setting<number>('afterDays') * 86400000;
+      // Not the ones that kept arriving as a different album: that loop
+      // starts again the moment they are wanted.
+      const rows = cap > 0 ? db.prepare(`SELECT lidarr_id FROM download_watch WHERE gave_up IS NOT NULL AND gave_up < ? AND done = 0
+        AND reason NOT LIKE 'downloads kept turning out%' ORDER BY gave_up LIMIT ?`).all(before, cap) as { lidarr_id: number }[] : [];
+      let n = 0;
+      for (const r of rows) {
+        try {
+          await lidarr.monitor(r.lidarr_id);
+          // The watcher starts over with it, as with any newly wanted album.
+          db.prepare('DELETE FROM download_watch WHERE lidarr_id = ?').run(r.lidarr_id);
+          n++;
+        } catch (e: any) {
+          ctx.log(`album ${r.lidarr_id}: ${e.message}`);
+          // Lidarr no longer knows it: nothing to try again.
+          if (/no such album|404/.test(e.message)) db.prepare('DELETE FROM download_watch WHERE lidarr_id = ?').run(r.lidarr_id);
+        }
+      }
+      out.push(cap <= 0 ? 'the wanted list is full, no album put back' : `${n} albums back in line`);
+      // Songs an import found no release for: asked again in turn (the
+      // import's own requester takes them from there, as room allows).
+      const songs = ctx.setting<number>('songsPerRun');
+      if (songs > 0) {
+        const after = Number(kvGet(db, 'task:retry:spotify') || 0);
+        const pick = (from: number) => db.prepare("SELECT id FROM spotify_pending WHERE state IN ('notfound', 'failed') AND created < ? AND id > ? ORDER BY id LIMIT ?").all(before, from, songs) as { id: number }[];
+        let ids = pick(after);
+        if (!ids.length && after) ids = pick(0); // round again from the start
+        for (const r of ids) db.prepare("UPDATE spotify_pending SET state = 'new', tries = 0 WHERE id = ?").run(r.id);
+        if (ids.length) kvSet(db, 'task:retry:spotify', String(ids[ids.length - 1].id));
+        out.push(`${ids.length} imported songs asked for again`);
       }
       return out.join('; ');
     },
@@ -788,5 +919,5 @@ export function builtinTasks(app: FastifyInstance, o: ChoreOptions): TaskDef[] {
     },
   };
 
-  return [scan, enrich, heads, discovery, backlog, flac, downloads, loudness];
+  return [scan, enrich, heads, discovery, backlog, flac, downloads, retry, loudness];
 }

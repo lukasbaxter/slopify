@@ -17,7 +17,15 @@ export type SoularrStatus = {
   lastStart: number | null; lastEnd: number | null; interval: number | null; next: number | null; checking: boolean;
   perCheck: number | null; // albums it searches per check (number_of_albums_to_grab)
   searches: Map<string, AlbumSearch>; // by searchKey(artist, title)
+  // By the same key: when each search since the album's last match came
+  // back with nothing usable (no results, nothing matching, or a match the
+  // peers refused).
+  fails: Map<string, number[]>;
   skipped: Map<number, number>; // Lidarr album id -> last time it was skipped as a failed import
+  // The last time any search came back with results: Soulseek itself was
+  // answering then. Long ago (or never) = it may be Soulseek that is down,
+  // not the albums that are missing.
+  lastResultsAt: number | null;
 };
 
 export const searchKey = (artist: string, title: string) =>
@@ -32,16 +40,29 @@ export function parseSoularrLog(text: string, now = Date.now()): Omit<SoularrSta
   const skipped = new Map<number, number>();
   const runs: { start: number; end: number }[] = [];
   let cur: AlbumSearch | null = null;
+  let lastResultsAt: number | null = null;
+  const fails = new Map<string, number[]>();
+  let key = '';
+  // A search that ended without a match is one failed try, counted once.
+  const fail = (c: AlbumSearch) => { const l = fails.get(key) ?? []; if (l[l.length - 1] !== c.at) l.push(c.at); fails.set(key, l); };
   for (const raw of text.split('\n')) {
     const m = LINE.exec(raw.trimEnd()); if (!m) continue;
     const at = ts(m[1]); const msg = m[2]; if (!at) continue;
     if (msg.startsWith('Logging to file')) { runs.push({ start: at, end: at }); cur = null; continue; }
     if (runs.length) runs[runs.length - 1].end = at;
     let x: RegExpExecArray | null;
-    if ((x = /^Searching for album: (.+)$/.exec(msg))) { cur = { at, results: null, outcome: 'searching' }; searches.set(searchKey(x[1], ''), cur); }
-    else if (cur && (x = /^Search returned (\d+) results/.exec(msg))) { cur.results = Number(x[1]); cur.outcome = cur.results ? 'nomatch' : 'noresults'; }
-    else if (cur && /^Failed to enqueue /.test(msg)) cur.outcome = 'refused';
-    else if (cur && /^SUCCESSFUL MATCH/.test(msg)) cur.outcome = 'matched';
+    if ((x = /^Searching for album: (.+)$/.exec(msg))) {
+      key = searchKey(x[1], '');
+      cur = { at, results: null, outcome: 'searching' };
+      searches.set(key, cur);
+    }
+    else if (cur && (x = /^Search returned (\d+) results/.exec(msg))) {
+      cur.results = Number(x[1]); cur.outcome = cur.results ? 'nomatch' : 'noresults';
+      if (cur.results) lastResultsAt = at;
+      fail(cur);
+    }
+    else if (cur && /^Failed to enqueue /.test(msg)) { cur.outcome = 'refused'; fail(cur); }
+    else if (cur && /^SUCCESSFUL MATCH/.test(msg)) { cur.outcome = 'matched'; fails.delete(key); }
     else if ((x = /^Skipping failed import album: .* \(ID: (\d+)\)$/.exec(msg))) skipped.set(Number(x[1]), at);
   }
   // The wait between checks: the gap from one check's last line to the next
@@ -53,7 +74,7 @@ export function parseSoularrLog(text: string, now = Date.now()): Omit<SoularrSta
   // it searches; a quiet minute means the check is over).
   const checking = !!last && now - last.end < 60000;
   const next = last && interval ? last.end + interval : null;
-  return { lastStart: last?.start ?? null, lastEnd: last?.end ?? null, interval, next, checking, searches, skipped };
+  return { lastStart: last?.start ?? null, lastEnd: last?.end ?? null, interval, next, checking, searches, fails, skipped, lastResultsAt };
 }
 
 // The last ~2 MB of the log (it rotates at 1 MB: the current file and the one before).

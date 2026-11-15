@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { usePlayhead } from '../player/playhead.js';
+import { usePlayhead, useSmoothSeek } from '../player/playhead.js';
 import Marquee from './Marquee.jsx';
 // Same list as App's swipe-to-skip (kept here: App imports this file).
 const NOT_A_SWIPE = '.devicemenu, .ctxmenu, .ctxmenu-scrim, input, .dm-volume';
@@ -259,6 +259,8 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
   };
   const shown = scrub != null ? scrub : position;
   const pct = duration > 0 ? (shown / duration) * 100 : 0;
+  const seekRef = useRef(null);
+  useSmoothSeek(seekRef, player, duration, scrub != null);
 
   const commitScrub = () => {
     if (scrub == null) return;
@@ -391,10 +393,12 @@ export default function Player({ player, jf, devices, onOpenAlbum, onOpenArtist,
           <div className="player-seek">
             <span className="t">{fmt(shown)}</span>
             <input
+              ref={seekRef}
               type="range"
               min="0"
-              max={Math.max(1, Math.floor(duration))}
-              value={Math.floor(shown)}
+              step="any"
+              max={Math.max(1, duration || 0)}
+              value={Math.min(shown || 0, Math.max(1, duration || 0))}
               onChange={(e) => setScrub(Number(e.target.value))}
               onPointerUp={commitScrub}
               onKeyUp={commitScrub}

@@ -149,9 +149,12 @@ export const config = {
     enrichEveryH: Number(env('ENRICH_EVERY_H', '1')),
     wantedTarget: Number(env('TASKS_WANTED_TARGET', '25')),
     discoveryPerRun: Number(env('DISCOVERY_PER_RUN', '10')),
-    backlogEveryH: Number(env('BACKLOG_EVERY_H', '6')),
+    // Places on the wanted list the background chores leave free, so a
+    // person's own request is searched on the downloader's very next round.
+    requestReserve: Number(env('TASKS_REQUEST_RESERVE', '5')),
+    backlogEveryH: Number(env('BACKLOG_EVERY_H', '1')),
     backlogPerRun: Number(env('BACKLOG_PER_RUN', '10')),
-    backlogArtistsPerRun: Number(env('BACKLOG_ARTISTS_PER_RUN', '5')),
+    backlogArtistsPerRun: Number(env('BACKLOG_ARTISTS_PER_RUN', '15')),
     flacPerRun: Number(env('FLAC_PER_RUN', '40')),
     // Watch downloads: an album Soulseek never found is searched once with
     // Lidarr's own indexers before it is given up (the task's toggle default).

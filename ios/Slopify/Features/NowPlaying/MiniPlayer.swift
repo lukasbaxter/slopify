@@ -105,7 +105,8 @@ struct MiniPlayer: View {
 
     /// 2 pt line, `--fg` over `rgba(fg,.25)`, read from the live playhead every 250 ms.
     private var progressLine: some View {
-        TimelineView(.periodic(from: .now, by: player.isPlaying ? 0.25 : 3600)) { _ in
+        // Every frame while it plays: the line glides instead of stepping four times a second.
+        TimelineView(.animation(minimumInterval: nil, paused: !player.isPlaying)) { _ in
             let f = NowPlayingMath.fraction(player.isPlaying ? player.positionNow() : player.position, duration: player.duration)
             GeometryReader { g in
                 ZStack(alignment: .leading) {

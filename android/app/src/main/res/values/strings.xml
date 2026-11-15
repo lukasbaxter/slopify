@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">Slopify</string>
+    <!-- Widget picker previews only (XML cannot reach L()); the live widgets use L("Listen to your music"). -->
+    <string name="widget_empty">Listen to your music</string>
 </resources>

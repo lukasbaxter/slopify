@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Widget corners; Android 12+ uses the launcher's own radius (values-v31). -->
+    <dimen name="widget_radius">16dp</dimen>
+    <!-- The neutral ground without a cover colour (WidgetLogic.NEUTRAL). -->
+    <color name="widget_neutral">#3d3c3c</color>
+    <!-- The recents strip on the neutral ground (the ground 84%, black 16%). -->
+    <color name="widget_neutral_strip">#333232</color>
+</resources>

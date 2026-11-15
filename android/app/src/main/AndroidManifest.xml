@@ -49,6 +49,38 @@
             </intent-filter>
         </service>
 
+        <!-- Home screen widgets (features/widget): 4x2 player + recents, 4x1 player, 2x2 small. -->
+        <receiver
+            android:name=".features.widget.WidgetRecentsReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_recents_info" />
+        </receiver>
+        <receiver
+            android:name=".features.widget.WidgetPlayerReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_player_info" />
+        </receiver>
+        <receiver
+            android:name=".features.widget.WidgetSmallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_small_info" />
+        </receiver>
+
         <!-- Android Auto: a media app (the browse tree comes from PlaybackService). -->
         <meta-data
             android:name="com.google.android.gms.car.application"

@@ -13,6 +13,7 @@ import com.lukasbaxter.slopify.android.core.attempt
 import com.lukasbaxter.slopify.android.core.auth.Account
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
+import com.lukasbaxter.slopify.android.core.model.HomePick
 import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Release
@@ -38,6 +39,8 @@ import kotlin.coroutines.cancellation.CancellationException
 @Serializable
 data class HomeSnapshot(
     val recent: List<Album> = emptyList(),
+    /** Home's shortcuts, as the server lists them. Empty in older kept copies. */
+    val picks: List<HomePick> = emptyList(),
     val topArtists: List<HomeLogic.RankedArtist> = emptyList(),
     val recentArtists: List<HomeLogic.RankedArtist> = emptyList(),
     val topYears: List<TopSongYears.Year> = emptyList(),
@@ -49,7 +52,7 @@ data class HomeSnapshot(
     /** Who is in each Daily Mix today, by seed artist (API.md §14.3): the tiles' and pages' subtitles. */
     val mixArtists: Map<String, List<MixArtist>> = emptyMap(),
 ) {
-    val shortcuts: List<HomeLogic.Shortcut> get() = HomeLogic.shortcuts(recent, playlists, albums)
+    val shortcuts: List<HomeLogic.Shortcut> get() = HomeLogic.shortcuts(picks, playlists, albums)
     val mixSeeds: List<HomeLogic.RankedArtist> get() = HomeLogic.mixSeeds(topArtists, artists)
     val radarShelf: List<Release> get() = radar.take(16)
 
@@ -90,6 +93,8 @@ class HomeStore(
     private var key: String? = null
     private var inflight: Job? = null
     private var loadedAt: Long? = null
+    /** The song [reloadHome] last ran for. */
+    private var reloadedFor: String? = null
 
     /** Switch to this account's kept copy (no-op when already on it). */
     fun use(key: String?) {
@@ -97,6 +102,7 @@ class HomeStore(
         inflight?.cancel(); inflight = null
         this.key = key
         loadedAt = null
+        reloadedFor = null
         val kept = key?.let { k -> file(k)?.takeIf { it.exists() } }?.let { f ->
             attempt { SlopifyJson.decodeFromString(HomeSnapshot.serializer(), f.readText()) }
         }
@@ -127,6 +133,19 @@ class HomeStore(
         persist()
     }
 
+    /**
+     * After a play is logged: the shortcuts (what was picked last) and the play-ranked lists
+     * again. One request, at most once per song: asking again for the same `trackId` does nothing.
+     */
+    suspend fun reloadHome(api: ApiClient, trackId: String) {
+        if (trackId == reloadedFor) return
+        reloadedFor = trackId
+        val forKey = key
+        val job = scope.launch { loadHome(api) }
+        job.join()
+        if (!job.isCancelled && forKey == key) persist()
+    }
+
     private suspend fun loadHome(api: ApiClient) {
         val h = attempt { api.home() } ?: return
         currentCoroutineContext().ensureActive()
@@ -134,6 +153,7 @@ class HomeStore(
             it.copy(
                 data = it.data.copy(
                     recent = h.recentAlbums.take(16),
+                    picks = h.recents.orEmpty(),
                     topArtists = HomeLogic.rankTopArtists(h.topTracks),
                     // /api/home has no last-played date per track, so this stays empty exactly as on the web.
                     recentArtists = HomeLogic.recentArtists(h.topTracks) { null },

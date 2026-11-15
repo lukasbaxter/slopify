@@ -2,6 +2,7 @@ package com.lukasbaxter.slopify.android.features.home
 
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
+import com.lukasbaxter.slopify.android.core.model.HomePick
 import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Radio
@@ -30,10 +31,13 @@ object HomeLogic {
 
     sealed interface Shortcut {
         val id: String
+        /** The bare id, as the web compares them across kinds. */
+        val itemId: String?
 
-        data object Liked : Shortcut { override val id = "__liked__" }
-        data class AlbumTile(val album: Album) : Shortcut { override val id get() = "al:" + album.id }
-        data class PlaylistTile(val playlist: Playlist) : Shortcut { override val id get() = "pl:" + playlist.id }
+        data object Liked : Shortcut { override val id = "__liked__"; override val itemId: String? = null }
+        data class AlbumTile(val album: Album) : Shortcut { override val id get() = "al:" + album.id; override val itemId get() = album.id }
+        data class PlaylistTile(val playlist: Playlist) : Shortcut { override val id get() = "pl:" + playlist.id; override val itemId get() = playlist.id }
+        data class ArtistTile(val artist: RankedArtist) : Shortcut { override val id get() = "ar:" + artist.id; override val itemId get() = artist.id }
     }
 
     /** Home.jsx `rankTopArtists`: every artist on every track scores `1 + plays`; most first. Ties keep first-seen order. */
@@ -82,23 +86,36 @@ object HomeLogic {
         return out.ifEmpty { name }
     }
 
-    /** Liked Songs first, then recent albums, playlists, then library albums not yet there; 8 max. */
-    fun shortcuts(recent: List<Album>, playlists: List<Playlist>, albums: List<Album>): List<Shortcut> {
+    /**
+     * Home.jsx `shortcuts`: Liked Songs first, then the latest album, playlist and artist the
+     * listener picked and played from (never what autoplay went on to), then (a new account)
+     * playlists and library albums not yet there; 8 max.
+     */
+    fun shortcuts(picks: List<HomePick>, playlists: List<Playlist>, albums: List<Album>): List<Shortcut> {
         val out = mutableListOf<Shortcut>(Shortcut.Liked)
-        for (a in recent) { if (out.size >= 8) break; out += Shortcut.AlbumTile(a) }
-        for (p in playlists) { if (out.size >= 8) break; out += Shortcut.PlaylistTile(p) }
-        for (a in albums) {
-            if (out.size >= 8) break
-            // The web compares bare ids across kinds (`o.item?.Id === a.Id`).
-            val taken = out.any {
-                when (it) {
-                    is Shortcut.AlbumTile -> it.album.id == a.id
-                    is Shortcut.PlaylistTile -> it.playlist.id == a.id
-                    Shortcut.Liked -> false
-                }
-            }
-            if (!taken) out += Shortcut.AlbumTile(a)
+        fun add(s: Shortcut) {
+            val id = s.itemId
+            if (out.size >= 8 || id.isNullOrEmpty() || out.any { it.itemId == id }) return
+            out += s
         }
+        for (p in picks) {
+            when (p.kind) {
+                "playlist" -> add(
+                    Shortcut.PlaylistTile(
+                        playlists.firstOrNull { it.id == p.id }
+                            ?: Playlist(id = p.id, name = p.name, userId = p.userId, trackCount = p.trackCount, cover = p.cover, aiPrompt = p.aiPrompt),
+                    ),
+                )
+                "artist" -> add(Shortcut.ArtistTile(RankedArtist(p.id, p.name, p.image)))
+                "album" -> add(
+                    Shortcut.AlbumTile(
+                        Album(id = p.id, name = p.name, artist = p.artist ?: "", artistId = p.artistId, year = p.year, trackCount = p.trackCount, cover = p.cover),
+                    ),
+                )
+            }
+        }
+        for (p in playlists) add(Shortcut.PlaylistTile(p))
+        for (a in albums) add(Shortcut.AlbumTile(a))
         return out
     }
 
@@ -128,7 +145,7 @@ object HomeLogic {
         return out
     }
 
-    /** `MIX_COLORS[i % 8]`. */
+    /** `MIX_COLORS[i % 8]` (and `TOP_COLORS[i % 8]`: both palettes have 8). */
     fun mixColorIndex(i: Int): Int = ((i % 8) + 8) % 8
 
     /**

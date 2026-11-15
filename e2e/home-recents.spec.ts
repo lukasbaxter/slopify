@@ -89,3 +89,18 @@ test('a session resumed in a fresh page still reports the album it was picked fr
     await expect.poll(() => [...seen].join(','), { timeout: 20000 }).toContain(album.id);
   } finally { await ctx2.close(); }
 });
+
+// Home's shelves all read /api/home. Each used to ask for it by itself, three
+// requests on every load, and every reload after a play tripled again; on an
+// account whose answer took 300 ms the server spent its time on nothing else
+// (owner, 11-14: slow songs, slow covers, a second device taking the player over).
+test('Home asks for /api/home once per load, not once per shelf', async ({ page }) => {
+  await login(page); await waitForLibrary(page);
+  await page.waitForTimeout(3000); // the first load's own requests are over
+  let asked = 0;
+  page.on('request', (r) => { if (new URL(r.url()).pathname === '/api/home') asked += 1; });
+  await page.reload();
+  await waitForLibrary(page);
+  await page.waitForTimeout(4000);
+  expect(asked).toBe(1);
+});

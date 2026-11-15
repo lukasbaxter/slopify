@@ -81,6 +81,7 @@ export class Slopify {
     // Session cache for list reads. A click should never wait on a fetch for
     // something already shown once; mutations evict what they change.
     this._cache = new Map();
+    this._going = new Map(); // _cachedFor's requests on their way, by key
   }
 
   // Per-user localStorage namespace, computed (login builds the client before it knows the user).
@@ -96,9 +97,17 @@ export class Slopify {
   _cachedFor(key, ms, fn) {
     const hit = this._cache.get(key);
     if (hit && hit._at && Date.now() - hit._at < ms) return Promise.resolve(hit.v);
-    return fn().then((v) => { this._cache.set(key, { _at: Date.now(), v }); return v; });
+    // One request, however many ask while it is on its way: Home's shelves
+    // each ask for /api/home, and that was three requests every time (11-14).
+    const going = this._going.get(key);
+    if (going) return going;
+    const p = fn().then((v) => { if (this._going.get(key) === p) this._cache.set(key, { _at: Date.now(), v }); return v; })
+      .finally(() => { if (this._going.get(key) === p) this._going.delete(key); });
+    this._going.set(key, p);
+    return p;
   }
-  _evict(prefix) { for (const k of [...this._cache.keys()]) if (k.startsWith(prefix)) this._cache.delete(k); }
+  // What is on its way goes too: its answer may be from before the change.
+  _evict(prefix) { for (const m of [this._cache, this._going]) for (const k of [...m.keys()]) if (k.startsWith(prefix)) m.delete(k); }
 
   async _fetch(path, options = {}) {
     const { retries = 0, timeoutMs = 45_000, raw = null, ...opts } = options;
@@ -328,7 +337,8 @@ export class Slopify {
     const all = await this._artists();
     return { items: all.slice(startIndex, limit ? startIndex + limit : undefined), total: all.length };
   }
-  _home() { return this._cachedFor('home', 5 * 1000, () => this._fetch('/api/home')); }
+  // Kept 3 minutes; Home drops it when a song has played (the shortcuts changed).
+  _home() { return this._cachedFor('home', 3 * 60 * 1000, () => this._fetch('/api/home')); }
   // Home's shortcuts: the latest album, playlist and artist picked and played from.
   recentPicks() {
     return this._home().then((h) => (h.recents || []).map((r) => (r.kind === 'playlist' ? { kind: 'playlist', item: rowPlaylist(r) }

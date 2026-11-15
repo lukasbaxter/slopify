@@ -171,8 +171,13 @@ async function refreshApi(req, key, cacheName, kept) {
   const res = await withTimeout(fetch(req), 60000);
   if (portalPage(res) || !res.ok || !(res.headers.get('Content-Type') || '').includes('json')) return res;
   const body = await res.clone().text();
-  await (await caches.open(cacheName)).put(key, res.clone());
-  if (kept && (await kept.clone().text()) !== body) tellClients({ type: 'api-fresh', path: new URL(key).pathname });
+  // Told once per change: against what is kept now, not what was kept when
+  // this request left. Three requests for the same answer used to announce
+  // the same change three times, each to every window (11-14).
+  const cache = await caches.open(cacheName);
+  const now = kept ? await cache.match(key).then((r) => (r ? r.text() : null)).catch(() => null) : null;
+  await cache.put(key, res.clone());
+  if (kept && now !== null && now !== body) tellClients({ type: 'api-fresh', path: new URL(key).pathname });
   return res;
 }
 

@@ -68,7 +68,7 @@ enum CarPlayLogic {
         case .album(_, let name), .playlist(_, let name), .artist(_, let name): name
         case .liked: L("Liked Songs")
         case .mix(_, let n, _): L("Daily Mix {n}", ["n": n])
-        case .topSongs(let year): L("Your Top Songs {year}", ["year": year])
+        case .topSongs(let year): L("Top Songs {year}", ["year": year])
         case .downloaded(_, let kind, let name): kind == .liked ? L("Liked Songs") : name
         case .libraryPlaylists: L("Playlists")
         case .libraryAlbums: L("Albums")
@@ -106,7 +106,7 @@ enum CarPlayLogic {
     }
 
     static func topSongsRow(_ y: TopSongYears.Year, currentYear: Int) -> Row {
-        Row(title: L("Your Top Songs {year}", ["year": y.year]), subtitle: HomeLogic.topSongsSub(y.year, currentYear: currentYear),
+        Row(title: L("Top Songs {year}", ["year": y.year]), subtitle: HomeLogic.topSongsSub(y.year, currentYear: currentYear),
             art: y.top.map { .album(id: $0.albumId, art: $0.cover) }, glyph: .mix, target: .topSongs(year: y.year))
     }
 

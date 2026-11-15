@@ -241,7 +241,7 @@ export default function Library({
   // account's own plays), shown like a Daily Mix.
   const openTopSongs = async (y, color) => {
     const id = `top:${y.year}`;
-    setDetail({ item: { Id: id, Name: t('Your Top Songs {year}', { year: y.year }), Type: 'Playlist', _mix: true, _art: y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 464, full: true }) : null, _color: color, _sub: topSongsSub(y.year) }, tracks: [], kind: 'Playlist', loading: true });
+    setDetail({ item: { Id: id, Name: t('Top Songs {year}', { year: y.year }), Type: 'Playlist', _mix: true, _art: y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 464, full: true }) : null, _color: color, _sub: topSongsSub(y.year) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.topSongs(y.year);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));

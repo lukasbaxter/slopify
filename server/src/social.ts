@@ -182,9 +182,20 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
     if (b.data.client !== 'import' && b.data.client !== 'offline') (app as any).scrobbleStart?.(uid(req), b.data.trackId, at);
     return { ok: true };
   });
+  // The albums of the newest plays, newest first: read down the play log
+  // (it is indexed by time) until there are enough, not grouped over all of
+  // it. On an account with 137,000 plays the grouped query took 160 ms, and
+  // Home asked it twice: every other request waited behind that (11-14).
+  const playsDown = db.prepare('SELECT t.album_id AS id FROM plays p JOIN tracks t ON t.id = p.track_id WHERE p.user_id = ? AND p.at < ? ORDER BY p.at DESC');
+  const lastAlbums = (u: string, n: number, before = Number.MAX_SAFE_INTEGER): string[] => {
+    const ids = new Set<string>();
+    for (const r of playsDown.iterate(u, before) as Iterable<{ id: string | null }>) { if (r.id) ids.add(r.id); if (ids.size >= n) break; }
+    return [...ids];
+  };
+  const firstSrcAt = db.prepare('SELECT at FROM plays INDEXED BY plays_user_src WHERE user_id = ? AND src IS NOT NULL ORDER BY at LIMIT 1');
   app.get('/api/home', auth, async (req) => {
     const u = uid(req);
-    const recentAlbumIds = (db.prepare(`SELECT t.album_id AS id, MAX(p.at) AS last FROM plays p JOIN tracks t ON t.id = p.track_id WHERE p.user_id = ? GROUP BY t.album_id ORDER BY last DESC LIMIT 24`).all(u) as any[]).map((r) => r.id);
+    const recentAlbumIds = lastAlbums(u, 24);
     const recentAlbums = recentAlbumIds.length ? (db.prepare(`SELECT * FROM albums WHERE id IN (${recentAlbumIds.map(() => '?').join(',')})`).all(...recentAlbumIds) as any[]) : [];
     const byId = new Map(recentAlbums.map((a) => [a.id, a]));
     const since = Date.now() - 28 * 86400000;
@@ -202,8 +213,8 @@ export function registerSocial(app: FastifyInstance, db: DB, dataDir: string, ca
       else if (s.kind === 'playlist') { const p = onePl.get(s.id, u) as any; if (p) recents.push({ kind: 'playlist', ...plOut(p) }); }
       else if (s.kind === 'artist') { const a = db.prepare('SELECT id, name, image_hash FROM artists WHERE id = ?').get(s.id) as any; if (a) recents.push({ kind: 'artist', id: a.id, name: a.name, image: a.image_hash }); }
     }
-    const firstSrc = (db.prepare('SELECT MIN(at) AS at FROM plays WHERE user_id = ? AND src IS NOT NULL').get(u) as any)?.at as number | null;
-    const older = firstSrc == null ? recentAlbumIds : (db.prepare(`SELECT t.album_id AS id, MAX(p.at) AS last FROM plays p JOIN tracks t ON t.id = p.track_id WHERE p.user_id = ? AND p.at < ? GROUP BY t.album_id ORDER BY last DESC LIMIT 8`).all(u, firstSrc) as any[]).map((r) => r.id);
+    const firstSrc = (firstSrcAt.get(u) as any)?.at as number | null;
+    const older = firstSrc == null ? recentAlbumIds : lastAlbums(u, 8, firstSrc);
     for (const id of older) {
       if (recents.length >= 24) break;
       if (recents.some((r) => r.kind === 'album' && r.id === id)) continue;

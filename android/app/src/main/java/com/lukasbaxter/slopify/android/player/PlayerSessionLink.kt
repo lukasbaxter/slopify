@@ -51,6 +51,8 @@ object SessionReports {
         val device: OutputDevice,
         val artUrl: String?,
         val now: Double,
+        val context: String? = null,
+        val picked: Boolean = false,
     )
 
     fun nowPlaying(s: LocalState): NowPlaying {
@@ -63,6 +65,7 @@ object SessionReports {
             liked = s.liked, device = s.device, queueIndex = s.index, playing = s.playing, held = s.playing && s.held,
             position = maxOf(0.0, s.position), duration = s.duration, volume = s.volume,
             repeat = s.repeatMode.wire, shuffle = s.shuffle.wire, at = s.now,
+            ctx = s.context, picked = s.picked,
         )
     }
 

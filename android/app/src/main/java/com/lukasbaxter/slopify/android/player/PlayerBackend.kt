@@ -22,7 +22,7 @@ interface PlayerBackend {
     suspend fun mix(id: String, limit: Int?, mode: String?): Mix
     suspend fun artist(id: String): ArtistDetail
     suspend fun warm(ids: List<String>, profile: String, norm: String?)
-    suspend fun postPlay(trackId: String, at: Double?, client: String)
+    suspend fun postPlay(trackId: String, at: Double?, client: String, ctx: String?, picked: Boolean)
     fun hlsUrl(trackId: String, max: String, norm: String?): String
     fun imageUrl(id: String, size: Int): String
     /**
@@ -38,7 +38,8 @@ class ApiPlayerBackend(private val api: ApiClient) : PlayerBackend {
     override suspend fun mix(id: String, limit: Int?, mode: String?) = api.mix(id, limit, mode)
     override suspend fun artist(id: String) = api.artist(id)
     override suspend fun warm(ids: List<String>, profile: String, norm: String?) = api.warm(ids, profile, norm)
-    override suspend fun postPlay(trackId: String, at: Double?, client: String) = api.postPlay(trackId, at, client)
+    override suspend fun postPlay(trackId: String, at: Double?, client: String, ctx: String?, picked: Boolean) =
+        api.postPlay(trackId, at, client, ctx, picked)
     override fun hlsUrl(trackId: String, max: String, norm: String?) = api.hlsUrl(trackId, max, norm).toString()
     override fun imageUrl(id: String, size: Int) = api.imageUrl(id, size).toString()
 

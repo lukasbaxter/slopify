@@ -73,6 +73,8 @@ class PlayerFakeBackend : PlayerBackend {
     val mixCalls = mutableListOf<Triple<String, Int?, String?>>()
     val warms = mutableListOf<List<String>>()
     val plays = mutableListOf<String>()
+    /** `ctx` and `picked` of each posted play. */
+    val playSources = mutableListOf<Pair<String?, Boolean>>()
     var offline = false
     val prewarms = mutableListOf<String>()
 
@@ -83,9 +85,10 @@ class PlayerFakeBackend : PlayerBackend {
     }
     override suspend fun artist(id: String): ArtistDetail = throw ApiError.Http(404, "no")
     override suspend fun warm(ids: List<String>, profile: String, norm: String?) { warms += ids }
-    override suspend fun postPlay(trackId: String, at: Double?, client: String) {
+    override suspend fun postPlay(trackId: String, at: Double?, client: String, ctx: String?, picked: Boolean) {
         if (offline) throw ApiError.Offline()
         plays += trackId
+        playSources += ctx to picked
     }
     override fun hlsUrl(trackId: String, max: String, norm: String?) =
         "http://srv.example.com/api/stream/$trackId/hls/master.m3u8?max=$max" + (norm?.let { "&norm=$it" } ?: "")

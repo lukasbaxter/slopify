@@ -1,6 +1,7 @@
 package com.lukasbaxter.slopify.android.player
 
 import com.lukasbaxter.slopify.android.core.model.Gain
+import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.session.Command
 import com.lukasbaxter.slopify.android.core.session.LanDevice
 import com.lukasbaxter.slopify.android.core.session.QueueItem
@@ -15,6 +16,9 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -363,6 +367,13 @@ class SlopifyPlayerTest {
         r.p.countListen(4.0)
         settle()
         assertEquals(listOf("a"), r.b.plays)
+        assertEquals("one song, no context: picked by itself", listOf<Pair<String?, Boolean>>(null to true), r.b.playSources)
+        r.p.play(playerTracks("b", "c"), 0, "pl_1")
+        r.p.audioHeard("b")
+        r.p.countListen(9.0)
+        settle()
+        assertEquals(null to true, r.b.playSources[0])
+        assertEquals("pl_1" to false, r.b.playSources[1])
     }
 
     @Test fun offlinePlayGoesToTheHook() = runTest {
@@ -612,6 +623,38 @@ class SlopifyPlayerTest {
         assertEquals(33.0, r.e.loads.last().second, 0.0)
         assertTrue(r.s.isPlaying)
         assertEquals("roster lag after the claim does not re-mirror", false, run { r.p.sessionChanged(); r.s.isRemote })
+    }
+
+    @Test fun takeOverAndAdoptionKeepWhatItWasPlayingFrom() = runTest {
+        val r = makePlayer()
+        r.l.edit {
+            it.copy(
+                activeClientId = "desk",
+                players = listOf(RosterPlayer("desk", "Desk", "desktop", "laptop", true, playerNp("y", 1, true, 33.0).copy(ctx = "pl_1"), true)),
+                queues = mapOf("desk" to playerTracks("x", "y", "z").map { t -> QueueItem.of(t) }),
+            )
+        }
+        r.p.sessionChanged()
+        r.p.transferToClient(null)
+        assertEquals("pl_1", r.s.context)
+        assertEquals("pl_1", r.l.reports.last()?.ctx)
+        assertEquals(false, r.l.reports.last()?.picked)
+
+        val r2 = makePlayer()
+        r2.l.edit { it.copy(lastSession = SessionSnapshot(playerNp("old", playing = false).copy(ctx = "artist:ar1"), emptyList(), PLAYER_T0 + 60_000)) }
+        r2.p.sessionChanged()
+        assertEquals("old", r2.s.current?.id)
+        assertEquals("artist:ar1", r2.s.context)
+    }
+
+    @Test fun reportSaysWhatASongWasPickedFrom() = runTest {
+        val r = makePlayer()
+        r.p.play(playerTracks("a"))
+        assertNull(r.l.reports.last()?.ctx)
+        assertEquals("one song, no context", true, r.l.reports.last()?.picked)
+        r.p.play(playerTracks("a", "b"), 1, "al1")
+        assertEquals("al1", r.l.reports.last()?.ctx)
+        assertEquals(false, r.l.reports.last()?.picked)
     }
 
     @Test fun transferToSelfWhenLocalResumes() = runTest {
@@ -880,6 +923,20 @@ class SlopifyPlayerTest {
         assertEquals("smart", rep.shuffle)
         assertEquals(false, rep.held)
         assertEquals(2, rep.queueIndex)
+        // What it was picked from: nothing said means no context and not picked by itself.
+        assertNull(rep.ctx)
+        assertEquals(false, rep.picked)
+        val from = SessionReports.nowPlaying(
+            SessionReports.LocalState(
+                t, 0, playing = true, held = false, position = 0.0, duration = 200.0, volume = 80.0,
+                repeatMode = RepeatMode.Off, shuffle = ShuffleMode.Off, liked = false,
+                device = com.lukasbaxter.slopify.android.core.session.OutputDevice.local("This Phone"), artUrl = null, now = 5.0,
+                context = "artist:ar1", picked = true,
+            ),
+        )
+        val wire = SlopifyJson.encodeToJsonElement(com.lukasbaxter.slopify.android.core.session.NowPlaying.serializer(), from).jsonObject
+        assertEquals("artist:ar1", wire["ctx"]?.jsonPrimitive?.content)
+        assertEquals(true, wire["picked"]?.jsonPrimitive?.boolean)
     }
 
     @Test fun trackFromQueueItemRoundTrip() {

@@ -188,7 +188,7 @@ struct HomeView: View {
         let years = Array(store.data.topYears.enumerated()).map { YearItem(index: $0.offset, year: $0.element) }
         return shelf(L("Your Top Songs"), seeAll: nil) {
             Shelf(items: years, style: .home) { y in
-                let label = L("Your Top Songs {year}", ["year": y.year.year])
+                let label = L("Top Songs {year}", ["year": y.year.year])
                 MediaCard(title: label, subtitle: HomeLogic.topSongsSub(y.year.year, currentYear: year), style: .home,
                           action: { nav.pushFromHome(.topSongs(year: y.year.year, colorIndex: y.index)) }) {
                     HomeMixArt(source: y.year.top.map { CoverSource.album(id: $0.albumId, art: $0.cover) }, color: Theme.Fixed.topPalette[HomeLogic.mixColorIndex(y.index)], label: label, pixelSize: 150)

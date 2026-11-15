@@ -698,7 +698,7 @@
  "You have been invited. Pick a username and a password (8 characters or more).": "Te han invitado. Elige un nombre de usuario y una contraseña (8 caracteres o más).",
  "Your Library": "Tu biblioteca",
  "Your Top Songs": "Tus canciones favoritas",
- "Your Top Songs {year}": "Tus canciones favoritas de {year}",
+ "Top Songs {year}": "Canciones favoritas de {year}",
  "Your devices": "Tus dispositivos",
  "Your library, on any speaker in the house.": "Tu biblioteca, en cualquier altavoz de la casa.",
  "Your listening habits throughout the day": "Tus hábitos de escucha a lo largo del día",

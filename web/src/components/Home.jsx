@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PlayGlyph, Heart, LikedCover, usePhone } from './TrackRow.jsx';
 import { t } from '../i18n.js';
 import { radar as relayRadar } from '../api/search.js';
@@ -164,24 +164,42 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
       setRecentArtists(ra); jf._persist('home.recentArtists', ra);
     }).catch(() => {});
   }, [jf, fresh]);
+  // Load again, at most once every 5 s however many reasons arrive: a kept
+  // answer that changed is announced to every open window, and each window
+  // asking again used to set the next round off (11-14: 200 requests a minute
+  // for /api/home, the whole server waiting behind them).
+  const againRef = useRef({ at: 0, timer: null, missed: false });
+  const loadAgain = useCallback(() => {
+    const a = againRef.current;
+    // Only the window in front asks; one behind asks when it is looked at again.
+    if (document.visibilityState !== 'visible') { a.missed = true; return; }
+    if (a.timer) return;
+    a.timer = setTimeout(() => { a.timer = null; a.at = Date.now(); jf?._evict('home'); setFresh((n) => n + 1); }, Math.max(0, a.at + 5000 - Date.now()));
+  }, [jf]);
+  useEffect(() => () => { clearTimeout(againRef.current.timer); againRef.current.timer = null; }, []);
   // A song that has played 8 s is in the play log: the shortcuts (what was
   // picked last) are asked for again, so the pick shows without a reload.
-  const playingId = player?.nowPlayingId, isPlaying = !!player?.playing;
   // One ask per song, 10 s after it shows as playing here; a later song does
   // not put it off (short songs would never get there).
+  const playingId = player?.nowPlayingId, isPlaying = !!player?.playing;
   const askedRef = useRef(new Map());
   useEffect(() => {
     const asked = askedRef.current;
     if (!jf || !playingId || !isPlaying || asked.has(playingId)) return;
-    asked.set(playingId, setTimeout(() => { asked.delete(playingId); jf._evict('home'); setFresh((n) => n + 1); }, 10000));
-  }, [jf, playingId, isPlaying]);
+    asked.set(playingId, setTimeout(() => { asked.delete(playingId); loadAgain(); }, 10000));
+  }, [jf, playingId, isPlaying, loadAgain]);
   useEffect(() => () => { for (const tm of askedRef.current.values()) clearTimeout(tm); askedRef.current.clear(); }, []);
+  useEffect(() => {
+    const on = () => { const a = againRef.current; if (document.visibilityState === 'visible' && a.missed) { a.missed = false; loadAgain(); } };
+    document.addEventListener('visibilitychange', on);
+    return () => document.removeEventListener('visibilitychange', on);
+  }, [loadAgain]);
   // A newer answer than the kept one Home opened with (sw.js 'api-fresh'): load again.
   useEffect(() => {
-    const on = (e) => { if (/^\/api\/(home|top-songs|tracks\/top)/.test(e.detail)) { jf?._evict('home'); setFresh((n) => n + 1); } };
+    const on = (e) => { if (/^\/api\/(home|top-songs|tracks\/top)/.test(e.detail)) loadAgain(); };
     window.addEventListener('slopify:fresh', on);
     return () => window.removeEventListener('slopify:fresh', on);
-  }, [jf]);
+  }, [loadAgain]);
 
   const playAlbum = async (a) => {
     const { items } = await jf.tracks({ albumId: a.Id });
@@ -299,7 +317,7 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
         {showMusic && topYears.length > 0 && (
           <Shelf title={t('Your Top Songs')}>
             {topYears.map((y, i) => (
-              <MixTile key={y.year} label={t('Your Top Songs {year}', { year: y.year })} sub={topSongsSub(y.year)}
+              <MixTile key={y.year} label={t('Top Songs {year}', { year: y.year })} sub={topSongsSub(y.year)}
                 image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={TOP_COLORS[i % TOP_COLORS.length]}
                 onOpen={() => onOpenTopSongs(y, TOP_COLORS[i % TOP_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
             ))}

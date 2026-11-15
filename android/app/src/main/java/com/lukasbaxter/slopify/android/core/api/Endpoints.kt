@@ -278,9 +278,12 @@ suspend fun ApiClient.topSongYears(): TopSongYears = get("api/top-songs", mapOf(
 
 suspend fun ApiClient.topSongs(year: Int): List<Track> = get<Items<Track>>("api/top-songs/$year", mapOf("tzo" to tzo())).items
 
-/** Only when the socket is down or for offline plays (§15.1). */
-suspend fun ApiClient.postPlay(trackId: String, at: Double? = null, client: String) =
-    send("POST", "api/plays", buildJsonObject { put("trackId", trackId); at?.let { put("at", it) }; put("client", client) })
+/** Only when the socket is down or for offline plays (§15.1). `ctx`, `picked`: what it was picked from, as on a NowPlaying report. */
+suspend fun ApiClient.postPlay(trackId: String, at: Double? = null, client: String, ctx: String? = null, picked: Boolean? = null) =
+    send("POST", "api/plays", buildJsonObject {
+        put("trackId", trackId); at?.let { put("at", it) }; put("client", client)
+        ctx?.let { put("ctx", it) }; picked?.let { put("picked", it) }
+    })
 
 // §16 prefs
 

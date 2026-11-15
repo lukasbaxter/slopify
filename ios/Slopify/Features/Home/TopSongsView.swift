@@ -7,7 +7,7 @@ struct TopSongsView: View {
 
     var body: some View {
         let top = HomeStore.shared.data.topYears.first { $0.year == year }?.top
-        HomeMixPage(context: "top:\(year)", title: L("Your Top Songs {year}", ["year": year]),
+        HomeMixPage(context: "top:\(year)", title: L("Top Songs {year}", ["year": year]),
                 sub: HomeLogic.topSongsSub(year, currentYear: Calendar.current.component(.year, from: Date())),
                 color: Theme.Fixed.topPalette[HomeLogic.mixColorIndex(colorIndex)],
                 art: top.map { .album(id: $0.albumId, art: $0.cover) },

@@ -2,6 +2,7 @@ package com.lukasbaxter.slopify.android.features.home
 
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
+import com.lukasbaxter.slopify.android.core.model.HomePick
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
@@ -71,14 +72,28 @@ class HomeLogicTest {
     }
 
     @Test fun shortcutsOrderAndCap() {
-        val recent = listOf(homeAlbum("r1"), homeAlbum("r2"))
+        // What was picked and played from, newest first: an album, an artist, a playlist;
+        // then playlists and library albums not yet there.
+        fun pick(kind: String, id: String) = HomePick(kind = kind, id = id, name = "N$id")
+        val picks = listOf(pick("album", "r1"), pick("artist", "a1"), pick("playlist", "p2"))
         val pls = listOf(homePlaylist("p1"), homePlaylist("p2"))
         val lib = listOf(homeAlbum("r1"), homeAlbum("l1"), homeAlbum("l2"), homeAlbum("l3"), homeAlbum("l4"))
-        val s = HomeLogic.shortcuts(recent, pls, lib)
-        assertEquals(listOf("__liked__", "al:r1", "al:r2", "pl:p1", "pl:p2", "al:l1", "al:l2", "al:l3"), s.map { it.id })
+        val s = HomeLogic.shortcuts(picks, pls, lib)
+        assertEquals(listOf("__liked__", "al:r1", "ar:a1", "pl:p2", "pl:p1", "al:l1", "al:l2", "al:l3"), s.map { it.id })
+        // A picked playlist is the library's own row (its real name), not the bare pick.
+        assertEquals("Pp2", (s[3] as HomeLogic.Shortcut.PlaylistTile).playlist.name)
         assertEquals(listOf("__liked__"), HomeLogic.shortcuts(emptyList(), emptyList(), emptyList()).map { it.id })
-        val tenRecent = (0 until 10).map { homeAlbum("x$it") }
-        assertEquals(8, HomeLogic.shortcuts(tenRecent, pls, lib).size)
+        val ten = (0 until 10).map { pick("album", "x$it") }
+        assertEquals(8, HomeLogic.shortcuts(ten, pls, lib).size)
+        // An unknown kind (a newer server) and an empty id are skipped.
+        assertEquals(listOf("__liked__"), HomeLogic.shortcuts(listOf(pick("genre", "g1"), pick("album", "")), emptyList(), emptyList()).map { it.id })
+    }
+
+    @Test fun topSongsColoursStartCyanThenYellowWithDarkLabels() {
+        assertEquals(RGB.hex(0x22d3ee), Theme.Fixed.topPalette[HomeLogic.mixColorIndex(0)])
+        assertEquals(RGB.hex(0xfde047), Theme.Fixed.topPalette[HomeLogic.mixColorIndex(9)])
+        assertTrue(Theme.Fixed.topPalette.all { it.luminance > 0.28 && it.ink == RGB.hex(0x121212) }) // dark labels
+        assertTrue(Theme.Fixed.mixPalette.all { it.luminance <= 0.28 && it.ink == RGB.WHITE }) // Daily Mix keeps white
     }
 
     @Test fun mixSeedsFallBackToLibraryArtists() {

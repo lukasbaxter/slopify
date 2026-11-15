@@ -41,7 +41,7 @@ final class CarPlayLogicTests: XCTestCase {
 
     func testTitles() {
         XCTAssertEqual(CarPlayLogic.title(.mix(artistId: "a", number: 3, seedName: "S")), "Daily Mix 3")
-        XCTAssertEqual(CarPlayLogic.title(.topSongs(year: 2024)), "Your Top Songs 2024")
+        XCTAssertEqual(CarPlayLogic.title(.topSongs(year: 2024)), "Top Songs 2024")
         XCTAssertEqual(CarPlayLogic.title(.liked), "Liked Songs")
         XCTAssertEqual(CarPlayLogic.title(.downloaded(id: "pl", kind: .playlist, name: "Road")), "Road")
         XCTAssertEqual(CarPlayLogic.title(.libraryDownloaded), "Downloaded")

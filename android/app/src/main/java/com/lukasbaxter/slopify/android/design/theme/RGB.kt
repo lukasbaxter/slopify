@@ -53,9 +53,13 @@ data class RGB(val r: Double, val g: Double, val b: Double, val alpha: Double = 
     /** prefs.js `inkOn`: black or white, whichever reads on this colour (black wins ties). */
     val inkOn: RGB get() = if (contrast(BLACK) >= contrast(WHITE)) BLACK else WHITE
 
+    /** The label colour that reads on a band of this colour (Home.jsx `inkOn`): dark on the bright ones. */
+    val ink: RGB get() = if (luminance > 0.28) INK_DARK else WHITE
+
     companion object {
         val BLACK = hex(0x000000)
         val WHITE = hex(0xffffff)
+        private val INK_DARK = hex(0x121212)
 
         /** `0xRRGGBB`. */
         fun hex(v: Int, alpha: Double = 1.0): RGB =

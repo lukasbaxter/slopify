@@ -40,6 +40,11 @@ data class PlayQueue(
     var original: List<QueueEntry> = emptyList(),
     var index: Int = 0,
     var context: String? = null,
+    /**
+     * The one song picked by itself, with no context (web `pickedRef`): the play log counts it
+     * as its album for Home's shortcuts.
+     */
+    var picked: String? = null,
     var shuffle: ShuffleMode = ShuffleMode.Off,
     var repeatMode: RepeatMode = RepeatMode.Off,
 ) {
@@ -52,6 +57,7 @@ data class PlayQueue(
         val rows = list.map { QueueEntry(it) }
         val i = if (at in rows.indices) at else 0
         this.context = context
+        picked = if (context.isNullOrEmpty() && rows.size == 1) rows[0].track.id else null
         original = rows
         if (shuffle != ShuffleMode.Off && rows.size > 1) {
             val rest = rows.toMutableList()
@@ -70,6 +76,7 @@ data class PlayQueue(
         this.index = if (rows.isEmpty()) 0 else index.coerceIn(0, rows.size - 1)
         this.original = original?.takeIf { it.isNotEmpty() } ?: rows
         this.context = context
+        picked = null
     }
 
     /**

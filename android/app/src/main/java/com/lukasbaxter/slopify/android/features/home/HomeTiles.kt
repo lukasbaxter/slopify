@@ -25,7 +25,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -68,6 +67,7 @@ internal fun HomeShortcutTile(shortcut: HomeLogic.Shortcut, modifier: Modifier =
         HomeLogic.Shortcut.Liked -> L("Liked Songs")
         is HomeLogic.Shortcut.AlbumTile -> HomeLogic.tileTitle(shortcut.album.name)
         is HomeLogic.Shortcut.PlaylistTile -> HomeLogic.tileTitle(shortcut.playlist.name)
+        is HomeLogic.Shortcut.ArtistTile -> HomeLogic.tileTitle(shortcut.artist.name)
     }
     Row(
         modifier.fillMaxWidth().height(56.dp)
@@ -84,6 +84,8 @@ internal fun HomeShortcutTile(shortcut: HomeLogic.Shortcut, modifier: Modifier =
                     CoverImage(CoverSource.of(shortcut.album), 56.dp, Modifier.fillMaxSize(), shape = CoverShape.Rounded(0.dp), placeholder = CoverPlaceholder.None)
                 is HomeLogic.Shortcut.PlaylistTile ->
                     CoverImage(CoverSource.of(shortcut.playlist), 56.dp, Modifier.fillMaxSize(), shape = CoverShape.Rounded(0.dp), placeholder = CoverPlaceholder.None)
+                is HomeLogic.Shortcut.ArtistTile ->
+                    CoverImage(CoverSource.ArtistArt(shortcut.artist.id, shortcut.artist.image), 56.dp, Modifier.fillMaxSize(), shape = CoverShape.Rounded(0.dp), placeholder = CoverPlaceholder.None)
             }
         }
         Text(
@@ -133,7 +135,7 @@ internal fun HomeMixArt(source: CoverSource?, color: RGB, label: String, pixelSi
         Text(
             label,
             style = (if (large) TextStyles.bodyBold else TextStyles.smallBold).copy(letterSpacing = (-0.2).sp),
-            color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            color = color.ink.color, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(bottomStart = corner, bottomEnd = corner))
                 .background(raw)
@@ -142,10 +144,10 @@ internal fun HomeMixArt(source: CoverSource?, color: RGB, label: String, pixelSi
     }
 }
 
-/** The hero's mix mark (`.hero-avatar.mixmark`): a 20 disc in the raw mix colour with a white note. */
+/** The hero's mix mark (`.hero-avatar.mixmark`): a 20 disc in the raw mix colour with a note in its ink. */
 @Composable
 internal fun HomeMixMark(color: RGB) {
     Box(Modifier.fillMaxSize().clip(CircleShape).background(color.color), contentAlignment = Alignment.Center) {
-        IconView(Icon.MusicNote, size = 12.dp, tint = Color.White, tintAll = true)
+        IconView(Icon.MusicNote, size = 12.dp, tint = color.ink.color, tintAll = true)
     }
 }

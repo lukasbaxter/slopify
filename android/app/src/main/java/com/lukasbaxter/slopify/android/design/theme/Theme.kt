@@ -109,6 +109,8 @@ class Theme private constructor(
         val sheetScrim = Color.Black.copy(alpha = 0.6f)
         /** Home mix tiles (Home.jsx:43). */
         val mixPalette: List<RGB> = listOf(0xe8115b, 0x1e3264, 0x8d67ab, 0xe13300, 0x148a08, 0x0d73ec, 0x7d4b32, 0xba5d07).map { RGB.hex(it) }
+        /** Your Top Songs has a scheme of its own (Home.jsx `TOP_COLORS`): bright, cyan then yellow. */
+        val topPalette: List<RGB> = listOf(0x22d3ee, 0xfde047, 0xf472b6, 0xa3e635, 0xfb923c, 0xa78bfa, 0x34d399, 0xf87171).map { RGB.hex(it) }
         /** Liked Songs tile gradient, 135deg (app.css:469-473). */
         val likedGradient = listOf(RGB.hex(0x450af5).color, RGB.hex(0xc4efd9).color)
         val likedHero = RGB.hex(0x5038a0)

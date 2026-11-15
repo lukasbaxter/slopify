@@ -698,7 +698,7 @@
  "You have been invited. Pick a username and a password (8 characters or more).": "Sinut on kutsuttu. Valitse käyttäjänimi ja salasana (vähintään 8 merkkiä).",
  "Your Library": "Kirjasto",
  "Your Top Songs": "Suosikkikappaleesi",
- "Your Top Songs {year}": "Suosikkikappaleesi {year}",
+ "Top Songs {year}": "Suosikkikappaleet {year}",
  "Your devices": "Laitteesi",
  "Your library, on any speaker in the house.": "Kirjastosi missä tahansa kodin kaiuttimessa.",
  "Your listening habits throughout the day": "Kuuntelutottumuksesi päivän mittaan",

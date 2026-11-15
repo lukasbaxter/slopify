@@ -69,6 +69,7 @@ import com.lukasbaxter.slopify.android.design.theme.LocalTheme
 import com.lukasbaxter.slopify.android.design.theme.RGB
 import com.lukasbaxter.slopify.android.design.theme.Spacing
 import com.lukasbaxter.slopify.android.design.theme.Theme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Calendar
@@ -101,6 +102,16 @@ fun HomeView() {
 
     val key = HomeStore.key(saved?.main, user?.id)
     LaunchedEffect(key) { store.load(account.api, maxAgeMs = 60_000) }
+
+    // A song that has played 8 s is in the play log (the server counts it then): ask for the
+    // shortcuts again, so what was just picked shows without a relaunch. One request per song.
+    val player by app.player.state.collectAsStateWithLifecycle()
+    val playedId = player.current?.id?.takeIf { player.isPlaying && !player.isRemote }
+    LaunchedEffect(key, playedId) {
+        val id = playedId ?: return@LaunchedEffect
+        delay(10_000)
+        store.reloadHome(account.api, id)
+    }
 
     // Tapping the lit Home tab on its root bumps this: scroll to the top.
     val scrollSignal = navState.scrollToTop[Tab.Home] ?: 0
@@ -197,9 +208,9 @@ fun TopSongsView(year: Int, colorIndex: Int) {
     val top = st.data.topYears.firstOrNull { it.year == year }?.top
     HomeMixPage(
         context = "top:$year",
-        title = L("Your Top Songs {year}", "year" to year),
+        title = L("Top Songs {year}", "year" to year),
         sub = HomeLogic.topSongsSub(year, homeCurrentYear()),
-        color = homeMixColor(colorIndex),
+        color = homeTopColor(colorIndex),
         art = top?.let { CoverSource.AlbumArt(it.albumId, it.cover) },
         radioSeed = null,
     ) { api -> api.topSongs(year) }
@@ -238,11 +249,11 @@ private fun HomeSection(s: HomeLogic.Section, data: HomeSnapshot) {
             val year = homeCurrentYear()
             HomeShelf(L("Your Top Songs"), null) {
                 Shelf(data.topYears.withIndex().toList(), style = CardStyle.Home) { (i, y) ->
-                    val label = L("Your Top Songs {year}", "year" to y.year)
+                    val label = L("Top Songs {year}", "year" to y.year)
                     MediaCard(label, HomeLogic.topSongsSub(y.year, year), style = CardStyle.Home, onClick = {
                         nav.pushFromHome(Route.TopSongs(y.year, i))
                     }) {
-                        HomeMixArt(y.top?.let { CoverSource.AlbumArt(it.albumId, it.cover) }, homeMixColor(i), label, pixelSize = 150.dp)
+                        HomeMixArt(y.top?.let { CoverSource.AlbumArt(it.albumId, it.cover) }, homeTopColor(i), label, pixelSize = 150.dp)
                     }
                 }
             }
@@ -279,6 +290,7 @@ private fun HomeShortcutGrid(shortcuts: List<HomeLogic.Shortcut>) {
                             HomeLogic.Shortcut.Liked -> nav.pushFromHome(Route.LikedSongs)
                             is HomeLogic.Shortcut.AlbumTile -> nav.pushFromHome(Route.Album(s.album.id))
                             is HomeLogic.Shortcut.PlaylistTile -> nav.pushFromHome(Route.Playlist(s.playlist.id))
+                            is HomeLogic.Shortcut.ArtistTile -> nav.pushFromHome(Route.Artist(s.artist.id))
                         }
                     }
                 }
@@ -354,5 +366,7 @@ private fun homeScrollTop(list: LazyListState) = remember(list) {
 }
 
 private fun homeMixColor(i: Int): RGB = Theme.Fixed.mixPalette[HomeLogic.mixColorIndex(i)]
+
+private fun homeTopColor(i: Int): RGB = Theme.Fixed.topPalette[HomeLogic.mixColorIndex(i)]
 
 private fun homeCurrentYear(): Int = Calendar.getInstance().get(Calendar.YEAR)

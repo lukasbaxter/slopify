@@ -515,7 +515,9 @@ class SlopifyPlayer(
         var i = SessionReports.queueIndex(np, items) ?: items.indexOfFirst { it.id == np.itemId }
         if (i < 0) { rows = listOf(QueueEntry(np.toTrack())); i = 0 }
         mutate { q ->
-            q.adopt(rows, i, context = null)
+            // What it was playing from comes along (the report carries it), so a resumed
+            // song still counts for the album or playlist it was picked from.
+            q.adopt(rows, i, context = np.ctx)
             np.repeat?.let { r -> RepeatMode.entries.firstOrNull { it.wire == r }?.let { q.repeatMode = it } }
             np.shuffle?.let { r -> ShuffleMode.entries.firstOrNull { it.wire == r }?.let { q.shuffle = it } }
         }
@@ -584,7 +586,7 @@ class SlopifyPlayer(
         val from = link.playhead(np)
         leaveMirror()
         mutate { q ->
-            q.adopt(rows, t.index, context = null)
+            q.adopt(rows, t.index, context = np.ctx)
             np.repeat?.let { r -> RepeatMode.entries.firstOrNull { it.wire == r }?.let { q.repeatMode = it } }
             np.shuffle?.let { r -> ShuffleMode.entries.firstOrNull { it.wire == r }?.let { q.shuffle = it } }
         }
@@ -605,6 +607,7 @@ class SlopifyPlayer(
                     val first = fetch(listOf(chosen)).firstOrNull() ?: return@launch
                     localPlay(listOf(first), 0, command.ctx, command.startAt ?: 0.0)
                     if (ids.size <= 1) return@launch
+                    mutate { it.picked = null } // one of a list, not a song picked by itself
                     val all = fetch(ids)
                     if (model.current?.track?.id != chosen || all.isEmpty()) return@launch
                     val at = maxOf(0, all.indexOfFirst { it.id == chosen })
@@ -1081,6 +1084,7 @@ class SlopifyPlayer(
                     shuffle = model.shuffle, liked = liked(cur.id),
                     device = OutputDevice.local(if (output.id == "local" && output.name.isNotEmpty()) output.name else LOCAL_NAME),
                     artUrl = artUrl(cur.id), now = now(),
+                    context = model.context, picked = model.picked == cur.id,
                 ),
             ),
         )
@@ -1115,9 +1119,12 @@ class SlopifyPlayer(
         val id = listen.id
         val at = listen.startedAt
         val client = playClient
+        // What it was picked from, as the report would have said (server: playsrc.ts).
+        val ctx = model.context
+        val picked = model.picked == id
         lastTask = scope.launch {
             try {
-                backend.postPlay(id, at, client)
+                backend.postPlay(id, at, client, ctx, picked)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: ApiError.Offline) {

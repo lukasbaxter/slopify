@@ -135,8 +135,33 @@ data class Items<T>(val items: List<T>)
 @Serializable
 data class LibraryInfo(val version: String, val tracks: Int? = null, val albums: Int? = null, val artists: Int? = null)
 
+/**
+ * One of Home's shortcuts as the server lists them (`recents`): the latest album, playlist or
+ * artist the listener picked and played a song from, newest first (server: playsrc.ts).
+ */
 @Serializable
-data class HomeData(val recentAlbums: List<Album>, val topTracks: List<Track>, val newestAlbums: List<Album>)
+data class HomePick(
+    val kind: String,
+    val id: String,
+    val name: String,
+    val artist: String? = null,
+    val artistId: String? = null,
+    val year: Int? = null,
+    val trackCount: Int? = null,
+    val cover: String? = null,
+    val image: String? = null,
+    val userId: String? = null,
+    val aiPrompt: String? = null,
+)
+
+@Serializable
+data class HomeData(
+    /** Missing from a server older than schema 36. */
+    val recents: List<HomePick>? = null,
+    val recentAlbums: List<Album>,
+    val topTracks: List<Track>,
+    val newestAlbums: List<Album>,
+)
 
 @Serializable
 data class BrowseTile(

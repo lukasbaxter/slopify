@@ -239,6 +239,20 @@ class PlayQueueTest {
         assertEquals("an empty original falls back to the rows", rows, q.original)
     }
 
+    @Test fun pickedIsOneSongStartedWithNoContext() {
+        val q = PlayQueue()
+        q.start(playerTracks("a"), 0, null, rng)
+        assertEquals("a", q.picked)
+        q.start(playerTracks("a"), 0, "al1", rng)
+        assertNull("from an album", q.picked)
+        q.start(playerTracks("a", "b"), 0, null, rng)
+        assertNull("one of a list", q.picked)
+        q.start(playerTracks("a"), 0, "", rng)
+        assertEquals("a", q.picked)
+        q.adopt(playerTracks("a").map { QueueEntry(it) }, 0, context = null)
+        assertNull("handed over, not picked here", q.picked)
+    }
+
     @Test fun jsonRoundTrip() {
         val q = PlayQueue(repeatMode = RepeatMode.All)
         q.start(playerTracks("a", "b"), 1, "x", rng)

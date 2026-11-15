@@ -20,7 +20,7 @@ class HomeStoreTest {
 
     @Before fun setUp() {
         bodies = linkedMapOf(
-            "/api/home" to """{"recentAlbums":[{"id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"topTracks":[${track("1", "Low", "a", 1)},${track("2", "High", "b", 9)}],"newestAlbums":[]}""",
+            "/api/home" to """{"recents":[{"kind":"album","id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"recentAlbums":[{"id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"topTracks":[${track("1", "Low", "a", 1)},${track("2", "High", "b", 9)}],"newestAlbums":[]}""",
             "/api/top-songs" to """{"years":[{"year":2026,"songs":40,"plays":300,"top":null}]}""",
             "/api/radar" to """{"releases":[{"album_id":"m1","title":"New","rtype":"EP","date":"2026-11-01","image":null,"artistId":"b","artistName":"High","inLibrary":null,"localName":null,"requestStatus":null}]}""",
             "/api/playlists" to """{"items":[{"id":"pl_1","name":"Mine","userId":"u","created":1,"updated":1,"trackCount":2,"cover":null,"aiPrompt":null}]}""",
@@ -66,6 +66,37 @@ class HomeStoreTest {
             assertEquals(1, store.data.radar.size)
             assertNotNull(store.state.value.radarError)
             assertEquals("boom", store.state.value.radarError)
+        }
+    }
+
+    @Test fun reloadHomeAsksOncePerSongAndOnlyForHome() = runTest {
+        StubServer().use { s ->
+            s.serve()
+            val store = HomeStore(backgroundScope)
+            store.load(s.client())
+            val first = s.seen.size
+            val picked = """{"recents":[{"kind":"artist","id":"ar9","name":"Nine","image":null},{"kind":"playlist","id":"pl_1","name":"Mine","userId":"u","created":1,"updated":1,"trackCount":2,"cover":null,"aiPrompt":null}],"recentAlbums":[],"topTracks":[],"newestAlbums":[]}"""
+            s.serve(mapOf("/api/home" to picked))
+            store.reloadHome(s.client(), "t1")
+            assertEquals(first + 1, s.seen.size)
+            assertEquals("/api/home", s.seen.last().requestUrl?.encodedPath)
+            assertEquals(listOf("__liked__", "ar:ar9", "pl:pl_1", "al:l1"), store.data.shortcuts.map { it.id })
+            // The same song again (paused and resumed, Home reopened): no request.
+            store.reloadHome(s.client(), "t1")
+            assertEquals(first + 1, s.seen.size)
+            store.reloadHome(s.client(), "t2")
+            assertEquals(first + 2, s.seen.size)
+        }
+    }
+
+    @Test fun anOlderServerWithoutRecentsStillLoads() = runTest {
+        StubServer().use { s ->
+            s.serve(mapOf("/api/home" to """{"recentAlbums":[{"id":"r1","name":"Recent","artist":"X"}],"topTracks":[],"newestAlbums":[]}"""))
+            val store = HomeStore(backgroundScope)
+            store.load(s.client())
+            assertTrue(store.data.picks.isEmpty())
+            assertEquals(listOf("r1"), store.data.recent.map { it.id })
+            assertEquals(listOf("__liked__", "pl:pl_1", "al:l1"), store.data.shortcuts.map { it.id })
         }
     }
 

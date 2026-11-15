@@ -4,6 +4,8 @@
 # make uitest     gesture UI tests against a local fixture server (UITEST_PORT, default 18765)
 # make install    signed Release on a USB/Wi-Fi paired iPhone
 #                 (DEVELOPMENT_TEAM=<id> once; it is kept in the git-ignored Local.xcconfig)
+# make install-all  the same on every paired iPhone, over Wi-Fi; phones that are away or
+#                 asleep are retried for HOURS (default 24), so run it and walk away
 # DD=<dir> picks the derived-data dir, so parallel builds do not collide.
 DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 export DEVELOPER_DIR
@@ -36,4 +38,9 @@ install: gen
 	$(XB) -configuration Release -destination 'id=$(DEVICE)' -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 	$(XCRUN) devicectl device install app --device $(DEVICE) $(DD)/Build/Products/Release-iphoneos/Slopify.app
 
-.PHONY: gen build test uitest install
+install-all: gen
+	@grep -q 'DEVELOPMENT_TEAM = .\+' Local.xcconfig || { echo "set DEVELOPMENT_TEAM=<team id> (once)"; exit 1; }
+	$(XB) -configuration Release -destination 'generic/platform=iOS' -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+	tools/install-all.sh $(DD)/Build/Products/Release-iphoneos/Slopify.app $(HOURS)
+
+.PHONY: gen build test uitest install install-all

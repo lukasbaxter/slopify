@@ -107,12 +107,18 @@ export function lidarrClient(opts: LidarrOptions) {
   const cached = (k: string, ttl: number) => { const e = cache.get(k); return e && Date.now() - e.at < ttl ? e.v : null; };
   const remember = <T>(k: string, v: T): T => { cache.set(k, { at: Date.now(), v }); return v; };
 
-  const api = async (p: string, init?: RequestInit & { timeoutMs?: number }) => {
-    const r = await f(`${base}/api/v1${p}`, {
+  const api = async (p: string, init?: RequestInit & { timeoutMs?: number; once?: boolean }) => {
+    const ask = () => f(`${base}/api/v1${p}`, {
       ...init,
       headers: { 'X-Api-Key': opts.apiKey, ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers },
       signal: AbortSignal.timeout(init?.timeoutMs ?? 20000),
     });
+    // Lidarr now and then holds a read for some 20 s (while it imports or
+    // refreshes) and answers the same one in milliseconds right after. A
+    // read is safe to ask twice, so one that got no answer is asked again
+    // once: left to throw, a single stall failed a whole download-watch run.
+    const read = !init?.once && (!init?.method || init.method === 'GET');
+    const r = await ask().catch((e: any) => { if (read && e?.name === 'TimeoutError') return ask(); throw e; });
     // The status rides on the error: an answer that is an error (a bad id)
     // is not the same as no answer in time (Lidarr busy).
     if (!r.ok) throw Object.assign(new Error(`Lidarr ${p.split('?')[0]} ${r.status}`), { status: r.status });
@@ -249,9 +255,10 @@ export function lidarrClient(opts: LidarrOptions) {
   // for ~20 s while it imports a download: 5 of 5 chunks at 19.6 s on the
   // live server, 11-08) says nothing about the ids: splitting then asked the
   // stalled Lidarr again, one half after the other, and a 45 s stall cost
-  // the Downloads page 46 s. It fails the call instead.
+  // the Downloads page 46 s. It fails the call instead (and is not asked
+  // a second time either: `once`).
   const albumChunk = async (c: number[]): Promise<any[]> => {
-    try { return ((await api(`/album?${c.map((i) => `albumIds=${i}`).join('&')}`)) || []) as any[]; }
+    try { return ((await api(`/album?${c.map((i) => `albumIds=${i}`).join('&')}`, { once: true })) || []) as any[]; }
     catch (e: any) {
       if (!e.status) throw e;
       if (c.length === 1) { log(`lidarr: album ${c[0]} not fetched (${e.message})`); return []; }

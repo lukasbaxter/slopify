@@ -232,6 +232,22 @@ describe('lidarr client', () => {
     expect(state.calls.some((c) => c.includes('/album/monitor'))).toBe(false);
   }, 20000);
 
+  it('a read Lidarr does not answer in time is asked once more; a write is not repeated', async () => {
+    const { state, fetcher } = fakeLidarr();
+    state.albums.push(fakeAlbum(7, { monitored: true }));
+    let stalls = 1, puts = 0;
+    const stalling: any = async (url: string, init?: any) => {
+      if (init?.method === 'PUT') puts++;
+      if ((url.includes('/wanted/missing') || init?.method === 'PUT') && stalls-- > 0) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      return fetcher(url, init);
+    };
+    const l = client(stalling);
+    expect(await l.wantedCount()).toBe(1); // the first ask stalled
+    stalls = 1;
+    await expect(l.unmonitor(7)).rejects.toThrow(/timeout/);
+    expect(puts).toBe(1);
+  }, 20000);
+
   it('retry fires AlbumSearch', async () => {
     const { state, fetcher } = fakeLidarr();
     const l = client(fetcher);

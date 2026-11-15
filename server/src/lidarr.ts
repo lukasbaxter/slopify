@@ -204,6 +204,17 @@ export function lidarrClient(opts: LidarrOptions) {
     return moved ?? artist;
   };
 
+  // An album's monitored flag, set on the album itself. Lidarr's bulk
+  // PUT /album/monitor got slower as its database grew (20.2 s for one
+  // album at 169,000 albums, against 0.3 s for this) and crossed the
+  // request timeout: every queue and give-up then failed, and the wanted
+  // list ran dry while each attempt took 20 s to fail.
+  const setMonitored = async (albumId: number, monitored: boolean) => {
+    const al = await api(`/album/${albumId}`);
+    if (!al) throw new Error('no such album');
+    if (al.monitored !== monitored) await api(`/album/${albumId}`, { method: 'PUT', body: JSON.stringify({ ...al, monitored }), timeoutMs: 60000 });
+  };
+
   // Until no refresh of this artist is queued or running (at most waitMs).
   const refreshDone = async (artistId: number, waitMs = 120000) => {
     const until = Date.now() + waitMs;
@@ -402,7 +413,7 @@ export function lidarrClient(opts: LidarrOptions) {
           await api(`/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...ar, monitored: true, monitorNewItems: 'none' }) });
           cache.delete('artists');
         }
-        await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [album.id], monitored: true }) });
+        await setMonitored(album.id, true);
         await refreshDone(artistId);
         const [a2, ar2] = await Promise.all([api(`/album/${album.id}`).catch(() => null), api(`/artist/${artistId}`).catch(() => null)]);
         if (a2?.monitored && ar2?.monitored) break;
@@ -480,7 +491,7 @@ export function lidarrClient(opts: LidarrOptions) {
       await refreshDone(artistId);
       const ar = await api(`/artist/${artistId}`);
       if (!ar?.monitored) await api(`/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...ar, monitored: true, monitorNewItems: 'none' }) });
-      await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: true }) });
+      await setMonitored(albumId, true);
       await api('/command', { method: 'POST', body: JSON.stringify({ name: 'AlbumSearch', albumIds: [albumId] }) });
       cache.delete('activity');
     },
@@ -494,7 +505,7 @@ export function lidarrClient(opts: LidarrOptions) {
       await refreshDone(artistId);
       const ar = await api(`/artist/${artistId}`);
       if (!ar?.monitored) await api(`/artist/${artistId}`, { method: 'PUT', body: JSON.stringify({ ...ar, monitored: true, monitorNewItems: 'none' }) });
-      await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: true }) });
+      await setMonitored(albumId, true);
       cache.delete('activity');
     },
 
@@ -508,7 +519,7 @@ export function lidarrClient(opts: LidarrOptions) {
     // Stop wanting an album (the watcher gave up on it): off the wanted
     // list, so the Soulseek watcher stops searching for it.
     async unmonitor(albumId: number) {
-      await api('/album/monitor', { method: 'PUT', body: JSON.stringify({ albumIds: [albumId], monitored: false }) });
+      await setMonitored(albumId, false);
       cache.delete('activity');
     },
 

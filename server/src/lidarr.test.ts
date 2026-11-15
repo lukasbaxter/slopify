@@ -16,6 +16,7 @@ function fakeLidarr() {
     albumLookup: null as any[] | null, // overrides /album/lookup when set // albums a RefreshArtist of that artist adds
     nextId: 1,
     commands: [] as any[],          // GET /command (what is queued / running)
+    slowBulkMonitor: true,          // PUT /album/monitor never answers in time
   };
   // /queue and /wanted/missing page like the real thing.
   const paged = (all: any[], u: URL) => {
@@ -53,6 +54,9 @@ function fakeLidarr() {
     if (p.startsWith('/album/lookup') && state.albumLookup) return json(state.albumLookup);
     if (p === '/album' && method === 'POST') { const a = { ...JSON.parse(init.body), id: state.nextId++, statistics: { totalTrackCount: 62, trackFileCount: 0 } }; state.albums.push(a); return json(a); }
     if (p.startsWith('/album/lookup')) return json(state.albums.length ? state.albums : [{ foreignAlbumId: 'mb-worlds', title: 'Worlds', artist: { artistName: 'Porter Robinson', foreignArtistId: 'fa-1', images: [] } }]);
+    // The real one takes 20 s on a large database: the client must not use it.
+    if (p === '/album/monitor' && state.slowBulkMonitor) throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    if (/^\/album\/\d+$/.test(p) && method === 'PUT') { const a = state.albums.find((x) => x.id === Number(p.split('/')[2])); a.monitored = JSON.parse(init.body).monitored; return json(a); }
     if (p === '/album/monitor') { const b = JSON.parse(init.body); for (const a of state.albums) if (b.albumIds.includes(a.id)) a.monitored = b.monitored; return json({}); }
     if (p === '/queue') return json(paged(state.queue, u));
     if (p === '/wanted/missing') return json(paged(state.albums.filter((a) => a.monitored && !a.statistics.trackFileCount).map((a) => ({ id: a.id, foreignAlbumId: a.foreignAlbumId })), u));
@@ -214,6 +218,18 @@ describe('lidarr client', () => {
     const r = await client(slow).request('mb-worlds'); // album lookup hands over a new artist
     expect(r.status).toBe('queued');
     expect(state.albums[0].monitored).toBe(true);
+  }, 20000);
+
+  it('giving up on an album and wanting it again go through the album itself, not the bulk monitor call that stops answering on a large database', async () => {
+    const { state, fetcher } = fakeLidarr();
+    const l = client(fetcher);
+    await l.request('mb-worlds');
+    const id = state.albums[0].id;
+    await l.unmonitor(id);
+    expect(state.albums[0].monitored).toBe(false);
+    await l.monitor(id);
+    expect(state.albums[0].monitored).toBe(true);
+    expect(state.calls.some((c) => c.includes('/album/monitor'))).toBe(false);
   }, 20000);
 
   it('retry fires AlbumSearch', async () => {

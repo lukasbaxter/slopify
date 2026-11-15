@@ -74,7 +74,7 @@ private struct Cover: View {
 
     var body: some View {
         Group {
-            if let url = WidgetStore.coverFile(name), let img = UIImage(contentsOfFile: url.path) {
+            if let data = WidgetStore.cover(name), let img = UIImage(data: data) {
                 Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
             } else {
                 Color.black.opacity(0.2)

@@ -1,13 +1,14 @@
 import Foundation
+import Security
 
-/// What the home screen widgets show. The app writes it into the shared app-group folder
-/// (with the cover files beside it); the widget extension only reads.
+/// What the home screen widgets show. The app writes it (and the covers) where the widget
+/// extension can read it: see `WidgetStore`.
 struct WidgetSnapshot: Codable, Equatable, Sendable {
     struct Now: Codable, Equatable, Sendable {
         var id: String
         var title: String
         var artist: String
-        /// File name in the shared covers folder; nil until the picture is there.
+        /// The cover's name in `WidgetStore`; nil until the picture is there.
         var cover: String?
         /// Background colour taken from the cover, 0...255 channels.
         var tint: [Int]?
@@ -100,33 +101,84 @@ enum WidgetLogic {
     }
 }
 
-/// The shared folder. Everything is a no-op (nil) where the app group is not available.
+/// Where the app leaves the snapshot and the covers for the widget extension: a keychain
+/// access group the two share. (An App Group folder would be the usual place, but it needs
+/// its own provisioning; a shared keychain group comes with every team profile.)
+/// Everything is a no-op (nil / false) where the group is not available.
 enum WidgetStore {
-    /// `group.<app bundle id>`, from the Info.plist of whichever target is running.
-    static var group: String? { Bundle.main.object(forInfoDictionaryKey: "SlopifyAppGroup") as? String }
-
-    static var folder: URL? {
-        guard let group, !group.isEmpty else { return nil }
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appendingPathComponent("widgets", isDirectory: true)
+    /// `<team prefix><shared id>`, from the Info.plist of whichever target is running.
+    static var group: String? {
+        let g = Bundle.main.object(forInfoDictionaryKey: "SlopifyKeychainGroup") as? String
+        return g?.isEmpty == false ? g : nil
     }
 
-    static var covers: URL? { folder?.appendingPathComponent("covers", isDirectory: true) }
-    private static var file: URL? { folder?.appendingPathComponent("snapshot.json") }
+    private static let service = "slopify.widget"
+    private static let snapshotKey = "snapshot"
+    private static let coverPrefix = "cover:"
+
+    private static func query(_ account: String?) -> [String: Any]? {
+        guard let group else { return nil }
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                kSecAttrAccessGroup as String: group]
+        if let account { q[kSecAttrAccount as String] = account }
+        return q
+    }
+
+    private static func get(_ account: String) -> Data? {
+        guard var q = query(account) else { return nil }
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: CFTypeRef?
+        return SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess ? out as? Data : nil
+    }
+
+    private static func set(_ account: String, _ data: Data) -> Bool {
+        guard let q = query(account) else { return false }
+        let status = SecItemUpdate(q as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        var add = q
+        add[kSecValueData as String] = data
+        // The widget is redrawn while the phone is locked too.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    }
 
     static func read() -> WidgetSnapshot? {
-        guard let file, let d = try? Data(contentsOf: file) else { return nil }
+        guard let d = get(snapshotKey) else { return nil }
         return try? JSONDecoder().decode(WidgetSnapshot.self, from: d)
     }
 
     @discardableResult
     static func write(_ s: WidgetSnapshot) -> Bool {
-        guard let folder, let file, let d = try? JSONEncoder().encode(s) else { return false }
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return (try? d.write(to: file, options: .atomic)) != nil
+        guard let d = try? JSONEncoder().encode(s) else { return false }
+        return set(snapshotKey, d)
     }
 
-    static func coverFile(_ name: String?) -> URL? {
-        guard let name, let covers else { return nil }
-        return covers.appendingPathComponent(name)
+    static func cover(_ name: String?) -> Data? {
+        guard let name else { return nil }
+        return get(coverPrefix + name)
+    }
+
+    static func hasCover(_ name: String) -> Bool {
+        guard var q = query(coverPrefix + name) else { return false }
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        return SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func saveCover(_ name: String, _ data: Data) -> Bool { set(coverPrefix + name, data) }
+
+    /// Drops every stored cover the snapshot no longer shows.
+    static func sweep(keeping: Set<String>) {
+        guard var q = query(nil) else { return }
+        q[kSecReturnAttributes as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitAll
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let items = out as? [[String: Any]] else { return }
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String, account.hasPrefix(coverPrefix),
+                  !keeping.contains(String(account.dropFirst(coverPrefix.count))), let del = query(account) else { continue }
+            SecItemDelete(del as CFDictionary)
+        }
     }
 }

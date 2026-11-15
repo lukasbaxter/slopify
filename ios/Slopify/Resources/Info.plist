@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key><string>Slopify</string>
-	<key>SlopifyAppGroup</key><string>$(APP_GROUP)</string>
+	<key>SlopifyKeychainGroup</key><string>$(AppIdentifierPrefix)$(WIDGET_KEYCHAIN_GROUP)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

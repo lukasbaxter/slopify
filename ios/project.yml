@@ -11,8 +11,8 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.200"
     CURRENT_PROJECT_VERSION: "1200"
-    # The folder the app and its widgets share.
-    APP_GROUP: group.com.lukasbaxter.slopify.native
+    # The keychain group the app and its widgets share (the team prefix is added at signing).
+    WIDGET_KEYCHAIN_GROUP: com.lukasbaxter.slopify.shared
 configFiles:
   Debug: Local.xcconfig
   Release: Local.xcconfig
@@ -38,7 +38,7 @@ targets:
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         # CarPlay audio is not granted by Apple yet: simulator builds only. Device builds unchanged.
         CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Slopify/Resources/Slopify-Sim.entitlements
-  # Home screen widgets. Reads what the app leaves in the shared app-group folder.
+  # Home screen widgets. Reads what the app leaves in the shared keychain group.
   SlopifyWidgets:
     type: app-extension
     platform: iOS

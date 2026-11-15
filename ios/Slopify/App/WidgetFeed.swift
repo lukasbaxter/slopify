@@ -3,7 +3,7 @@ import Foundation
 import WidgetKit
 
 /// Keeps the home screen widgets up to date: writes what is playing and the recent shortcuts
-/// (with their covers) into the shared folder, and has WidgetKit redraw when that changes.
+/// (with their covers) where the widget extension reads them, and has WidgetKit redraw when that changes.
 @MainActor
 final class WidgetFeed {
     private let player: Player
@@ -136,29 +136,22 @@ final class WidgetFeed {
         }
     }
 
-    // MARK: - Shared folder
+    // MARK: - Shared store
 
     private func commit(_ s: WidgetSnapshot) {
         guard s != last else { return }
         last = s
         guard WidgetStore.write(s) else { return }
         WidgetCenter.shared.reloadAllTimelines()
-        Self.sweep(keeping: Set(([s.now?.cover] + s.recents.map(\.cover)).compactMap { $0 }))
+        WidgetStore.sweep(keeping: Set(([s.now?.cover] + s.recents.map(\.cover)).compactMap { $0 }))
     }
 
-    /// The picture in the shared covers folder; its file name, or nil when it could not be fetched.
+    /// The picture, stored for the widgets; its name, or nil when it could not be fetched.
     private static func saveCover(_ url: URL) async -> String? {
-        guard let dir = WidgetStore.covers else { return nil }
+        guard WidgetStore.group != nil else { return nil }
         let name = coverName(url)
-        let file = dir.appendingPathComponent(name)
-        if FileManager.default.fileExists(atPath: file.path) { return name }
+        if WidgetStore.hasCover(name) { return name }
         guard let data = await ImageLoader.shared.data(url) else { return nil }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return (try? data.write(to: file, options: .atomic)) != nil ? name : nil
-    }
-
-    private static func sweep(keeping: Set<String>) {
-        guard let dir = WidgetStore.covers, let all = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
-        for f in all where !keeping.contains(f) { try? FileManager.default.removeItem(at: dir.appendingPathComponent(f)) }
+        return WidgetStore.saveCover(name, data) ? name : nil
     }
 }

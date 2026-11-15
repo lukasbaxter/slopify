@@ -13,6 +13,8 @@ final class AppModel {
     /// Songs kept on this device ("Download for offline").
     let offline = OfflineStore()
     let themeStore: ThemeStore
+    /// Feeds the home screen widgets.
+    private var widgets: WidgetFeed?
 
     private var started = false
 
@@ -52,6 +54,7 @@ final class AppModel {
         // Follows sign-in itself: resumes this account's unfinished jobs, forgets them on sign-out.
         LyricJobStore.shared.attach(account)
         AppModel.current = self
+        widgets = WidgetFeed(player: player, account: account)
     }
 
     /// Call when signed in (launch, after sign-in, foreground).

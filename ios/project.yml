@@ -11,6 +11,8 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.200"
     CURRENT_PROJECT_VERSION: "1200"
+    # The folder the app and its widgets share.
+    APP_GROUP: group.com.lukasbaxter.slopify.native
 configFiles:
   Debug: Local.xcconfig
   Release: Local.xcconfig
@@ -20,10 +22,13 @@ targets:
     platform: iOS
     sources:
       - path: Slopify
+      - path: Shared
     resources: []
+    dependencies: [{ target: SlopifyWidgets }]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lukasbaxter.slopify.native
+        CODE_SIGN_ENTITLEMENTS: Slopify/Resources/Slopify.entitlements
         PRODUCT_NAME: Slopify
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -33,6 +38,23 @@ targets:
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         # CarPlay audio is not granted by Apple yet: simulator builds only. Device builds unchanged.
         CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Slopify/Resources/Slopify-Sim.entitlements
+  # Home screen widgets. Reads what the app leaves in the shared app-group folder.
+  SlopifyWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: SlopifyWidgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lukasbaxter.slopify.native.widgets
+        PRODUCT_NAME: SlopifyWidgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: SlopifyWidgets/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: SlopifyWidgets/SlopifyWidgets.entitlements
+        SKIP_INSTALL: YES
   SlopifyTests:
     type: bundle.unit-test
     platform: iOS

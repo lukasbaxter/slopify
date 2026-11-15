@@ -29,6 +29,11 @@ struct MainShell: View {
         .onChange(of: nav.nowPlayingOpen, initial: true) { _, open in
             ToastCenter.shared.layout = open ? .nowPlaying : .shell(miniPlayer: true)
         }
+        // A tap on a home screen widget.
+        .onOpenURL { url in
+            guard let link = WidgetLink(url) else { return }
+            if let route = WidgetFeed.route(link) { nav.open(route) } else { nav.nowPlayingOpen = true }
+        }
     }
 
     @ViewBuilder

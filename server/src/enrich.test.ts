@@ -241,3 +241,26 @@ describe('enrichment: lyrics LrcLib does not have', () => {
     expect(got).toEqual({ feat: 'synced lrclib', netease: 'synced netease', genius: 'plain genius' });
   });
 });
+
+describe('enrichment: a lyrics site that blocks us', () => {
+  const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-lyricblock-')));
+  db.prepare("INSERT INTO albums (id, name, artist, dir, added_at, sort_name) VALUES ('al', 'Single', 'Band', 'al', 1, 'Single')").run();
+  for (let i = 0; i < 8; i++) db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at, duration_ms)
+    VALUES (?, ?, 1, 1, ?, 'Band', '["Band"]', '[]', 'al', 'Single', 'Band', 1, 100000)`).run(`t${i}`, `/nowhere/t${i}.flac`, `Song ${i}`);
+  const lrclib: Fetcher = async (url) => (new URL(url).pathname.endsWith('/get') ? { status: 404, json: async () => ({}) } : { status: 200, json: async () => [] });
+  const asked: string[] = [];
+  const web = async (url: string) => {
+    asked.push(new URL(url).hostname);
+    if (url.includes('163.com')) return { ok: true, status: 200, json: async () => ({ result: { songs: [] } }), text: async () => '' };
+    return { ok: false, status: 403, json: async () => ({}), text: async () => '' };
+  };
+  it('is left alone after a few failures, and its songs are asked again in hours, not days', async () => {
+    const r = await enrichPass(db, { fetcher: lrclib, web });
+    expect(r.missing).toBe(8);
+    expect(asked.filter((h) => h === 'genius.com').length).toBe(5);
+    for (const e of db.prepare('SELECT lyrics_tries, lyrics_next FROM enrich').all() as any[]) {
+      expect(e.lyrics_tries).toBe(0);
+      expect(e.lyrics_next).toBeLessThan(Date.now() + 7 * 3600000);
+    }
+  });
+});

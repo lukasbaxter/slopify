@@ -18,7 +18,9 @@ import { storeArtwork, storeBanner } from './artwork.js';
 
 const run = promisify(execFile);
 const UA = 'slopify/0.1 (https://github.com/lukasbaxter/slopify)';
+const BROWSER_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
 const DAY = 86400000;
+const HOUR = 3600000;
 
 export type LrclibRecord = { id: number; trackName: string; artistName: string; albumName: string; duration: number; instrumental: boolean; plainLyrics: string | null; syncedLyrics: string | null };
 export type Fetcher = (url: string) => Promise<{ status: number; json: () => Promise<any> }>;
@@ -87,7 +89,7 @@ export type EnrichOptions = {
   // folders), so it is never fetched again - by this install or any other.
   musicDir?: string; saveToLibrary?: boolean;
   // NetEase and Genius, asked when LrcLib has nothing (defaults to the real
-  // sites; with only `fetcher` given, that one answers them too).
+  // sites; with only `fetcher` given, they are not asked).
   web?: Fetch;
 };
 
@@ -116,18 +118,34 @@ export async function enrichPass(db: DB, opts: EnrichOptions = {}): Promise<{ do
   db.exec(`UPDATE enrich SET lyrics_state = 'done' WHERE lyrics_state != 'done' AND track_id IN (SELECT track_id FROM lyrics)`);
   const due = db.prepare(`SELECT e.track_id, t.title, t.artist, t.artists, t.album, t.duration_ms, t.path, e.lyrics_tries FROM enrich e JOIN tracks t ON t.id = e.track_id WHERE e.lyrics_state IN ('pending', 'missing') AND e.lyrics_next <= ? ORDER BY e.lyrics_next, t.added_at DESC LIMIT ?`).all(Date.now(), opts.max ?? 500) as any[];
   const stats = { done: 0, missing: 0, instrumental: 0 };
-  // A site that keeps failing (throttled, blocked) is left alone for the
-  // rest of the pass instead of being asked 500 times.
-  const web: Fetch | undefined = opts.web ?? (opts.fetcher ? ((url) => opts.fetcher!(url) as any) : undefined);
+  // NetEase and Genius: one request every so often (Genius blocks a house's
+  // IP for a while after a burst), answers cached like LrcLib's, and a site
+  // that keeps failing is left alone for the rest of the pass. A song a
+  // failing site never got to answer is asked again in a few hours instead
+  // of counting as "no lyrics anywhere".
+  const base = opts.web;
+  const others = Boolean(opts.web) || !opts.fetcher; // a test that fakes only LrcLib asks nobody else
+  const GAP: Record<string, number> = opts.fetcher || opts.web ? {} : { 'genius.com': 3000, 'music.163.com': 500 };
+  const last: Record<string, number> = {};
+  const web: Fetch = async (url, init) => {
+    const host = new URL(url).hostname;
+    const wait = (last[host] ?? 0) + (GAP[host] ?? 0) - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    last[host] = Date.now();
+    return base ? base(url, init) : (fetch(url, { ...init, headers: { 'User-Agent': BROWSER_UA, ...init?.headers }, signal: AbortSignal.timeout(15000) }) as any);
+  };
   const strikes = { netease: 0, genius: 0 };
-  const ask = async (site: 'netease' | 'genius', go: () => Promise<Candidate | null>) => {
-    if (strikes[site] >= 5) return null;
-    try { const c = await go(); strikes[site] = 0; return c; } catch (e: any) { strikes[site]++; log(`${site} ${e.message}`); return null; }
+  let failed = false;
+  const ask = async (site: 'netease' | 'genius', title: string, artist: string, go: () => Promise<Candidate | null>) => {
+    if (strikes[site] >= 5) { failed = true; return null; }
+    try { const c = await cached(db, `${site}:${artist}|${title}`, 30 * DAY, go); strikes[site] = 0; return c; }
+    catch (e: any) { strikes[site]++; failed = true; log(`${site} ${title}: ${e.message}`); return null; }
   };
   for (const row of due) {
     const artists: string[] = JSON.parse(row.artists || '[]');
     const main = artists[0] || row.artist;
     let rec: LrclibRecord | null = null;
+    failed = false;
     try {
       // main artist first, then the joined credit, then shorter forms of the
       // title ("Love Sick, Pt. 1 (feat. A, B & C)" is "Love Sick, Pt. 1" there)
@@ -138,14 +156,15 @@ export async function enrichPass(db: DB, opts: EnrichOptions = {}): Promise<{ do
     let kind = rec ? storeLyricsFromRecord(db, row.track_id, rec) : null;
     let text = rec && kind === 'synced' ? rec.syncedLyrics : rec && kind === 'plain' ? rec.plainLyrics : null;
     // Not on LrcLib: NetEase (timed, matched on duration too), then Genius (plain).
-    if (!rec) {
-      const c = await ask('netease', () => fromNetease({ artist: main, title: row.title, durationMs: row.duration_ms, strict: true }, web))
-        ?? await ask('genius', () => fromGenius({ artist: main, title: row.title, strict: true }, web));
+    if (!rec && others) {
+      const c = await ask('netease', row.title, main, () => fromNetease({ artist: main, title: row.title, durationMs: row.duration_ms, strict: true }, web))
+        ?? await ask('genius', row.title, main, () => fromGenius({ artist: main, title: row.title, strict: true }, web));
       if (c) { kind = storeLines(db, row.track_id, c.kind, c.lines, c.source); text = c.kind === 'synced' ? toLrc(c.lines) : c.lines.map((l) => l.text).join('\n') + '\n'; }
     }
     // The answer goes beside the song too, as the .lrc the scanner reads.
     if (opts.saveToLibrary && text && (kind === 'synced' || kind === 'plain')) await writeNew(row.path.replace(/\.[^.]+$/, '.lrc'), text, log);
     if (kind) { db.prepare(`UPDATE enrich SET lyrics_state = 'done', updated = ? WHERE track_id = ?`).run(Date.now(), row.track_id); if (kind === 'instrumental') stats.instrumental++; else stats.done++; }
+    else if (failed) { db.prepare(`UPDATE enrich SET lyrics_state = 'missing', lyrics_next = ?, updated = ? WHERE track_id = ?`).run(Date.now() + 6 * HOUR, Date.now(), row.track_id); stats.missing++; }
     else { const tries = row.lyrics_tries + 1; const next = Date.now() + (tries <= 7 ? DAY : 7 * DAY); db.prepare(`UPDATE enrich SET lyrics_state = 'missing', lyrics_tries = ?, lyrics_next = ?, updated = ? WHERE track_id = ?`).run(tries, next, Date.now(), row.track_id); stats.missing++; }
     await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 250)); // be polite to LrcLib
   }

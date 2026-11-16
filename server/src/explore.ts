@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import { ftsQuery, tracksByIds } from './library.js';
+import { matchClassical } from './classical.js';
 
 const LB = 'https://api.listenbrainz.org/1';
 const UA = 'slopify/0.1 (https://github.com/lukasbaxter/slopify)';
@@ -25,7 +26,13 @@ export function lbCreds(db: DB, uid: string): { user: string; token: string } | 
 }
 
 // --- library matching -------------------------------------------------------
+// A composer's song the title + artist match missed (the library has it by
+// another performer, under another title) goes to the classical matcher.
 export function matchTrack(db: DB, t: LbTrack): string | null {
+  return matchByName(db, t) ?? matchClassical(db, t);
+}
+
+function matchByName(db: DB, t: LbTrack): string | null {
   // Title words through FTS (all of them), the artist checked loosely after:
   // "feat." credits and spelling variants must not lose the match. Title +
   // artist words first: a common title ("Intro", "Home") has more than 60

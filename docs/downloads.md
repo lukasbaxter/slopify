@@ -45,6 +45,34 @@ under `[Search Settings]` in its config.ini: with `album_prepend_artist`
 on, it would otherwise search Soulseek for "Various Artists <title>",
 which almost no shared folder is named after.
 
+## Classical music
+
+Spotify credits classical tracks to the composer ("Frédéric Chopin",
+"Nocturne No. 2 in E-Flat Major, Op. 9 No. 2"). Your files usually have
+the performer as the artist, sometimes the composer in another script
+("Пётр Ильич Чайковский"), and a shorter title. So for a composer's song,
+Slopify matches the piece itself:
+
+| Has to agree | Example |
+|---|---|
+| Catalog number, when both have one | Op. 9, BWV 1007, K. 545, L. 75 |
+| Numbers and movement | No. 2, IV. Adagietto (No. 14a is not No. 14) |
+| Key, when both have one | E-flat major |
+| Name words | "Clair de lune" finds the Suite bergamasque movement |
+
+Any recording counts, as long as it names the composer somewhere (artist,
+album or title) or shares enough of the title. A track that names a
+different composer is never used. This applies everywhere songs get
+matched: Spotify import and generated playlists.
+
+When the piece isn't in your library, Lidarr gets asked for the
+composer's album by surname ("Chopin Nocturnes"), because that's how
+MusicBrainz files classical albums.
+
+There's nothing to set up. The composer list lives in
+`server/src/classical.ts`. Composers who aren't on it get normal
+matching, and adding one is a single line.
+
 ## Tasks
 
 Settings → Admin has a Tasks list, Jellyfin-style: every recurring chore

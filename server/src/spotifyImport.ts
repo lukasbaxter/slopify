@@ -26,6 +26,7 @@ import { startJob, jobOut, type Job } from './jobs.js';
 import type { Lidarr } from './lidarr.js';
 import { config } from './config.js';
 import { recordRequest } from './downloads.js';
+import { composerOf, findClassicalRelease } from './classical.js';
 
 type Song = { artist: string; title: string; album?: string };
 type Play = Song & { at: number };
@@ -197,6 +198,11 @@ export async function requestPending(db: DB, lidarr: Lidarr, log: (m: string) =>
     const k = `${norm(r.artist)}|${r.kind === 'album' ? '' : norm(r.title)}|${norm(r.album || (r.kind === 'album' ? r.title : ''))}`;
     if (!releases.has(k)) releases.set(k, (async () => {
       const albumName = r.kind === 'album' ? r.title : r.album;
+      // A composer's song: search the way MusicBrainz files classical albums (classical.ts).
+      if (r.kind !== 'album' && composerOf(r.artist)) {
+        const hit = await findClassicalRelease((q) => lidarr.search(q), r);
+        if (hit) return { album_id: hit.album_id, artist: hit.artist, title: hit.title };
+      }
       if (albumName) {
         const found = await lidarr.search(`${r.artist} ${albumName}`);
         const hit = found.find((x) => norm(x.title) === norm(albumName) && norm(x.artist) === norm(r.artist)) || found.find((x) => norm(x.title) === norm(albumName));
@@ -256,6 +262,8 @@ export function fillPending(db: DB, log: (m: string) => void = () => {}, opts: {
     const albumsTouched = (db.prepare('SELECT COUNT(*) n FROM albums WHERE added_at >= ?').get(opts.since) as any).n > 0;
     rows = rows.filter((r) => {
       if (r.kind === 'album') return albumsTouched;
+      // A composer's song arrives under the performer's name: any new track may be it.
+      if (composerOf(r.artist)) return touched.length > 0;
       const na = norm(r.artist);
       return touched.some((as) => as.some((a) => a === na || a.includes(na) || na.includes(a)));
     });

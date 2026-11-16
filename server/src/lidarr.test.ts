@@ -56,7 +56,7 @@ function fakeLidarr() {
     if (p.startsWith('/album/lookup')) return json(state.albums.length ? state.albums : [{ foreignAlbumId: 'mb-worlds', title: 'Worlds', artist: { artistName: 'Porter Robinson', foreignArtistId: 'fa-1', images: [] } }]);
     // The real one takes 20 s on a large database: the client must not use it.
     if (p === '/album/monitor' && state.slowBulkMonitor) throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
-    if (/^\/album\/\d+$/.test(p) && method === 'PUT') { const a = state.albums.find((x) => x.id === Number(p.split('/')[2])); a.monitored = JSON.parse(init.body).monitored; return json(a); }
+    if (/^\/album\/\d+$/.test(p) && method === 'PUT') { const a = state.albums.find((x) => x.id === Number(p.split('/')[2])); const b = JSON.parse(init.body); a.monitored = b.monitored; if (b.releases) { a.releases = b.releases; a.statistics = { ...a.statistics, trackFileCount: 0 }; } return json(a); }
     if (p === '/album/monitor') { const b = JSON.parse(init.body); for (const a of state.albums) if (b.albumIds.includes(a.id)) a.monitored = b.monitored; return json({}); }
     if (p === '/queue') return json(paged(state.queue, u));
     if (p === '/wanted/missing') return json(paged(state.albums.filter((a) => a.monitored && !a.statistics.trackFileCount).map((a) => ({ id: a.id, foreignAlbumId: a.foreignAlbumId })), u));
@@ -374,5 +374,40 @@ describe('lidarr import webhook', () => {
     expect((await app.inject({ method: 'POST', url: '/api/hooks/lidarr', headers: { 'x-api-key': 'sekret' }, payload: { eventType: 'Test' } })).json()).toEqual({ ok: true });
     expect((await app.inject({ method: 'POST', url: '/api/hooks/lidarr', headers: { 'x-api-key': 'wrong' }, payload: { eventType: 'Test' } })).statusCode).toBe(401);
     await app.close();
+  });
+});
+
+describe('lidarr: a sped-up edition is not the album', () => {
+  const rel = (id: number, title: string, monitored: boolean, extra: any = {}) => ({ id, title, monitored, trackCount: 13, country: ['[Worldwide]'], disambiguation: '', ...extra });
+  const summer = () => fakeAlbum(70, { title: 'Last Day of Summer', monitored: false, statistics: { totalTrackCount: 13, trackFileCount: 13 }, artist: { id: 10000, artistName: 'Summer Walker', monitored: true },
+    releases: [rel(1, 'Last Day Of Summer (Sped Up)', true, { country: ['United States'] }), rel(2, 'Last Day of Summer', false, { disambiguation: 'clean' }), rel(3, 'Last Day of Summer', false)] });
+
+  it('a request moves the album onto the original release and wants it', async () => {
+    const { state, fetcher } = fakeLidarr();
+    state.artists.push({ id: 10000, artistName: 'Summer Walker', monitored: true });
+    state.albums.push(summer());
+    const r = await client(fetcher).request('mb-70');
+    expect(r.status).toBe('queued');
+    expect(state.albums[0].releases.filter((x: any) => x.monitored).map((x: any) => x.id)).toEqual([3]);
+    expect(state.albums[0].monitored).toBe(true);
+  });
+
+  it('leaves a normal release alone, and an album that is itself sped up', async () => {
+    const { state, fetcher } = fakeLidarr();
+    state.albums.push(fakeAlbum(71, { releases: [rel(1, 'Album 71', true)] }), fakeAlbum(72, { title: 'Hits (Sped Up)', releases: [rel(1, 'Hits (Sped Up)', true), rel(2, 'Hits', false)] }));
+    const l = client(fetcher);
+    expect(await l.preferOriginal(71)).toBe(false);
+    expect(await l.preferOriginal(72)).toBe(false);
+  });
+
+  it('the import hook catches a sped-up folder coming in', async () => {
+    const app = Fastify();
+    const asked: number[] = [];
+    (app as any).scanFolders = async () => {};
+    registerLidarrHook(app, { apiKey: 'k', musicDir: '/music', lidarrRoot: '/music', lidarr: { preferOriginal: async (id: number) => { asked.push(id); return true; } } });
+    const hook = (dir: string) => app.inject({ method: 'POST', url: '/api/hooks/lidarr', headers: { 'x-api-key': 'k' }, payload: { eventType: 'Download', album: { id: 70, title: 'Last Day of Summer' }, trackFiles: [{ path: `/music/Summer Walker/${dir}/01. BP.flac` }] } });
+    await hook('Last Day Of Summer (Sped Up)');
+    await hook('Last Day of Summer');
+    expect(asked).toEqual([70]);
   });
 });

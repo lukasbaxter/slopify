@@ -132,7 +132,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerSpotifyImport(app, db, dataDir, { lidarr });
   const soularr = soularrClient(config.soularr);
   registerDownloads(app, db, { lidarr, soularr });
-  registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root });
+  registerLidarrHook(app, { apiKey: config.lidarr.apiKey, musicDir, lidarrRoot: config.lidarr.root, lidarr });
   registerTasks(app, db, [...builtinTasks(app, {
     db, lidarr, cacheDir, musicDir,
     headsEnabled: config.headsEnabled, headSeconds: config.headSeconds, pauseMs: config.scanPauseMs,

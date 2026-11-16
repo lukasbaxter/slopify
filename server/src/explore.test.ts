@@ -24,6 +24,17 @@ describe('matching library tracks and finding them on Soulseek', () => {
     expect(matchTrack(db, { title: first.title, artist: 'Completely Different Artist' })).toBeNull();
   });
 
+  it('never takes a sped-up, slowed or live take for the song itself', () => {
+    db.prepare("INSERT INTO albums (id, name, artist, dir, added_at, sort_name) VALUES ('sw', 'Last Day of Summer', 'Summer Walker', 'sw', 1, 'Last Day of Summer')").run();
+    const add = (id: string, title: string) => db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES (?, ?, 1, 1, ?, 'Summer Walker', '["Summer Walker"]', '[]', 'sw', 'Last Day of Summer', 'Summer Walker', 1)`).run(id, `/x/${id}.flac`, title);
+    add('bp-fast', 'BP (Sped Up)');
+    expect(matchTrack(db, { title: 'BP', artist: 'Summer Walker' })).toBeNull();
+    expect(matchTrack(db, { title: 'BP (Sped Up)', artist: 'Summer Walker' })).toBe('bp-fast');
+    add('bp', 'BP');
+    expect(matchTrack(db, { title: 'BP', artist: 'Summer Walker' })).toBe('bp');
+  });
+
   it('picks the best Soulseek file: flac over mp3, mp3 only at 256 kbps+, title and artist in the path', async () => {
     const fetcher: any = async (url: string, init?: any) => {
       if (url.endsWith('/api/v0/searches') && init?.method === 'POST') return { ok: true, json: async () => ({ id: 's1' }) };

@@ -232,6 +232,26 @@ export function lidarrClient(opts: LidarrOptions) {
     if (al.monitored !== monitored) await api(`/album/${albumId}`, { method: 'PUT', body: JSON.stringify({ ...al, monitored }), timeoutMs: 60000 });
   };
 
+  // MusicBrainz files a sped-up or slowed edition as one more release of the
+  // album, and Lidarr happily picks it (or switches to it when Soulseek hands
+  // it that folder): "Last Day of Summer" came in as "Last Day Of Summer (Sped
+  // Up)" and counted as done. Put the album back on a normal release; the
+  // files already there stay on disk.
+  const preferOriginal = async (albumId: number): Promise<boolean> => {
+    const al = await api(`/album/${albumId}`);
+    const rels: any[] = al?.releases || [];
+    const cur = rels.find((r) => r.monitored);
+    if (!cur || !isAltVersion(cur.title, al.title)) return false;
+    const pick = rels.filter((r) => !isAltVersion(r.title, al.title))
+      .sort((a, b) => Number(/clean/i.test(a.disambiguation || '')) - Number(/clean/i.test(b.disambiguation || ''))
+        || (b.trackCount || 0) - (a.trackCount || 0)
+        || Number((b.country || []).includes('[Worldwide]')) - Number((a.country || []).includes('[Worldwide]')))[0];
+    if (!pick) return false;
+    await api(`/album/${albumId}`, { method: 'PUT', body: JSON.stringify({ ...al, releases: rels.map((r) => ({ ...r, monitored: r.id === pick.id })) }), timeoutMs: 60000 });
+    log(`lidarr: ${al.title} was on "${cur.title}", switched to the original release`);
+    return true;
+  };
+
   // Until no refresh of this artist is queued or running (at most waitMs).
   const refreshDone = async (artistId: number, waitMs = 120000) => {
     const until = Date.now() + waitMs;
@@ -412,6 +432,7 @@ export function lidarrClient(opts: LidarrOptions) {
         if (!album) throw new Error('Lidarr is still fetching the artist, try again shortly');
       }
       const out = { id: album.id as number, album_id: fid, artist: album.artist?.artistName || '', title: album.title as string };
+      if (await preferOriginal(album.id).catch(() => false)) album = (await api(`/album/${album.id}`)) ?? album;
       if ((album.statistics?.trackFileCount ?? 0) >= (album.statistics?.totalTrackCount || 1)) return { ...out, status: 'exists' };
       // The wanted list only lists albums of monitored artists, so both the
       // artist and the album have to end up monitored. A brand-new artist is
@@ -514,6 +535,8 @@ export function lidarrClient(opts: LidarrOptions) {
       cache.delete('activity');
     },
 
+    preferOriginal,
+
     // Want an album again without searching the indexers: back on the wanted
     // list, where the Soulseek watcher finds it on its next round.
     async monitor(albumId: number) {
@@ -568,10 +591,14 @@ export function lidarrClient(opts: LidarrOptions) {
 
 export type Lidarr = ReturnType<typeof lidarrClient>;
 
+// A sped-up, slowed, nightcore... edition, when the album itself is not one.
+const ALT = /\b(sped[ -]?up|speed[ -]?up|slowed|reverb|nightcore|8d audio|daycore)\b/i;
+export const isAltVersion = (release: string, album: string) => ALT.test(release || '') && !ALT.test(album || '');
+
 // Lidarr tells us the moment it imports: scan just those folders so the
 // album is playable seconds later. Point a Lidarr Webhook notification
 // (on Release Import + on Upgrade) at /api/hooks/lidarr?key=<LIDARR_API_KEY>.
-export function registerLidarrHook(app: FastifyInstance, opts: { apiKey: string; musicDir: string; lidarrRoot: string }) {
+export function registerLidarrHook(app: FastifyInstance, opts: { apiKey: string; musicDir: string; lidarrRoot: string; lidarr?: Pick<Lidarr, 'preferOriginal'> }) {
   // Constant-time compare (hashed first so lengths always match); the key
   // may come as an X-Api-Key header - preferred, keeps it out of access
   // logs - or in the query string for notifications set up before that.
@@ -593,6 +620,9 @@ export function registerLidarrHook(app: FastifyInstance, opts: { apiKey: string;
     app.log.info(`lidarr import: ${b.artist?.name || ''} - ${b.album?.title || ''} (${dirs.join(', ')})`);
     const scan = (app as any).scanFolders;
     if (scan) await scan(dirs).catch((e: any) => app.log.error(`lidarr import scan: ${e.message}`));
+    // A sped-up edition imported in place of the album: still want the original.
+    if (b.album?.id && opts.lidarr && ALT.test(String(b.album?.releaseTitle || '') + ' ' + dirs.join(' ')) && !ALT.test(String(b.album?.title || '')))
+      await opts.lidarr.preferOriginal(Number(b.album.id)).catch((e: any) => app.log.warn(`lidarr original release: ${e.message}`));
     return { ok: true, scanned: dirs };
   });
 }

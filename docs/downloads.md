@@ -73,6 +73,15 @@ There's nothing to set up. The composer list lives in
 `server/src/classical.ts`. Composers who aren't on it get normal
 matching, and adding one is a single line.
 
+## Sped-up and slowed editions
+
+MusicBrainz lists a "(Sped Up)" or "(Slowed)" edition as one more release of
+the album, so Lidarr can pick it, or switch to it when Soulseek hands it that
+folder. When a request or an import lands on one, Slopify moves the album back
+to a normal release, so the original is still wanted. The sped-up files stay
+where they are. When matching songs (Spotify import, playlists), "BP" never
+counts as "BP (Sped Up)", a slowed take, a remix or a live version.
+
 ## Tasks
 
 Settings → Admin has a Tasks list, Jellyfin-style: every recurring chore

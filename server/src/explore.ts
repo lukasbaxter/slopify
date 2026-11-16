@@ -32,6 +32,8 @@ export function matchTrack(db: DB, t: LbTrack): string | null {
   return matchByName(db, t) ?? matchClassical(db, t);
 }
 
+const OTHER_TAKE = /\b(sped[ -]?up|speed[ -]?up|slowed|reverb|nightcore|daycore|8d|instrumental|karaoke|a ?cappella|acapella|remix|remixed|live)\b/i;
+
 function matchByName(db: DB, t: LbTrack): string | null {
   // Title words through FTS (all of them), the artist checked loosely after:
   // "feat." credits and spelling variants must not lose the match. Title +
@@ -48,6 +50,9 @@ function matchByName(db: DB, t: LbTrack): string | null {
   let best: { id: string; score: number } | null = null;
   for (const r of rows) {
     const rt = norm(r.title); if (rt !== nt && !rt.startsWith(nt) && !nt.startsWith(rt)) continue;
+    // "BP" is not "BP (Sped Up)": a longer title may add a credit or a
+    // "Remastered", never turn the song into another version of it.
+    if (OTHER_TAKE.test(r.title) && !OTHER_TAKE.test(t.title)) continue;
     const artists = [r.artist, ...JSON.parse(r.artists || '[]')].map(norm);
     const artistOk = artists.some((a) => a === na || a.includes(na) || na.includes(a));
     if (!artistOk) continue;

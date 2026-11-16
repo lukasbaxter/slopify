@@ -13,7 +13,7 @@ Every lookup can be turned off.
 | --- | --- | --- | --- |
 | [Deezer](https://www.deezer.com) API | Artist pictures, album covers, genres, similar artists | Artist and album names | Turn off the **Fetch lyrics & artwork**, **Discovery** and **Fill in discographies** tasks (Settings › Tasks) |
 | [LrcLib](https://lrclib.net) | Lyrics | Artist, title, album, duration | **Fetch lyrics & artwork** task |
-| [NetEase Cloud Music](https://music.163.com), [Genius](https://genius.com) | Finding lyrics when you press **Sync Lyrics** | Artist and title | Only runs when someone presses Sync Lyrics |
+| [NetEase Cloud Music](https://music.163.com), [Genius](https://genius.com) | Lyrics LrcLib doesn't have, and finding lyrics when you press **Sync Lyrics** | Artist, title (and duration for NetEase) | **Fetch lyrics & artwork** task; Sync Lyrics only runs when someone presses it |
 | [TheAudioDB](https://www.theaudiodb.com) | Wide artist photos for artist page banners | Artist names | `THEAUDIODB_KEY=` (empty), or the **Fetch lyrics & artwork** task |
 | [MusicBrainz](https://musicbrainz.org) and [ListenBrainz](https://listenbrainz.org) | The **Popular** order on artist pages | Artist names | Not yet switchable; the page falls back to your own plays when they cannot be reached |
 | ListenBrainz (your account) | Scrobbling | **Your listening history**, sent to your own ListenBrainz account | Off unless a person adds their ListenBrainz token in Settings |

@@ -32,3 +32,8 @@ export function parseLrc(text: string): LyricLine[] {
 }
 
 export const isSynced = (lines: LyricLine[]) => lines.some((l) => l.start != null);
+
+export const toLrc = (lines: LyricLine[]) => lines.map((l) => {
+  const ms = Math.max(0, l.start ?? 0); const m = Math.floor(ms / 60000); const s = (ms % 60000) / 1000;
+  return `[${String(m).padStart(2, '0')}:${s.toFixed(2).padStart(5, '0')}]${l.text}`;
+}).join('\n') + '\n';

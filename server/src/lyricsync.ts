@@ -27,7 +27,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
-import { parseLrc, type LyricLine } from './lyrics.js';
+import { parseLrc, toLrc, type LyricLine } from './lyrics.js';
 import { lrclibLookup } from './enrich.js';
 import { fromNetease, fromGenius, titleVariants, type Candidate, type Fetch } from './lyricsources.js';
 import type { TaskDef, TaskCtx } from './tasks.js';
@@ -81,10 +81,7 @@ export function timePlain(orig: LyricLine[], aligned: AlignedLine[], score: numb
   return { state: 'synced', lines: orig.map((l, i) => ({ start: starts[i], text: l.text })) };
 }
 
-export const toLrc = (lines: LyricLine[]) => lines.map((l) => {
-  const ms = Math.max(0, l.start ?? 0); const m = Math.floor(ms / 60000); const s = (ms % 60000) / 1000;
-  return `[${String(m).padStart(2, '0')}:${s.toFixed(2).padStart(5, '0')}]${l.text}`;
-}).join('\n') + '\n';
+export { toLrc };
 
 // --- the GPU ----------------------------------------------------------------
 

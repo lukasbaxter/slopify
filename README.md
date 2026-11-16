@@ -105,7 +105,7 @@ In 22 languages. Set `LANGUAGE` in compose for everyone (e.g. `de`, `ja`,
 | **Lidarr** | Full discographies and requests from inside the app ([guide](docs/downloads.md)) |
 | **Spotify import** | Upload your Spotify data download: playlists, Liked Songs, saved albums and listening history come over. Anything you don't have gets requested |
 | **ListenBrainz** | Scrobbling, per person |
-| **LrcLib** | Lyrics, if you don't have your own `.lrc` files. Can also sync them on a GPU ([guide](docs/lyric-sync.md)) |
+| **LrcLib, NetEase, Genius** | Lyrics, if you don't have your own `.lrc` files: LrcLib first, NetEase for timed lyrics it doesn't have, Genius for plain ones. Can also sync them on a GPU ([guide](docs/lyric-sync.md)) |
 | **Your GPU** | Optional: the [brain](brain/README.md) learns how your house listens and what each song sounds like, and picks what plays next. Type a vibe and it makes a playlist from your library. NVIDIA, Intel Arc or CPU, one extra container |
 
 Nothing phones home. [PRIVACY.md](docs/PRIVACY.md) lists every outside service it

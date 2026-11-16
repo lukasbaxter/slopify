@@ -12,7 +12,8 @@ import { promisify } from 'node:util';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { DB } from './db.js';
-import { parseLrc, isSynced, type LyricLine } from './lyrics.js';
+import { parseLrc, isSynced, toLrc, type LyricLine } from './lyrics.js';
+import { fromNetease, fromGenius, titleVariants, type Candidate, type Fetch } from './lyricsources.js';
 import { storeArtwork, storeBanner } from './artwork.js';
 
 const run = promisify(execFile);
@@ -73,12 +74,21 @@ export function storeLyricsFromRecord(db: DB, trackId: string, rec: LrclibRecord
   return kind;
 }
 
+// Lyrics from somewhere other than LrcLib; a .lrc that came with the song wins.
+function storeLines(db: DB, trackId: string, kind: 'synced' | 'plain', lines: LyricLine[], source: string): 'synced' | 'plain' {
+  db.prepare(`INSERT INTO lyrics (track_id, kind, lines, source, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET kind = excluded.kind, lines = excluded.lines, source = excluded.source, fetched_at = excluded.fetched_at WHERE lyrics.kind != 'synced' OR lyrics.source != 'sidecar'`).run(trackId, kind, JSON.stringify(lines), source, Date.now());
+  return kind;
+}
+
 export type EnrichOptions = {
   fetcher?: Fetcher; log?: (m: string) => void; max?: number; acoustidKey?: string; dataDir?: string; bytes?: (url: string) => Promise<Buffer | null>;
   // With saveToLibrary, everything fetched lands in the library too (lyrics
   // as .lrc beside the song, pictures as artist.jpg / cover.jpg in their
   // folders), so it is never fetched again - by this install or any other.
   musicDir?: string; saveToLibrary?: boolean;
+  // NetEase and Genius, asked when LrcLib has nothing (defaults to the real
+  // sites; with only `fetcher` given, that one answers them too).
+  web?: Fetch;
 };
 
 // Never clobbers: an existing non-empty file wins, whatever is in it. Returns
@@ -106,19 +116,35 @@ export async function enrichPass(db: DB, opts: EnrichOptions = {}): Promise<{ do
   db.exec(`UPDATE enrich SET lyrics_state = 'done' WHERE lyrics_state != 'done' AND track_id IN (SELECT track_id FROM lyrics)`);
   const due = db.prepare(`SELECT e.track_id, t.title, t.artist, t.artists, t.album, t.duration_ms, t.path, e.lyrics_tries FROM enrich e JOIN tracks t ON t.id = e.track_id WHERE e.lyrics_state IN ('pending', 'missing') AND e.lyrics_next <= ? ORDER BY e.lyrics_next, t.added_at DESC LIMIT ?`).all(Date.now(), opts.max ?? 500) as any[];
   const stats = { done: 0, missing: 0, instrumental: 0 };
+  // A site that keeps failing (throttled, blocked) is left alone for the
+  // rest of the pass instead of being asked 500 times.
+  const web: Fetch | undefined = opts.web ?? (opts.fetcher ? ((url) => opts.fetcher!(url) as any) : undefined);
+  const strikes = { netease: 0, genius: 0 };
+  const ask = async (site: 'netease' | 'genius', go: () => Promise<Candidate | null>) => {
+    if (strikes[site] >= 5) return null;
+    try { const c = await go(); strikes[site] = 0; return c; } catch (e: any) { strikes[site]++; log(`${site} ${e.message}`); return null; }
+  };
   for (const row of due) {
     const artists: string[] = JSON.parse(row.artists || '[]');
+    const main = artists[0] || row.artist;
     let rec: LrclibRecord | null = null;
     try {
-      // main artist first, then the joined credit
-      for (const artist of [...new Set([artists[0] || row.artist, row.artist])]) { rec = await lrclibLookup(db, fetcher, { title: row.title, artist, album: row.album, durationMs: row.duration_ms }); if (rec) break; }
+      // main artist first, then the joined credit, then shorter forms of the
+      // title ("Love Sick, Pt. 1 (feat. A, B & C)" is "Love Sick, Pt. 1" there)
+      const tries = [...new Set([main, row.artist])].map((a) => [a, row.title] as const);
+      for (const v of titleVariants(row.title).slice(1)) tries.push([main, v]);
+      for (const [artist, title] of tries) { rec = await lrclibLookup(db, fetcher, { title, artist, album: row.album, durationMs: row.duration_ms }); if (rec) break; }
     } catch (e: any) { log(`lrclib ${row.title}: ${e.message}`); }
-    const kind = rec ? storeLyricsFromRecord(db, row.track_id, rec) : null;
-    // The answer goes beside the song too, as the .lrc the scanner reads.
-    if (opts.saveToLibrary && rec && (kind === 'synced' || kind === 'plain')) {
-      const text = kind === 'synced' ? rec.syncedLyrics : rec.plainLyrics;
-      if (text) await writeNew(row.path.replace(/\.[^.]+$/, '.lrc'), text, log);
+    let kind = rec ? storeLyricsFromRecord(db, row.track_id, rec) : null;
+    let text = rec && kind === 'synced' ? rec.syncedLyrics : rec && kind === 'plain' ? rec.plainLyrics : null;
+    // Not on LrcLib: NetEase (timed, matched on duration too), then Genius (plain).
+    if (!rec) {
+      const c = await ask('netease', () => fromNetease({ artist: main, title: row.title, durationMs: row.duration_ms, strict: true }, web))
+        ?? await ask('genius', () => fromGenius({ artist: main, title: row.title, strict: true }, web));
+      if (c) { kind = storeLines(db, row.track_id, c.kind, c.lines, c.source); text = c.kind === 'synced' ? toLrc(c.lines) : c.lines.map((l) => l.text).join('\n') + '\n'; }
     }
+    // The answer goes beside the song too, as the .lrc the scanner reads.
+    if (opts.saveToLibrary && text && (kind === 'synced' || kind === 'plain')) await writeNew(row.path.replace(/\.[^.]+$/, '.lrc'), text, log);
     if (kind) { db.prepare(`UPDATE enrich SET lyrics_state = 'done', updated = ? WHERE track_id = ?`).run(Date.now(), row.track_id); if (kind === 'instrumental') stats.instrumental++; else stats.done++; }
     else { const tries = row.lyrics_tries + 1; const next = Date.now() + (tries <= 7 ? DAY : 7 * DAY); db.prepare(`UPDATE enrich SET lyrics_state = 'missing', lyrics_tries = ?, lyrics_next = ?, updated = ? WHERE track_id = ?`).run(tries, next, Date.now(), row.track_id); stats.missing++; }
     await new Promise((r) => setTimeout(r, opts.fetcher ? 0 : 250)); // be polite to LrcLib

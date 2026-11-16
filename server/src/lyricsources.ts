@@ -28,7 +28,15 @@ export function titleVariants(t: string): string[] {
   v.add(noBrackets.split(/\s+[-–—]\s+/)[0].replace(/\s+(?:feat\.?|ft\.?|featuring|with|x)\s+.*$/i, '').trim());
   return [...v].filter(Boolean);
 }
-const sameTitle = (theirs: string, ours: string) => {
+// Strict: nothing will line the words up with the song afterwards (the
+// hourly lyrics fetch), so only a "(... Remix)", "- Live", "(From X)" kind of
+// tail may differ. "Intro (Roe How You Feelin')" is not "Intro (Twin Towers 2)".
+const VERSION = /\b(?:remix|mix|edit|version|remaster(?:ed)?|live|from|mono|stereo|acoustic|demo|bonus|explicit|clean|single|radio|extended|original|vs)\b/i;
+const strictForm = (t: string) => normTitle(String(t || '')
+  .replace(/\s*[([]([^)\]]*)[)\]]/g, (m, inner) => (VERSION.test(inner) ? '' : m))
+  .replace(/\s+[-–—]\s+(.*)$/, (m, tail) => (VERSION.test(tail) ? '' : m)));
+const sameTitle = (theirs: string, ours: string, strict = false) => {
+  if (strict) return strictForm(theirs) === strictForm(ours);
   const mine = new Set(titleVariants(ours).map(normTitle));
   return titleVariants(theirs).some((x) => mine.has(normTitle(x)));
 };
@@ -43,11 +51,12 @@ const CREDIT = /^\s*(?:作词|作曲|编曲|制作人|混音|母带|和声|录�
 
 export function cleanNetease(lrc: string): LyricLine[] | null {
   if (!lrc || /纯音乐/.test(lrc)) return null; // "pure music": no lyrics
+  lrc = lrc.replace(/\[(\d+):(\d+):(\d+)\]/g, '[$1:$2.$3]'); // some files write [00:01:066]
   const lines = parseLrc(lrc).filter((l) => l.text && !CREDIT.test(l.text));
   return lines.length >= 4 ? lines : null;
 }
 
-export async function fromNetease(q: { artist: string; title: string; durationMs: number }, f: Fetch = defaultFetch): Promise<Candidate | null> {
+export async function fromNetease(q: { artist: string; title: string; durationMs: number; strict?: boolean }, f: Fetch = defaultFetch): Promise<Candidate | null> {
   const H = { headers: { Referer: 'https://music.163.com' } };
   const seen = new Set<number>();
   const hits: any[] = [];
@@ -55,7 +64,7 @@ export async function fromNetease(q: { artist: string; title: string; durationMs
     const r = await f(`https://music.163.com/api/search/get?${new URLSearchParams({ s: `${q.artist} ${title}`, type: '1', limit: '10' })}`, H);
     if (!r.ok) throw new Error(`netease search ${r.status}`);
     for (const s of ((await r.json())?.result?.songs || []) as any[]) {
-      if (seen.has(s.id) || !sameTitle(s.name, q.title) || !(s.artists || []).some((a: any) => sameArtist(a.name, q.artist)) || Math.abs((s.duration || 0) - q.durationMs) > 4000) continue;
+      if (seen.has(s.id) || !sameTitle(s.name, q.title, q.strict) || !(s.artists || []).some((a: any) => sameArtist(a.name, q.artist)) || Math.abs((s.duration || 0) - q.durationMs) > 4000) continue;
       seen.add(s.id); hits.push(s);
     }
     if (hits.length) break;
@@ -113,7 +122,7 @@ export function parseGeniusHtml(html: string): LyricLine[] | null {
   return lines.length >= 4 ? lines : null;
 }
 
-export async function fromGenius(q: { artist: string; title: string }, f: Fetch = defaultFetch): Promise<Candidate | null> {
+export async function fromGenius(q: { artist: string; title: string; strict?: boolean }, f: Fetch = defaultFetch): Promise<Candidate | null> {
   let hits: any[] = [];
   for (const title of titleVariants(q.title)) {
     const r = await f(`https://genius.com/api/search/multi?${new URLSearchParams({ q: `${q.artist} ${title}` })}`);
@@ -121,7 +130,7 @@ export async function fromGenius(q: { artist: string; title: string }, f: Fetch 
     const sections: any[] = (await r.json())?.response?.sections || [];
     hits = sections.filter((s) => s.type === 'song').flatMap((s) => s.hits || []).map((h) => h.result)
       .filter((s: any) => s && !/genius/i.test(s.primary_artist?.name || '') // translation and romanization pages
-        && sameTitle(s.title, q.title) && sameArtist(s.artist_names || s.primary_artist?.name || '', q.artist));
+        && sameTitle(s.title, q.title, q.strict) && sameArtist(s.artist_names || s.primary_artist?.name || '', q.artist));
     if (hits.length) break;
   }
   for (const s of hits.slice(0, 2)) {

@@ -204,3 +204,40 @@ describe('parseLrc with mixed timed and plain lines', () => {
     expect(lines[0].start).toBe(1000);
   });
 });
+
+describe('enrichment: lyrics LrcLib does not have', () => {
+  const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-lyricsrc-')));
+  const add = (id: string, title: string, artist: string, ms: number) => {
+    db.prepare("INSERT OR IGNORE INTO albums (id, name, artist, dir, added_at, sort_name) VALUES ('al', 'Single', ?, 'al', 1, 'Single')").run(artist);
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at, duration_ms)
+      VALUES (?, ?, 1, 1, ?, ?, ?, '[]', 'al', 'Single', ?, 1, ?)`).run(id, `/nowhere/${id}.flac`, title, artist, JSON.stringify([artist]), artist, ms);
+  };
+  add('feat', 'Love Sick, Pt. 1 (feat. Chamomile & Resident)', 'vagrxnt', 334530);
+  add('genius', 'Quiet Song', 'Some Band', 200000);
+  add('netease', 'Timed Song', 'Other Band', 180000);
+  add('none', 'Nobody Has This', 'Nobody', 100000);
+  add('intro', 'Intro (Roe How You Feelin)', 'Some Band', 90000);
+  const lrclib: Fetcher = async (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/get') && u.searchParams.get('track_name') === 'Love Sick, Pt. 1') return { status: 200, json: async () => ({ id: 9, trackName: 'Love Sick, Pt. 1', artistName: 'vagrxnt', albumName: 'Single', duration: 335, instrumental: false, plainLyrics: 'two evenings', syncedLyrics: '[00:01.00] two evenings' }) };
+    return u.pathname.endsWith('/get') ? { status: 404, json: async () => ({}) } : { status: 200, json: async () => [] };
+  };
+  const lrc = '[00:01.00] one\n[00:02.00] two\n[00:03.00] three\n[00:04.00] four';
+  const genius = '<div data-lyrics-container="true">line one<br>line two<br>line three<br>line four</div>';
+  const web = async (url: string) => {
+    const ok = (body: any) => ({ ok: true, status: 200, json: async () => body, text: async () => body });
+    if (url.includes('163.com/api/search')) return ok({ result: { songs: new URL(url).searchParams.get('s')?.includes('Timed Song') ? [{ id: 5, name: 'Timed Song', artists: [{ name: 'Other Band' }], duration: 180500 }] : [] } });
+    if (url.includes('163.com/api/song/lyric')) return ok({ lrc: { lyric: lrc } });
+    if (url.includes('genius.com/api/search')) return ok({ response: { sections: [{ type: 'song', hits: new URL(url).searchParams.get('q')?.includes('Quiet Song') ? [{ result: { title: 'Quiet Song', artist_names: 'Some Band', primary_artist: { name: 'Some Band' }, url: 'https://genius.com/quiet' } }]
+      : new URL(url).searchParams.get('q')?.includes('Intro') ? [{ result: { title: 'Intro (Twin Towers 2)', artist_names: 'Some Band', primary_artist: { name: 'Some Band' }, url: 'https://genius.com/quiet' } }] : [] }] } });
+    if (url === 'https://genius.com/quiet') return ok(genius);
+    return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+  };
+
+  it('finds them under a shorter title, on NetEase, or on Genius', async () => {
+    const r = await enrichPass(db, { fetcher: lrclib, web });
+    expect(r).toEqual({ done: 3, missing: 2, instrumental: 0 }); // another song's "Intro" is not this one
+    const got = Object.fromEntries((db.prepare('SELECT track_id, kind, source FROM lyrics').all() as any[]).map((x) => [x.track_id, `${x.kind} ${x.source}`]));
+    expect(got).toEqual({ feat: 'synced lrclib', netease: 'synced netease', genius: 'plain genius' });
+  });
+});

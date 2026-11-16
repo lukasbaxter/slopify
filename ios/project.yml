@@ -9,8 +9,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.201"
-    CURRENT_PROJECT_VERSION: "1201"
+    MARKETING_VERSION: "0.1.202"
+    CURRENT_PROJECT_VERSION: "1202"
     # The keychain group the app and its widgets share (the team prefix is added at signing).
     WIDGET_KEYCHAIN_GROUP: com.lukasbaxter.slopify.shared
 configFiles:

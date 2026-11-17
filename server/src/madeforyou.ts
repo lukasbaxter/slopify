@@ -26,6 +26,15 @@ const PROPS = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'
 const prop = (name: string) => { try { return fs.readFileSync(path.join(PROPS, `${name}.svg`)); } catch { return null; } };
 const CREAM = '#F1EADF';
 
+// Christmas by name. "Holiday" alone is not: Madonna's "Holiday", Loud
+// Luxury's album "Holiday Hills", Fontaines D.C.'s "Roman Holiday". A title
+// says "Holidays" ("Happy Holidays", "Home for the Holidays"); an album says
+// so plainly ("A Holiday Album", "Holiday Classics", "Happy Holidays").
+const XMAS_WORDS = 'christmas|xmas|x-mas|santa|jingle|sleigh|snowman|mistletoe|rudolph|reindeer|noel|navidad|silent night|holy night|deck the halls?|let it snow|winter wonderland|holidays';
+const XMAS_TITLE = new RegExp(`\\b(${XMAS_WORDS})\\b`, 'i');
+const XMAS_ALBUM = new RegExp(`\\b(${XMAS_WORDS}|holiday (album|songs?|collection|classics|hits|favou?rites|edition|season|cheer|music|wishes|party))\\b`, 'i');
+export const isChristmas = (title: string, album: string) => XMAS_TITLE.test(title) || XMAS_ALBUM.test(album);
+
 export type Theme = {
   id: string; title: string; kind: 'genre' | 'mood' | 'decade' | 'season' | 'thisis';
   description: string;
@@ -33,7 +42,8 @@ export type Theme = {
   genres?: string[];                  // canonical album genres (genres.ts) its songs come from
   notGenres?: string[];               // never these (a workout without Classical)
   years?: [number, number];
-  match?: RegExp;                     // the song's title or album must say so (Christmas)
+  match?: RegExp;                     // the song's title must say so (Christmas)
+  albumMatch?: RegExp;                // or its album's (default: match)
   text?: string;                      // what the brain listens for (CLAP words)
   season?: [string, string];          // MM-DD to MM-DD, inclusive (wraps the new year)
   color: string;
@@ -80,7 +90,7 @@ export const THEMES: Theme[] = [
   T({ id: '00s', title: '2000s Throwbacks', kind: 'decade', description: 'The 2000s, your way', words: ['2000s', '00s', 'two thousands', 'throwback'], years: [2000, 2009], color: '#8D67AB', look: 'artist', style: 'editorial', prop: 'dvd', tint: 'dark' }),
   T({ id: '10s', title: '2010s Hits', kind: 'decade', description: 'The 2010s, your way', words: ['2010s', '10s', 'twenty tens'], years: [2010, 2019], color: '#0D73EC', look: 'artist', style: 'editorial', prop: 'headphone', tint: 'dark' }),
   // Seasons: only while it is the season.
-  T({ id: 'christmas', title: 'Christmas Hits', kind: 'season', description: 'Christmas songs you love and more', words: ['christmas', 'xmas', 'holiday', 'holidays', 'navidad'], match: /\b(christmas|xmas|santa|jingle|sleigh|snowman|mistletoe|rudolph|reindeer|noel|navidad|silent night|holy night|deck the hall|let it snow|winter wonderland|feliz|holiday)/i, text: 'christmas music, sleigh bells, festive', season: ['11-15', '12-26'], color: '#C8102E', look: 'artist', style: 'editorial', ornaments: true }),
+  T({ id: 'christmas', title: 'Christmas Hits', kind: 'season', description: 'Christmas songs you love and more', words: ['christmas', 'xmas', 'holiday', 'holidays', 'navidad'], match: XMAS_TITLE, albumMatch: XMAS_ALBUM, text: 'christmas music, sleigh bells, festive', season: ['11-15', '12-26'], color: '#C8102E', look: 'artist', style: 'editorial', ornaments: true }),
   T({ id: 'summer', title: 'Summer Hits', kind: 'season', description: 'The sound of summer', words: ['summer', 'summer hits', 'beach'], text: 'summer, sunny, beach, upbeat', season: ['06-01', '08-31'], notGenres: ['Classical', 'Metal'], color: '#F59B23', look: 'artist', style: 'editorial', prop: 'sun', tint: 'dark' }),
   T({ id: 'halloween', title: 'Halloween', kind: 'season', description: 'Spooky season', words: ['halloween', 'spooky', 'scary'], match: /\b(halloween|spooky|monster|zombie|ghost|witch|haunted|thriller|scream|vampire|werewolf|graveyard|ghostbusters)/i, text: 'spooky, eerie, halloween', season: ['10-01', '10-31'], color: '#E0701B', look: 'object', prop: 'jack_o_lantern', tint: 'dark' }),
 ];
@@ -98,7 +108,6 @@ const dayOf = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
 // Versions nobody means in a themed playlist (ai.ts's list): instrumentals,
 // sped-up edits, karaoke, skits; and holiday songs outside the holiday one.
 const ODD = /\b(instrumental|karaoke|a ?cappella|sped[ -]?up|slowed|nightcore|skit|interlude|commentary)\b/i;
-const XMAS = /\b(christmas|xmas|santa|jingle|sleigh|mistletoe|rudolph|reindeer|holiday)\b/i;
 const LIVE = /[([][^)\]]*\b(live|soundcheck|demo)\b/i;
 
 type Row = { id: string; title: string; album: string; album_id: string; year: number | null; artist_ids: string };
@@ -130,14 +139,14 @@ function seeded(key: string) {
 // One listener's copy of a theme: track ids, best first. `sound` is what the
 // brain heard for the theme's words, leaning to this listener ([] without one).
 export function pickThemeTracks(lib: Lib, me: Listener, theme: Theme, sound: SoundHit[], day: string, size = SIZE): string[] {
-  const odd = (r: Row) => ODD.test(r.title) || LIVE.test(r.title) || LIVE.test(r.album) || (theme.id !== 'christmas' && (XMAS.test(r.title) || XMAS.test(r.album)));
+  const odd = (r: Row) => ODD.test(r.title) || LIVE.test(r.title) || LIVE.test(r.album) || (theme.id !== 'christmas' && isChristmas(r.title, r.album));
   const genreOk = (r: Row) => {
     const g = lib.genreOf.get(r.album_id);
     if (theme.notGenres && g && theme.notGenres.includes(g)) return false;
     return !theme.genres || (!!g && theme.genres.includes(g));
   };
   const yearOk = (r: Row) => !theme.years || (r.year != null && r.year >= theme.years[0] && r.year <= theme.years[1]);
-  const matchOk = (r: Row) => !theme.match || theme.match.test(r.title) || theme.match.test(r.album);
+  const matchOk = (r: Row) => !theme.match || theme.match.test(r.title) || (theme.albumMatch ?? theme.match).test(r.album);
   const fits = (r: Row) => !me.disliked.has(r.id) && !odd(r) && genreOk(r) && yearOk(r) && matchOk(r);
   const known = (id: string) => (me.plays.get(id) || 0) > 0 || me.liked.has(id);
   const rand = seeded(`${theme.id}|${day}`);

@@ -79,6 +79,16 @@ describe('a themed playlist for one listener', () => {
     expect([inSeason(wraps, new Date(2027, 0, 3)), inSeason(wraps, new Date(2026, 10, 30))]).toEqual([true, false]);
   });
 
+  it('"Holiday" alone is not Christmas: an album called Holiday Hills, a song called Holiday', () => {
+    const add = (id: string, title: string, album: string) => db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at, year)
+      VALUES (?, ?, 0, 0, ?, 'Artist p1', '[]', ?, 'al-p1', ?, 'Artist p1', 0, 2015)`).run(id, `/m/p1/${id}.flac`, title, JSON.stringify(['p1'.padEnd(32, '0')]), album);
+    add('redhanded', 'Red Handed', 'Holiday Hills'); add('holiday', 'Holiday', 'Album p1'); add('happyhols', 'Happy Holidays', 'Album p1');
+    const lib = loadLib(db), me = listenerOf(db, 'u1');
+    const xmas = pickThemeTracks(lib, me, theme('christmas'), [], 'd');
+    expect(xmas).not.toContain('redhanded'); expect(xmas).not.toContain('holiday'); expect(xmas).toContain('happyhols');
+    db.prepare("DELETE FROM tracks WHERE id IN ('redhanded', 'holiday', 'happyhols')").run();
+  });
+
   it('This Is an artist: their songs, most played first, one copy each, no odd versions', () => {
     const ids = pickThisIs(loadLib(db), listenerOf(db, 'u1'), 'r1'.padEnd(32, '0'));
     expect(ids[0]).toBe('r1-4');

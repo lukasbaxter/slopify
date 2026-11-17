@@ -9,6 +9,7 @@
 // cuts it out, once per photo), or a quiet one-colour object.
 import fs from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 import type { FastifyInstance } from 'fastify';
 import type { DB } from './db.js';
 import type { TaskDef } from './tasks.js';
@@ -62,13 +63,13 @@ export const THEMES: Theme[] = [
   T({ id: 'soundtrack', title: 'Soundtracks', kind: 'genre', description: 'Film, TV and game scores', words: ['soundtrack', 'score', 'film', 'movie', 'ost'], genres: ['Soundtrack'], text: 'film score, cinematic orchestra', color: '#2E3A59', look: 'object', prop: 'musical_score', tint: 'light' }),
   // Moods: by how songs sound (the brain), not by tags.
   T({ id: 'chill', title: 'Chill Vibes', kind: 'mood', description: 'Kick back', words: ['chill', 'relax', 'calm', 'chill vibes'], notGenres: ['Metal'], text: 'chill, relaxed, mellow, laid back', color: '#477D95', look: 'object', prop: 'palm_tree', tint: 'light' }),
-  T({ id: 'workout', title: 'Workout', kind: 'mood', description: 'High energy to keep you going', words: ['workout', 'gym', 'exercise', 'training', 'running'], notGenres: ['Classical', 'Jazz', 'Folk'], text: 'high energy workout music, fast tempo, hard hitting', color: '#E0701B', look: 'artist', style: 'behind', prop: 'high_voltage', tint: 'dark' }),
+  T({ id: 'workout', title: 'Workout', kind: 'mood', description: 'High energy to keep you going', words: ['workout', 'gym', 'exercise', 'training', 'running'], notGenres: ['Classical', 'Jazz', 'Folk', 'Soundtrack'], text: 'high energy workout music, fast tempo, hard hitting', color: '#E0701B', look: 'artist', style: 'behind', prop: 'high_voltage', tint: 'dark' }),
   T({ id: 'drive', title: 'Late Night Drive', kind: 'mood', description: 'For the road after dark', words: ['drive', 'driving', 'night drive', 'late night', 'car'], notGenres: ['Classical'], text: 'late night drive, moody synths, nocturnal', color: '#1B1F3B', look: 'object', prop: 'automobile', tint: 'light' }),
   T({ id: 'sad', title: 'Sad Songs', kind: 'mood', description: 'For when you need a cry', words: ['sad', 'sad songs', 'heartbreak', 'crying'], text: 'sad, melancholic, heartbreak ballad', color: '#2E3A59', look: 'object', prop: 'broken_heart', tint: 'light' }),
   T({ id: 'happy', title: 'Feel Good', kind: 'mood', description: 'Songs that lift you up', words: ['happy', 'feel good', 'good vibes', 'upbeat'], notGenres: ['Metal'], text: 'happy, upbeat, feel good, sunny', color: '#F59B23', look: 'object', prop: 'sun', tint: 'dark' }),
   T({ id: 'focus', title: 'Deep Focus', kind: 'mood', description: 'Keep calm and focus', words: ['focus', 'study', 'concentration', 'work'], notGenres: ['Hip-Hop', 'Metal'], text: 'instrumental focus music, calm, ambient, no vocals', color: '#5A6B7B', look: 'object', prop: 'books', tint: 'light' }),
   T({ id: 'lofi', title: 'Lofi Beats', kind: 'mood', description: 'Beats to relax and study to', words: ['lofi', 'lo-fi', 'lo fi', 'beats'], text: 'lofi hip hop beats, dusty, mellow, vinyl crackle', color: '#8D67AB', look: 'object', prop: 'headphone', tint: 'dark' }),
-  T({ id: 'party', title: 'Party', kind: 'mood', description: 'Turn it up', words: ['party', 'party songs', 'pregame'], notGenres: ['Classical', 'Jazz', 'Folk'], text: 'party anthem, loud, danceable, crowd', color: '#AF2896', look: 'object', prop: 'party_popper', tint: 'light' }),
+  T({ id: 'party', title: 'Party', kind: 'mood', description: 'Turn it up', words: ['party', 'party songs', 'pregame'], notGenres: ['Classical', 'Jazz', 'Folk', 'Soundtrack'], text: 'party anthem, loud, danceable, crowd', color: '#AF2896', look: 'object', prop: 'party_popper', tint: 'light' }),
   T({ id: 'rainy', title: 'Rainy Day', kind: 'mood', description: 'For grey skies', words: ['rain', 'rainy', 'rainy day'], notGenres: ['Metal'], text: 'rainy day, soft, acoustic, cozy, melancholic', color: '#5A6B7B', look: 'object', prop: 'cloud_with_rain', tint: 'light' }),
   T({ id: 'sleep', title: 'Sleep', kind: 'mood', description: 'Gentle songs to drift off to', words: ['sleep', 'sleeping', 'bedtime'], notGenres: ['Metal', 'Hip-Hop', 'Dance'], text: 'very calm, soft, slow, peaceful lullaby, ambient', color: '#1B1F3B', look: 'object', prop: 'crescent_moon', tint: 'cream' }),
   // Decades: the years on the songs.
@@ -212,6 +213,14 @@ export async function checkPhoto(db: DB, cacheDir: string, hash: string, opts: {
 }
 
 // ---- covers -----------------------------------------------------------------
+// A cut-out person worth a cover: they fill a fair part of their photo (a
+// figure far off in a landscape is a speck once it is cut out).
+async function bigEnough(cutout: Buffer) {
+  const { data } = await sharp(cutout).ensureAlpha().extractChannel(3).resize(64, 64, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
+  let on = 0, top = 64;
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) if (data[y * 64 + x] > 128) { on++; top = Math.min(top, y); }
+  return on / 4096 >= 0.12 && top <= 32;
+}
 const tintOf = (bg: string, t: Theme['tint']) => t === 'cream' ? CREAM : t === 'light' ? mix(bg, '#FFFFFF', 0.22) : mix(bg, '#000000', 0.28);
 export async function themeCover(db: DB, cacheDir: string, theme: Theme, artists: string[], day: string, opts: { log?: (m: string) => void; thisIs?: string } = {}): Promise<string | null> {
   const bg = theme.color;
@@ -225,7 +234,7 @@ export async function themeCover(db: DB, cacheDir: string, theme: Theme, artists
     for (const a of (opts.thisIs ? [opts.thisIs] : artists).slice(0, 8)) {
       const h = imageOf(a); if (!h) continue;
       const c = await checkPhoto(db, cacheDir, h, opts);
-      if (c?.ok && c.cutout) ok.push({ hash: h, cutout: c.cutout });
+      if (c?.ok && c.cutout && await bigEnough(c.cutout)) ok.push({ hash: h, cutout: c.cutout });
       if (ok.length >= 3) break;
     }
     if (ok.length) cut = ok[Math.floor(Date.parse(`${day}T00:00:00Z`) / 86400000) % ok.length];
@@ -234,7 +243,9 @@ export async function themeCover(db: DB, cacheDir: string, theme: Theme, artists
   let spec: CoverSpec;
   if (opts.thisIs) {
     const name = (db.prepare('SELECT name FROM artists WHERE id = ?').get(opts.thisIs) as { name: string } | undefined)?.name ?? theme.title;
-    spec = { title: name, style: 'thisis', color: bg, cutout: cut?.cutout };
+    // No photo to cut them out of: a microphone instead of an empty square.
+    const mic = cut ? null : prop('studio_microphone');
+    spec = { title: name, style: 'thisis', color: bg, cutout: cut?.cutout, props: mic ? [{ img: mic, x: 0.62, y: 0.72, size: 0.62, rot: -12, tint: mix(bg, '#000000', 0.25) }] : undefined };
   } else if (cut) {
     if (theme.ornaments) props.push({ hang: true, size: 0.17, tint: mix(bg, '#000000', 0.28) }, { hang: true, size: 0.13, tint: mix(bg, '#000000', 0.28) });
     else if (p) props.push({ img: p, size: 0.26, rot: -10, tint: tintOf(bg, theme.tint) });

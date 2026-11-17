@@ -256,7 +256,7 @@ export async function themeCover(db: DB, cacheDir: string, theme: Theme, artists
     else if (p) props.push({ img: p, x: 0.64, y: 0.72, size: 0.7, rot: -10, tint: tintOf(bg, theme.tint) });
     spec = { title: theme.title, style: 'object', color: bg, props };
   }
-  const look = ['made', theme.id, opts.thisIs ?? null, bg, cut?.hash ?? null, theme.prop ?? null, theme.ornaments ?? false, spec.style, spec.title];
+  const look = ['made', 2, theme.id, opts.thisIs ?? null, bg, cut?.hash ?? null, theme.prop ?? null, theme.ornaments ?? false, spec.style, spec.title, (spec.props || []).length];
   return coverArt(db, cacheDir, look, () => renderTypeCover(spec));
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "slopify",
   "private": true,
-  "version": "0.1.205",
+  "version": "0.1.206",
   "description": "Self-hosted music server + Spotify-style clients. One container, your music folder.",
   "workspaces": [
     "server",

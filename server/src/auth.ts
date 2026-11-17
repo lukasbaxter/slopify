@@ -132,7 +132,12 @@ export function registerAuth(app: FastifyInstance, db: DB) {
   });
 
   // --- admin: users, roles, invites ---
-  app.get('/api/users', { preHandler: (app as any).requireAdmin }, async () => ({ users: db.prepare('SELECT id, name, role, must_change_pw, created, last_seen FROM users ORDER BY name').all() }));
+  // Last seen: the newest use of any of the person's own sign-ins. Home
+  // Assistant (household/service) and the server's speaker token touch theirs
+  // on their own, so they never count.
+  app.get('/api/users', { preHandler: (app as any).requireAdmin }, async () => ({ users: db.prepare(`SELECT id, name, role, must_change_pw, created,
+      MAX(COALESCE(last_seen, 0), COALESCE((SELECT MAX(t.last_seen) FROM tokens t WHERE t.user_id = users.id AND t.kind NOT IN ('household', 'service', 'speaker')), 0)) AS last_seen
+    FROM users ORDER BY name`).all().map((u: any) => ({ ...u, last_seen: u.last_seen || null })) }));
   const Role = z.object({ role: z.enum(['admin', 'user']) });
   app.post('/api/users/:id/role', { preHandler: (app as any).requireAdmin }, async (req, reply) => {
     const body = Role.safeParse(req.body); if (!body.success) return reply.code(400).send({ error: 'role must be admin or user' });

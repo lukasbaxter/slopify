@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { buildServer } from './app.js';
 
@@ -89,5 +89,22 @@ describe('household sign-ins', () => {
     expect(devices.map((d: any) => d.device)).toContain('Home Assistant (household)');
     expect((await app.inject({ method: 'POST', url: `/api/users/${uid}/household-token`, headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/users/nope/household-token', headers: H })).statusCode).toBe(404);
+  });
+  it('last seen is the last time the person used the app, not their sign-in or Home Assistant', async () => {
+    const admin = (await login('admin', 'correct horse battery')).json().token;
+    const H = { authorization: `Bearer ${admin}` };
+    const t0 = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'], now: t0 });
+    try {
+      const code = (await app.inject({ method: 'POST', url: '/api/invites', headers: H })).json().code;
+      const reg = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { invite: code, username: 'seen-me', password: 'seen password 1' } })).json();
+      const hh = (await app.inject({ method: 'POST', url: `/api/users/${reg.user.id}/household-token`, headers: H, payload: { device: 'Home Assistant' } })).json().token;
+      vi.setSystemTime(t0 + 2 * 3600e3); // they open the app two hours later
+      expect((await app.inject({ url: '/api/auth/me', headers: { authorization: `Bearer ${reg.token}` } })).statusCode).toBe(200);
+      vi.setSystemTime(t0 + 5 * 3600e3); // Home Assistant keeps polling on its own
+      expect((await app.inject({ url: '/api/auth/me', headers: { authorization: `Bearer ${hh}` } })).statusCode).toBe(200);
+      const users = (await app.inject({ url: '/api/users', headers: H })).json().users;
+      expect(users.find((u: any) => u.name === 'seen-me').last_seen).toBe(t0 + 2 * 3600e3);
+    } finally { vi.useRealTimers(); }
   });
 });

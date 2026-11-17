@@ -153,3 +153,24 @@ def test_similar_by_sound_skips_and_caps_artists():
     assert ids[4] not in out and ids[7] not in out          # an odd version, one never heard
     assert sum(1 for t in out if info[t][1] == "A") <= 2
     assert out == similar(audio, ids, index, info, [ids[0]], 4, skip={ids[2]}, per_artist=2, seed=1)
+
+def test_similar_weighs_the_artists_whole_sound():
+    """One song by a far-off artist that happens to sound like the seed (a
+    K-pop group's one R&B ballad in a 6LACK mix) loses to songs by an artist
+    whose songs all sound close."""
+    pytest.importorskip("torch")
+    import numpy as np
+    from brain.recommend import similar, artist_sounds
+    ids = [f"{i:032x}" for i in range(1, 11)]; index = {t: i + 1 for i, t in enumerate(ids)}
+    vecs = [[1, 0, 0], [.97, .03, 0],                      # the seed; the far-off group's ballad
+            [0, 1, 0], [0, .9, .1], [0, 1, .1], [.1, 1, 0],  # the rest of that group
+            [.9, .1, .1], [.88, .1, .12], [.9, .12, .1], [.87, .13, .1]]  # an artist who is close all through
+    audio = np.zeros((len(ids) + 1, 3), np.float32)
+    for k, v in enumerate(vecs):
+        audio[k + 1] = np.array(v) / np.linalg.norm(v)
+    who = ["S", "K", "K", "K", "K", "K", "R", "R", "R", "R"]
+    names = sorted(set(who)); artist_of = np.array([0] + [names.index(a) + 1 for a in who])
+    info = {t: ("Song", who[i], "") for i, t in enumerate(ids)}
+    for seed in range(5):
+        out = similar(audio, ids, index, info, [ids[0]], 3, per_artist=3, seed=seed, artist_sound=artist_sounds(audio, artist_of))
+        assert ids[1] not in out and len(out) == 3 and all(info[t][1] == "R" for t in out)

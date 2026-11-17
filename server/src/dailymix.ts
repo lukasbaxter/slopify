@@ -7,7 +7,9 @@
 // With BRAIN_DAILY_MIXES=1 and the brain on, the songs around the artist are
 // the ones that sound like the artist's songs this listener plays most (CLAP,
 // brain /similar); a brain that is off, slow or old means the usual mix for
-// that one, never a wait past BRAIN_TIMEOUT_MS.
+// that one. A mix is made once a day, so it waits longer than a queue's
+// next song does (DAILY_BRAIN_MS): the brain answers in well under a second,
+// but Home asks for every mix at once.
 import crypto from 'node:crypto';
 import type { DB } from './db.js';
 import { config } from './config.js';
@@ -17,6 +19,7 @@ import { brainSimilar, dislikedOf } from './brain.js';
 // page (50) and Play on Home (100) agree.
 export const DAILY_SIZE = 100;
 const KEEP_MS = 30 * 86400_000; // mixes of artists not asked for in a month go
+const DAILY_BRAIN_MS = 10_000;
 
 export type DailyMix = { ids: string[]; from: 'brain' | 'own'; day: string };
 // Makes the mix's songs; `sounds` = the brain's picks, closest first; `day`
@@ -69,7 +72,7 @@ export async function dailyMix(db: DB, artistId: string, uid: string, make: Make
       if (o.brain ?? config.brain.dailyMixes) {
         const seeds = seedsOf(db, artistId, uid, day);
         const seed = crypto.createHash('sha1').update(key).digest().readUInt32BE(0);
-        sounds = await brainSimilar(db, { user: uid, seeds, n: DAILY_SIZE, exclude: seeds, seed }, { ...o.brainOpts, log: o.log });
+        sounds = await brainSimilar(db, { user: uid, seeds, n: DAILY_SIZE, exclude: seeds, seed }, { timeoutMs: DAILY_BRAIN_MS, ...o.brainOpts, log: o.log });
       }
       const ids = (await make(sounds ?? undefined, day)).map((t) => t.id).slice(0, DAILY_SIZE);
       const from = sounds ? 'brain' : 'own';

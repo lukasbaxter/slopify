@@ -1,6 +1,6 @@
 {
   "name": "slopify-mobile",
-  "version": "0.1.210",
+  "version": "0.1.211",
   "main": "index.js",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

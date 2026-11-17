@@ -3,6 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { buildServer } from './app.js';
 import { scanLibrary } from './scanner.js';
 import { playlistRecommendations, warmPlaylistReco } from './playlistreco.js';
+import { bumpLibraryVersion } from './db.js';
 
 const MUSIC = path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), '..', 'fixtures', 'music'));
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-reco-'));
@@ -56,5 +57,35 @@ describe("a playlist's Recommended", () => {
     expect(again).toEqual([]);
     expect(out2.map((t) => t.id)).toEqual(out.map((t) => t.id));
     expect(await warmPlaylistReco(db, { fetcher: deezer([]) })).toBe(0);
+  });
+
+  it('Refresh brings songs it has not shown yet; the same generation again gives the same ones', async () => {
+    // A playlist with a circle of eight related artists, six songs each.
+    const now = Date.now(); const ada = db.prepare("SELECT id FROM artists WHERE name = 'Ada Lovelace'").get();
+    const rel = Array.from({ length: 8 }, (_, i) => `Circle Artist ${i}`);
+    rel.forEach((name, i) => {
+      const id = `circle${i}`.padEnd(32, '0');
+      db.prepare('INSERT INTO artists (id, name, sort_name) VALUES (?, ?, ?)').run(id, name, name.toLowerCase());
+      db.prepare('INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES (?, ?, ?, ?, ?, 6, 0, ?)').run(`al-${id}`, `${name} Album`, id, name, `/m/${id}`, name);
+      for (let k = 0; k < 6; k++) db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+        VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, 0)`).run(`c${i}t${k}`.padEnd(32, '0'), `/m/c${i}t${k}.flac`, `Circle Song ${i}-${k}`, name, JSON.stringify([name]), JSON.stringify([id]), `al-${id}`, `${name} Album`, name);
+    });
+    db.prepare('INSERT INTO playlists (id, user_id, name, created, updated) VALUES (?, ?, ?, ?, ?)').run('pl_circle', 'u-reco', 'circle', now, now);
+    (db.prepare('SELECT id FROM tracks WHERE artist_ids LIKE ? LIMIT 3').all(`%"${ada.id}"%`) as any[]).forEach((t, i) => db.prepare('INSERT INTO playlist_tracks (playlist_id, pos, track_id, added) VALUES (?, ?, ?, ?)').run('pl_circle', i, t.id, now));
+    db.prepare("DELETE FROM ext_cache WHERE k LIKE 'dzrel:%'").run();
+    bumpLibraryVersion(db);
+    const f = (async (url: string) => {
+      const q = new URL(url).searchParams.get('q');
+      if (url.includes('/search/artist')) return ok({ data: [{ id: q === 'Ada Lovelace' ? 1 : 2, name: q, nb_fan: 5000 }] });
+      if (url.includes('/artist/1/related')) return ok({ data: rel.map((name) => ({ name })) });
+      return ok({ data: [] });
+    }) as any;
+    const gens: string[][] = [];
+    for (let g = 1; g <= 3; g++) gens.push((await playlistRecommendations(db, 'pl_circle', 'u-reco', { fetcher: f, n: 6, seed: g })).map((t) => t.id));
+    for (const x of gens) expect(x.length).toBe(6);
+    expect(new Set(gens.flat()).size).toBe(18); // three Refreshes, all different songs
+    expect((await playlistRecommendations(db, 'pl_circle', 'u-reco', { fetcher: f, n: 6, seed: 3 })).map((t) => t.id)).toEqual(gens[2]);
+    // Once the circle runs out it goes round again rather than going empty.
+    for (let g = 4; g < 14; g++) expect((await playlistRecommendations(db, 'pl_circle', 'u-reco', { fetcher: f, n: 6, seed: g })).length).toBe(6);
   });
 });

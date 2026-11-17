@@ -118,6 +118,29 @@ const playsOf = (db: DB, uid?: string) => new Map<string, number>(uid ? (db.prep
 // Most played first; a tie by id, so the order holds from one day to the next.
 const byPlays = (plays: Map<string, number>) => (a: TrackRow, b: TrackRow) => (plays.get(b.id) || 0) - (plays.get(a.id) || 0) || (a.id < b.id ? -1 : 1);
 
+const ODD_TAKE = /\b(instrumental|karaoke|a ?cappella|acapella|sped[ -]?up|slowed|nightcore|skit|interlude|commentary)\b/i;
+// Tags that say nothing about a scene on their own ("R&B" is K-pop ballads
+// and Drake both).
+const BROAD_TAG = /^(pop|r&b|rnb|hip[ -]?hop|rap|rock|electronic|dance|alternative|soul|other|unknown|music|world|soundtrack|soul, funk, r&b|hip-hop\/rap)$/i;
+// Songs by other artists that share the artist's genres, for a short mix:
+// the more of the artist's tags a song shares the better, and a song that
+// shares only a broad one ("R&B", "Pop") is not one.
+export function genreFill(db: DB, theirs: TrackRow[], artistId: string, limit: number, rnd: () => number): TrackRow[] {
+  const tags = new Map<string, number>();
+  for (const t of theirs) for (const g of JSON.parse(t.genres) as string[]) for (const p of String(g).split(/;/)) { const k = p.trim(); if (k) tags.set(k, (tags.get(k) || 0) + 1); }
+  const top = [...tags].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([g]) => g);
+  const specific = top.filter((g) => !BROAD_TAG.test(g));
+  if (!specific.length) return [];
+  const seen = new Map<string, { t: TrackRow; n: number; sp: number; r: number }>();
+  for (const g of top) for (const t of db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.artist_ids NOT LIKE ? ORDER BY RANDOM() LIMIT 200`).all(`%${g}%`, `%"${artistId}"%`) as TrackRow[]) {
+    if (seen.has(t.id)) continue;
+    const mine = new Set((JSON.parse(t.genres) as string[]).flatMap((x) => String(x).split(/;/).map((p) => p.trim())));
+    seen.set(t.id, { t, n: top.filter((x) => mine.has(x)).length, sp: specific.filter((x) => mine.has(x)).length, r: rnd() });
+  }
+  const ok = [...seen.values()].filter((x) => x.sp >= 1);
+  return ok.sort((a, b) => b.n - a.n || a.r - b.r).slice(0, limit).map((x) => x.t);
+}
+
 // Home's Daily Mix for an artist, Spotify-style: the artist (what this
 // listener plays most first), artists like them that the library has (Deezer,
 // cached), then the artist's genres; interleaved so the artist recurs without
@@ -157,12 +180,11 @@ export async function artistMix(db: DB, artist: { id: string; name: string }, li
     try { similar = await similarInLibrary(db, artist); } catch { /* offline: genres only */ }
     for (const s of similar.slice(0, 10)) others.push(...shuffle(byArtist(s.id)).slice(0, 6));
   }
-  if (heard.length + others.length < limit - own.length) {
-    const genres = new Map<string, number>();
-    for (const t of all) for (const g of JSON.parse(t.genres) as string[]) genres.set(g, (genres.get(g) || 0) + 1);
-    for (const [g] of [...genres].sort((a, b) => b[1] - a[1]).slice(0, 3)) others.push(...db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.artist_ids NOT LIKE ? ORDER BY RANDOM() LIMIT 40`).all(`%${JSON.stringify(g)}%`, `%"${artist.id}"%`) as TrackRow[]);
-  }
-  return interleave(own, [...heard, ...shuffle(others)], limit);
+  if (heard.length + others.length < limit - own.length) others.push(...genreFill(db, all, artist.id, limit, rnd));
+  // Skits, sped-up edits, a cappellas... only when that is all the artist has.
+  const plain = (xs: TrackRow[]) => xs.filter((t) => !ODD_TAKE.test(t.title));
+  if (plain(own).length) own = plain(own);
+  return interleave(own, [...plain(heard), ...shuffle(plain(others))], limit);
 }
 
 // Radio from an artist, a song, an album or a playlist (Go to radio, radio.ts

@@ -14,6 +14,9 @@
 //   never as a source;
 // - spread: after each pick, candidates reached through the same playlist
 //   artist weigh less, so a mixed playlist gets all of its circles.
+// - Refresh brings new songs: what this listener was shown for this playlist
+//   (kv recoshown:<user>:<playlist>) stays out of the next generation until
+//   the circle runs out; the same generation again gives the same songs.
 // Deezer answers are kept in ext_cache for two weeks and warmed in the
 // background for every playlist's artists, so opening a playlist is quick.
 import type { FastifyInstance } from 'fastify';
@@ -119,8 +122,23 @@ const weighted = <T>(rnd: () => number, xs: T[], w: (x: T) => number) => {
   return xs.length - 1;
 };
 
+type Shown = { seed: number; base: string[]; shown: string[] };
+const SHOWN_KEEP = 150;
+
 export async function playlistRecommendations(db: DB, playlistId: string, uid: string, o: Opts & { n?: number; seed?: number; budgetMs?: number; onMiss?: () => void } = {}): Promise<TrackRow[]> {
-  const n = o.n ?? 10;
+  const n = o.n ?? 10, seed = o.seed ?? 0;
+  const memKey = `recoshown:${uid}:${playlistId}`;
+  let mem: Shown | null = null;
+  try { mem = JSON.parse((db.prepare('SELECT v FROM kv WHERE k = ?').get(memKey) as { v: string } | undefined)?.v || 'null'); } catch { /* start over */ }
+  // The same generation again (a page reopened): what it was picked from then.
+  let base = mem ? (mem.seed === seed ? mem.base : mem.shown) : [];
+  let out = await pick(db, playlistId, uid, o, n, seed, new Set(base));
+  if (out.length < n && base.length) { base = []; out = await pick(db, playlistId, uid, o, n, seed, new Set()); } // the circle ran out: round again
+  if (out.length) db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(memKey, JSON.stringify({ seed, base, shown: [...base, ...out.map((t) => t.id)].slice(-SHOWN_KEEP) } satisfies Shown));
+  return out;
+}
+
+async function pick(db: DB, playlistId: string, uid: string, o: Opts & { budgetMs?: number; onMiss?: () => void }, n: number, seed: number, shown: Set<string>): Promise<TrackRow[]> {
   const deadline = Date.now() + (o.budgetMs ?? 4000);
   const idx = artistIndex(db);
   const byArtist = (a: string) => idx.get(a) || [];
@@ -206,24 +224,24 @@ export async function playlistRecommendations(db: DB, playlistId: string, uid: s
   const known = new Set([...circle, ...final.keys()]);
   const plays = new Map((db.prepare('SELECT track_id, COUNT(*) n FROM plays WHERE user_id = ? GROUP BY track_id').all(uid) as any[]).map((r) => [r.track_id, r.n as number]));
   const likes = new Set((db.prepare('SELECT track_id FROM likes WHERE user_id = ?').all(uid) as any[]).map((r) => r.track_id));
-  const rnd = prng(o.seed ?? 0);
+  const rnd = prng(seed * 7919 + shown.size);
   const pool: { s: number; a: string; t: TrackRow }[] = [];
   for (const a of [...final].sort((x, y) => y[1] - x[1]).slice(0, 40).map(([a]) => a)) {
     const ids = byArtist(a).slice(0, 900).map((x) => x.id);
     const ts = (ids.length ? db.prepare(`${TRACK_SELECT} WHERE t.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as TrackRow[] : [])
-      .filter((t) => !have.has(t.id) && !disliked.has(t.id) && !titles.has(songKey(t)) && !ALT_TAKE.test(t.title))
+      .filter((t) => !have.has(t.id) && !shown.has(t.id) && !disliked.has(t.id) && !titles.has(songKey(t)) && !ALT_TAKE.test(t.title))
       .map((t) => {
         const ids = JSON.parse(t.artist_ids) as string[];
         const cred = ids.filter((x) => known.has(x)).length / ids.length;
-        return { t, q: (1 + 0.4 * Math.log1p(plays.get(t.id) || 0) + (likes.has(t.id) ? 0.6 : 0) + rnd() * 0.3) * (0.3 + 0.7 * cred) * (ids[0] === a ? 1 : 0.7) };
+        return { t, q: (1 + 0.4 * Math.log1p(plays.get(t.id) || 0) + (likes.has(t.id) ? 0.6 : 0) + rnd() * 0.8) * (0.3 + 0.7 * cred) * (ids[0] === a ? 1 : 0.7) };
       })
       .sort((x, y) => y.q - x.q);
-    ts.slice(0, 3).forEach((x, k) => pool.push({ s: final.get(a)! * x.q * 0.8 ** k, a, t: x.t }));
+    ts.slice(0, 5).forEach((x, k) => pool.push({ s: final.get(a)! * x.q * 0.85 ** k, a, t: x.t }));
   }
   const main = (c: string) => { const m = src.get(c); return m ? [...m].sort((x, y) => y[1] - x[1])[0][0] : c; };
   const out: TrackRow[] = []; const per = new Map<string, number>(); const seen = new Set<string>(); const fromSrc = new Map<string, number>();
   while (pool.length && out.length < n) {
-    const k = weighted(rnd, pool, (c) => c.s ** 2 * 0.35 ** (fromSrc.get(main(c.a)) || 0));
+    const k = weighted(rnd, pool, (c) => c.s ** 1.5 * 0.35 ** (fromSrc.get(main(c.a)) || 0));
     const { a, t } = pool.splice(k, 1)[0];
     const key = songKey(t);
     if ((per.get(a) || 0) >= (w.has(a) ? 2 : 1) || seen.has(key)) continue;

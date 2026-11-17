@@ -33,6 +33,13 @@ describe("a Daily Mix's own songs", () => {
     expect(out.filter((id) => id.startsWith('kpop'))).toEqual([]);
   });
 
+  it('an artist with only broad tags still gets others who share them', () => {
+    track('broad1', 'Broad 1', 'Broad Singer', ['Electronic']);
+    track('broad2', 'Broad 2', 'Other Broad', ['Electronic']);
+    const theirs = db.prepare("SELECT * FROM tracks WHERE artist = 'Broad Singer'").all() as TrackRow[];
+    expect(ids(genreFill(db, theirs, aid('Broad Singer'), 20, rngOf('d')))).toEqual(['broad2']);
+  });
+
   it('leaves out skits and sped-up edits', async () => {
     const mix = ids(await artistMix(db, { id: aid('Seed Singer'), name: 'Seed Singer' }, 6, undefined, { sounds: ['near1', 'nearsped', 'near2', 'near3', 'near4'], day: '2026-11-17' }));
     expect(mix).not.toContain('skit');

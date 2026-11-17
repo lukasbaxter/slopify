@@ -124,18 +124,20 @@ const ODD_TAKE = /\b(instrumental|karaoke|a ?cappella|acapella|sped[ -]?up|slowe
 const BROAD_TAG = /^(pop|r&b|rnb|hip[ -]?hop|rap|rock|electronic|dance|alternative|soul|other|unknown|music|world|soundtrack|soul, funk, r&b|hip-hop\/rap)$/i;
 // Songs by other artists that share the artist's genres, for a short mix:
 // the more of the artist's tags a song shares the better, and a song that
-// shares only a broad one ("R&B", "Pop") is not one.
+// shares only a broad one ("R&B", "Pop") is not one, unless broad tags are
+// all the artist has.
 export function genreFill(db: DB, theirs: TrackRow[], artistId: string, limit: number, rnd: () => number): TrackRow[] {
   const tags = new Map<string, number>();
   for (const t of theirs) for (const g of JSON.parse(t.genres) as string[]) for (const p of String(g).split(/;/)) { const k = p.trim(); if (k) tags.set(k, (tags.get(k) || 0) + 1); }
   const top = [...tags].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([g]) => g);
   const specific = top.filter((g) => !BROAD_TAG.test(g));
-  if (!specific.length) return [];
+  const need = specific.length ? specific : top;
+  if (!need.length) return [];
   const seen = new Map<string, { t: TrackRow; n: number; sp: number; r: number }>();
   for (const g of top) for (const t of db.prepare(`${TRACK_SELECT} WHERE t.genres LIKE ? AND t.artist_ids NOT LIKE ? ORDER BY RANDOM() LIMIT 200`).all(`%${g}%`, `%"${artistId}"%`) as TrackRow[]) {
     if (seen.has(t.id)) continue;
     const mine = new Set((JSON.parse(t.genres) as string[]).flatMap((x) => String(x).split(/;/).map((p) => p.trim())));
-    seen.set(t.id, { t, n: top.filter((x) => mine.has(x)).length, sp: specific.filter((x) => mine.has(x)).length, r: rnd() });
+    seen.set(t.id, { t, n: top.filter((x) => mine.has(x)).length, sp: need.filter((x) => mine.has(x)).length, r: rnd() });
   }
   const ok = [...seen.values()].filter((x) => x.sp >= 1);
   return ok.sort((a, b) => b.n - a.n || a.r - b.r).slice(0, limit).map((x) => x.t);

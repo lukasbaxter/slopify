@@ -15,7 +15,7 @@ android {
         minSdk = 29
         targetSdk = 36
         // The release tag sets these (-PslopifyVersion=0.1.179 -> versionCode 1179, the Expo app's scheme).
-        val version = (findProperty("slopifyVersion") as String?) ?: "0.1.212"
+        val version = (findProperty("slopifyVersion") as String?) ?: "0.1.213"
         val (a, b, c) = version.split(".").map { it.toInt() }
         versionCode = a * 1_000_000 + b * 1_000 + c
         versionName = version

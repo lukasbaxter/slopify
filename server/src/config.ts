@@ -93,6 +93,9 @@ export const config = {
   slskdUrl: serviceUrl(env('SLSKD_URL', '')),
   slskdKey: env('SLSKD_API_KEY', ''),
   slskdDownloadsDir: env('SLSKD_DOWNLOADS_DIR', ''),
+  // An app's client credentials for reading Spotify playlists (charts.ts: TikTok viral, pulled playlists).
+  spotifyClientId: env('SPOTIFY_CLIENT_ID', ''),
+  spotifyClientSecret: env('SPOTIFY_CLIENT_SECRET', ''),
   // Lidarr runs acquisition: the artist page's full discography, "Request"
   // buttons, Release Radar, global search and the Downloads page all speak
   // its API directly. Point it at the same library this server scans and

@@ -25,6 +25,8 @@ import { registerPlaylistReco } from './playlistreco.js';
 import { registerJobs } from './jobs.js';
 import { registerAi } from './ai.js';
 import { registerMadeForYou, madeForYouTask } from './madeforyou.js';
+import { chartTasks, registerCharts, spotifyClient } from './charts.js';
+import { songFetchTask } from './songfetch.js';
 import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
@@ -131,6 +133,8 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerReports(app, db, { version: VERSION });
   app.decorate('ai', registerAi(app, db));
   registerMadeForYou(app, db, cacheDir);
+  registerCharts(app, db);
+  const spotify = config.spotifyClientId && config.spotifyClientSecret ? spotifyClient(config.spotifyClientId, config.spotifyClientSecret) : null;
   registerSpotifyImport(app, db, dataDir, { lidarr });
   const soularr = soularrClient(config.soularr);
   registerDownloads(app, db, { lidarr, soularr });
@@ -144,7 +148,9 @@ export async function buildServer(opts: BuildOptions = {}) {
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,
     python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
-  }), madeForYouTask(app, db, cacheDir), ...[brainTask(app, db, { cacheDir })].filter((x) => x !== null)]);
+  }), madeForYouTask(app, db, cacheDir), ...chartTasks(db, cacheDir, { spotify }),
+  songFetchTask(db, { app, musicDir, slskdUrl: config.slskdUrl || undefined, slskdKey: config.slskdKey || undefined, downloadsDir: config.slskdDownloadsDir || undefined }),
+  ...[brainTask(app, db, { cacheDir })].filter((x) => x !== null)]);
   registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 
   // Every /api route must carry a sign-in check unless it is one of the few

@@ -327,6 +327,26 @@ export const MIGRATIONS: string[] = [
     image_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, photo REAL NOT NULL, cutout INTEGER NOT NULL DEFAULT 0, checked INTEGER NOT NULL
   );
   `,
+  // 38: single songs fetched from Soulseek without Lidarr (songfetch.ts):
+  // chart songs and pulled playlists'; and the charts and pulled playlists
+  // themselves (charts.ts).
+  `
+  CREATE TABLE song_wants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL UNIQUE,
+    artist TEXT NOT NULL, title TEXT NOT NULL, album TEXT, duration_s INTEGER,
+    source TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'wanted', tries INTEGER NOT NULL DEFAULT 0, next_try INTEGER NOT NULL DEFAULT 0,
+    peer TEXT, file TEXT, size INTEGER, started INTEGER,
+    added INTEGER NOT NULL, done INTEGER, track_id TEXT, note TEXT
+  );
+  CREATE INDEX song_wants_line ON song_wants(state, priority DESC, added);
+  CREATE TABLE charts (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, fetched INTEGER NOT NULL, entries TEXT NOT NULL, art TEXT
+  );
+  CREATE TABLE pulled_playlists (
+    ref TEXT PRIMARY KEY, name TEXT, added INTEGER NOT NULL, pulled INTEGER, songs INTEGER, error TEXT
+  );
+  `,
 ];
 
 export type DB = Database.Database;

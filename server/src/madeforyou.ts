@@ -18,6 +18,7 @@ import { brainOn, brainPhoto, brainSearch, dislikedOf, type SoundHit } from './b
 import { coverArt, photoOf } from './homemixes.js';
 import { renderTypeCover, mix, type CoverSpec, type Prop } from './typecover.js';
 import { tracksByIds } from './library.js';
+import { CHARTS, chartTracks } from './charts.js';
 
 const SIZE = 50;
 const MIN_SONGS = 10;
@@ -261,7 +262,7 @@ export async function themeCover(db: DB, cacheDir: string, theme: Theme, artists
 }
 
 // ---- building ---------------------------------------------------------------
-export type Made = { id: string; title: string; kind: Theme['kind']; description: string; color: string; art: string | null; count: number; artists: { id: string; name: string }[] };
+export type Made = { id: string; title: string; kind: Theme['kind'] | 'chart'; description: string; color: string; art: string | null; count: number; artists: { id: string; name: string }[] };
 const themeOf = (id: string) => THEMES.find((t) => t.id === id);
 const thisIsTheme = (artistId: string, name: string): Theme => ({ id: `thisis:${artistId}`, title: `This Is ${name}`, kind: 'thisis', description: `The essential ${name}`, words: [name.toLowerCase(), `this is ${name.toLowerCase()}`], color: THIS_IS_COLORS[[...artistId].reduce((n, c) => n + c.charCodeAt(0), 0) % THIS_IS_COLORS.length], look: 'artist' });
 
@@ -318,7 +319,7 @@ export async function buildForListener(db: DB, cacheDir: string, uid: string, op
 export function listMade(db: DB, uid: string, now = Date.now()): Made[] {
   const rows = db.prepare('SELECT theme, track_ids, artists, art FROM made_playlists WHERE user_id = ?').all(uid) as { theme: string; track_ids: string; artists: string; art: string | null }[];
   const name = (id: string) => (db.prepare('SELECT name FROM artists WHERE id = ?').get(id) as { name: string } | undefined)?.name;
-  const order = { season: 0, thisis: 1, genre: 2, mood: 3, decade: 4 } as const;
+  const order = { season: 0, thisis: 1, genre: 2, mood: 3, decade: 4 } as const; // charts: 500+, between the season's and This Is
   const out: (Made & { o: number })[] = [];
   for (const r of rows) {
     const ids = JSON.parse(r.track_ids) as string[];
@@ -332,6 +333,14 @@ export function listMade(db: DB, uid: string, now = Date.now()): Made[] {
     if (!t || !inSeason(t, new Date(now))) continue;
     out.push({ id: t.id, title: t.title, kind: t.kind, description: t.description, color: t.color, art: r.art, count: ids.length, artists: artists.slice(0, 3), o: order[t.kind] * 1000 + ids.length * -1 + THEMES.indexOf(t) / 100 });
   }
+  // The charts: the same for everyone, after the season's.
+  for (const c of db.prepare('SELECT id, entries, art FROM charts').all() as { id: string; entries: string; art: string | null }[]) {
+    const def = CHARTS.find((d) => d.id === c.id); if (!def) continue;
+    const entries = JSON.parse(c.entries) as { artist: string; track?: string | null }[];
+    const count = entries.filter((e) => e.track).length;
+    if (count < 5) continue;
+    out.push({ id: `chart:${c.id}`, title: def.title, kind: 'chart', description: `The ${def.title} chart, the songs the library has`, color: def.color, art: c.art, count, artists: [], o: 500 + CHARTS.indexOf(def) });
+  }
   return out.sort((a, b) => a.o - b.o).map((m) => { const { o, ...rest } = m; void o; return rest; });
 }
 
@@ -342,7 +351,8 @@ export function searchMade(made: Made[], q: string): Made[] {
   if (n.length < 2) return [];
   return made.filter((m) => {
     const t = themeOf(m.id);
-    const words = t ? t.words : [m.title.toLowerCase().replace(/^this is /, '')];
+    const chart = m.id.startsWith('chart:') ? CHARTS.find((c) => `chart:${c.id}` === m.id) : null;
+    const words = t ? t.words : chart ? chart.words : [m.title.toLowerCase().replace(/^this is /, '')];
     return words.some((w) => { const nw = norm(w); return nw === n || nw.startsWith(n) || (n.length >= 4 && n.startsWith(nw)); }) || norm(m.title).startsWith(n);
   });
 }
@@ -373,6 +383,7 @@ export function registerMadeForYou(app: FastifyInstance, db: DB, cacheDir: strin
     const uid = (req as any).user.id as string;
     const id = String((req.params as any).id || '').slice(0, 80);
     const m = listMade(db, uid).find((x) => x.id === id);
+    if (m?.kind === 'chart') return { ...m, items: tracksByIds(db, chartTracks(db, id.slice(6))) };
     const row = db.prepare('SELECT track_ids FROM made_playlists WHERE user_id = ? AND theme = ?').get(uid, id) as { track_ids: string } | undefined;
     if (!m || !row) return reply.code(404).send({ error: 'not found' });
     return { ...m, items: tracksByIds(db, JSON.parse(row.track_ids)) };

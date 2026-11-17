@@ -18,6 +18,7 @@ ODD = re.compile(r"\b(instrumental|karaoke|a ?cappella|sped[ -]?up|slowed|nightc
 SEED_PULL = {"continue": 0.6, "smart": 0.35, "radio": 1.2, "now": 0.0}
 SESSION_PULL = {"continue": 0.8, "smart": 0.6, "radio": 0.5, "now": 0.3}
 KNOWN_SHARE = {"continue": 0.6, "smart": 0.5, "radio": 0.3, "now": 0.7}
+NEAR_PULL = 3.0   # a Daily Mix keeps to the artist's scene; sound picks within it
 
 def artist_sounds(audio, artist_of):
     """Each artist as one sound: the mean CLAP of all their songs; with
@@ -32,13 +33,15 @@ def artist_sounds(audio, artist_of):
 def _z(x):
     return (x - x.mean()) / (x.std() + 1e-6)
 
-def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None, artist_sound=None, has=None, taste=None):
+def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None, artist_sound=None, has=None, taste=None, near=None, lead=None):
     """Songs that sound like the seeds: the seeds' CLAP averaged, every song
     heard so far ranked by closeness to it, and by how close its artist's
     whole sound is (artist_sound, see artist_sounds) so one song that
     happens to sound alike does not bring a far-off artist in; taste (the
     trained model's closeness to the seeds, from this house's listening)
-    counts too. Sampled from the best (seed: the same draw for the same
+    counts too, and so do the artists Slopify says are near the seeds' artist
+    (near: lead artist id -> 0..1, its related artists; lead: song i's lead
+    artist id), the way a Daily Mix stays in one scene. Sampled from the best (seed: the same draw for the same
     seed), then closest first; no seed, nothing in skip, no odd versions
     unless a seed is one, per_artist songs per artist at most."""
     if has is None:
@@ -50,6 +53,8 @@ def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None,
     sound = audio @ q
     sound[~has] = -9; sound[0] = -9
     top = np.argsort(-sound)[:max(n * 30, 3000)]
+    if near and lead is not None:   # the scene's songs are candidates even when the sound alone would not reach them
+        top = np.unique(np.concatenate([top, np.array([i for i in range(1, len(lead)) if lead[i] in near], np.int64)]))
     top = top[sound[top] > -9]
     if not len(top):
         return []
@@ -59,6 +64,8 @@ def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None,
         score = score + _z(cent[artist_of[top]] @ q)
     if taste is not None:
         score = score + 0.5 * _z(taste[top])
+    if near and lead is not None:
+        score = score + NEAR_PULL * np.array([float(near.get(lead[i], 0)) for i in top], np.float32)
     seed_odd = any(ODD.search((info.get(s) or ("",))[0] or "") for s in seeds)
     skip = set(skip) | set(seeds)
     cand = []
@@ -110,10 +117,11 @@ class Engine:
         d = store.db()
         info = {r[0]: (r[1], r[2], r[3]) for r in d.execute("SELECT id, title, artist, artist_ids FROM tracks")}
         has = np.abs(v["audio"]).sum(1) > 0      # once: 0.7 s on the whole catalog
+        lead = [""] + [(json.loads(info.get(t, ("", "", "[]"))[2] or "[]") or [""])[0] for t in v["ids"]]
         asound = artist_sounds(v["audio"], v["artist_of"])
         with self.lock:
             self.m, self.dev, self.meta, self.v, self.vecs, self.info = m, dev, meta, v, vecs, info
-            self.has, self.asound = has, asound
+            self.has, self.asound, self.lead = has, asound, lead
             self.ready = True; self.loaded_at = int(time.time() * 1000)
         return True
 
@@ -229,7 +237,7 @@ class Engine:
         if not self.ready:
             return None
         with self.lock:
-            v, info, vecs, has, asound = self.v, self.info, self.vecs, self.has, self.asound
+            v, info, vecs, has, asound, lead = self.v, self.info, self.vecs, self.has, self.asound, self.lead
         _, disliked = self._known(ask.get("user"))
         n = max(1, min(200, int(ask.get("n", 100))))
         seed = ask.get("seed")
@@ -242,7 +250,8 @@ class Engine:
                 sv = torch.nn.functional.normalize(vecs[torch.tensor(rows, device=vecs.device)].mean(0), dim=-1)
                 taste = (torch.nn.functional.normalize(vecs, dim=-1) @ sv).float().cpu().numpy()
         items = similar(v["audio"], v["ids"], v["index"], info, seeds, n, skip=set(ask.get("exclude") or []) | disliked,
-                        seed=int(seed) if isinstance(seed, (int, float)) else None, artist_sound=asound, has=has, taste=taste)
+                        seed=int(seed) if isinstance(seed, (int, float)) else None, artist_sound=asound, has=has, taste=taste,
+                        near={str(k): float(w) for k, w in (ask.get("near") or {}).items() if isinstance(w, (int, float))}, lead=lead)
         return {"items": items}
 
     def search(self, ask):

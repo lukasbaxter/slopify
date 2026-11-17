@@ -6,7 +6,7 @@
 //
 // With BRAIN_DAILY_MIXES=1 and the brain on, the songs around the artist are
 // the ones that sound like the artist's songs this listener plays most (CLAP,
-// brain /similar); a brain that is off, slow or old means the usual mix for
+// brain /similar), kept to the artist's scene (nearOf); a brain that is off, slow or old means the usual mix for
 // that one. A mix is made once a day, so it waits longer than a queue's
 // next song does (DAILY_BRAIN_MS): the brain answers in well under a second,
 // but Home asks for every mix at once.
@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import type { DB } from './db.js';
 import { config } from './config.js';
 import { brainSimilar, dislikedOf } from './brain.js';
+import { cachedRel, deezerRelated } from './playlistreco.js';
 
 // Songs kept per mix; a request for fewer gets the start of it, so the mix's
 // page (50) and Play on Home (100) agree.
@@ -47,10 +48,36 @@ function seedsOf(db: DB, artistId: string, uid: string, day: string): string[] {
   return [...pool].sort((a, b) => rank(a) - rank(b)).slice(0, 5);
 }
 
+// The artist's scene, for the brain to keep to: the artist, who they work
+// with, Deezer's related artists (closest first) and, a little, theirs.
+// Deezer answers are kept two weeks (ext_cache). Without a fetcher only
+// what is kept counts; with one, Deezer gets budgetMs and no more.
+export async function nearOf(db: DB, artistId: string, o: { fetcher?: typeof fetch; budgetMs?: number } = {}): Promise<Record<string, number>> {
+  const near: Record<string, number> = { [artistId]: 1 };
+  const put = (id: string | null, w: number) => { if (id && (near[id] ?? 0) < w) near[id] = w; };
+  // Who they work with: twice or more, or on a song of a few names (a charity
+  // single of thirty does not make a scene).
+  const together = new Map<string, number>();
+  for (const r of db.prepare('SELECT artist_ids FROM tracks WHERE artist_ids LIKE ? LIMIT 2000').all(`%"${artistId}"%`) as { artist_ids: string }[]) {
+    const ids = JSON.parse(r.artist_ids) as string[];
+    if (ids.length <= 4) for (const a of ids) together.set(a, (together.get(a) || 0) + 1);
+  }
+  for (const [a, k] of together) if (k >= 2 || together.size < 30) put(a, 0.6);
+  near[artistId] = 1;
+  const name = (db.prepare('SELECT name FROM artists WHERE id = ?').get(artistId) as { name: string } | undefined)?.name;
+  const budget = o.budgetMs ?? 1500;
+  const ask = () => Promise.race([deezerRelated(db, { id: artistId, name: name! }, { fetcher: o.fetcher, deadline: Date.now() + budget }), new Promise<null>((r) => setTimeout(() => r(null), budget))]);
+  const first = cachedRel(db, artistId) ?? (name && o.fetcher ? await ask() : null);
+  const rel = first?.related ?? [];
+  rel.forEach((x, i) => put(x.id, 1 - 0.5 * i / Math.max(rel.length, 20)));
+  for (const x of rel.slice(0, 10)) if (x.id) for (const y of cachedRel(db, x.id)?.related ?? []) put(y.id, 0.35);
+  return near;
+}
+
 const inflight = new Map<string, Promise<DailyMix>>();
 
 export async function dailyMix(db: DB, artistId: string, uid: string, make: MakeMix,
-  o: { tzo?: unknown; now?: number; brain?: boolean; brainOpts?: BrainOpts; log?: (m: string) => void } = {}): Promise<DailyMix> {
+  o: { tzo?: unknown; now?: number; brain?: boolean; brainOpts?: BrainOpts; near?: (artistId: string) => Promise<Record<string, number>>; log?: (m: string) => void } = {}): Promise<DailyMix> {
   const now = o.now ?? Date.now();
   const last = db.prepare('SELECT tzo FROM daily_mixes WHERE user_id = ? ORDER BY made DESC LIMIT 1').get(uid) as { tzo: number } | undefined;
   const tzo = tzoOf(o.tzo) ?? last?.tzo ?? new Date(now).getTimezoneOffset();
@@ -72,7 +99,8 @@ export async function dailyMix(db: DB, artistId: string, uid: string, make: Make
       if (o.brain ?? config.brain.dailyMixes) {
         const seeds = seedsOf(db, artistId, uid, day);
         const seed = crypto.createHash('sha1').update(key).digest().readUInt32BE(0);
-        sounds = await brainSimilar(db, { user: uid, seeds, n: DAILY_SIZE, exclude: seeds, seed }, { timeoutMs: DAILY_BRAIN_MS, ...o.brainOpts, log: o.log });
+        const near = await (o.near ?? ((id: string) => nearOf(db, id)))(artistId).catch(() => ({}));
+        sounds = await brainSimilar(db, { user: uid, seeds, n: DAILY_SIZE, exclude: seeds, seed, near }, { timeoutMs: DAILY_BRAIN_MS, ...o.brainOpts, log: o.log });
       }
       const ids = (await make(sounds ?? undefined, day)).map((t) => t.id).slice(0, DAILY_SIZE);
       const from = sounds ? 'brain' : 'own';

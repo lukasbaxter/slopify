@@ -16,7 +16,7 @@ import { AUDIO_EXT, COVER_EXT, COVER_NAMES, splitArtists } from './scanner.js';
 import { gainDb } from './loudness.js';
 import { dailyMixArt, stations, topMixes, topMixTracks } from './homemixes.js';
 import { brainNext, dislikedOf } from './brain.js';
-import { dailyMix, DAILY_SIZE } from './dailymix.js';
+import { dailyMix, nearOf, DAILY_SIZE } from './dailymix.js';
 
 export type TrackRow = {
   id: string; title: string; artist: string; artists: string; artist_ids: string; album_id: string; album: string; album_artist: string;
@@ -487,7 +487,7 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   });
   const radioAsk = (uid: string) => radioAskFor(app, db, uid);
   const todaysMix = (artist: { id: string; name: string }, me: string, tzo: unknown) =>
-    dailyMix(db, artist.id, me, (sounds, day) => artistMix(db, artist, DAILY_SIZE, me, { sounds, day }), { tzo, log: (m) => app.log.info(m) });
+    dailyMix(db, artist.id, me, (sounds, day) => artistMix(db, artist, DAILY_SIZE, me, { sounds, day }), { tzo, near: (id) => nearOf(db, id, { fetcher: fetch }), log: (m) => app.log.info(m) });
   app.get('/api/tracks/:id/mix', auth, async (req, reply) => {
     const id = (req.params as any).id as string; const limit = Math.min(200, Number((req.query as any).limit) || 100);
     // An artist seeds Home's Daily Mixes.

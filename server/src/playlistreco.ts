@@ -64,7 +64,7 @@ function artistIndex(db: DB) {
   return byArtist;
 }
 
-function cachedRel(db: DB, artistId: string): Rel | null {
+export function cachedRel(db: DB, artistId: string): Rel | null {
   const row = db.prepare('SELECT json, at FROM ext_cache WHERE k = ?').get(`dzrel:${artistId}`) as { json: string; at: number } | undefined;
   return row && Date.now() - row.at < TTL ? JSON.parse(row.json) : null;
 }

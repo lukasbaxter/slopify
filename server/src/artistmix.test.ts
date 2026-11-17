@@ -4,6 +4,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
 import { artistMix, genreFill, rngOf, type TrackRow } from './library.js';
+import { nearOf } from './dailymix.js';
 
 const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-artistmix-')));
 const aid = (name: string) => name.toLowerCase().replace(/\W/g, '').padEnd(32, '0').slice(0, 32);
@@ -37,5 +38,28 @@ describe("a Daily Mix's own songs", () => {
     expect(mix).not.toContain('skit');
     expect(mix).not.toContain('nearsped');
     expect(mix.some((id) => id.startsWith('seed'))).toBe(true);
+  });
+});
+
+describe("the brain's Daily Mix keeps to the artist's scene", () => {
+  it('near: the artist, related artists closest first, theirs a little; nothing far', async () => {
+    const put = (a: string, related: string[]) => db.prepare('INSERT OR REPLACE INTO ext_cache (k, json, at) VALUES (?, ?, ?)').run(`dzrel:${aid(a)}`, JSON.stringify({ fans: 1, related: related.map((r) => ({ name: r, id: aid(r) })) }), Date.now());
+    put('Seed Singer', ['Near Singer']);
+    put('Near Singer', ['Second Hop']);
+    const near = await nearOf(db, aid('Seed Singer'));
+    expect(near[aid('Seed Singer')]).toBe(1);
+    expect(near[aid('Near Singer')]).toBe(1);
+    expect(near[aid('Second Hop')]).toBeCloseTo(0.35);
+    expect(near[aid('Kpop Group')]).toBeUndefined();
+    // A charity single of thirty names does not make them all the scene.
+    const many = Array.from({ length: 30 }, (_, i) => `Charity Voice ${i}`);
+    for (const m of many) db.prepare('INSERT OR IGNORE INTO artists (id, name, sort_name) VALUES (?, ?, ?)').run(aid(m), m, m);
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at, genres)
+      VALUES ('charity', '/m/charity.flac', 0, 0, 'Charity Single', 'Seed Singer', '[]', ?, ?, 'x', 'x', 0, '[]')`).run(JSON.stringify([aid('Seed Singer'), ...many.map(aid)]), `al-${aid('Seed Singer')}`);
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at, genres)
+      VALUES ('duet', '/m/duet.flac', 0, 0, 'Duet', 'Seed Singer', '[]', ?, ?, 'x', 'x', 0, '[]')`).run(JSON.stringify([aid('Seed Singer'), aid('Duet Partner')]), `al-${aid('Seed Singer')}`);
+    const again = await nearOf(db, aid('Seed Singer'));
+    expect(again[aid('Charity Voice 3')]).toBeUndefined();
+    expect(again[aid('Duet Partner')]).toBe(0.6);
   });
 });

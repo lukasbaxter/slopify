@@ -234,11 +234,12 @@ export async function brainNext(db: DB, ask: BrainAsk, opts: { url?: string; key
   }
 }
 
-// Songs that sound like the seeds, by CLAP alone (Home's Daily Mixes with
+// Songs that sound like the seeds (CLAP; `near`: artists to keep close to,
+// id -> 0..1) for Home's Daily Mixes with
 // BRAIN_DAILY_MIXES=1, dailymix.ts): closest first, only ones this library
 // has; null when there is no brain, it is off, it does not know /similar
 // (an older brain) or it did not answer in time.
-export async function brainSimilar(db: DB, ask: { user: string; seeds: string[]; n: number; exclude?: string[]; seed?: number },
+export async function brainSimilar(db: DB, ask: { user: string; seeds: string[]; n: number; exclude?: string[]; seed?: number; near?: Record<string, number> },
   opts: { url?: string; key?: string; timeoutMs?: number; fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<string[] | null> {
   const url = opts.url ?? config.brain.url, key = opts.key ?? config.brain.key;
   if (!url || !key || !brainRules(db).enabled || !ask.seeds.length) return null;

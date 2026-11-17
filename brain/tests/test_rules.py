@@ -174,3 +174,20 @@ def test_similar_weighs_the_artists_whole_sound():
     for seed in range(5):
         out = similar(audio, ids, index, info, [ids[0]], 3, per_artist=3, seed=seed, artist_sound=artist_sounds(audio, artist_of))
         assert ids[1] not in out and len(out) == 3 and all(info[t][1] == "R" for t in out)
+
+def test_similar_keeps_to_the_artists_scene():
+    """Two artists sound as close as each other to the seed; the one Slopify
+    says is related (near) is the one the mix takes."""
+    pytest.importorskip("torch")
+    import numpy as np
+    from brain.recommend import similar
+    ids = [f"{i:032x}" for i in range(1, 8)]; index = {t: i + 1 for i, t in enumerate(ids)}
+    audio = np.zeros((len(ids) + 1, 3), np.float32)
+    for k, v in enumerate([[1, 0, 0], [.9, .1, 0], [.9, 0, .1], [.9, .1, .05], [.9, .05, .1], [0, 1, 0], [0, 0, 1]]):
+        audio[k + 1] = np.array(v) / np.linalg.norm(v)
+    who = ["seed", "pop", "rnb", "pop", "rnb", "x", "y"]
+    info = {t: ("Song", who[i], "") for i, t in enumerate(ids)}
+    lead = [""] + who
+    for seed in range(5):
+        out = similar(audio, ids, index, info, [ids[0]], 2, per_artist=2, seed=seed, near={"rnb": 1.0}, lead=lead)
+        assert sorted(out) == sorted([ids[2], ids[4]])

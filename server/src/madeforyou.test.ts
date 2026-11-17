@@ -51,6 +51,14 @@ describe('a themed playlist for one listener', () => {
     expect(ids.slice(0, 3)).toEqual(['r3-1', expect.stringMatching(/^r1-/), 'r4-1']); // brain picks first, theirs woven in
   });
 
+  it('a mood takes only their songs that sound like it, not everything they play', () => {
+    const lib = loadLib(db), me = listenerOf(db, 'u1');
+    // The brain heard one of their rock songs as chill, and some new songs.
+    const ids = pickThemeTracks(lib, me, theme('chill'), hits(['r2-1', 'r1-3', 'p2-1', 'j1-2']), 'd', 20);
+    expect(ids.filter((id) => me.plays.has(id))).toEqual(['r1-3']);
+    expect(ids).toEqual(expect.arrayContaining(['r2-1', 'p2-1', 'j1-2']));
+  });
+
   it("is each listener's own", () => {
     const lib = loadLib(db);
     const a = pickThemeTracks(lib, listenerOf(db, 'u1'), theme('rock'), [], '2026-11-17', 12);

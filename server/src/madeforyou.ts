@@ -145,8 +145,13 @@ export function pickThemeTracks(lib: Lib, me: Listener, theme: Theme, sound: Sou
   // over day to day; then songs they play that SOUND like it (top of what
   // the brain heard) even if tagged otherwise ("close to rock").
   const ownScore = (id: string) => (me.plays.get(id) || 0) + (me.liked.has(id) ? 6 : 0);
-  const own = lib.rows.filter((r) => known(r.id) && fits(r))
-    .map((r) => ({ id: r.id, k: Math.log(rand() || 1e-9) / Math.max(1, ownScore(r.id)) })).sort((a, b) => b.k - a.k).map((x) => x.id);
+  // A mood has no tag to go by: their songs count only when the brain says
+  // they sound like it (in the order it heard them), never all they play.
+  const byTag = !!(theme.genres || theme.years || theme.match);
+  const own = byTag
+    ? lib.rows.filter((r) => known(r.id) && fits(r))
+      .map((r) => ({ id: r.id, k: Math.log(rand() || 1e-9) / Math.max(1, ownScore(r.id)) })).sort((a, b) => b.k - a.k).map((x) => x.id)
+    : sound.slice(0, 250).filter((h) => known(h.id)).map((h) => lib.byId.get(h.id)).filter((r): r is Row => !!r && fits(r)).map((r) => r.id);
   const close = theme.genres ? sound.slice(0, 120).filter((h) => known(h.id)).map((h) => lib.byId.get(h.id)).filter((r): r is Row => !!r && !me.disliked.has(r.id) && !odd(r) && yearOk(r) && matchOk(r) && !own.includes(r.id)).map((r) => r.id) : [];
   // New to them: what the brain heard that fits, in its order; without a
   // brain (or for themes it cannot hear, decades), the household's favourites

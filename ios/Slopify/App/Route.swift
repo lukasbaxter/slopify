@@ -17,6 +17,8 @@ enum Route: Hashable {
     case topSongs(year: Int, colorIndex: Int)
     /// One of Home's Your top mixes (§14.3), by genre.
     case topMix(genre: String)
+    /// A themed playlist made for this listener (Search's Made For You row).
+    case made(MadeForYou)
     case genre(name: String)
     case charts
     case folder(id: String)

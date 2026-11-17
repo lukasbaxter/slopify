@@ -184,6 +184,8 @@ struct SearchResults: Codable, Sendable {
     var tracks: [Track]
     var albums: [Album]
     var artists: [Artist]
+    /// The listener's themed playlists the words name ("rock", "this is drake"). Older servers omit it.
+    var made: [MadeForYou]? = nil
 }
 
 struct ItemLookup: Codable, Sendable {
@@ -383,6 +385,38 @@ struct HomeTopMix: Codable, Hashable, Identifiable, Sendable {
     var art: String? = nil
     var day: String? = nil
     var id: String { genre }
+}
+
+/// A themed playlist made for this listener (`GET /api/made`, madeforyou.ts): Rock Classics,
+/// Christmas Hits, This Is <artist>. `id` is "rock", "christmas" or "thisis:<artistId>".
+struct MadeForYou: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    /// `genre` | `mood` | `decade` | `season` | `thisis`
+    var kind: String? = nil
+    var description: String? = nil
+    /// "#rrggbb"
+    var color: String? = nil
+    /// The drawn cover (`art_<hash>`), shown as is (no band).
+    var art: String? = nil
+    var count: Int? = nil
+    var artists: [MixArtist]? = nil
+}
+
+/// `GET /api/made`: the list, `building` while the server is still making them.
+struct MadeForYouList: Codable, Sendable {
+    var items: [MadeForYou]
+    var building: Bool? = nil
+}
+
+/// `GET /api/made/:id`: one themed playlist with its songs.
+struct MadeForYouDetail: Codable, Sendable {
+    var id: String
+    var title: String
+    var description: String? = nil
+    var color: String? = nil
+    var art: String? = nil
+    var items: [Track]
 }
 
 /// Go to radio: the listener's radio playlist of one seed (§14.4).

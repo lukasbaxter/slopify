@@ -70,10 +70,12 @@ import com.lukasbaxter.slopify.android.app.Route
 import com.lukasbaxter.slopify.android.app.SeeAllKind
 import com.lukasbaxter.slopify.android.app.Tab
 import com.lukasbaxter.slopify.android.core.api.track
+import com.lukasbaxter.slopify.android.core.model.MadePlaylist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.Track
 import com.lukasbaxter.slopify.android.core.storage.SharedPrefsStore
 import com.lukasbaxter.slopify.android.design.L
+import com.lukasbaxter.slopify.android.design.components.CardStyle
 import com.lukasbaxter.slopify.android.design.components.Chip
 import com.lukasbaxter.slopify.android.design.components.ChipRow
 import com.lukasbaxter.slopify.android.design.components.ErrorBanner
@@ -81,6 +83,7 @@ import com.lukasbaxter.slopify.android.design.components.PressFeedback
 import com.lukasbaxter.slopify.android.design.components.RequestPill
 import com.lukasbaxter.slopify.android.design.components.SectionHeader
 import com.lukasbaxter.slopify.android.design.components.SectionStyle
+import com.lukasbaxter.slopify.android.design.components.Shelf
 import com.lukasbaxter.slopify.android.design.components.TrackRow
 import com.lukasbaxter.slopify.android.design.components.pageBanner
 import com.lukasbaxter.slopify.android.design.components.pressable
@@ -135,6 +138,12 @@ internal class SearchSession(app: AppModel, val browse: SearchBrowseData) {
 
         /** The live browse copy, if the Search tab has been opened (genre page colour). */
         fun browseIfOpen(app: AppModel): SearchBrowseData? = current?.takeIf { it.first === app }?.second?.browse
+
+        /** A themed playlist the Search tab shows (browse row or results), to paint its page at once. */
+        fun madeIfOpen(app: AppModel, id: String): MadePlaylist? {
+            val s = current?.takeIf { it.first === app }?.second ?: return null
+            return s.browse.made.value.firstOrNull { it.id == id } ?: s.model.state.value.page?.made?.firstOrNull { it.id == id }
+        }
     }
 }
 
@@ -154,6 +163,7 @@ fun SearchView() {
     val saved by app.account.saved.collectAsStateWithLifecycle()
     val prefs by app.account.prefs.collectAsStateWithLifecycle()
     val browse by session.browse.saved.collectAsStateWithLifecycle()
+    val made by session.browse.made.collectAsStateWithLifecycle()
     val player by app.player.state.collectAsStateWithLifecycle()
     val theme = LocalTheme.current
     val focusManager = LocalFocusManager.current
@@ -176,6 +186,12 @@ fun SearchView() {
     LaunchedEffect(browseKey) {
         session.browse.use(browseKey)
         if (browseKey != null) session.browse.refresh(app.account.api)
+    }
+    // The Made For You row: asked anew each time the Search tab shows (Library.jsx `madeList` on view).
+    val onSearchTab = navState.tab == Tab.Search
+    LaunchedEffect(browseKey, onSearchTab) {
+        session.browse.use(browseKey)
+        if (browseKey != null && onSearchTab) session.browse.refreshMade(app.account.api)
     }
     LaunchedEffect(navState.tab) {
         if (navState.tab != Tab.Search) { model.leftTab(); focusManager.clearFocus() }
@@ -238,6 +254,7 @@ fun SearchView() {
         }
         saveRecents(SearchRecent.adding(x, recents))
     }
+    fun openMade(m: MadePlaylist) = app.nav.push(Route.Made(m.id, m.title))
     fun openOrRequest(a: Release) {
         val owned = a.inLibrary
         if (owned != null) app.nav.push(Route.Album(owned)) else if (model.stateOf(a) == null) model.requestLater(a)
@@ -260,35 +277,42 @@ fun SearchView() {
             if (empty && s.focusMode && recents.isNotEmpty()) {
                 recentSection(recents, onOpen = ::openRecent, onRemove = { saveRecents(SearchRecent.removing(it, recents)) }, onClear = { saveRecents(emptyList()) })
             }
-            if (empty && !s.focusMode) browseSections(browse, app)
+            if (empty && !s.focusMode) browseSections(browse, made, app, ::openMade)
             if (s.type == SearchType.Everywhere && !empty) {
                 everywhereSection(s, onRow = ::openOrRequest, onRequest = { model.requestLater(it) })
             }
-            s.rows?.let { rows ->
-                if (rows.isEmpty()) {
-                    item(key = "search-none") {
-                        SearchEmptyBlock(L("Couldn’t find “{query}”", "query" to s.trimmed), L("Try searching again using a different spelling or keyword."))
-                    }
-                } else {
-                    item(key = "search-rows-top") { Box(Modifier.height(4.dp)) }
-                    items(rows, key = { "row:" + it.key }) { item ->
-                        when (item) {
-                            is SearchItem.Song -> {
-                                val t = item.track
-                                TrackRow(
-                                    t, showArt = true, isCurrent = player.current?.id == t.id,
-                                    // TODO(lead): offline store `has` / `unavailable` once ported (iOS app.offline).
-                                    isDownloaded = app.player.localFile?.invoke(t.id) != null,
-                                    subtitle = SearchItem.songSubtitle(t),
-                                    onMore = { menu = builder.sheet(t) },
-                                    onArt = { open(item) },
-                                    onTouchDown = { app.player.prewarm(t) },
-                                ) { tapSong(t) }
+            val blocks = SearchLogic.resultBlocks(s.page, s.type)
+            val hasMade = blocks.any { it is SearchBlock.Made }
+            for (block in blocks) when (block) {
+                is SearchBlock.Made -> madeSection(block.items, "search-made", first = true, onOpen = ::openMade)
+                is SearchBlock.Rows -> {
+                    val rows = block.rows
+                    // Themed playlists alone are a result: no "Couldn't find" under them.
+                    if (rows.isEmpty()) {
+                        if (!hasMade) item(key = "search-none") {
+                            SearchEmptyBlock(L("Couldn’t find “{query}”", "query" to s.trimmed), L("Try searching again using a different spelling or keyword."))
+                        }
+                    } else {
+                        item(key = "search-rows-top") { Box(Modifier.height(4.dp)) }
+                        items(rows, key = { "row:" + it.key }) { item ->
+                            when (item) {
+                                is SearchItem.Song -> {
+                                    val t = item.track
+                                    TrackRow(
+                                        t, showArt = true, isCurrent = player.current?.id == t.id,
+                                        // TODO(lead): offline store `has` / `unavailable` once ported (iOS app.offline).
+                                        isDownloaded = app.player.localFile?.invoke(t.id) != null,
+                                        subtitle = SearchItem.songSubtitle(t),
+                                        onMore = { menu = builder.sheet(t) },
+                                        onArt = { open(item) },
+                                        onTouchDown = { app.player.prewarm(t) },
+                                    ) { tapSong(t) }
+                                }
+                                else -> SearchRow(
+                                    searchSource(item), item.name, item.subtitle, Modifier.padding(horizontal = Spacing.gutter),
+                                    round = item.kind == SearchKind.Artist,
+                                ) { open(item) }
                             }
-                            else -> SearchRow(
-                                searchSource(item), item.name, item.subtitle, Modifier.padding(horizontal = Spacing.gutter),
-                                round = item.kind == SearchKind.Artist,
-                            ) { open(item) }
                         }
                     }
                 }
@@ -383,7 +407,7 @@ private fun SearchInput(text: String, modifier: Modifier, onChange: (String) -> 
 
 // browse
 
-private fun LazyListScope.browseSections(b: SearchBrowseData.Saved, app: AppModel) {
+private fun LazyListScope.browseSections(b: SearchBrowseData.Saved, made: List<MadePlaylist>, app: AppModel, onMade: (MadePlaylist) -> Unit) {
     item(key = "browse-start-head") { SectionHeader(L("Start browsing"), style = SectionStyle.Search, first = true) }
     item(key = "browse-start") {
         SearchTileGrid(
@@ -411,6 +435,8 @@ private fun LazyListScope.browseSections(b: SearchBrowseData.Saved, app: AppMode
             ),
         )
     }
+    // The listener's themed playlists, between Start browsing and the genre tiles (Library.jsx `made-row`).
+    if (made.isNotEmpty()) madeSection(made, "browse-made", first = false, onOpen = onMade)
     item(key = "browse-all-head") { SectionHeader(L("Browse all"), style = SectionStyle.Search) }
     val tiles = b.tiles ?: return
     tiles.chunked(2).forEachIndexed { row, pair ->
@@ -425,6 +451,16 @@ private fun LazyListScope.browseSections(b: SearchBrowseData.Saved, app: AppMode
                 },
                 Modifier.padding(top = if (row == 0) 0.dp else 12.dp),
             )
+        }
+    }
+}
+
+/** "Made For You": a shelf of themed playlists (drawn cover, title, description); a tap opens its page. */
+private fun LazyListScope.madeSection(made: List<MadePlaylist>, key: String, first: Boolean, onOpen: (MadePlaylist) -> Unit) {
+    item(key = "$key-head") { SectionHeader(L("Made For You"), style = SectionStyle.Search, first = first) }
+    item(key = key) {
+        Shelf(made.withIndex().toList(), style = CardStyle.Home, key = { it.value.id }) { (i, m) ->
+            MadeCard(m, i) { onOpen(m) }
         }
     }
 }

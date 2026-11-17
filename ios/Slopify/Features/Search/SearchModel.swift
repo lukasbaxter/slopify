@@ -70,6 +70,11 @@ final class SearchModel {
         guard let page, type != .everywhere else { return nil }
         return SearchLogic.phoneRows(page, type: type)
     }
+    /// The result page in order (Made For You row first); nil before the first result and in Everywhere mode.
+    var sections: [SearchSection]? {
+        guard let page, type != .everywhere else { return nil }
+        return SearchLogic.sections(page, type: type)
+    }
 
     // MARK: input
 

@@ -2,6 +2,7 @@ package com.lukasbaxter.slopify.android.features.search
 
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
+import com.lukasbaxter.slopify.android.core.model.MadePlaylist
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.SearchResults
 import com.lukasbaxter.slopify.android.core.model.Track
@@ -95,6 +96,12 @@ sealed interface SearchItem {
     }
 }
 
+/** One block of the result page, in display order ([SearchLogic.resultBlocks]). */
+sealed interface SearchBlock {
+    data class Made(val items: List<MadePlaylist>) : SearchBlock
+    data class Rows(val rows: List<SearchItem>) : SearchBlock
+}
+
 /** A finished search: the server lists, the matching playlists and the client-picked top result. */
 data class SearchPage(
     val query: String,
@@ -103,6 +110,8 @@ data class SearchPage(
     val artists: List<Artist>,
     val playlists: List<Playlist>,
     val top: SearchItem?,
+    /** The listener's themed playlists the words name, in the server's order (Library.jsx `r.made`). */
+    val made: List<MadePlaylist> = emptyList(),
 ) {
     companion object {
         operator fun invoke(query: String, results: SearchResults, playlists: List<Playlist>): SearchPage {
@@ -111,6 +120,7 @@ data class SearchPage(
                 query, results.tracks, results.albums, results.artists,
                 playlists.filter { it.name.lowercase().contains(q) },
                 SearchLogic.topResult(query, results),
+                results.made,
             )
         }
     }
@@ -151,6 +161,23 @@ object SearchLogic {
         (songs + artists + albums + playlists).forEach(::push)
         return rows
     }
+
+    /**
+     * The "Made For You" row above the result list (Library.jsx `made-row`): the page's themed
+     * playlists on the All and Playlists chips; empty (no row) otherwise, offline or on an older server.
+     */
+    fun madeRow(p: SearchPage?, type: SearchType): List<MadePlaylist> =
+        if (p != null && (type == SearchType.All || type == SearchType.Playlists)) p.made else emptyList()
+
+    /** What the results show, top first: the Made For You row (when there is one), then the rows. */
+    fun resultBlocks(p: SearchPage?, type: SearchType): List<SearchBlock> {
+        if (p == null || type == SearchType.Everywhere) return emptyList()
+        val made = madeRow(p, type)
+        return listOfNotNull(if (made.isNotEmpty()) SearchBlock.Made(made) else null, SearchBlock.Rows(phoneRows(p, type)))
+    }
+
+    /** A Made For You card's colour: the server's, else the Daily Mix palette by place. */
+    fun madeColor(hex: String?, index: Int): RGB = RGB.parse(hex) ?: Theme.Fixed.mixPalette[index.mod(Theme.Fixed.mixPalette.size)]
 
     /** Browse tile colour when the server sends none (`TILE_COLORS[i % 16]`). */
     fun tileColor(index: Int): RGB = Theme.Fixed.browseTiles[index % Theme.Fixed.browseTiles.size]

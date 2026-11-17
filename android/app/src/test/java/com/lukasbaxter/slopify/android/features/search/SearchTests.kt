@@ -5,10 +5,12 @@ import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
 import com.lukasbaxter.slopify.android.core.model.BrowseTile
 import com.lukasbaxter.slopify.android.core.model.EverywhereResults
+import com.lukasbaxter.slopify.android.core.model.MadePlaylist
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.SearchResults
 import com.lukasbaxter.slopify.android.core.model.Track
+import com.lukasbaxter.slopify.android.core.StubServer
 import com.lukasbaxter.slopify.android.core.storage.MemoryStore
 import com.lukasbaxter.slopify.android.design.L
 import com.lukasbaxter.slopify.android.design.color.ColorMath
@@ -37,6 +39,8 @@ private fun searchArtist(id: String, name: String) = Artist(id, name)
 private fun searchPlaylist(id: String, name: String) = Playlist(id, name)
 private fun searchResults(tracks: List<Track> = emptyList(), albums: List<Album> = emptyList(), artists: List<Artist> = emptyList()) =
     SearchResults(tracks, albums, artists)
+private fun searchMade(id: String, title: String, color: String? = "#B3261E") =
+    MadePlaylist(id, title, kind = "genre", description = "$title for you", color = color, art = "art_$id")
 
 class SearchLogicTest {
     @Test fun topResultPrefersArtistThenAlbumThenSongPrefix() {
@@ -78,6 +82,44 @@ class SearchLogicTest {
     @Test fun playlistsFilteredBySubstringCaseInsensitive() {
         val page = SearchPage("Road", searchResults(), listOf(searchPlaylist("p1", "Road Trip"), searchPlaylist("p2", "Crossroads"), searchPlaylist("p3", "Gym")))
         assertEquals(listOf("p1", "p2"), page.playlists.map { it.id })
+    }
+
+    @Test fun themedPlaylistsComeFirstInServerOrder() {
+        val made = listOf(searchMade("rock", "Rock Classics"), searchMade("thisis:r1", "This Is Rock"))
+        val page = SearchPage("rock", SearchResults(listOf(searchTrack("t1", "Rock On")), emptyList(), listOf(searchArtist("r1", "Rock")), made), emptyList())
+        assertEquals(made, page.made)
+        val blocks = SearchLogic.resultBlocks(page, SearchType.All)
+        assertEquals(2, blocks.size)
+        assertEquals(listOf("rock", "thisis:r1"), (blocks[0] as SearchBlock.Made).items.map { it.id })
+        assertEquals(listOf("Artist:r1", "Song:t1"), (blocks[1] as SearchBlock.Rows).rows.map { it.key })
+        // The Playlists chip keeps the row; Songs / Artists / Albums and Everywhere drop it.
+        assertTrue(SearchLogic.resultBlocks(page, SearchType.Playlists).first() is SearchBlock.Made)
+        assertEquals(listOf(SearchBlock.Rows(SearchLogic.phoneRows(page, SearchType.Songs))), SearchLogic.resultBlocks(page, SearchType.Songs))
+        assertTrue(SearchLogic.madeRow(page, SearchType.Artists).isEmpty())
+        assertEquals(emptyList<SearchBlock>(), SearchLogic.resultBlocks(page, SearchType.Everywhere))
+        assertEquals(emptyList<SearchBlock>(), SearchLogic.resultBlocks(null, SearchType.All))
+    }
+
+    @Test fun themedPlaylistsAloneStillMakeARow() {
+        val page = SearchPage("christmas", SearchResults(emptyList(), emptyList(), emptyList(), listOf(searchMade("christmas", "Christmas Hits"))), emptyList())
+        val blocks = SearchLogic.resultBlocks(page, SearchType.All)
+        assertEquals(listOf("christmas"), (blocks[0] as SearchBlock.Made).items.map { it.id })
+        assertTrue((blocks[1] as SearchBlock.Rows).rows.isEmpty())
+    }
+
+    @Test fun olderServerHasNoMadeForYouRow() {
+        // An older server's search answer has no `made`: no row, only the result rows.
+        val page = SearchPage("rock", searchResults(listOf(searchTrack("t1", "Rock On"))), emptyList())
+        assertTrue(page.made.isEmpty())
+        val blocks = SearchLogic.resultBlocks(page, SearchType.All)
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.single() is SearchBlock.Rows)
+    }
+
+    @Test fun madeColourIsTheServersElseTheMixPalette() {
+        assertEquals("#b3261e", SearchLogic.madeColor("#B3261E", 3).hex)
+        assertEquals(Theme.Fixed.mixPalette[1].hex, SearchLogic.madeColor(null, 1).hex)
+        assertEquals(Theme.Fixed.mixPalette[1].hex, SearchLogic.madeColor("nope", 9).hex)
     }
 
     @Test fun subtitlesAreLocalisedAndDropEmptyParts() {
@@ -196,6 +238,34 @@ class SearchBrowseDataTest {
         assertEquals(saved, d.saved.value)
         d.use("other")
         assertEquals(SearchBrowseData.Saved(), d.saved.value)
+    }
+
+    @Test fun madeRowLoadsPersistsAndSurvivesAnOlderServer() = runTest {
+        val store = MemoryStore()
+        StubServer().use { s ->
+            s.answers["/api/made"] = 200 to """{"items":[{"id":"rock","title":"Rock Classics","kind":"genre","description":"d","color":"#B3261E","art":null,"count":3,"artists":[]}],"building":false}"""
+            val d = SearchBrowseData(store)
+            // No account yet: nothing is asked.
+            d.refreshMade(s.client())
+            assertTrue(s.seen.isEmpty())
+            d.use("k")
+            d.refreshMade(s.client())
+            assertEquals(listOf("rock"), d.made.value.map { it.id })
+            // Painted from the kept copy on the next start, per account.
+            val again = SearchBrowseData(store)
+            again.use("k")
+            assertEquals(listOf("Rock Classics"), again.made.value.map { it.title })
+            again.use("other")
+            assertTrue(again.made.value.isEmpty())
+        }
+        StubServer().use { s ->
+            // An older server has no /api/made: the row stays hidden.
+            s.answers["/api/made"] = 404 to """{"error":"not found"}"""
+            val d = SearchBrowseData(MemoryStore())
+            d.use("k")
+            d.refreshMade(s.client())
+            assertTrue(d.made.value.isEmpty())
+        }
     }
 
     @Test fun startTileCoverFallbacks() {

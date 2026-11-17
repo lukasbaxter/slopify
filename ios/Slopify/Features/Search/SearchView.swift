@@ -46,11 +46,14 @@ struct SearchView: View {
         .onAppear { model.backend = .live(account.api, offline: app.offline) }
         .task(id: SearchBrowseData.storageKey(account: account)) {
             browse.use(key: SearchBrowseData.storageKey(account: account))
+            async let made: Void = browse.refreshMade(api: account.api)
             await browse.refresh(api: account.api)
+            await made
         }
         .onChange(of: fieldFocused) { _, f in if f { model.focused = true } }
         .onChange(of: nav.tab) { _, t in
             if t != .search { model.leftTab(); fieldFocused = false }
+            else { Task { await browse.refreshMade(api: account.api) } }
         }
         .onChange(of: phase) { _, p in model.hidden = p != .active }
     }
@@ -146,8 +149,14 @@ struct SearchView: View {
             if empty && model.focusMode && !recents.isEmpty { recentSection }
             if empty && !model.focusMode { browseSections }
             if model.type == .everywhere && !empty { everywhereSection }
-            if let rows = model.rows {
-                if rows.isEmpty { noResults } else { resultList(rows) }
+            if let sections = model.sections {
+                if sections.isEmpty { noResults }
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, sec in
+                    switch sec {
+                    case .made(let list): madeRow(list, first: true)
+                    case .rows(let rows): resultList(rows)
+                    }
+                }
             }
         }
         .padding(.top, 4)
@@ -172,6 +181,7 @@ struct SearchView: View {
                 LikedCover(heart: 0.5)
             }
         }
+        if !browse.made.isEmpty { madeRow(browse.made, first: false) }
         SectionHeader(L("Browse all"), style: .search)
         if let tiles = browse.tiles {
             tileGrid {
@@ -180,6 +190,16 @@ struct SearchView: View {
                         if let c = t.coverId { CoverImage(.album(id: c, art: t.cover), size: 100, placeholder: .none) }
                     }
                 }
+            }
+        }
+    }
+
+    /// The listener's themed playlists (Rock Classics, This Is ...) as a card row.
+    private func madeRow(_ list: [MadeForYou], first: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader(L("Made For You"), style: .search, first: first)
+            Shelf(items: list, style: .home) { m in
+                MadeForYouCard(item: m) { nav.push(.made(m)) }
             }
         }
     }

@@ -456,8 +456,12 @@ Up to 24, biggest first, `Other` last. `count` = track count. `covers` = up to 4
   `name`; exact name first, then bigger first.
 
 ```json
-{ "tracks": [Track], "albums": [Album], "artists": [Artist] }
+{ "tracks": [Track], "albums": [Album], "artists": [Artist], "made": [MadeForYou] }
 ```
+
+`made` (§14.5): the listener's themed playlists whose words the query names ("rock",
+"christmas", "this is drake"). Older servers omit it: no row. Clients show it as a "Made For
+You" card row at the top of the results (All and Playlists chips).
 
 Playlists are not searched server-side; the web filters `GET /api/playlists` by name
 (substring, lowercase) and shows them as a 4th group. The web picks a "top result": the first
@@ -993,6 +997,27 @@ The page is drawn like a Daily Mix page: title `L("{name} Radio", name: seed.nam
 composite cover (an artist: their picture; a song or album: the album cover, `albumId`; a
 playlist: its picture) with the title in the band, colour `MIX_COLORS[(sum of the seed id's UTF-16 code units) % 8]`, owner line
 "Made for you", subtitle from `artists`. Its menu: Add to queue, Refresh (`?refresh=1`), Add to playlist. No Go to radio on a radio page.
+
+### 14.5 `GET /api/made` (auth): Made For You themed playlists
+
+Themed playlists made for this listener (madeforyou.ts): genres (Rock Classics), moods, decades,
+seasons (Christmas Hits, in season only) and "This Is <artist>". Slow the first time (up to
+~20 s while the server makes them): clients wait 30 s.
+
+```json
+{ "items": [ { "id": "rock", "title": "Rock Classics", "kind": "genre", "description": "Rock legends and the rock you play",
+               "color": "#B3261E", "art": "art_<40 hex>|null", "count": 50, "artists": [{ "id": "...", "name": "..." }] } ],
+  "building": false }
+```
+
+- `id`: `rock`, `christmas`, `thisis:<artistId>`. `kind`: `genre` | `mood` | `decade` | `season` | `thisis`.
+- `art`: the drawn cover, `/api/image/<art>`, shown as is (no band, no label).
+- `GET /api/made/:id` (id URL-encoded as ONE path part: `thisis%3A<artistId>`): the same fields plus `items: [Track]`.
+
+Clients: the Search page (no query) shows a "Made For You" card row of the list above Browse all
+(kept locally, refreshed whenever the tab shows); search results show `made` (§6) first. A card
+(cover, title, description) opens a page like one of Your top mixes: title, the drawn cover,
+"Made for you", description as subtitle, the songs, Play / Shuffle; player context `made:<id>`.
 
 ---
 
@@ -1656,6 +1681,8 @@ Of the remaining 115, about 22 are admin-only. Plus `GET /healthz` and `GET /api
 | 71d | GET | /api/home/mixes | auth | 14.3 |
 | 71e | GET | /api/home/mixes/:genre | auth | 14.3 |
 | 71b | POST | /api/radio/:id | auth | 14.4 |
+| 71f | GET | /api/made | auth | 14.5 |
+| 71g | GET | /api/made/:id | auth | 14.5 |
 | 72 | GET | /api/radar | auth | 14.2 |
 | 73 | GET | /api/ai/status | auth | 14.2 |
 | 74 | POST | /api/ai/playlists | auth | 14.2 |

@@ -31,6 +31,9 @@ import com.lukasbaxter.slopify.android.core.model.LikesMap
 import com.lukasbaxter.slopify.android.core.model.LoginResponse
 import com.lukasbaxter.slopify.android.core.model.LyricJob
 import com.lukasbaxter.slopify.android.core.model.LyricJobs
+import com.lukasbaxter.slopify.android.core.model.MadeDetail
+import com.lukasbaxter.slopify.android.core.model.MadePlaylist
+import com.lukasbaxter.slopify.android.core.model.MadePlaylists
 import com.lukasbaxter.slopify.android.core.model.Lyrics
 import com.lukasbaxter.slopify.android.core.model.Mix
 import com.lukasbaxter.slopify.android.core.model.Ok
@@ -279,6 +282,12 @@ suspend fun ApiClient.homeMixes(): List<TopMix> = get<TopMixes>("api/home/mixes"
 /** The songs of one of Your top mixes. Genre names may hold "/" ("R&B/Soul"): one path segment, escaped. */
 suspend fun ApiClient.homeMixTracks(genre: String): List<Track> =
     get<Items<Track>>("api/home/mixes/${ApiClient.segment(genre)}").items
+
+/** The listener's themed playlists (server madeforyou.ts). The first call of a day builds them: up to ~20 s, so 30. */
+suspend fun ApiClient.madeList(): List<MadePlaylist> = get<MadePlaylists>("api/made", timeout = 30.0).items
+
+/** One themed playlist with its songs. Ids hold ":" ("thisis:<artistId>"): one path segment, escaped. */
+suspend fun ApiClient.made(id: String): MadeDetail = get("api/made/${ApiClient.segment(id)}", timeout = 30.0)
 
 /** Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s. */
 suspend fun ApiClient.radar(): List<Release> = get<RadarR>("api/radar", timeout = 120.0).releases ?: emptyList()

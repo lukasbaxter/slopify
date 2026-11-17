@@ -5,8 +5,10 @@ import com.lukasbaxter.slopify.android.core.api.albums
 import com.lukasbaxter.slopify.android.core.api.artists
 import com.lukasbaxter.slopify.android.core.api.browse
 import com.lukasbaxter.slopify.android.core.api.home
+import com.lukasbaxter.slopify.android.core.api.madeList
 import com.lukasbaxter.slopify.android.core.attempt
 import com.lukasbaxter.slopify.android.core.model.BrowseTile
+import com.lukasbaxter.slopify.android.core.model.MadePlaylist
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.storage.KeyValueStore
 import com.lukasbaxter.slopify.android.design.theme.RGB
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 
 /**
  * What the Browse state paints (UI.md 6.2.5): the genre tiles from `GET /api/browse` and the
@@ -43,12 +46,29 @@ class SearchBrowseData(private val store: KeyValueStore) {
 
     private val mutable = MutableStateFlow(Saved())
     val saved: StateFlow<Saved> = mutable.asStateFlow()
+
+    /**
+     * The listener's themed playlists, the browse page's "Made For You" row (`GET /api/made`). Kept
+     * apart from [saved]: the first call of a day takes ~20 s and must not hold the tiles back.
+     */
+    private val madeMutable = MutableStateFlow<List<MadePlaylist>>(emptyList())
+    val made: StateFlow<List<MadePlaylist>> = madeMutable.asStateFlow()
     private var key: String? = null
 
     fun use(key: String?) {
         if (key == this.key) return
         this.key = key
         mutable.value = key?.let { load(store, it) } ?: Saved()
+        madeMutable.value = key?.let { loadMade(store, it) } ?: emptyList()
+    }
+
+    /** Asks the server for the themed playlists; a failure (an older server: 404) keeps what is shown. */
+    suspend fun refreshMade(api: ApiClient) {
+        val k = key ?: return
+        val got = attempt { api.madeList() } ?: return
+        if (k != key) return
+        madeMutable.value = got
+        store.putString(madeKey(k), SlopifyJson.encodeToString(madeSerializer, got))
     }
 
     suspend fun refresh(api: ApiClient) {
@@ -79,6 +99,13 @@ class SearchBrowseData(private val store: KeyValueStore) {
 
         fun load(store: KeyValueStore, key: String): Saved? =
             store.getString(key)?.let { attempt { SlopifyJson.decodeFromString(Saved.serializer(), it) } }
+
+        private val madeSerializer = ListSerializer(MadePlaylist.serializer())
+
+        fun madeKey(key: String): String = "$key.made"
+
+        fun loadMade(store: KeyValueStore, key: String): List<MadePlaylist>? =
+            store.getString(madeKey(key))?.let { attempt { SlopifyJson.decodeFromString(madeSerializer, it) } }
 
         /** The colour a genre's tile had (DECISIONS: genre pages take their tile colour). */
         fun tileColor(genre: String, tiles: List<BrowseTile>?): RGB? {

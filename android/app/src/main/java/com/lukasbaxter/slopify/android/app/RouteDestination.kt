@@ -18,6 +18,7 @@ import com.lukasbaxter.slopify.android.features.library.FolderView
 import com.lukasbaxter.slopify.android.features.library.LikedSongsView
 import com.lukasbaxter.slopify.android.features.library.PlaylistView
 import com.lukasbaxter.slopify.android.features.search.GenreView
+import com.lukasbaxter.slopify.android.features.search.MadeView
 import com.lukasbaxter.slopify.android.features.search.SearchBrowsePage
 
 /** Route -> screen. Exhaustive: a new Route does not compile until it has a screen. */
@@ -32,6 +33,7 @@ fun RouteDestination(route: Route) {
         is Route.TopSongs -> TopSongsView(route.year, route.colorIndex)
         is Route.TopMix -> TopMixView(route.genre, route.name)
         is Route.Radio -> RadioView(route.seedId, route.nameHint)
+        is Route.Made -> MadeView(route.id, route.title)
         is Route.Genre -> GenreView(route.name)
         Route.Charts -> SearchBrowsePage(charts = true)
         is Route.Folder -> FolderView(route.id)

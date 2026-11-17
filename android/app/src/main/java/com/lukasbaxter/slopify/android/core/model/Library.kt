@@ -174,8 +174,14 @@ data class BrowseTile(
     val kind: String? = null,
 )
 
+/** `made`: the listener's themed playlists the words name ("rock", "this is drake"); older servers send none. */
 @Serializable
-data class SearchResults(val tracks: List<Track>, val albums: List<Album>, val artists: List<Artist>)
+data class SearchResults(
+    val tracks: List<Track>,
+    val albums: List<Album>,
+    val artists: List<Artist>,
+    val made: List<MadePlaylist> = emptyList(),
+)
 
 /** What an id is: the server decides likes, saves and follows by it (API.md §9). */
 @Serializable
@@ -341,6 +347,43 @@ data class TopMix(
 
 @Serializable
 data class TopMixes(val items: List<TopMix> = emptyList())
+
+/**
+ * A themed playlist made for this listener (`GET /api/made`, server madeforyou.ts): Rock Classics,
+ * Chill Vibes, 90s Hits, This Is <artist>. `id` is the theme ("rock", "thisis:<artistId>"),
+ * `kind` genre | mood | decade | season | thisis, `art` the cover as the server drew it.
+ */
+@Serializable
+data class MadePlaylist(
+    val id: String,
+    val title: String = "",
+    val kind: String? = null,
+    val description: String? = null,
+    val color: String? = null,
+    val art: String? = null,
+    val count: Int? = null,
+    val artists: List<MixArtist> = emptyList(),
+)
+
+/** `GET /api/made`. `building`: the server is still making today's set. */
+@Serializable
+data class MadePlaylists(val items: List<MadePlaylist> = emptyList(), val building: Boolean = false)
+
+/** `GET /api/made/{id}`: the playlist's fields and its songs. */
+@Serializable
+data class MadeDetail(
+    val id: String,
+    val title: String = "",
+    val kind: String? = null,
+    val description: String? = null,
+    val color: String? = null,
+    val art: String? = null,
+    val count: Int? = null,
+    val artists: List<MixArtist> = emptyList(),
+    val items: List<Track> = emptyList(),
+) {
+    val summary: MadePlaylist get() = MadePlaylist(id, title, kind, description, color, art, count, artists)
+}
 
 /** The listener's radio playlist of a seed (API.md §14.4). */
 @Serializable

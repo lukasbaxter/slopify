@@ -211,6 +211,12 @@ extension APIClient {
         try await (get("api/home/mixes/\(Self.segment(genre))") as Items<Track>).items
     }
 
+    /// Made For You themed playlists (§14.5). Slow the first time the server makes them: 30 s.
+    func madeList() async throws -> [MadeForYou] { try await (get("api/made", timeout: 30) as MadeForYouList).items }
+
+    /// One themed playlist with its songs; the id ("thisis:<artistId>") is one encoded path part.
+    func made(_ id: String) async throws -> MadeForYouDetail { try await get("api/made/\(Self.segment(id))", timeout: 30) }
+
     /// Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s.
     func radar() async throws -> [Release] {
         struct R: Decodable { var releases: [Release]? }

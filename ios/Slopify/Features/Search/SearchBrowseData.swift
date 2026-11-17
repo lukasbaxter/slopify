@@ -15,12 +15,15 @@ final class SearchBrowseData {
         var recentAlbum: String?
         /// First two library albums (A-Z), the fallbacks of New Releases and Charts.
         var firstAlbums: [String] = []
+        /// The Made For You row (`GET /api/made`).
+        var made: [MadeForYou]?
     }
 
     private(set) var saved = Saved()
     private var key: String?
 
     var tiles: [BrowseTile]? { saved.tiles }
+    var made: [MadeForYou] { saved.made ?? [] }
     var madeForYouCover: String? { saved.topArtist ?? saved.firstArtist }
     /// Home never writes `home.added`, so this is the first library album (UI.md 6.2.5 note).
     var newReleasesCover: String? { saved.firstAlbums.first }
@@ -61,6 +64,14 @@ final class SearchBrowseData {
         }
         if let al { saved.firstAlbums = al.map(\.id) }
         if let ar { saved.firstArtist = ar.first?.id }
+        persist()
+    }
+
+    /// The Made For You row, on its own: the server can take ~20 s to make it the first time, and
+    /// the tiles must not wait for it. A failure keeps the kept row.
+    func refreshMade(api: APIClient) async {
+        guard let m = try? await api.madeList(), !Task.isCancelled else { return }
+        saved.made = m
         persist()
     }
 

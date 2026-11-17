@@ -86,18 +86,43 @@ struct SearchPage: Sendable {
     var albums: [Album]
     var artists: [Artist]
     var playlists: [Playlist]
+    /// The listener's themed playlists the words name (empty from older servers).
+    var made: [MadeForYou]
     var top: SearchItem?
 
     init(query: String, results: SearchResults, playlists: [Playlist]) {
         self.query = query
         tracks = results.tracks; albums = results.albums; artists = results.artists
+        made = results.made ?? []
         let q = query.lowercased()
         self.playlists = playlists.filter { $0.name.lowercased().contains(q) }
         top = SearchLogic.topResult(query: query, results: results)
     }
 }
 
+/// One block of the result page, in order.
+enum SearchSection: Equatable, Sendable {
+    /// The "Made For You" card row.
+    case made([MadeForYou])
+    /// The flat phone list.
+    case rows([SearchItem])
+}
+
 enum SearchLogic {
+    /// The result page top to bottom: the Made For You row first (All and Playlists chips, when the
+    /// server sent any), then the flat list. Empty: nothing found.
+    static func sections(_ p: SearchPage, type: SearchType) -> [SearchSection] {
+        guard type != .everywhere else { return [] }
+        var out: [SearchSection] = []
+        if type.shows(.playlist), !p.made.isEmpty { out.append(.made(p.made)) }
+        let rows = phoneRows(p, type: type)
+        if !rows.isEmpty { out.append(.rows(rows)) }
+        return out
+    }
+
+    /// A themed playlist's player context (the web's `made:<id>`).
+    static func madeContext(_ id: String) -> String { "made:\(id)" }
+
     /// NFKC + lowercase (api/search.js `norm`).
     static func norm(_ s: String) -> String { s.precomposedStringWithCompatibilityMapping.lowercased() }
 

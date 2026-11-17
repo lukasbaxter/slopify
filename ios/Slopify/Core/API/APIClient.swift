@@ -37,6 +37,9 @@ final class APIClient {
         var u = baseURL
         for seg in path.split(separator: "/") { u = u.appending(component: seg.removingPercentEncoding ?? String(seg), directoryHint: .notDirectory) }
         var c = URLComponents(url: u, resolvingAgainstBaseURL: false)!
+        // A colon inside a segment (an id like "thisis:<artistId>") goes as %3A, like the web's
+        // encodeURIComponent: one path part, never read as a scheme or port.
+        if c.percentEncodedPath.contains(":") { c.percentEncodedPath = c.percentEncodedPath.replacingOccurrences(of: ":", with: "%3A") }
         let items = query.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }.sorted { $0.name < $1.name }
         if !items.isEmpty { c.queryItems = items }
         return c.url!

@@ -288,9 +288,19 @@ data class Mix(val items: List<Track>, val from: String? = null, val day: String
 @Serializable
 data class MixArtist(val id: String, val name: String = "")
 
-/** One Made For You tile's day (API.md §14.3). */
+/**
+ * One Made For You tile's day (API.md §14.3). `art`: the whole tile as the server drew it
+ * (`art_<hash>`, photo + "Daily Mix" + its number), loaded as `/api/image/<art>`; absent on older servers.
+ */
 @Serializable
-data class DailyMixSummary(val artistId: String, val day: String? = null, val from: String? = null, val artists: List<MixArtist> = emptyList(), val cover: MixCover? = null)
+data class DailyMixSummary(
+    val artistId: String,
+    val day: String? = null,
+    val from: String? = null,
+    val artists: List<MixArtist> = emptyList(),
+    val cover: MixCover? = null,
+    val art: String? = null,
+)
 
 /** Today's cover of a Daily Mix: whose photo its tile shows (a new one each day). */
 @Serializable
@@ -298,6 +308,39 @@ data class MixCover(val id: String, val image: String? = null)
 
 @Serializable
 data class DailyMixSummaries(val items: List<DailyMixSummary> = emptyList())
+
+/**
+ * A Recommended Stations tile (`GET /api/home/stations`): an artist's radio. `id` is the artist,
+ * `withArtists` who else plays on it, `art` the tile as the server drew it.
+ */
+@Serializable
+data class HomeStation(
+    val id: String,
+    val name: String = "",
+    @SerialName("with") val withArtists: List<MixArtist> = emptyList(),
+    val color: String? = null,
+    val art: String? = null,
+)
+
+@Serializable
+data class HomeStations(val items: List<HomeStation> = emptyList())
+
+/**
+ * One of Your top mixes (`GET /api/home/mixes`): the day's mix of a genre the listener plays most.
+ * `name` is the tile's title ("Hip-Hop Mix"), `art` the tile as the server drew it.
+ */
+@Serializable
+data class TopMix(
+    val genre: String,
+    val name: String = "",
+    val artists: List<MixArtist> = emptyList(),
+    val color: String? = null,
+    val art: String? = null,
+    val day: String? = null,
+)
+
+@Serializable
+data class TopMixes(val items: List<TopMix> = emptyList())
 
 /** The listener's radio playlist of a seed (API.md §14.4). */
 @Serializable

@@ -354,9 +354,36 @@ struct DailyMixSummary: Codable, Hashable, Sendable {
     var artists: [MixArtist]
     /// Today's cover: the artist whose photo the tile shows (a new one each day). Older servers omit it.
     var cover: MixCover? = nil
+    /// The whole tile as the server drew it (photo, "Daily Mix", its number): an `art_<hash>`
+    /// image id, shown as is. Older servers omit it.
+    var art: String? = nil
 }
 
 struct MixCover: Codable, Hashable, Sendable { var id: String; var image: String? }
+
+/// Home's Recommended Stations (§14.3): an artist's radio, with who it brings in.
+struct HomeStation: Codable, Hashable, Identifiable, Sendable {
+    /// The seed artist's id.
+    var id: String
+    var name: String
+    var with: [MixArtist]? = nil
+    var color: String? = nil
+    /// The drawn tile (`art_<hash>`).
+    var art: String? = nil
+}
+
+/// Home's Your top mixes (§14.3): the day's mix of a genre the listener plays most.
+struct HomeTopMix: Codable, Hashable, Identifiable, Sendable {
+    var genre: String
+    /// "Hip-Hop Mix".
+    var name: String
+    var artists: [MixArtist]? = nil
+    var color: String? = nil
+    /// The drawn tile (`art_<hash>`).
+    var art: String? = nil
+    var day: String? = nil
+    var id: String { genre }
+}
 
 /// Go to radio: the listener's radio playlist of one seed (§14.4).
 struct Radio: Codable, Sendable {

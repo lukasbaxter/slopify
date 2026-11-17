@@ -27,7 +27,7 @@ object HomeLogic {
 
     enum class Filter { All, Music, Artists }
 
-    enum class Section { Shortcuts, MadeForYou, TopSongs, Recent, JumpBackIn, Radar, TopArtists }
+    enum class Section { Shortcuts, MadeForYou, Stations, TopMixes, JumpBackIn, Radar, TopArtists, TopSongs }
 
     sealed interface Shortcut {
         val id: String
@@ -126,22 +126,28 @@ object HomeLogic {
     }
 
     data class Counts(
-        val mixes: Int = 0, val years: Int = 0, val recent: Int = 0,
+        val mixes: Int = 0, val stations: Int = 0, val topMixes: Int = 0, val years: Int = 0,
         val recentArtists: Int = 0, val radar: Int = 0, val topArtists: Int = 0,
     )
 
-    /** Which sections show, in the web's order (UI.md 6.1.3). Made For You hides without mixes (DECISIONS: web bug fixed). */
+    /**
+     * Which sections show, in the web's order (Home.jsx): shortcuts, Made For You, Recommended
+     * Stations, Your top mixes, Jump back in, Release Radar, Your top artists, Your Top Songs. No
+     * Recently played: the shortcuts are what was played last. Made For You hides without mixes
+     * (DECISIONS: web bug fixed).
+     */
     fun sections(filter: Filter, counts: Counts): List<Section> {
         val music = filter != Filter.Artists
         val artists = filter != Filter.Music
         val out = mutableListOf<Section>()
         if (music) out += Section.Shortcuts
         if (music && counts.mixes > 0) out += Section.MadeForYou
-        if (music && counts.years > 0) out += Section.TopSongs
-        if (music && counts.recent > 0) out += Section.Recent
+        if (music && counts.stations > 0) out += Section.Stations
+        if (music && counts.topMixes > 0) out += Section.TopMixes
         if (artists && counts.recentArtists > 0) out += Section.JumpBackIn
         if (music && counts.radar > 0) out += Section.Radar
         if (artists && counts.topArtists > 0) out += Section.TopArtists
+        if (music && counts.years > 0) out += Section.TopSongs
         return out
     }
 
@@ -156,6 +162,12 @@ object HomeLogic {
         val names = artists.map { it.name }.filter { it.isNotEmpty() }
         val name = if (names.isNotEmpty()) names.joinToString(", ") else fallback?.takeIf { it.isNotEmpty() }
         return name?.let { L("{name} and more", "name" to it) }
+    }
+
+    /** A Recommended Stations tile's subtitle (Home.jsx `withSub`): "With A, B and more"; null when nobody else is named. */
+    fun withSub(others: List<MixArtist>): String? {
+        val names = others.map { it.name }.filter { it.isNotEmpty() }
+        return if (names.isEmpty()) null else L("With {name} and more", "name" to names.joinToString(", "))
     }
 
     /** A radio's band colour (API.md §14.4): the seed id's UTF-16 code units summed, `% 8`. */

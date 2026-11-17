@@ -16,6 +16,8 @@ enum CoverSource: Hashable, Sendable {
     /// Library folder picture (`fd_`).
     case folder(id: String)
     case user(id: String)
+    /// A picture the server drew whole (`art_<hash>`: Home's Daily Mix, station and top mix tiles).
+    case drawn(id: String)
     /// Any absolute URL (Lidarr release art, now-playing `artUrl`).
     case url(URL?)
 
@@ -43,6 +45,7 @@ enum CoverSource: Hashable, Sendable {
             return api.imageURL(id: id, size: size)
         case .banner(let id): return api.imageURL(id: id, size: size, banner: true)
         case .folder(let id): return api.imageURL(id: id, size: size)
+        case .drawn(let id): return api.imageURL(id: id, size: size)
         case .user(let id): return api.avatarURL(userId: id)
         case .url(let u): return u
         }

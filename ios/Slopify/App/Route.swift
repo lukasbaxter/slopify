@@ -15,6 +15,8 @@ enum Route: Hashable {
     case radio(seedId: String, name: String?)
     /// `colorIndex`: the tile's place on Home's Your Top Songs shelf.
     case topSongs(year: Int, colorIndex: Int)
+    /// One of Home's Your top mixes (§14.3), by genre.
+    case topMix(genre: String)
     case genre(name: String)
     case charts
     case folder(id: String)

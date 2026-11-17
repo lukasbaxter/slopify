@@ -105,9 +105,10 @@ private val homeMixBlack = RGB(0.0, 0.0, 0.0)
  * Daily Mix / Top Songs composite art (UI.md 6.1.6, 6.3.6): photo kept by its top edge over a
  * `160deg mix(color 55% black) -> color` ground, with a band in the raw mix colour carrying the label.
  * Home tile: 14 sp, padding 6/10, bottom radius 2. Page cover (`large`): 16 sp, padding 10/14, no radius.
+ * `drawn`: the source is the whole tile as the server drew it (`art_…`), shown as it is with no band.
  */
 @Composable
-internal fun HomeMixArt(source: CoverSource?, color: RGB, label: String, pixelSize: Dp, modifier: Modifier = Modifier, large: Boolean = false) {
+internal fun HomeMixArt(source: CoverSource?, color: RGB, label: String, pixelSize: Dp, modifier: Modifier = Modifier, large: Boolean = false, drawn: Boolean = false) {
     val api = LocalApiClient.current
     val density = LocalDensity.current
     val px = ceil(pixelSize.value * maxOf(density.density, 1f)).toInt()
@@ -132,16 +133,18 @@ internal fun HomeMixArt(source: CoverSource?, color: RGB, label: String, pixelSi
         image?.let {
             Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, alpha = alpha.value)
         }
-        val corner = if (large) 0.dp else Radius.card
-        Text(
-            label,
-            style = (if (large) TextStyles.bodyBold else TextStyles.smallBold).copy(letterSpacing = (-0.2).sp),
-            color = color.ink.color, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(bottomStart = corner, bottomEnd = corner))
-                .background(raw)
-                .padding(vertical = if (large) 10.dp else 6.dp, horizontal = if (large) 14.dp else 10.dp),
-        )
+        if (!drawn) {
+            val corner = if (large) 0.dp else Radius.card
+            Text(
+                label,
+                style = (if (large) TextStyles.bodyBold else TextStyles.smallBold).copy(letterSpacing = (-0.2).sp),
+                color = color.ink.color, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(bottomStart = corner, bottomEnd = corner))
+                    .background(raw)
+                    .padding(vertical = if (large) 10.dp else 6.dp, horizontal = if (large) 14.dp else 10.dp),
+            )
+        }
     }
 }
 

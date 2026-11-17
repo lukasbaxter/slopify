@@ -1,6 +1,6 @@
 {
   "name": "slopify-desktop",
-  "version": "0.1.207",
+  "version": "0.1.208",
   "private": true,
   "description": "Slopify desktop: the web app in a window, with Chromecast and BluOS speakers driven from this machine (for speakers away from home; at home the server drives them).",
   "main": "electron/main.js",

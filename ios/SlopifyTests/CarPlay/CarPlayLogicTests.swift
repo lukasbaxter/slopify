@@ -86,10 +86,10 @@ final class CarPlayLogicTests: XCTestCase {
         let d = snapshot
         let s = CarPlayLogic.homeSections(d, mixSeeds: HomeLogic.mixSeeds(topArtists: d.topArtists, libraryArtists: []),
                                           offline: false, held: [], currentYear: 2026, perSection: 12)
-        XCTAssertEqual(s.map(\.title), ["Made For You", "Your Top Songs", "Recently played", "Your top artists"])
+        XCTAssertEqual(s.map(\.title), ["Made For You", "Your top artists", "Your Top Songs"])
         XCTAssertEqual(s[0].rows.map(\.title), ["Daily Mix 1", "Daily Mix 2"])
-        XCTAssertEqual(s[1].rows.first?.subtitle, "Your most played songs of 2026 so far")
-        XCTAssertEqual(s[1].rows.first?.art, .album(id: "al_y", art: nil))
+        XCTAssertEqual(s[2].rows.first?.subtitle, "Your most played songs of 2026 so far")
+        XCTAssertEqual(s[2].rows.first?.art, .album(id: "al_y", art: nil))
     }
 
     func testHomeSectionsCapPerSection() {
@@ -102,7 +102,7 @@ final class CarPlayLogicTests: XCTestCase {
     func testHomeOfflineShowsOnlyDownloadedRecentAlbums() {
         let s = CarPlayLogic.homeSections(snapshot, mixSeeds: [.init(id: "a1", name: "A1")], offline: true, held: ["r2"],
                                           currentYear: 2026, perSection: 12)
-        XCTAssertEqual(s.map(\.title), ["Recently played"])
+        XCTAssertEqual(s.map(\.title), ["Downloaded"])
         XCTAssertEqual(s[0].rows.map(\.target), [.album(id: "r2", name: "Nr2")])
         XCTAssertTrue(CarPlayLogic.homeSections(snapshot, mixSeeds: [], offline: true, held: [], currentYear: 2026, perSection: 12).isEmpty)
     }

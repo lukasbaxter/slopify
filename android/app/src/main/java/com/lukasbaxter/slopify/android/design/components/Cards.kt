@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -68,6 +69,8 @@ fun MediaCard(
     missing: Boolean = false,
     request: (@Composable () -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
+    /** False: no title line under the art (a tile whose drawn art carries its name); the title is still read out. */
+    showTitle: Boolean = true,
     onClick: () -> Unit,
     art: @Composable () -> Unit,
 ) {
@@ -84,22 +87,26 @@ fun MediaCard(
                 Modifier.matchParentSize()
                     .clip(if (round) CircleShape else RoundedCornerShape(Radius.card))
                     .then(if (missing) Modifier.missingArt() else Modifier)
+                    .then(if (showTitle) Modifier else Modifier.semantics { contentDescription = title })
                     .pressDim(press),
             ) { art() }
             if (missing && request != null) request()
         }
-        Text(
-            title,
-            style = if (style == CardStyle.Home) TextStyles.cardTitle else TextStyles.cardTitlePage,
-            color = if (missing) theme.fgDim else theme.fg,
-            maxLines = if (style == CardStyle.Home) 1 else 2, overflow = TextOverflow.Ellipsis, textAlign = align,
-            modifier = Modifier.fillMaxWidth().padding(top = if (style == CardStyle.Home) 8.dp else 4.dp),
-        )
+        val titleTop = if (style == CardStyle.Home) 8.dp else 4.dp
+        if (showTitle) {
+            Text(
+                title,
+                style = if (style == CardStyle.Home) TextStyles.cardTitle else TextStyles.cardTitlePage,
+                color = if (missing) theme.fgDim else theme.fg,
+                maxLines = if (style == CardStyle.Home) 1 else 2, overflow = TextOverflow.Ellipsis, textAlign = align,
+                modifier = Modifier.fillMaxWidth().padding(top = titleTop),
+            )
+        }
         if (!subtitle.isNullOrEmpty()) {
             Text(
                 subtitle, style = TextStyles.cardSub, color = if (style == CardStyle.Home) theme.fgSub else theme.fgDim,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = align,
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = if (showTitle) 2.dp else titleTop),
             )
         }
     }
@@ -119,7 +126,7 @@ fun MediaCard(
     artSize: Dp = 158.dp,
     onLongPress: (() -> Unit)? = null,
     onClick: () -> Unit,
-) = MediaCard(title, subtitle, modifier, round, style, missing, request, onLongPress, onClick) {
+) = MediaCard(title, subtitle, modifier, round, style, missing, request, onLongPress, onClick = onClick) {
     CoverImage(
         source, artSize, Modifier.fillMaxSize(),
         shape = if (round) CoverShape.Circle else CoverShape.Rounded(Radius.card),

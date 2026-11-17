@@ -1,6 +1,9 @@
 package com.lukasbaxter.slopify.android.core
 
 import com.lukasbaxter.slopify.android.core.api.dailyMixes
+import com.lukasbaxter.slopify.android.core.api.homeMixTracks
+import com.lukasbaxter.slopify.android.core.api.homeMixes
+import com.lukasbaxter.slopify.android.core.api.homeStations
 import com.lukasbaxter.slopify.android.core.api.radio
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -54,6 +57,44 @@ class RadioApiTest {
         StubServer().use { s ->
             assertEquals(emptyList<Any>(), s.client().dailyMixes(emptyList()))
             assertTrue(s.seen.isEmpty())
+        }
+    }
+
+    @Test fun dailyMixesCarryTheDrawnArt() = runTest {
+        StubServer().use { s ->
+            s.answers["/api/daily-mixes"] = 200 to """{"items":[{"artistId":"a1","day":"2026-11-17","artists":[],"cover":{"id":"c1"},"art":"art_0123456789abcdef0123456789abcdef01234567"},{"artistId":"b1"}]}"""
+            val got = s.client().dailyMixes(listOf("a1", "b1"))
+            assertEquals("art_0123456789abcdef0123456789abcdef01234567", got[0].art)
+            assertNull(got[1].art) // an older server: no art, the tile keeps its band
+        }
+    }
+
+    @Test fun homeStationsSendSkipAndDecodeWith() = runTest {
+        StubServer().use { s ->
+            s.answers["/api/home/stations"] = 200 to """{"items":[{"id":"a9","name":"Nine","with":[{"id":"x","name":"X"}],"color":"#148a08","art":"art_1"},{"id":"a8"}]}"""
+            val got = s.client().homeStations(listOf("a1", "b1"))
+            val url = s.seen.single().requestUrl!!
+            assertEquals("/api/home/stations", url.encodedPath)
+            assertEquals("a1,b1", url.queryParameter("skip"))
+            assertTrue(url.queryParameter("tzo") != null)
+            assertEquals(listOf("X"), got[0].withArtists.map { it.name })
+            assertEquals("art_1", got[0].art)
+            assertTrue(got[1].withArtists.isEmpty())
+            assertNull(got[1].art)
+        }
+    }
+
+    @Test fun topMixesDecodeAndTheirSongsEscapeTheGenre() = runTest {
+        StubServer().use { s ->
+            s.answers["/api/home/mixes"] = 200 to """{"items":[{"genre":"R&B/Soul","name":"R&B/Soul Mix","artists":[{"id":"a1","name":"A"}],"color":"#e8115b","art":"art_2","day":"2026-11-17"}]}"""
+            s.answers["/api/home/mixes/R&B%2FSoul"] = 200 to """{"items":[$track]}"""
+            val m = s.client().homeMixes().single()
+            assertEquals("R&B/Soul", m.genre)
+            assertEquals("R&B/Soul Mix", m.name)
+            assertEquals("art_2", m.art)
+            val songs = s.client().homeMixTracks(m.genre)
+            assertEquals("/api/home/mixes/R&B%2FSoul", s.seen.last().requestUrl!!.encodedPath)
+            assertEquals(listOf("t1"), songs.map { it.id })
         }
     }
 }

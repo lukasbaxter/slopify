@@ -3,6 +3,7 @@ package com.lukasbaxter.slopify.android.features.home
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
 import com.lukasbaxter.slopify.android.core.model.HomePick
+import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
@@ -105,18 +106,31 @@ class HomeLogicTest {
     }
 
     @Test fun sectionsOrderFiltersAndHiddenMadeForYou() {
-        val full = HomeLogic.Counts(mixes = 6, years = 2, recent = 3, recentArtists = 4, radar = 5, topArtists = 6)
+        val full = HomeLogic.Counts(mixes = 6, stations = 3, topMixes = 2, years = 2, recentArtists = 4, radar = 5, topArtists = 6)
+        // Home.jsx: Made For You, Recommended Stations, Your top mixes, Jump back in, Release Radar,
+        // Your top artists, Your Top Songs last; no Recently played.
         assertEquals(
-            listOf(Section.Shortcuts, Section.MadeForYou, Section.TopSongs, Section.Recent, Section.JumpBackIn, Section.Radar, Section.TopArtists),
+            listOf(
+                Section.Shortcuts, Section.MadeForYou, Section.Stations, Section.TopMixes, Section.JumpBackIn,
+                Section.Radar, Section.TopArtists, Section.TopSongs,
+            ),
             HomeLogic.sections(HomeLogic.Filter.All, full),
         )
         assertEquals(
-            listOf(Section.Shortcuts, Section.MadeForYou, Section.TopSongs, Section.Recent, Section.Radar),
+            listOf(Section.Shortcuts, Section.MadeForYou, Section.Stations, Section.TopMixes, Section.Radar, Section.TopSongs),
             HomeLogic.sections(HomeLogic.Filter.Music, full),
         )
         assertEquals(listOf(Section.JumpBackIn, Section.TopArtists), HomeLogic.sections(HomeLogic.Filter.Artists, full))
         // No mixes: no Made For You (DECISIONS), and empty lists hide their shelves.
         assertEquals(listOf(Section.Shortcuts), HomeLogic.sections(HomeLogic.Filter.All, HomeLogic.Counts()))
+        assertFalse(HomeLogic.sections(HomeLogic.Filter.All, full.copy(stations = 0)).contains(Section.Stations))
+        assertFalse(HomeLogic.sections(HomeLogic.Filter.All, full.copy(topMixes = 0)).contains(Section.TopMixes))
+    }
+
+    @Test fun stationSubtitleNamesWhoElseIsOnIt() {
+        assertEquals("With A, B and more", HomeLogic.withSub(listOf(MixArtist("1", "A"), MixArtist("2", "B"))))
+        assertNull(HomeLogic.withSub(emptyList()))
+        assertNull(HomeLogic.withSub(listOf(MixArtist("1", ""))))
     }
 
     @Test fun mixColourIndexWraps() {

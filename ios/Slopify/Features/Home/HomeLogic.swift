@@ -14,7 +14,7 @@ enum HomeLogic {
 
     enum Filter: String, CaseIterable, Sendable { case all, music, artists }
 
-    enum Section: Hashable, Sendable { case shortcuts, madeForYou, topSongs, recent, jumpBackIn, radar, topArtists }
+    enum Section: Hashable, Sendable { case shortcuts, madeForYou, stations, topMixes, jumpBackIn, radar, topArtists, topSongs }
 
     enum Shortcut: Hashable, Identifiable, Sendable {
         case liked
@@ -141,6 +141,45 @@ enum HomeLogic {
         return names.isEmpty ? nil : L("{name} and more", ["name": names.joined(separator: ", ")])
     }
 
+    /// A Recommended Stations tile's subtitle: "With A, B and more"; nil without names.
+    static func stationSub(_ with: [MixArtist]?) -> String? {
+        let names = (with ?? []).map(\.name).filter { !$0.isEmpty }
+        return names.isEmpty ? nil : L("With {name} and more", ["name": names.joined(separator: ", ")])
+    }
+
+    /// What a Home mix tile shows. A drawn tile (the server drew the whole picture: Daily Mix,
+    /// station, top mix) is the picture as is, no band over it and no title under it, only the sub.
+    struct MixTile: Equatable, Sendable {
+        var image: CoverSource?
+        /// The label on the colour band over the picture; nil: no band.
+        var band: String?
+        /// The title line under the picture; nil: none.
+        var title: String?
+        var sub: String?
+        var drawn: Bool { band == nil && title == nil }
+    }
+
+    /// A Daily Mix tile: the server's drawn `art` when it sent one, else today's look (photo,
+    /// band and title "Daily Mix {n}").
+    static func dailyMixTile(label: String, sub: String?, art: String?, photo: CoverSource) -> MixTile {
+        if let art, !art.isEmpty { return MixTile(image: .drawn(id: art), band: nil, title: nil, sub: sub) }
+        return MixTile(image: photo, band: label, title: label, sub: sub)
+    }
+
+    static func stationTile(_ s: HomeStation) -> MixTile {
+        MixTile(image: s.art.map { .drawn(id: $0) }, band: nil, title: nil, sub: stationSub(s.with))
+    }
+
+    static func topMixTile(_ m: HomeTopMix) -> MixTile {
+        MixTile(image: m.art.map { .drawn(id: $0) }, band: nil, title: nil, sub: mixSub(m.artists))
+    }
+
+    /// A tile colour the server sent ("#rrggbb"), else the mix palette's first.
+    static func color(_ hex: String?) -> RGB { hex.flatMap { RGB(hex: $0) } ?? Theme.Fixed.mixPalette[0] }
+
+    /// The player context of one of Your top mixes (the web's `topmix:<genre>`).
+    static func topMixContext(_ genre: String) -> String { "topmix:\(genre)" }
+
     /// A Daily Mix tile's (and its page's) subtitle: today's artists (§14.3), else the seed alone.
     static func dailyMixSub(seedName: String, summary: DailyMixSummary?) -> String? {
         mixSub(summary?.artists) ?? (seedName.isEmpty ? nil : L("{name} and more", ["name": seedName]))
@@ -153,21 +192,24 @@ enum HomeLogic {
     }
 
     struct Counts: Sendable {
-        var mixes = 0, years = 0, recent = 0, recentArtists = 0, radar = 0, topArtists = 0
+        var mixes = 0, stations = 0, topMixes = 0, years = 0, recentArtists = 0, radar = 0, topArtists = 0
     }
 
-    /// Which sections show, in the web's order (UI.md 6.1.3). Made For You hides without mixes
-    /// (DECISIONS: web bug fixed).
+    /// Which sections show, in the web's order (UI.md 6.1.3): shortcuts, Made For You,
+    /// Recommended Stations, Your top mixes, Jump back in, Release Radar, Your top artists, Your
+    /// Top Songs. No Recently played (the shortcuts are what was played last). Made For You hides
+    /// without mixes (DECISIONS: web bug fixed).
     static func sections(filter: Filter, counts c: Counts) -> [Section] {
         let music = filter != .artists, artists = filter != .music
         var out: [Section] = []
         if music { out.append(.shortcuts) }
         if music && c.mixes > 0 { out.append(.madeForYou) }
-        if music && c.years > 0 { out.append(.topSongs) }
-        if music && c.recent > 0 { out.append(.recent) }
+        if music && c.stations > 0 { out.append(.stations) }
+        if music && c.topMixes > 0 { out.append(.topMixes) }
         if artists && c.recentArtists > 0 { out.append(.jumpBackIn) }
         if music && c.radar > 0 { out.append(.radar) }
         if artists && c.topArtists > 0 { out.append(.topArtists) }
+        if music && c.years > 0 { out.append(.topSongs) }
         return out
     }
 
@@ -193,6 +235,10 @@ enum HomeLogic {
     }
 
     // MARK: Release Radar
+
+    /// Home's shelf: only releases in the library (the server fetches the rest; they show once
+    /// they land), 16 at most.
+    static func radarShelf(_ all: [Release]) -> [Release] { Array(all.filter { $0.inLibrary != nil }.prefix(16)) }
 
     /// Home shelf subtitle: "{artistName} • {t(rtype) or t('Album')}".
     static func radarShelfSub(_ r: Release) -> String {

@@ -112,18 +112,9 @@ struct HomeView: View {
         switch s {
         case .shortcuts: shortcutGrid
         case .madeForYou: madeForYou
+        case .stations: stations
+        case .topMixes: topMixes
         case .topSongs: topSongs
-        case .recent:
-            shelf(L("Recently played"), seeAll: { nav.pushFromHome(.seeAll(.albums)) }) {
-                Shelf(items: store.data.recent, style: .home) { a in
-                    MediaCard(.init(a), title: a.name, subtitle: a.artist.isEmpty ? L("Album") : a.artist, style: .home, artSize: 150) {
-                        nav.pushFromHome(.album(id: a.id))
-                    } onLongPress: {
-                        menu = CardMenuBuilder(app: app).album(a.id, name: a.name, artist: a.artist, artistId: a.artistId)
-                    }
-                    .homeZoomSource(.album(id: a.id))
-                }
-            }
         case .jumpBackIn:
             shelf(L("Jump back in"), seeAll: { nav.push(.seeAll(.artists)) }) { artistShelf(store.data.recentArtists) }
         case .radar:
@@ -173,14 +164,38 @@ struct HomeView: View {
         let seeds = store.mixSeeds
         return shelf(L("Made For You"), seeAll: nil) {
             Shelf(items: Array(seeds.enumerated()).map { MixItem(index: $0.offset, artist: $0.element) }, style: .home) { m in
-                let label = L("Daily Mix {n}", ["n": m.index + 1])
-                MediaCard(title: label, subtitle: store.mixSub(artistId: m.artist.id, seedName: m.artist.name), style: .home,
-                          action: { nav.pushFromHome(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name)) }) {
-                    HomeMixArt(source: store.mixArt(artistId: m.artist.id, image: m.artist.image), color: mixColor(m.index), label: label, pixelSize: 150)
-                }
-                .homeZoomSource(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name))
+                let route = Route.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name)
+                mixTile(store.dailyMixTile(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name, image: m.artist.image),
+                        label: L("Daily Mix {n}", ["n": m.index + 1]), color: mixColor(m.index), route: route)
             }
         }
+    }
+
+    /// Recommended Stations: a tap opens the artist's radio, as Go to radio does.
+    private var stations: some View {
+        shelf(L("Recommended Stations"), seeAll: nil) {
+            Shelf(items: store.stations, style: .home) { st in
+                mixTile(HomeLogic.stationTile(st), label: L("{name} Radio", ["name": st.name]), color: HomeLogic.color(st.color),
+                        route: .radio(seedId: st.id, name: st.name))
+            }
+        }
+    }
+
+    private var topMixes: some View {
+        shelf(L("Your top mixes"), seeAll: nil) {
+            Shelf(items: store.topMixes, style: .home) { m in
+                mixTile(HomeLogic.topMixTile(m), label: m.name, color: HomeLogic.color(m.color), route: .topMix(genre: m.genre))
+            }
+        }
+    }
+
+    /// A mix tile: the drawn picture alone with its sub, or photo + band + title (older servers).
+    private func mixTile(_ t: HomeLogic.MixTile, label: String, color: RGB, route: Route) -> some View {
+        MediaCard(title: t.title ?? "", subtitle: t.sub, style: .home, action: { nav.pushFromHome(route) }) {
+            HomeMixArt(source: t.image, color: color, label: t.band, pixelSize: 150)
+        }
+        .accessibilityLabel(label)
+        .homeZoomSource(route)
     }
 
     private var topSongs: some View {
@@ -209,6 +224,7 @@ struct HomeView: View {
         }
     }
 
+    /// The shelf only lists releases in the library (HomeLogic.radarShelf).
     @ViewBuilder private func radarCard(_ r: Release) -> some View {
         if let lib = r.inLibrary {
             MediaCard(.album(id: lib, art: nil), title: r.title, subtitle: HomeLogic.radarShelfSub(r), style: .home, artSize: 150) {
@@ -217,12 +233,6 @@ struct HomeView: View {
                 menu = CardMenuBuilder(app: app).album(lib, name: r.title, artist: r.artist, artistId: r.artistId)
             }
             .homeZoomSource(.album(id: lib))
-        } else {
-            // Not in the library yet: the artist's page, where it can be requested.
-            MediaCard(.url(r.image.flatMap(URL.init(string:))), title: r.title, subtitle: HomeLogic.radarShelfSub(r), style: .home, artSize: 150) {
-                if let a = r.artistId { nav.pushFromHome(.artist(id: a)) }
-            }
-            .homeZoomSource(r.artistId.map { Route.artist(id: $0) } ?? .releaseRadar)
         }
     }
 

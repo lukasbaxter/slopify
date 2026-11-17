@@ -57,7 +57,7 @@ import kotlin.coroutines.cancellation.CancellationException
  * skeleton rows, the Home tile composite as cover, mix mark + "Made for you", ⋯ | Shuffle, Play,
  * rows with art.
  *
- * - `context`: player context, `mix:<artistId>` or `top:<year>`.
+ * - `context`: player context, `mix:<artistId>`, `top:<year>`, `topmix:<genre>` or `radio:<seed>`.
  * - `radioSeed`: the Daily Mix's artist; null hides "Go to radio".
  * - `refresh`: a Refresh menu item that loads anew (a radio). Nothing starts by itself (owner 11-13).
  */
@@ -70,6 +70,8 @@ internal fun HomeMixPage(
     art: CoverSource?,
     radioSeed: String?,
     radioName: String? = null,
+    /** `art` is the whole cover as the server drew it (`art_…`): shown as it is, no band. */
+    drawn: Boolean = false,
     refresh: (suspend (ApiClient) -> List<Track>)? = null,
     load: suspend (ApiClient) -> List<Track>,
 ) {
@@ -115,7 +117,7 @@ internal fun HomeMixPage(
     DetailScaffold(title, heroColor = hero) {
         item(key = "hero") {
             HeroHeader(hero, title, coverSize = 208.dp, cover = {
-                HomeMixArt(art, color, title, pixelSize = 208.dp, large = true)
+                HomeMixArt(art, color, title, pixelSize = 208.dp, large = true, drawn = drawn)
             }) {
                 HeroOwner(L("Made for you")) { HomeMixMark(color) }
                 Text(HomeLogic.mixStats(sub, tracks.sumOf { it.durationMs }))

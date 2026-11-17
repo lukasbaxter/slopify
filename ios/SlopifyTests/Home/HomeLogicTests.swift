@@ -90,10 +90,12 @@ final class HomeLogicTests: XCTestCase {
     }
 
     func testSectionsOrderFiltersAndHiddenMadeForYou() {
-        let full = HomeLogic.Counts(mixes: 6, years: 2, recent: 3, recentArtists: 4, radar: 5, topArtists: 6)
+        let full = HomeLogic.Counts(mixes: 6, stations: 3, topMixes: 2, years: 2, recentArtists: 4, radar: 5, topArtists: 6)
+        // The web's order: Made For You, Recommended Stations, Your top mixes, Jump back in, Release
+        // Radar, Your top artists, then Your Top Songs last. No Recently played.
         XCTAssertEqual(HomeLogic.sections(filter: .all, counts: full),
-                       [.shortcuts, .madeForYou, .topSongs, .recent, .jumpBackIn, .radar, .topArtists])
-        XCTAssertEqual(HomeLogic.sections(filter: .music, counts: full), [.shortcuts, .madeForYou, .topSongs, .recent, .radar])
+                       [.shortcuts, .madeForYou, .stations, .topMixes, .jumpBackIn, .radar, .topArtists, .topSongs])
+        XCTAssertEqual(HomeLogic.sections(filter: .music, counts: full), [.shortcuts, .madeForYou, .stations, .topMixes, .radar, .topSongs])
         XCTAssertEqual(HomeLogic.sections(filter: .artists, counts: full), [.jumpBackIn, .topArtists])
         // No mixes: no Made For You (DECISIONS), and empty lists hide their shelves.
         XCTAssertEqual(HomeLogic.sections(filter: .all, counts: .init()), [.shortcuts])
@@ -143,6 +145,33 @@ final class HomeLogicTests: XCTestCase {
         XCTAssertEqual(HomeLogic.requestUI("failed").label, "Retry")
         XCTAssertFalse(HomeLogic.requestUI("failed").busy)
         XCTAssertEqual(HomeLogic.requestUI("error").label, "Failed")
+    }
+
+    func testDrawnTilesHaveNoBandAndNoTitle() {
+        let photo = CoverSource.artist(id: "a", image: nil)
+        let drawn = HomeLogic.dailyMixTile(label: "Daily Mix 1", sub: "Drake, Future and more", art: "art_" + String(repeating: "a", count: 40), photo: photo)
+        XCTAssertEqual(drawn.image, .drawn(id: "art_" + String(repeating: "a", count: 40)))
+        XCTAssertNil(drawn.band); XCTAssertNil(drawn.title); XCTAssertTrue(drawn.drawn)
+        XCTAssertEqual(drawn.sub, "Drake, Future and more")
+        // An older server (no art): today's look, photo + band + title.
+        let old = HomeLogic.dailyMixTile(label: "Daily Mix 1", sub: "Drake and more", art: nil, photo: photo)
+        XCTAssertEqual(old.image, photo); XCTAssertEqual(old.band, "Daily Mix 1"); XCTAssertEqual(old.title, "Daily Mix 1"); XCTAssertFalse(old.drawn)
+
+        let st = HomeLogic.stationTile(HomeStation(id: "a", name: "Drake", with: [.init(id: "b", name: "Future"), .init(id: "c", name: "Travis Scott")], color: "#e8115b", art: "art_s"))
+        XCTAssertEqual(st, .init(image: .drawn(id: "art_s"), band: nil, title: nil, sub: "With Future, Travis Scott and more"))
+        let tm = HomeLogic.topMixTile(HomeTopMix(genre: "Hip-Hop", name: "Hip-Hop Mix", artists: [.init(id: "a", name: "Drake"), .init(id: "b", name: "Future")], color: "#1e3264", art: "art_m", day: "2026-11-17"))
+        XCTAssertEqual(tm, .init(image: .drawn(id: "art_m"), band: nil, title: nil, sub: "Drake, Future and more"))
+        XCTAssertNil(HomeLogic.stationSub([]))
+        XCTAssertEqual(HomeLogic.color("#1e3264"), RGB(hex: 0x1e3264))
+        XCTAssertEqual(HomeLogic.color(nil), Theme.Fixed.mixPalette[0])
+    }
+
+    func testRadarShelfOnlyListsReleasesInTheLibrary() {
+        let owned = Release(album_id: "m1", title: "In", artist: nil, rtype: nil, year: nil, date: nil, image: nil, total_tracks: nil,
+                            inLibrary: "al1", localName: nil, artistId: nil, artistName: nil, requestStatus: nil)
+        var missing = owned; missing.album_id = "m2"; missing.inLibrary = nil
+        XCTAssertEqual(HomeLogic.radarShelf([missing, owned]).map(\.album_id), ["m1"])
+        XCTAssertEqual(HomeLogic.sections(filter: .all, counts: .init(radar: HomeLogic.radarShelf([missing]).count)), [.shortcuts])
     }
 
     func testRadarReleaseDecodesServerShape() throws {

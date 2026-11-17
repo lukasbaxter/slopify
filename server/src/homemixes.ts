@@ -82,6 +82,8 @@ export async function stations(db: DB, cacheDir: string, uid: string, skip: Set<
   mixOf: (a: { id: string; name: string }) => Promise<{ artists: { id: string; name: string }[] }>, n = 8): Promise<Station[]> {
   let seeds = listenerArtists(db, uid, Date.now() - 180 * 86400000).filter((a) => !skip.has(a.id));
   if (seeds.length < n) seeds = [...seeds, ...listenerArtists(db, uid, 0).filter((a) => !skip.has(a.id) && !seeds.some((s) => s.id === a.id))];
+  // A small library: the Daily Mix artists too, after the rest, rather than no shelf.
+  if (seeds.length < n) seeds = [...seeds, ...listenerArtists(db, uid, 0).filter((a) => !seeds.some((s) => s.id === a.id))];
   seeds = seeds.slice(0, n);
   const keys = seeds.map((s) => `station:${s.id}`);
   return Promise.all(seeds.map(async (s, i) => {

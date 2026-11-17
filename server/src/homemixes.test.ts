@@ -50,9 +50,9 @@ describe('Recommended Stations', () => {
   it("are the listener's artists after the Daily Mix seeds, with who each brings in and a drawn cover", async () => {
     const mixOf = async (a: { id: string }) => ({ artists: [{ id: a.id, name: 'self' }, { id: B, name: 'Artist B' }, { id: C, name: 'Artist C' }] });
     const s = await stations(db, dir, 'u1', new Set([A]), mixOf);
-    expect(s.map((x) => x.name)).toEqual(['Artist C', 'Artist B', 'Artist E', 'Artist D']); // by plays, A skipped
+    expect(s.map((x) => x.name)).toEqual(['Artist C', 'Artist B', 'Artist E', 'Artist D', 'Artist A']); // by plays, the Daily Mix one (A) last
     expect(s[0].with.map((w) => w.name)).toEqual(['Artist B']); // not itself
-    expect(new Set(s.map((x) => x.color)).size).toBe(4);
+    expect(new Set(s.map((x) => x.color)).size).toBe(5);
     expect(s[0].art).toMatch(/^art_[0-9a-f]{40}$/);
     expect(fs.existsSync(path.join(dir, 'art', s[0].art!.slice(4), '640.jpg'))).toBe(true);
     const again = await stations(db, dir, 'u1', new Set([A]), mixOf);

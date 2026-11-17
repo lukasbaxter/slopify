@@ -49,6 +49,7 @@ import com.lukasbaxter.slopify.android.app.LocalAppModel
 import com.lukasbaxter.slopify.android.app.Route
 import com.lukasbaxter.slopify.android.app.SeeAllKind
 import com.lukasbaxter.slopify.android.app.Tab
+import com.lukasbaxter.slopify.android.core.api.homeMixTracks
 import com.lukasbaxter.slopify.android.core.api.mix
 import com.lukasbaxter.slopify.android.core.api.topSongs
 import com.lukasbaxter.slopify.android.core.model.MixArtist
@@ -190,15 +191,40 @@ fun DailyMixView(artistId: String, number: Int, seedName: String) {
     // The same day's artists as its Home tile; the mix's own answer fills in when Home has none.
     var fromMix by remember(artistId) { mutableStateOf<List<MixArtist>>(emptyList()) }
     val artists = st.data.mixArtists[artistId]?.takeIf { it.isNotEmpty() } ?: fromMix
+    // The cover as the server drew it (photo, "Daily Mix", its number) when it has; else today's photo.
+    val drawn = st.data.mixArt[artistId]
     HomeMixPage(
         context = "mix:$artistId",
         title = L("Daily Mix {n}", "n" to number),
         sub = HomeLogic.mixSub(artists, seedName),
         color = homeMixColor(number - 1),
-        art = st.data.mixCovers[artistId]?.let { CoverSource.ArtistArt(it.id, it.image) } ?: CoverSource.ArtistArt(artistId, null),
+        art = drawn?.let { CoverSource.AlbumArt(it, null) }
+            ?: st.data.mixCovers[artistId]?.let { CoverSource.ArtistArt(it.id, it.image) } ?: CoverSource.ArtistArt(artistId, null),
         radioSeed = artistId,
         radioName = seedName.ifEmpty { null },
+        drawn = drawn != null,
     ) { api -> api.mix(artistId, limit = 50).also { fromMix = it.artists }.items }
+}
+
+/**
+ * One of Your top mixes (Library.jsx `openTopMix`): the day's mix of a genre the listener plays
+ * most, `GET /api/home/mixes/{genre}`, shown like a Daily Mix with the server's drawn cover.
+ */
+@Composable
+fun TopMixView(genre: String, name: String) {
+    val st by homeStore().state.collectAsStateWithLifecycle()
+    val i = st.data.topMixes.indexOfFirst { it.genre == genre }
+    val m = st.data.topMixes.getOrNull(i)
+    val art = m?.art?.takeIf { it.isNotEmpty() }
+    HomeMixPage(
+        context = "topmix:$genre",
+        title = m?.name?.takeIf { it.isNotEmpty() } ?: name,
+        sub = HomeLogic.mixSub(m?.artists.orEmpty(), null),
+        color = homeTileColor(m?.color, maxOf(i, 0)),
+        art = art?.let { CoverSource.AlbumArt(it, null) },
+        radioSeed = null,
+        drawn = art != null,
+    ) { api -> api.homeMixTracks(genre) }
 }
 
 /** Your Top Songs {year} (UI.md 6.3.6): `GET /api/top-songs/{year}?tzo=`, shown like a Daily Mix. */
@@ -238,10 +264,34 @@ private fun HomeSection(s: HomeLogic.Section, data: HomeSnapshot) {
         HomeLogic.Section.MadeForYou -> HomeShelf(L("Made For You"), null) {
             Shelf(data.mixSeeds.withIndex().toList(), style = CardStyle.Home) { (i, a) ->
                 val label = L("Daily Mix {n}", "n" to i + 1)
-                MediaCard(label, HomeLogic.mixSub(data.mixArtists[a.id].orEmpty(), a.name) ?: "", style = CardStyle.Home, onClick = {
+                // The server's drawn tile carries "Daily Mix" and its number: no band, no title line.
+                val drawn = data.mixArt[a.id]
+                MediaCard(label, HomeLogic.mixSub(data.mixArtists[a.id].orEmpty(), a.name) ?: "", style = CardStyle.Home, showTitle = drawn == null, onClick = {
                     nav.pushFromHome(Route.DailyMix(a.id, i + 1, a.name))
                 }) {
-                    HomeMixArt(data.mixCovers[a.id]?.let { CoverSource.ArtistArt(it.id, it.image) } ?: CoverSource.ArtistArt(a.id, a.image), homeMixColor(i), label, pixelSize = 150.dp)
+                    val source = drawn?.let { CoverSource.AlbumArt(it, null) }
+                        ?: data.mixCovers[a.id]?.let { CoverSource.ArtistArt(it.id, it.image) } ?: CoverSource.ArtistArt(a.id, a.image)
+                    HomeMixArt(source, homeMixColor(i), label, pixelSize = 150.dp, drawn = drawn != null)
+                }
+            }
+        }
+        HomeLogic.Section.Stations -> HomeShelf(L("Recommended Stations"), null) {
+            Shelf(data.stations.withIndex().toList(), style = CardStyle.Home) { (i, st) ->
+                val label = L("{name} Radio", "name" to st.name)
+                // Opens the artist's radio exactly like Go to radio; its page plays it.
+                MediaCard(label, HomeLogic.withSub(st.withArtists) ?: "", style = CardStyle.Home, showTitle = false, onClick = {
+                    nav.pushFromHome(Route.Radio(st.id, st.name.ifEmpty { null }))
+                }) {
+                    HomeMixArt(st.art?.takeIf { it.isNotEmpty() }?.let { CoverSource.AlbumArt(it, null) }, homeTileColor(st.color, i), label, pixelSize = 150.dp, drawn = true)
+                }
+            }
+        }
+        HomeLogic.Section.TopMixes -> HomeShelf(L("Your top mixes"), null) {
+            Shelf(data.topMixes.withIndex().toList(), style = CardStyle.Home) { (i, m) ->
+                MediaCard(m.name, HomeLogic.mixSub(m.artists, null) ?: "", style = CardStyle.Home, showTitle = false, onClick = {
+                    nav.pushFromHome(Route.TopMix(m.genre, m.name))
+                }) {
+                    HomeMixArt(m.art?.takeIf { it.isNotEmpty() }?.let { CoverSource.AlbumArt(it, null) }, homeTileColor(m.color, i), m.name, pixelSize = 150.dp, drawn = true)
                 }
             }
         }
@@ -255,13 +305,6 @@ private fun HomeSection(s: HomeLogic.Section, data: HomeSnapshot) {
                     }) {
                         HomeMixArt(y.top?.let { CoverSource.AlbumArt(it.albumId, it.cover) }, homeTopColor(i), label, pixelSize = 150.dp)
                     }
-                }
-            }
-        }
-        HomeLogic.Section.Recent -> HomeShelf(L("Recently played"), { nav.pushFromHome(Route.SeeAll(SeeAllKind.Albums)) }) {
-            Shelf(data.recent, style = CardStyle.Home) { a ->
-                MediaCard(CoverSource.of(a), a.name, a.artist.ifEmpty { L("Album") }, style = CardStyle.Home, artSize = 150.dp) {
-                    nav.pushFromHome(Route.Album(a.id))
                 }
             }
         }
@@ -310,19 +353,13 @@ private fun HomeArtistShelf(list: List<HomeLogic.RankedArtist>) {
     }
 }
 
+/** Only releases in the library reach the shelf ([HomeSnapshot.radarShelf]). */
 @Composable
 private fun HomeRadarCard(r: Release) {
     val nav = LocalAppModel.current.nav
-    val lib = r.inLibrary
-    if (lib != null) {
-        MediaCard(CoverSource.AlbumArt(lib, null), r.title, HomeLogic.radarShelfSub(r), style = CardStyle.Home, artSize = 150.dp) {
-            nav.pushFromHome(Route.Album(lib))
-        }
-    } else {
-        // Not in the library yet: the artist's page, where it can be requested.
-        MediaCard(CoverSource.Url(r.image), r.title, HomeLogic.radarShelfSub(r), style = CardStyle.Home, artSize = 150.dp) {
-            r.artistId?.let { nav.push(Route.Artist(it)) }
-        }
+    val lib = r.inLibrary ?: return
+    MediaCard(CoverSource.AlbumArt(lib, null), r.title, HomeLogic.radarShelfSub(r), style = CardStyle.Home, artSize = 150.dp) {
+        nav.pushFromHome(Route.Album(lib))
     }
 }
 
@@ -366,6 +403,9 @@ private fun homeScrollTop(list: LazyListState) = remember(list) {
 }
 
 private fun homeMixColor(i: Int): RGB = Theme.Fixed.mixPalette[HomeLogic.mixColorIndex(i)]
+
+/** A station's or top mix's tile colour as the server gave it (`#rrggbb`), else the Daily Mix palette's. */
+private fun homeTileColor(hex: String?, i: Int): RGB = RGB.parse(hex) ?: homeMixColor(i)
 
 private fun homeTopColor(i: Int): RGB = Theme.Fixed.topPalette[HomeLogic.mixColorIndex(i)]
 

@@ -11,6 +11,7 @@ struct RouteDestination: View {
         case let .dailyMix(a, n, s): DailyMixView(artistId: a, number: n, seedName: s)
         case let .radio(id, name): RadioView(seedId: id, name: name)
         case let .topSongs(y, c): TopSongsView(year: y, colorIndex: c)
+        case let .topMix(g): TopMixView(genre: g)
         case let .genre(n): GenreView(name: n)
         case .charts: SearchBrowsePage(kind: .charts)
         case let .folder(id): FolderView(id: id)

@@ -22,6 +22,9 @@ sealed interface Route {
      */
     @Serializable data class Radio(val seedId: String, val nameHint: String? = null) : Route
 
+    /** One of Home's Your top mixes: `genre` keys its songs (`/api/home/mixes/{genre}`), `name` is its title ("Hip-Hop Mix"). */
+    @Serializable data class TopMix(val genre: String, val name: String) : Route
+
     /** `colorIndex`: the tile's place on Home's Your Top Songs shelf. */
     @Serializable data class TopSongs(val year: Int, val colorIndex: Int) : Route
     @Serializable data class Genre(val name: String) : Route

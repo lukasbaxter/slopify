@@ -12,6 +12,7 @@ import com.lukasbaxter.slopify.android.features.home.DailyMixView
 import com.lukasbaxter.slopify.android.features.home.RadioView
 import com.lukasbaxter.slopify.android.features.home.ReleaseRadarView
 import com.lukasbaxter.slopify.android.features.home.SeeAllView
+import com.lukasbaxter.slopify.android.features.home.TopMixView
 import com.lukasbaxter.slopify.android.features.home.TopSongsView
 import com.lukasbaxter.slopify.android.features.library.FolderView
 import com.lukasbaxter.slopify.android.features.library.LikedSongsView
@@ -29,6 +30,7 @@ fun RouteDestination(route: Route) {
         Route.LikedSongs -> LikedSongsView()
         is Route.DailyMix -> DailyMixView(route.artistId, route.number, route.seedName)
         is Route.TopSongs -> TopSongsView(route.year, route.colorIndex)
+        is Route.TopMix -> TopMixView(route.genre, route.name)
         is Route.Radio -> RadioView(route.seedId, route.nameHint)
         is Route.Genre -> GenreView(route.name)
         Route.Charts -> SearchBrowsePage(charts = true)

@@ -6,6 +6,8 @@ import com.lukasbaxter.slopify.android.core.api.albums
 import com.lukasbaxter.slopify.android.core.api.artists
 import com.lukasbaxter.slopify.android.core.api.dailyMixes
 import com.lukasbaxter.slopify.android.core.api.home
+import com.lukasbaxter.slopify.android.core.api.homeMixes
+import com.lukasbaxter.slopify.android.core.api.homeStations
 import com.lukasbaxter.slopify.android.core.api.playlists
 import com.lukasbaxter.slopify.android.core.api.radar
 import com.lukasbaxter.slopify.android.core.api.topSongYears
@@ -14,11 +16,13 @@ import com.lukasbaxter.slopify.android.core.auth.Account
 import com.lukasbaxter.slopify.android.core.model.Album
 import com.lukasbaxter.slopify.android.core.model.Artist
 import com.lukasbaxter.slopify.android.core.model.HomePick
+import com.lukasbaxter.slopify.android.core.model.HomeStation
 import com.lukasbaxter.slopify.android.core.model.MixArtist
 import com.lukasbaxter.slopify.android.core.model.MixCover
 import com.lukasbaxter.slopify.android.core.model.Playlist
 import com.lukasbaxter.slopify.android.core.model.Release
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
+import com.lukasbaxter.slopify.android.core.model.TopMix
 import com.lukasbaxter.slopify.android.core.model.TopSongYears
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +43,6 @@ import kotlin.coroutines.cancellation.CancellationException
 /** Home's kept data (one file per account). */
 @Serializable
 data class HomeSnapshot(
-    val recent: List<Album> = emptyList(),
     /** Home's shortcuts, as the server lists them. Empty in older kept copies. */
     val picks: List<HomePick> = emptyList(),
     val topArtists: List<HomeLogic.RankedArtist> = emptyList(),
@@ -54,16 +57,23 @@ data class HomeSnapshot(
     val mixArtists: Map<String, List<MixArtist>> = emptyMap(),
     /** Today's cover of each seed's Daily Mix, by seed artist id. */
     val mixCovers: Map<String, MixCover> = emptyMap(),
+    /** Today's Daily Mix tile as the server drew it (`art_…` image id), by seed artist id. Empty on older servers. */
+    val mixArt: Map<String, String> = emptyMap(),
+    /** Recommended Stations: artists' radios, after the Daily Mix seeds. */
+    val stations: List<HomeStation> = emptyList(),
+    /** Your top mixes: a mix of each genre the listener plays most. */
+    val topMixes: List<TopMix> = emptyList(),
 ) {
     val shortcuts: List<HomeLogic.Shortcut> get() = HomeLogic.shortcuts(picks, playlists, albums)
     val mixSeeds: List<HomeLogic.RankedArtist> get() = HomeLogic.mixSeeds(topArtists, artists)
-    val radarShelf: List<Release> get() = radar.take(16)
+    /** Home shows only what is in the library (the server fetches the rest and it shows once it lands). */
+    val radarShelf: List<Release> get() = radar.filter { it.inLibrary != null }.take(16)
 
     fun sections(filter: HomeLogic.Filter): List<HomeLogic.Section> = HomeLogic.sections(
         filter,
         HomeLogic.Counts(
-            mixes = mixSeeds.size, years = topYears.size, recent = recent.size,
-            recentArtists = recentArtists.size, radar = radar.size, topArtists = topArtists.size,
+            mixes = mixSeeds.size, stations = stations.size, topMixes = topMixes.size, years = topYears.size,
+            recentArtists = recentArtists.size, radar = radarShelf.size, topArtists = topArtists.size,
         ),
     )
 }
@@ -119,6 +129,7 @@ class HomeStore(
         val forKey = key
         val job = scope.launch {
             launch { loadHome(api) }
+            launch { loadTopMixes(api) }
             launch { loadYears(api) }
             launch { loadRadar(api) }
             launch { loadPlaylists(api) }
@@ -127,8 +138,11 @@ class HomeStore(
         }
         inflight = job
         job.join()
-        // Today's Daily Mixes, once the seeds are known (they come from the lists above).
-        val mixes = scope.launch { loadMixes(api) }
+        // Today's Daily Mixes and the stations after them, once the seeds are known (they come from the lists above).
+        val mixes = scope.launch {
+            launch { loadMixes(api) }
+            launch { loadStations(api) }
+        }
         mixes.join()
         if (inflight === job) inflight = null
         if (job.isCancelled || mixes.isCancelled || forKey != key) return
@@ -155,7 +169,6 @@ class HomeStore(
         mutable.update {
             it.copy(
                 data = it.data.copy(
-                    recent = h.recentAlbums.take(16),
                     picks = h.recents.orEmpty(),
                     topArtists = HomeLogic.rankTopArtists(h.topTracks),
                     // /api/home has no last-played date per track, so this stays empty exactly as on the web.
@@ -171,7 +184,30 @@ class HomeStore(
         if (ids.isEmpty()) return
         val got = attempt { api.dailyMixes(ids) } ?: return
         currentCoroutineContext().ensureActive()
-        mutable.update { it.copy(data = it.data.copy(mixArtists = got.associate { m -> m.artistId to m.artists }, mixCovers = got.mapNotNull { m -> m.cover?.let { m.artistId to it } }.toMap())) }
+        mutable.update {
+            it.copy(
+                data = it.data.copy(
+                    mixArtists = got.associate { m -> m.artistId to m.artists },
+                    mixCovers = got.mapNotNull { m -> m.cover?.let { m.artistId to it } }.toMap(),
+                    mixArt = got.mapNotNull { m -> m.art?.takeIf { a -> a.isNotEmpty() }?.let { m.artistId to it } }.toMap(),
+                ),
+            )
+        }
+    }
+
+    /** Recommended Stations: the artists already seeding a Daily Mix are skipped. */
+    private suspend fun loadStations(api: ApiClient) {
+        val ids = data.mixSeeds.map { it.id }
+        if (ids.isEmpty()) return
+        val got = attempt { api.homeStations(ids) } ?: return
+        currentCoroutineContext().ensureActive()
+        mutable.update { it.copy(data = it.data.copy(stations = got)) }
+    }
+
+    private suspend fun loadTopMixes(api: ApiClient) {
+        val got = attempt { api.homeMixes() } ?: return
+        currentCoroutineContext().ensureActive()
+        mutable.update { it.copy(data = it.data.copy(topMixes = got)) }
     }
 
     private suspend fun loadYears(api: ApiClient) {

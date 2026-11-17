@@ -70,10 +70,11 @@ struct HomeShortcutTile: View {
 
 /// Daily Mix / Top Songs composite art (UI.md 6.1.6, 6.3.6): photo kept by its top edge over a
 /// `160deg mix(color 55% black) -> color` ground, with a band in the raw mix colour carrying the label.
+/// A picture the server drew whole (`CoverSource.drawn`) or a nil label: no band, the picture as is.
 struct HomeMixArt: View {
     var source: CoverSource?
     var color: RGB
-    var label: String
+    var label: String?
     /// Home tile: 14 pt, padding 6/10, bottom radius 2. Page cover: 16 pt, padding 10/14, no radius.
     var large = false
     var pixelSize: CGFloat
@@ -82,6 +83,11 @@ struct HomeMixArt: View {
     @Environment(\.displayScale) private var scale
     @State private var image: UIImage?
     @State private var shown = false
+
+    private var band: String? {
+        if case .drawn = source { return nil }
+        return label
+    }
 
     var body: some View {
         let u = source?.url(api, size: Int((pixelSize * max(scale, 1)).rounded(.up)))
@@ -96,7 +102,7 @@ struct HomeMixArt: View {
                         .opacity(shown ? 1 : 0)
                 }
             }
-            Text(label)
+            if let band { Text(band)
                 .font(.system(size: large ? 16 : 14, weight: .bold))
                 .tracking(-0.2)
                 .foregroundStyle(color.ink)
@@ -105,6 +111,7 @@ struct HomeMixArt: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(color.color)
                 .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: large ? 0 : Radius.card, bottomTrailingRadius: large ? 0 : Radius.card))
+            }
         }
         .task(id: u) {
             guard let u else { image = nil; shown = false; return }

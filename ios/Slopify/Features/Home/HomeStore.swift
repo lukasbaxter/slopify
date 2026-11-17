@@ -10,6 +10,8 @@ final class HomeStore {
     static let shared = HomeStore()
 
     struct Snapshot: Codable, Sendable {
+        /// The last played albums. Not a Home shelf any more (the shortcuts are what was played
+        /// last); CarPlay's offline list still uses it.
         var recent: [Album] = []
         /// Home's shortcuts, as the server lists them. Optional: older kept copies lack it.
         var picks: [HomePick]? = nil
@@ -23,6 +25,10 @@ final class HomeStore {
         var artists: [Artist] = []
         /// Today's Daily Mix of each seed artist, by artist id (§14.3). Optional: older kept copies lack it.
         var mixSummaries: [String: DailyMixSummary]? = nil
+        /// Recommended Stations (§14.3). Optional: older kept copies lack it.
+        var stations: [HomeStation]? = nil
+        /// Your top mixes (§14.3). Optional: older kept copies lack it.
+        var topMixes: [HomeTopMix]? = nil
     }
 
     private(set) var data = Snapshot()
@@ -43,21 +49,33 @@ final class HomeStore {
 
     var shortcuts: [HomeLogic.Shortcut] { HomeLogic.shortcuts(picks: data.picks ?? [], playlists: data.playlists, albums: data.albums) }
     var mixSeeds: [HomeLogic.RankedArtist] { HomeLogic.mixSeeds(topArtists: data.topArtists, libraryArtists: data.artists) }
-    var radarShelf: [Release] { Array(data.radar.prefix(16)) }
+    var radarShelf: [Release] { HomeLogic.radarShelf(data.radar) }
+    var stations: [HomeStation] { data.stations ?? [] }
+    var topMixes: [HomeTopMix] { data.topMixes ?? [] }
     /// A Daily Mix's subtitle, the same on its tile and its page.
     func mixSub(artistId: String, seedName: String) -> String? {
         HomeLogic.dailyMixSub(seedName: seedName, summary: data.mixSummaries?[artistId])
     }
-    /// A Daily Mix's cover, the same on its tile and its page: today's photo, else the seed's.
+    /// A Daily Mix's cover, the same on its tile and its page: the server's drawn picture, else
+    /// today's photo, else the seed's.
     func mixArt(artistId: String, image: String?) -> CoverSource {
+        if let a = mixDrawn(artistId: artistId) { return .drawn(id: a) }
         if let c = data.mixSummaries?[artistId]?.cover { return .artist(id: c.id, image: c.image) }
         return .artist(id: artistId, image: image)
+    }
+    /// Today's drawn Daily Mix picture (`art_<hash>`), when the server drew one.
+    func mixDrawn(artistId: String) -> String? { data.mixSummaries?[artistId]?.art.flatMap { $0.isEmpty ? nil : $0 } }
+    /// A Daily Mix tile as Home shows it.
+    func dailyMixTile(artistId: String, number: Int, seedName: String, image: String?) -> HomeLogic.MixTile {
+        let label = L("Daily Mix {n}", ["n": number])
+        let photo: CoverSource = data.mixSummaries?[artistId]?.cover.map { .artist(id: $0.id, image: $0.image) } ?? .artist(id: artistId, image: image)
+        return HomeLogic.dailyMixTile(label: label, sub: mixSub(artistId: artistId, seedName: seedName), art: mixDrawn(artistId: artistId), photo: photo)
     }
 
     func sections(_ filter: HomeLogic.Filter) -> [HomeLogic.Section] {
         HomeLogic.sections(filter: filter, counts: .init(
-            mixes: mixSeeds.count, years: data.topYears.count, recent: data.recent.count,
-            recentArtists: data.recentArtists.count, radar: data.radar.count, topArtists: data.topArtists.count))
+            mixes: mixSeeds.count, stations: stations.count, topMixes: topMixes.count, years: data.topYears.count,
+            recentArtists: data.recentArtists.count, radar: radarShelf.count, topArtists: data.topArtists.count))
     }
 
     // MARK: Loading
@@ -76,7 +94,7 @@ final class HomeStore {
     func load(api: APIClient, maxAge: TimeInterval = 0) async {
         if let at = loadedAt, Date().timeIntervalSince(at) < maxAge { return }
         if let inflight { await inflight.value; return }
-        let task = Task { await self.fetchAll(api); await self.loadMixSummaries(api) }
+        let task = Task { await self.fetchAll(api); await self.fetchSeeded(api) }
         inflight = task
         await task.value
         inflight = nil
@@ -92,6 +110,15 @@ final class HomeStore {
             g.addTask { await self.loadPlaylists(api) }
             g.addTask { await self.loadAlbums(api) }
             g.addTask { await self.loadArtists(api) }
+            g.addTask { await self.loadTopMixes(api) }
+        }
+    }
+
+    /// What needs the Daily Mix seeds: today's mixes, and the stations after them.
+    private func fetchSeeded(_ api: APIClient) async {
+        await withTaskGroup(of: Void.self) { g in
+            g.addTask { await self.loadMixSummaries(api) }
+            g.addTask { await self.loadStations(api) }
         }
     }
 
@@ -116,6 +143,18 @@ final class HomeStore {
         let ids = mixSeeds.map(\.id)
         guard !ids.isEmpty, let items = try? await api.dailyMixes(ids: ids), !Task.isCancelled else { return }
         data.mixSummaries = Dictionary(items.map { ($0.artistId, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Recommended Stations: radios of artists the listener plays, after the Daily Mix seeds.
+    private func loadStations(_ api: APIClient) async {
+        let ids = mixSeeds.map(\.id)
+        guard let items = try? await api.homeStations(skip: ids), !Task.isCancelled else { return }
+        data.stations = items
+    }
+
+    private func loadTopMixes(_ api: APIClient) async {
+        guard let items = try? await api.homeMixes(), !Task.isCancelled else { return }
+        data.topMixes = items
     }
 
     private func loadYears(_ api: APIClient) async {

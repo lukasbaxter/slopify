@@ -930,13 +930,31 @@ Radar `Release`: `{ album_id, artist, title, rtype, year, date, image, total_tra
 
 `ids`: the tiles' seed artists, comma separated (at most 12). For each one the server makes
 today's Daily Mix if it is a new day for the listener (`tzo` as in §14.1), so the tile and its
-page always show the same day. `{ items: [{ artistId, day: "YYYY-MM-DD", from, artists: [{ id, name }], cover: { id, image } }] }`,
+page always show the same day. `{ items: [{ artistId, day: "YYYY-MM-DD", from, artists: [{ id, name }], cover: { id, image }, art }] }`,
 unknown ids left out. `artists` as in §14.1. `cover`: the artist whose photo is the tile's (and
 its page's) cover today, the seed or someone in the day's mix with a picture, a different one
 each day; `image` is that artist's `image` hash. The artist's `/mix` answer carries the same
 `cover`. The web adds `day=<local YYYY-MM-DD>` to this and
 to the Daily Mix URLs so its service worker never answers a new day with yesterday's copy;
 the server ignores it.
+
+`art`: `art_<40 hex>`, the whole tile as the server drew it (cover photo, "Daily Mix" box, its
+number, logo), loaded like any picture: `/api/image/<art>`. With `art` the tile is that picture
+as is: no colour band or label over it, no title line under it, only the subtitle ("A, B and
+more"); the page uses it as its cover, also without a band. Older servers omit it: the tile
+keeps the photo + band + "Daily Mix {n}" title.
+
+Home's other drawn shelves (homemixes.ts), each tile only its `art` picture and a subtitle:
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/api/home/stations?skip=<artistIds>&tzo=` | Recommended Stations: `{ items: [{ id (artist), name, with: [{ id, name }], color: "#rrggbb", art }] }`. `skip`: the Daily Mix seeds. Subtitle "With {names joined by ', '} and more". Tap: the artist's Go to radio (§14.4); play: `/api/tracks/<id>/mix?limit=100&mode=radio` |
+| GET | `/api/home/mixes` | Your top mixes: `{ items: [{ genre, name: "Hip-Hop Mix", artists: [{ id, name }], color, art, day }] }`. Subtitle "{names} and more" (as a Daily Mix). Tap: a mix page like a Daily Mix (title `name`, cover `art`, player context `topmix:<genre>`) |
+| GET | `/api/home/mixes/:genre` | that mix's songs (genre URL-encoded): `{ items: [Track] }` (§8) |
+
+Home order: greeting + 8 shortcuts, Made For You, Recommended Stations, Your top mixes, Jump
+back in, Release Radar, Your top artists, Your Top Songs. No Recently played. `/api/radar`
+only lists releases in the library on Home's shelf (`inLibrary` set).
 
 ### 14.4 `POST /api/radio/:id?refresh=1` (auth): Go to radio
 
@@ -1634,6 +1652,9 @@ Of the remaining 115, about 22 are admin-only. Plus `GET /healthz` and `GET /api
 | 70 | GET | /api/download/:id | auth | 13 |
 | 71 | GET | /api/tracks/:id/mix | auth | 14.1 |
 | 71a | GET | /api/daily-mixes | auth | 14.3 |
+| 71c | GET | /api/home/stations | auth | 14.3 |
+| 71d | GET | /api/home/mixes | auth | 14.3 |
+| 71e | GET | /api/home/mixes/:genre | auth | 14.3 |
 | 71b | POST | /api/radio/:id | auth | 14.4 |
 | 72 | GET | /api/radar | auth | 14.2 |
 | 73 | GET | /api/ai/status | auth | 14.2 |

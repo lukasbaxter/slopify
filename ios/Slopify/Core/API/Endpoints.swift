@@ -197,6 +197,20 @@ extension APIClient {
         return try await (get("api/daily-mixes", ["ids": ids.prefix(12).joined(separator: ","), "tzo": String(tzo)]) as Items<DailyMixSummary>).items
     }
 
+    /// Home's Recommended Stations (§14.3), after the artists already seeding a Daily Mix (`skip`).
+    func homeStations(skip: [String]) async throws -> [HomeStation] {
+        let tzo = -TimeZone.current.secondsFromGMT() / 60
+        return try await (get("api/home/stations", ["skip": skip.joined(separator: ","), "tzo": String(tzo)]) as Items<HomeStation>).items
+    }
+
+    /// Home's Your top mixes (§14.3).
+    func homeMixes() async throws -> [HomeTopMix] { try await (get("api/home/mixes") as Items<HomeTopMix>).items }
+
+    /// The songs of one of Your top mixes.
+    func homeMixTracks(genre: String) async throws -> [Track] {
+        try await (get("api/home/mixes/\(Self.segment(genre))") as Items<Track>).items
+    }
+
     /// Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s.
     func radar() async throws -> [Release] {
         struct R: Decodable { var releases: [Release]? }

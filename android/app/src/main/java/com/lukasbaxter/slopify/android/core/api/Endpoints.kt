@@ -20,6 +20,8 @@ import com.lukasbaxter.slopify.android.core.model.GenreDetail
 import com.lukasbaxter.slopify.android.core.model.HistoryPage
 import com.lukasbaxter.slopify.android.core.model.HistoryStats
 import com.lukasbaxter.slopify.android.core.model.HomeData
+import com.lukasbaxter.slopify.android.core.model.HomeStation
+import com.lukasbaxter.slopify.android.core.model.HomeStations
 import com.lukasbaxter.slopify.android.core.model.ItemLookup
 import com.lukasbaxter.slopify.android.core.model.Items
 import com.lukasbaxter.slopify.android.core.model.LibraryInfo
@@ -44,6 +46,8 @@ import com.lukasbaxter.slopify.android.core.model.ServerInfo
 import com.lukasbaxter.slopify.android.core.model.ServerJob
 import com.lukasbaxter.slopify.android.core.model.SlopifyJson
 import com.lukasbaxter.slopify.android.core.model.Track
+import com.lukasbaxter.slopify.android.core.model.TopMix
+import com.lukasbaxter.slopify.android.core.model.TopMixes
 import com.lukasbaxter.slopify.android.core.model.TopSongYears
 import com.lukasbaxter.slopify.android.core.model.User
 import kotlinx.coroutines.delay
@@ -264,6 +268,17 @@ suspend fun ApiClient.radio(seedId: String, refresh: Boolean = false): Radio =
 suspend fun ApiClient.dailyMixes(ids: List<String>): List<DailyMixSummary> =
     if (ids.isEmpty()) emptyList()
     else get<DailyMixSummaries>("api/daily-mixes", mapOf("ids" to ids.take(12).joinToString(","), "tzo" to tzo())).items
+
+/** Home's Recommended Stations: artists' radios, after the ones seeding a Daily Mix (`skip`). */
+suspend fun ApiClient.homeStations(skip: List<String>): List<HomeStation> =
+    get<HomeStations>("api/home/stations", mapOf("skip" to skip.joinToString(","), "tzo" to tzo())).items
+
+/** Home's Your top mixes: a mix of each genre the listener plays most. */
+suspend fun ApiClient.homeMixes(): List<TopMix> = get<TopMixes>("api/home/mixes").items
+
+/** The songs of one of Your top mixes. Genre names may hold "/" ("R&B/Soul"): one path segment, escaped. */
+suspend fun ApiClient.homeMixTracks(genre: String): List<Track> =
+    get<Items<Track>>("api/home/mixes/${ApiClient.segment(genre)}").items
 
 /** Release Radar (§14.2). Slow the first time the server asks upstream: the web waits 120 s. */
 suspend fun ApiClient.radar(): List<Release> = get<RadarR>("api/radar", timeout = 120.0).releases ?: emptyList()

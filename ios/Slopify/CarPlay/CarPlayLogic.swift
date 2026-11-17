@@ -150,9 +150,9 @@ enum CarPlayLogic {
                              currentYear: Int, perSection: Int) -> [Section] {
         if offline {
             let recent = d.recent.filter { held.contains($0.id) }.prefix(perSection).map(albumRow)
-            return recent.isEmpty ? [] : [Section(title: L("Recently played"), rows: Array(recent))]
+            return recent.isEmpty ? [] : [Section(title: L("Downloaded"), rows: Array(recent))]
         }
-        let counts = HomeLogic.Counts(mixes: mixSeeds.count, years: d.topYears.count, recent: d.recent.count,
+        let counts = HomeLogic.Counts(mixes: mixSeeds.count, years: d.topYears.count,
                                       recentArtists: d.recentArtists.count, radar: 0, topArtists: d.topArtists.count)
         var out: [Section] = []
         for s in HomeLogic.sections(filter: .all, counts: counts) {
@@ -161,13 +161,12 @@ enum CarPlayLogic {
                 out.append(Section(title: L("Made For You"), rows: mixSeeds.prefix(perSection).enumerated().map { mixRow($0.element, number: $0.offset + 1, summary: d.mixSummaries?[$0.element.id]) }))
             case .topSongs:
                 out.append(Section(title: L("Your Top Songs"), rows: d.topYears.prefix(perSection).map { topSongsRow($0, currentYear: currentYear) }))
-            case .recent:
-                out.append(Section(title: L("Recently played"), rows: d.recent.prefix(perSection).map(albumRow)))
             case .jumpBackIn:
                 out.append(Section(title: L("Jump back in"), rows: d.recentArtists.prefix(perSection).map { artistRow(id: $0.id, name: $0.name, image: $0.image) }))
             case .topArtists:
                 out.append(Section(title: L("Your top artists"), rows: d.topArtists.prefix(min(16, perSection)).map { artistRow(id: $0.id, name: $0.name, image: $0.image) }))
-            case .shortcuts, .radar:
+            // TODO(lead): stations and top mixes in the car (they need targets of their own).
+            case .shortcuts, .radar, .stations, .topMixes:
                 break
             }
         }

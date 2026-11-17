@@ -36,13 +36,16 @@ struct MediaCard<Art: View>: View {
                     .colorMultiply(Color(white: missing ? 0.55 : 1))
                     .pressDim()
                     .overlay { if missing, let request { request } }
-                Text(title)
-                    .textStyle(style == .home ? .cardTitle : TextStyle(size: 14, weight: .bold, lineHeight: 1.4))
-                    .foregroundStyle(missing ? theme.fgDim : theme.fg)
-                    .lineLimit(style == .home ? 1 : 2)
-                    .multilineTextAlignment(centred ? .center : .leading)
-                    .frame(maxWidth: .infinity, alignment: centred ? .center : .leading)
-                    .padding(.top, style == .home ? 8 : 4)
+                // An empty title: no title line (Home's drawn mix tiles carry their name in the picture).
+                if !title.isEmpty {
+                    Text(title)
+                        .textStyle(style == .home ? .cardTitle : TextStyle(size: 14, weight: .bold, lineHeight: 1.4))
+                        .foregroundStyle(missing ? theme.fgDim : theme.fg)
+                        .lineLimit(style == .home ? 1 : 2)
+                        .multilineTextAlignment(centred ? .center : .leading)
+                        .frame(maxWidth: .infinity, alignment: centred ? .center : .leading)
+                        .padding(.top, style == .home ? 8 : 4)
+                }
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .textStyle(.cardSub)
@@ -50,7 +53,7 @@ struct MediaCard<Art: View>: View {
                         .lineLimit(2)
                         .multilineTextAlignment(centred ? .center : .leading)
                         .frame(maxWidth: .infinity, alignment: centred ? .center : .leading)
-                        .padding(.top, 2)
+                        .padding(.top, title.isEmpty ? (style == .home ? 8 : 4) : 2)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)

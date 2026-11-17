@@ -22,10 +22,12 @@ class HomeStoreTest {
         bodies = linkedMapOf(
             "/api/home" to """{"recents":[{"kind":"album","id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"recentAlbums":[{"id":"r1","name":"Recent","artist":"X","artistId":"x","year":2020,"trackCount":3,"cover":null}],"topTracks":[${track("1", "Low", "a", 1)},${track("2", "High", "b", 9)}],"newestAlbums":[]}""",
             "/api/top-songs" to """{"years":[{"year":2026,"songs":40,"plays":300,"top":null}]}""",
-            "/api/radar" to """{"releases":[{"album_id":"m1","title":"New","rtype":"EP","date":"2026-11-01","image":null,"artistId":"b","artistName":"High","inLibrary":null,"localName":null,"requestStatus":null}]}""",
+            "/api/radar" to """{"releases":[{"album_id":"m1","title":"New","rtype":"EP","date":"2026-11-01","image":null,"artistId":"b","artistName":"High","inLibrary":"lib_new","localName":null,"requestStatus":null},{"album_id":"m2","title":"Elsewhere","rtype":"Single","date":"2026-11-02","image":null,"artistId":"a","artistName":"Low","inLibrary":null,"localName":null,"requestStatus":null}]}""",
             "/api/playlists" to """{"items":[{"id":"pl_1","name":"Mine","userId":"u","created":1,"updated":1,"trackCount":2,"cover":null,"aiPrompt":null}]}""",
             "/api/albums" to """{"items":[{"id":"l1","name":"Lib","artist":"Y","artistId":null,"year":null,"trackCount":1,"durationMs":1,"cover":null,"addedAt":1}],"total":1}""",
             "/api/artists" to """{"items":[{"id":"z","name":"Zed","trackCount":1,"albumCount":1,"image":null,"banner":null}],"total":1}""",
+            "/api/home/stations" to """{"items":[{"id":"s1","name":"Station","with":[{"id":"w1","name":"W1"},{"id":"w2","name":"W2"}],"color":"#1e3264","art":"art_${"a".repeat(40)}"}]}""",
+            "/api/home/mixes" to """{"items":[{"genre":"Hip-Hop","name":"Hip-Hop Mix","artists":[{"id":"b","name":"High"},{"id":"a","name":"Low"}],"color":"#e8115b","art":"art_${"b".repeat(40)}","day":"2026-11-17"}]}""",
         )
     }
 
@@ -45,11 +47,14 @@ class HomeStoreTest {
             assertEquals(listOf("b", "a"), d.topArtists.map { it.id })
             assertEquals(listOf("b", "a"), d.mixSeeds.map { it.id })
             assertEquals(listOf("__liked__", "al:r1", "pl:pl_1", "al:l1"), d.shortcuts.map { it.id })
-            assertEquals("High", d.radarShelf.first().artistName)
+            // Home's radar shelf: only what is in the library (the page keeps the full list).
+            assertEquals(listOf("lib_new"), d.radarShelf.map { it.inLibrary })
+            assertEquals(2, d.radar.size)
             assertTrue(store.state.value.radarLoaded)
-            // No last-played dates in /api/home: Jump back in stays hidden, as on the web.
+            // No last-played dates in /api/home: Jump back in stays hidden, as on the web. No Recently
+            // played; Your Top Songs last.
             assertEquals(
-                listOf(Section.Shortcuts, Section.MadeForYou, Section.TopSongs, Section.Recent, Section.Radar, Section.TopArtists),
+                listOf(Section.Shortcuts, Section.MadeForYou, Section.Stations, Section.TopMixes, Section.Radar, Section.TopArtists, Section.TopSongs),
                 d.sections(HomeLogic.Filter.All),
             )
         }
@@ -62,8 +67,8 @@ class HomeStoreTest {
             store.load(s.client())
             s.serve(failing = setOf("/api/home", "/api/radar"))
             store.load(s.client())
-            assertEquals(listOf("r1"), store.data.recent.map { it.id })
-            assertEquals(1, store.data.radar.size)
+            assertEquals(listOf("r1"), store.data.picks.map { it.id })
+            assertEquals(2, store.data.radar.size)
             assertNotNull(store.state.value.radarError)
             assertEquals("boom", store.state.value.radarError)
         }
@@ -95,7 +100,6 @@ class HomeStoreTest {
             val store = HomeStore(backgroundScope)
             store.load(s.client())
             assertTrue(store.data.picks.isEmpty())
-            assertEquals(listOf("r1"), store.data.recent.map { it.id })
             assertEquals(listOf("__liked__", "pl:pl_1", "al:l1"), store.data.shortcuts.map { it.id })
         }
     }
@@ -126,11 +130,15 @@ class HomeStoreTest {
 
                 val b = HomeStore(backgroundScope, cacheDir = dir)
                 b.use("https://example.com|u1")
-                assertEquals(listOf("r1"), b.data.recent.map { it.id })
+                assertEquals(listOf("r1"), b.data.picks.map { it.id })
                 assertEquals(listOf("b", "a"), b.data.topArtists.map { it.id })
+                // The new shelves are kept too.
+                assertEquals(listOf("W1", "W2"), b.data.stations.single().withArtists.map { it.name })
+                assertEquals("Hip-Hop", b.data.topMixes.single().genre)
                 assertFalse(b.state.value.radarLoaded) // kept list, but not answered in this run
                 b.use("https://example.com|u2")
-                assertTrue(b.data.recent.isEmpty())
+                assertTrue(b.data.picks.isEmpty())
+                assertTrue(b.data.stations.isEmpty())
             }
         } finally {
             dir.deleteRecursively()
@@ -172,6 +180,50 @@ class HomeStoreTest {
             s.serve(mapOf("/api/daily-mixes" to """{"items":[{"artistId":"b","day":"2026-11-14","artists":[{"id":"b","name":"High"},{"id":"r","name":"R"}]}]}"""))
             store.load(s.client())
             assertEquals(listOf("High", "R"), store.data.mixArtists["b"]!!.map { it.name })
+        }
+    }
+
+    @Test fun dailyMixTilesKeepTheDrawnArt() = runTest {
+        StubServer().use { s ->
+            val art = "art_" + "c".repeat(40)
+            s.serve(mapOf("/api/daily-mixes" to """{"items":[{"artistId":"b","day":"2026-11-17","artists":[{"id":"b","name":"High"}],"cover":{"id":"q","image":null},"art":"$art"},{"artistId":"a","day":"2026-11-17","artists":[]}]}"""))
+            val store = HomeStore(backgroundScope)
+            store.load(s.client())
+            assertEquals(mapOf("b" to art), store.data.mixArt)
+            assertEquals("q", store.data.mixCovers["b"]!!.id)
+        }
+    }
+
+    @Test fun stationsSkipTheDailyMixSeeds() = runTest {
+        StubServer().use { s ->
+            s.serve()
+            val store = HomeStore(backgroundScope)
+            store.load(s.client())
+            val req = s.seen.single { it.requestUrl!!.encodedPath == "/api/home/stations" }
+            assertEquals("b,a", req.requestUrl!!.queryParameter("skip"))
+            assertNotNull(req.requestUrl!!.queryParameter("tzo"))
+            val st = store.data.stations.single()
+            assertEquals("s1", st.id)
+            assertEquals("#1e3264", st.color)
+            assertEquals("art_" + "a".repeat(40), st.art)
+            val m = store.data.topMixes.single()
+            assertEquals("Hip-Hop Mix", m.name)
+            assertEquals(listOf("High", "Low"), m.artists.map { it.name })
+            assertEquals("art_" + "b".repeat(40), m.art)
+        }
+    }
+
+    @Test fun anOlderServerWithoutTheNewShelvesHidesThem() = runTest {
+        StubServer().use { s ->
+            s.serve(failing = setOf("/api/home/stations", "/api/home/mixes"))
+            val store = HomeStore(backgroundScope)
+            store.load(s.client())
+            assertTrue(store.data.stations.isEmpty())
+            assertTrue(store.data.topMixes.isEmpty())
+            assertTrue(store.data.mixArt.isEmpty())
+            val sections = store.data.sections(HomeLogic.Filter.All)
+            assertFalse(sections.contains(Section.Stations))
+            assertFalse(sections.contains(Section.TopMixes))
         }
     }
 }

@@ -12,7 +12,7 @@ test('every page renders without errors or failed API calls', async ({ page, isM
   // Home shelves
   await expect(page.locator('.card').first()).toBeVisible();
   // an artist page via an album's artist link
-  await page.locator('.card', { hasText: 'First Light' }).first().click();
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
   await page.locator('.trackrow').first().locator('.trackrow-artist button, .rowlink').first().click().catch(() => {});
   await page.waitForTimeout(600);
@@ -61,7 +61,7 @@ test('playlists, saved albums and the session socket', async ({ page, isMobile }
   expect((await (await page.request.get(`/api/playlists/${pl.id}`, { headers: H })).json()).tracks.length).toBe(2);
   // save an album to the library from its page
   await page.locator('.sidebar .navitem', { hasText: 'Home' }).click();
-  await page.locator('.card', { hasText: 'First Light' }).first().click();
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(page.locator('.trackrow').first()).toBeVisible({ timeout: 15000 });
   const save = page.locator('button[title="Save to Your Library"]').first();
   await expect(save).toBeVisible({ timeout: 10000 });
@@ -69,7 +69,7 @@ test('playlists, saved albums and the session socket', async ({ page, isMobile }
   await expect.poll(async () => (await (await page.request.get('/api/likes/albums', { headers: H })).json()).items.length, { timeout: 5000 }).toBe(1);
   await expect(page.locator('button[title="Remove from Your Library"]').first()).toBeVisible();
   await page.reload(); await waitForLibrary(page);
-  await page.locator('.card', { hasText: 'First Light' }).first().click();
+  await page.locator('.card, .shortcut', { hasText: 'First Light' }).first().click();
   await expect(page.locator('button[title="Remove from Your Library"]').first()).toBeVisible({ timeout: 15000 }); // remembered
   // the session socket: this client is on the roster and the session shows what plays
   await page.locator('.trackrow').nth(0).dblclick();

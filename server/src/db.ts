@@ -312,6 +312,21 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE plays ADD COLUMN src TEXT;
   CREATE INDEX plays_user_src ON plays(user_id, src, at) WHERE src IS NOT NULL;
   `,
+  // 37: playlists made for each listener from a theme (madeforyou.ts: Rock
+  // Classics, Chill Vibes, 90s Hits, Christmas Hits, This Is <artist>),
+  // rebuilt daily; and what the brain made of each artist photo (photo or
+  // album cover, the cut-out person) for their covers.
+  `
+  CREATE TABLE made_playlists (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    theme TEXT NOT NULL, day TEXT NOT NULL, built INTEGER NOT NULL,
+    track_ids TEXT NOT NULL, artists TEXT NOT NULL DEFAULT '[]', art TEXT,
+    PRIMARY KEY (user_id, theme)
+  );
+  CREATE TABLE artist_photos (
+    image_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, photo REAL NOT NULL, cutout INTEGER NOT NULL DEFAULT 0, checked INTEGER NOT NULL
+  );
+  `,
 ];
 
 export type DB = Database.Database;

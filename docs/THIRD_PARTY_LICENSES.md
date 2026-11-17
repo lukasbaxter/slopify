@@ -7,7 +7,7 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 
 | License | Packages |
 | --- | --- |
-| MIT | 124 |
+| MIT | 125 |
 | BSD-3-Clause | 16 |
 | ISC | 9 |
 | BlueOak-1.0.0 | 5 |
@@ -130,6 +130,7 @@ is AGPL-3.0-or-later; see [NOTICE](NOTICE) for components shipped outside npm
 | obliterator | 2.0.5 | MIT | https://github.com/yomguithereal/obliterator |
 | on-exit-leak-free | 2.1.2 | MIT | https://github.com/mcollina/on-exit-or-gc |
 | once | 1.4.0 | ISC | git://github.com/isaacs/once |
+| opentype.js | 1.3.5 | MIT | git://github.com/opentypejs/opentype.js |
 | path-scurry | 2.0.2 | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry |
 | pino | 10.3.1 | MIT | https://github.com/pinojs/pino |
 | pino-abstract-transport | 3.0.0 | MIT | https://github.com/pinojs/pino-abstract-transport |

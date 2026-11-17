@@ -223,6 +223,16 @@ export default function Library({
   const recents = (Array.isArray(prefs?.recentSearches) ? prefs.recentSearches : []).filter((x) => x && typeof x === 'object' && x.id);
   // Browse tiles (genre buckets) for the empty search page.
   const [tiles, setTiles] = useState(() => { try { return JSON.parse(localStorage.getItem('slopify.browse') || 'null'); } catch { return null; } });
+  // The listener's themed playlists, for the search page's Made For You row.
+  const [made, setMade] = useState(() => jf?.persisted?.('search.made') || []);
+  useEffect(() => {
+    if (!jf || view !== 'search') return;
+    jf.madeList().then((m) => { setMade(m); jf._persist?.('search.made', m); }).catch(() => {});
+  }, [jf, view]);
+  const madeCards = (list) => list.map((m) => (
+    <Card key={m.id} title={m.title} subtitle={m.description} image={m.art ? jf.imageUrl(m.art, { maxHeight: 320 }) : null}
+      onOpen={() => openMade(m)} onPlay={() => playMade(m)} />
+  ));
   useEffect(() => {
     if (!jf) return;
     relayBrowse(jf).then((t) => { setTiles(t); try { localStorage.setItem('slopify.browse', JSON.stringify(t)); } catch {} }).catch(() => {});
@@ -258,6 +268,19 @@ export default function Library({
       const items = await jf.homeMixTracks(m.genre);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+  };
+  // A themed playlist made for this listener (Rock Classics, This Is ...).
+  const openMade = async (m) => {
+    const id = `made:${m.id}`;
+    setDetail({ item: { Id: id, Name: m.title, Type: 'Playlist', _mix: true, _drawn: !!m.art, _art: m.art ? jf.imageUrl(m.art, { maxHeight: 464, full: true }) : null, _color: m.color, _sub: m.description }, tracks: [], kind: 'Playlist', loading: true });
+    try {
+      const items = await jf.madeTracks(m.id);
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
+    } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+  };
+  const playMade = async (m) => {
+    const items = await jf.madeTracks(m.id);
+    if (items.length) player.playQueue(items, 0, `made:${m.id}`);
   };
   const openRadar = async () => {
     setDetail({ item: { Id: 'radar', Name: t('Release Radar'), Type: 'Radar', _color: '#8d67ab' }, tracks: [], kind: 'Radar', releases: null });
@@ -1822,6 +1845,12 @@ export default function Library({
               <div className="tilegrid">{startTiles}</div>
             </section>
           )}
+          {!query.trim() && !focusMode && made.length > 0 && (
+            <section className="homeshelf made-row">
+              <div className="shelf-head"><h2>{t('Made For You')}</h2></div>
+              <div className="shelf">{madeCards(made)}</div>
+            </section>
+          )}
           {!query.trim() && !focusMode && (
             <section className="browseall">
               <div className="shelf-head"><h2>{t('Browse all')}</h2></div>
@@ -1897,6 +1926,13 @@ export default function Library({
               </section>
             );
           })()}
+
+          {r && !r.scoped && r.made?.length > 0 && (
+            <section className="homeshelf made-row">
+              <div className="shelf-head"><h2>{t('Made For You')}</h2></div>
+              <div className="shelf">{madeCards(r.made)}</div>
+            </section>
+          )}
 
           {phoneRows && phoneRows.length > 0 && (
             <div className="searchlist">

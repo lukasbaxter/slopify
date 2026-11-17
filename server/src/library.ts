@@ -448,7 +448,9 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
     const params = words.map((w) => `%${w}%`);
     const albums = (db.prepare(`SELECT * FROM albums WHERE ${where("(name || ' ' || artist)")} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(albumOut);
     const artists = (db.prepare(`SELECT * FROM artists WHERE ${where('name')} ORDER BY (name = ? COLLATE NOCASE) DESC, track_count DESC LIMIT ?`).all(...params, q, limit) as any[]).map(artistOut);
-    return { tracks, albums, artists };
+    // The listener's own themed playlists the words name ("rock", "christmas"; madeforyou.ts).
+    const made = (app as any).madeSearch?.((req as any).user.id, q) ?? [];
+    return { tracks, albums, artists, made };
   });
   const radioAsk = (uid: string) => radioAskFor(app, db, uid);
   const todaysMix = (artist: { id: string; name: string }, me: string, tzo: unknown) =>

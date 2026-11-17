@@ -24,6 +24,7 @@ import { registerDiscover } from './discover.js';
 import { registerPlaylistReco } from './playlistreco.js';
 import { registerJobs } from './jobs.js';
 import { registerAi } from './ai.js';
+import { registerMadeForYou, madeForYouTask } from './madeforyou.js';
 import { registerSpotifyImport } from './spotifyImport.js';
 import { registerDownloads } from './downloads.js';
 import { lidarrClient, registerLidarrHook } from './lidarr.js';
@@ -129,6 +130,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   registerJobs(app);
   registerReports(app, db, { version: VERSION });
   app.decorate('ai', registerAi(app, db));
+  registerMadeForYou(app, db, cacheDir);
   registerSpotifyImport(app, db, dataDir, { lidarr });
   const soularr = soularrClient(config.soularr);
   registerDownloads(app, db, { lidarr, soularr });
@@ -142,7 +144,7 @@ export async function buildServer(opts: BuildOptions = {}) {
   }), lyricSyncTask(app, {
     db, cacheDir, saveToLibrary: config.saveToLibrary,
     python: config.align.python, script: config.align.script || path.join(repoRoot, 'aligner', 'align.py'), model: config.align.model,
-  }), ...[brainTask(app, db, { cacheDir })].filter((x) => x !== null)]);
+  }), madeForYouTask(app, db, cacheDir), ...[brainTask(app, db, { cacheDir })].filter((x) => x !== null)]);
   registerLyricSync(app, db, { saveToLibrary: config.saveToLibrary });
 
   // Every /api route must carry a sign-in check unless it is one of the few

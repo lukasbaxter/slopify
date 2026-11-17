@@ -437,7 +437,15 @@ export class Slopify {
     return {
       albums: (r.albums || []).map(rowAlbum), artists: (r.artists || []).map(rowArtist), tracks: (r.tracks || []).map(rowTrack),
       playlists: pls.items.filter((x) => x.Name.toLowerCase().includes(term.toLowerCase())),
+      made: r.made || [], // the listener's themed playlists the words name ("rock")
     };
+  }
+  // Themed playlists made for this listener (server: madeforyou.ts): Rock
+  // Classics, Chill Vibes, 90s Hits, This Is <artist>, Christmas Hits.
+  async madeList() { return (await this._fetch('/api/made', { timeoutMs: 30000 })).items || []; }
+  async madeTracks(id) {
+    const dis = this._dislikes || {};
+    return ((await this._fetch(`/api/made/${encodeURIComponent(id)}`)).items || []).map(rowTrack).filter((t) => !dis[t.Id]);
   }
   // Songs for a playlist's "Recommended", from the playlist's circle of
   // artists (server: playlistreco.ts). seed = the Refresh generation.

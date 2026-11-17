@@ -21,7 +21,8 @@ import { matchTrack, slskdFind, slskdDownload } from './explore.js';
 import { safeName } from './downloads.js';
 
 export type WantedSong = { artist: string; title: string; album?: string | null; durationS?: number | null; source: string; priority?: number };
-const norm = (s: string) => String(s || '').normalize('NFKC').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+// Accents do not count ("ADELA" is "Adéla").
+const norm = (s: string) => String(s || '').normalize('NFKD').replace(/\p{M}+/gu, '').normalize('NFKC').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 // "Dracula (feat. X)" and "Dracula" are one song; the first credited artist decides.
 export const songKey = (artist: string, title: string) => `${norm(String(artist).split(/,|&| feat\.? | ft\.? | x | with /i)[0])}|${norm(title)}`;
 

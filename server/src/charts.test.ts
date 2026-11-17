@@ -70,6 +70,7 @@ describe('fetching single songs', () => {
     expect(wantSong(db, { artist: 'Fresh Artist feat. Someone', title: 'Fresh Song (feat. Someone)', source: 't', priority: 50 })).toBe('known');
     expect((db.prepare('SELECT priority FROM song_wants WHERE key = ?').get(songKey('Fresh Artist', 'Fresh Song')) as any).priority).toBe(50); // raised
     expect(wantSong(db, { artist: 'Singer 2', title: 'Song 2', source: 't' })).toBe('have');
+    expect(songKey('ADELA', 'Nicole Kidman')).toBe(songKey('Adéla', 'Nicole Kidman')); // accents do not count
   });
 
   it('searches, downloads, checks and shelves a song; a file by someone else is thrown away and tried again later', async () => {
@@ -91,7 +92,7 @@ describe('fetching single songs', () => {
     }) as any;
     const scanned: string[][] = [];
     const o = { slskdUrl: 'http://slskd', slskdKey: 'k', downloadsDir: downloads, musicDir: music, fetcher, scan: async (rel: string[]) => { scanned.push(rel); }, plays: async () => true,
-      artistOf: async (f: string) => (f.includes('Wrong') ? 'Somebody Else' : 'Shelf Artist'), albumOf: async () => 'Shelf Album' };
+      artistOf: async (f: string) => (f.includes('Wrong') ? 'Somebody Else' : 'Shélf Ártist'), albumOf: async () => 'Shelf Album' }; // accents in the tags still match
     const first = await fetchSongs(db, o, 5);
     expect(first.started).toBe(2);
     // slskd finishes both downloads.

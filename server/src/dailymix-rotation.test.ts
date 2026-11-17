@@ -70,4 +70,20 @@ describe('Daily Mix: new each day, the same all day', () => {
     expect(j.items[0].artists[0].id).toBe(band);
     expect(db.prepare('SELECT day FROM daily_mixes WHERE user_id = ? AND artist_id = ?').get(me, band).day).toBe('2026-11-20');
   });
+  it('the tile\'s cover changes with the day: a photo of someone in that day\'s mix', async () => {
+    db.prepare("UPDATE artists SET image_hash = 'h' || substr(id, 1, 6)").run();
+    const covers: string[] = [];
+    for (const d of ['2026-12-01', '2026-12-02', '2026-12-03', '2026-12-04']) {
+      vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(`${d}T09:00:00Z`));
+      const m = (await app.inject({ url: `/api/daily-mixes?ids=${band}&tzo=0`, headers: { authorization: `Bearer ${tok}` } })).json().items[0];
+      const page = (await app.inject({ url: `/api/tracks/${band}/mix?limit=50&tzo=0`, headers: { authorization: `Bearer ${tok}` } })).json();
+      vi.useRealTimers();
+      const inMix = new Set(page.items.flatMap((t: any) => t.artistIds));
+      expect(m.cover.image).toBe(db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(m.cover.id).image_hash);
+      expect(m.cover.id === band || inMix.has(m.cover.id)).toBe(true);
+      expect(page.cover).toEqual(m.cover); // the page shows the tile's photo
+      covers.push(m.cover.id);
+    }
+    for (let i = 1; i < covers.length; i++) expect(covers[i]).not.toBe(covers[i - 1]);
+  });
 });

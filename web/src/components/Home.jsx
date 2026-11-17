@@ -251,13 +251,16 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
     let alive = true;
     jf.dailyMixes(seedKey.split(',')).then((items) => {
       if (!alive) return;
-      const next = Object.fromEntries(items.map((m) => [m.artistId, { day: m.day, artists: m.artists || [] }]));
+      const next = Object.fromEntries(items.map((m) => [m.artistId, { day: m.day, artists: m.artists || [], cover: m.cover?.id || null }]));
       setMixInfo(next); jf._persist('home.mixInfo', next);
     }).catch(() => {});
     return () => { alive = false; };
   }, [jf, seedKey, fresh]);
   // A kept answer from an earlier day says nothing about today's mix.
   const mixSubOf = (a) => mixSub(mixInfo[a.Id]?.day >= localDay() ? mixInfo[a.Id].artists : null, a.Name);
+  // Today's cover: a photo of someone in today's mix (the server picks, a new
+  // one each day); the seed's own until today's answer is in.
+  const mixCoverOf = (a) => (mixInfo[a.Id]?.day >= localDay() && mixInfo[a.Id].cover) || a.Id;
 
   // Phone: the chip row sticks to the top; once the page has scrolled it gets
   // a solid background (the home gradient scrolls away underneath). A class
@@ -310,8 +313,8 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
         {showMusic && <Shelf title={t('Made For You')}>
           {mixSeeds.map((a, i) => (
             <MixTile key={a.Id} label={t('Daily Mix {n}', { n: i + 1 })} sub={mixSubOf(a)}
-              image={jf.imageUrl(a.Id, { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
-              onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length], mixSubOf(a))} onPlay={() => playMix(a)} />
+              image={jf.imageUrl(mixCoverOf(a), { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
+              onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length], mixSubOf(a), mixCoverOf(a))} onPlay={() => playMix(a)} />
           ))}
         </Shelf>}
 

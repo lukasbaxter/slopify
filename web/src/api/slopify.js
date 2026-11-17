@@ -457,6 +457,8 @@ export class Slopify {
     const items = out.filter((t) => !dis[t.Id]);
     // Who is in today's mix (a Daily Mix only), for its page's subtitle.
     if (!mode && Array.isArray(r.artists)) items.artists = r.artists;
+    // And whose photo is its cover today (the same as Home's tile).
+    if (!mode && r.cover?.id) items.cover = r.cover.id;
     return items;
   }
   // Home's Made For You tiles: today's mix of each seed artist and who is in it.

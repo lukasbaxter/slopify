@@ -12,7 +12,7 @@ struct DailyMixView: View {
         HomeMixPage(context: "mix:\(artistId)", title: L("Daily Mix {n}", ["n": number]),
                 sub: HomeStore.shared.mixSub(artistId: artistId, seedName: seedName),
                 color: Theme.Fixed.mixPalette[HomeLogic.mixColorIndex(number - 1)],
-                art: .artist(id: artistId, image: nil),
+                art: HomeStore.shared.mixArt(artistId: artistId, image: nil),
                 radioSeed: .init(id: artistId, name: seedName)) { api, _ in
             try await api.mix(artistId, limit: 50).items
         }

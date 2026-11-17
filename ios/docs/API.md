@@ -930,8 +930,11 @@ Radar `Release`: `{ album_id, artist, title, rtype, year, date, image, total_tra
 
 `ids`: the tiles' seed artists, comma separated (at most 12). For each one the server makes
 today's Daily Mix if it is a new day for the listener (`tzo` as in §14.1), so the tile and its
-page always show the same day. `{ items: [{ artistId, day: "YYYY-MM-DD", from, artists: [{ id, name }] }] }`,
-unknown ids left out. `artists` as in §14.1. The web adds `day=<local YYYY-MM-DD>` to this and
+page always show the same day. `{ items: [{ artistId, day: "YYYY-MM-DD", from, artists: [{ id, name }], cover: { id, image } }] }`,
+unknown ids left out. `artists` as in §14.1. `cover`: the artist whose photo is the tile's (and
+its page's) cover today, the seed or someone in the day's mix with a picture, a different one
+each day; `image` is that artist's `image` hash. The artist's `/mix` answer carries the same
+`cover`. The web adds `day=<local YYYY-MM-DD>` to this and
 to the Daily Mix URLs so its service worker never answers a new day with yesterday's copy;
 the server ignores it.
 

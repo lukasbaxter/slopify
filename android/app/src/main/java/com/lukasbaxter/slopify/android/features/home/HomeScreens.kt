@@ -195,7 +195,7 @@ fun DailyMixView(artistId: String, number: Int, seedName: String) {
         title = L("Daily Mix {n}", "n" to number),
         sub = HomeLogic.mixSub(artists, seedName),
         color = homeMixColor(number - 1),
-        art = CoverSource.ArtistArt(artistId, null),
+        art = st.data.mixCovers[artistId]?.let { CoverSource.ArtistArt(it.id, it.image) } ?: CoverSource.ArtistArt(artistId, null),
         radioSeed = artistId,
         radioName = seedName.ifEmpty { null },
     ) { api -> api.mix(artistId, limit = 50).also { fromMix = it.artists }.items }
@@ -241,7 +241,7 @@ private fun HomeSection(s: HomeLogic.Section, data: HomeSnapshot) {
                 MediaCard(label, HomeLogic.mixSub(data.mixArtists[a.id].orEmpty(), a.name) ?: "", style = CardStyle.Home, onClick = {
                     nav.pushFromHome(Route.DailyMix(a.id, i + 1, a.name))
                 }) {
-                    HomeMixArt(CoverSource.ArtistArt(a.id, a.image), homeMixColor(i), label, pixelSize = 150.dp)
+                    HomeMixArt(data.mixCovers[a.id]?.let { CoverSource.ArtistArt(it.id, it.image) } ?: CoverSource.ArtistArt(a.id, a.image), homeMixColor(i), label, pixelSize = 150.dp)
                 }
             }
         }

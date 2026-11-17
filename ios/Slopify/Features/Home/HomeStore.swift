@@ -48,6 +48,11 @@ final class HomeStore {
     func mixSub(artistId: String, seedName: String) -> String? {
         HomeLogic.dailyMixSub(seedName: seedName, summary: data.mixSummaries?[artistId])
     }
+    /// A Daily Mix's cover, the same on its tile and its page: today's photo, else the seed's.
+    func mixArt(artistId: String, image: String?) -> CoverSource {
+        if let c = data.mixSummaries?[artistId]?.cover { return .artist(id: c.id, image: c.image) }
+        return .artist(id: artistId, image: image)
+    }
 
     func sections(_ filter: HomeLogic.Filter) -> [HomeLogic.Section] {
         HomeLogic.sections(filter: filter, counts: .init(

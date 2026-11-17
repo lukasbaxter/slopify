@@ -337,6 +337,17 @@ export function mixArtists(db: DB, ids: string[], seedArtist: string | null, n =
   return [...(seedArtist ? [seedArtist] : []), ...order].slice(0, n).map((a) => artistRow(db, a)).filter((a): a is { id: string; name: string } => !!a);
 }
 
+// A Daily Mix tile's photo for the day: the seed or one of the artists in
+// that day's mix who has a picture, a different one each day (in turn by
+// date), so the cover changes with the songs. Every device gets the same one.
+export function mixCover(db: DB, ids: string[], seedArtist: string, day: string): { id: string; image: string | null } {
+  const pic = (id: string) => (db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as { image_hash: string | null } | undefined)?.image_hash || null;
+  const withPic = mixArtists(db, ids, seedArtist, 6).map((a) => ({ id: a.id, image: pic(a.id) })).filter((a) => a.image);
+  if (!withPic.length) return { id: seedArtist, image: pic(seedArtist) };
+  const n = Math.floor(Date.parse(`${day}T00:00:00Z`) / 86400_000) || 0;
+  return withPic[n % withPic.length];
+}
+
 function tracksRows(db: DB, ids: string[]): TrackRow[] {
   if (!ids.length) return [];
   const rows = new Map((db.prepare(`${TRACK_SELECT} WHERE t.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as TrackRow[]).map((r) => [r.id, r]));
@@ -452,7 +463,7 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
       if (me && (req.query as any).mode === 'radio') return { items: (await artistRadio(db, artist, limit, me, radioAsk(me))).map(trackOut) };
       if (!me || (req.query as any).mode) return { items: (await artistMix(db, artist, limit, me)).map(trackOut) };
       const m = await todaysMix(artist, me, (req.query as any).tzo);
-      return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day, artists: mixArtists(db, m.ids, artist.id) };
+      return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day, artists: mixArtists(db, m.ids, artist.id), cover: mixCover(db, m.ids, artist.id, m.day) };
     }
     // A song: the brain first (smart shuffle and autoplay land here when the
     // queue runs out; ?mode=radio for a song's radio), its own mix otherwise.
@@ -483,7 +494,7 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
       const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
       if (!artist) return null;
       const m = await todaysMix(artist, me, (req.query as any).tzo);
-      return { artistId: id, day: m.day, from: m.from, artists: mixArtists(db, m.ids, id) };
+      return { artistId: id, day: m.day, from: m.from, artists: mixArtists(db, m.ids, id), cover: mixCover(db, m.ids, id, m.day) };
     }));
     return { items: items.filter(Boolean) };
   });

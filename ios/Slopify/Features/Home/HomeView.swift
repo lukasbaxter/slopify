@@ -176,7 +176,7 @@ struct HomeView: View {
                 let label = L("Daily Mix {n}", ["n": m.index + 1])
                 MediaCard(title: label, subtitle: store.mixSub(artistId: m.artist.id, seedName: m.artist.name), style: .home,
                           action: { nav.pushFromHome(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name)) }) {
-                    HomeMixArt(source: .artist(id: m.artist.id, image: m.artist.image), color: mixColor(m.index), label: label, pixelSize: 150)
+                    HomeMixArt(source: store.mixArt(artistId: m.artist.id, image: m.artist.image), color: mixColor(m.index), label: label, pixelSize: 150)
                 }
                 .homeZoomSource(.dailyMix(artistId: m.artist.id, number: m.index + 1, seedName: m.artist.name))
             }

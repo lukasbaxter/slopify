@@ -229,12 +229,13 @@ export default function Library({
   }, [jf]);
   // A Daily Mix as a page: Jellyfin's instant mix seeded from the artist,
   // shown like a playlist (list, play, shuffle) rather than played blind.
-  const openMix = async (seed, n, color, sub = null) => {
+  const openMix = async (seed, n, color, sub = null, cover = null) => {
     const id = `mix:${seed.Id}`;
-    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _seed: seed.Id, _seedName: seed.Name, _art: jf.imageUrl(seed.Id, { maxHeight: 464, full: true }), _color: color, _sub: sub || mixSub(null, seed.Name) }, tracks: [], kind: 'Playlist', loading: true });
+    const art = (who) => jf.imageUrl(who || seed.Id, { maxHeight: 464, full: true });
+    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _seed: seed.Id, _seedName: seed.Name, _art: art(cover), _color: color, _sub: sub || mixSub(null, seed.Name) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.instantMix(seed.Id, 50);
-      setDetail((d) => (d && d.item?.Id === id ? { ...d, item: { ...d.item, _sub: mixSub(items.artists, seed.Name) }, tracks: items, loading: false } : d));
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, item: { ...d.item, _sub: mixSub(items.artists, seed.Name), _art: items.cover ? art(items.cover) : d.item._art }, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   // Your Top Songs <year>: the year's most played songs (server ranks the

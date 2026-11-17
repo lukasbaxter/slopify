@@ -352,7 +352,11 @@ struct DailyMixSummary: Codable, Hashable, Sendable {
     var day: String
     var from: String?
     var artists: [MixArtist]
+    /// Today's cover: the artist whose photo the tile shows (a new one each day). Older servers omit it.
+    var cover: MixCover? = nil
 }
+
+struct MixCover: Codable, Hashable, Sendable { var id: String; var image: String? }
 
 /// Go to radio: the listener's radio playlist of one seed (§14.4).
 struct Radio: Codable, Sendable {

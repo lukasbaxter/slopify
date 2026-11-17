@@ -290,7 +290,11 @@ data class MixArtist(val id: String, val name: String = "")
 
 /** One Made For You tile's day (API.md §14.3). */
 @Serializable
-data class DailyMixSummary(val artistId: String, val day: String? = null, val from: String? = null, val artists: List<MixArtist> = emptyList())
+data class DailyMixSummary(val artistId: String, val day: String? = null, val from: String? = null, val artists: List<MixArtist> = emptyList(), val cover: MixCover? = null)
+
+/** Today's cover of a Daily Mix: whose photo its tile shows (a new one each day). */
+@Serializable
+data class MixCover(val id: String, val image: String? = null)
 
 @Serializable
 data class DailyMixSummaries(val items: List<DailyMixSummary> = emptyList())

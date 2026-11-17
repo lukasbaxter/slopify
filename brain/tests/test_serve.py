@@ -56,3 +56,23 @@ def test_two_recommends_never_run_the_model_at_once(monkeypatch):
     rs = asyncio.run(go())
     assert [r.status_code for r in rs] == [200, 200, 200]
     assert slow.most == 1
+
+def test_photo_rejects_what_is_not_an_image_without_loading_models(monkeypatch):
+    from brain import photo
+    called = []
+    monkeypatch.setattr(photo, "_load", lambda: called.append(1))
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=serve.app), base_url="http://brain") as c:
+            return [await c.post("/photo", json=j, headers=KEY) for j in ({"image": "not base64!"}, {"image": ""}, {"image": "aGVsbG8="})] \
+                + [await c.post("/photo", json={"image": "aGVsbG8="})]
+    bad64, empty, notimg, nokey = asyncio.run(go())
+    assert (bad64.status_code, empty.status_code, notimg.status_code, nokey.status_code) == (400, 400, 400, 401)
+    assert not called
+
+def test_photo_models_unload_only_after_idle():
+    from brain import photo
+    assert photo.unload_if_idle() is False                     # nothing loaded
+    photo._m.update(seg=object(), clip=object(), proc=object(), dev="cpu", used=time.time())
+    assert photo.unload_if_idle() is False                     # just used
+    assert photo.unload_if_idle(now=time.time() + photo.IDLE_S + 1) is True
+    assert photo._m["seg"] is None

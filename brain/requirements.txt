@@ -3,3 +3,7 @@ numpy==2.3.4
 fastapi==0.121.0
 uvicorn==0.38.0
 httpx==0.28.1
+pillow==12.3.0
+timm==1.0.30
+kornia==0.8.3
+einops==0.8.2

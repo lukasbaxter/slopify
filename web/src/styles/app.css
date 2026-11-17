@@ -834,6 +834,9 @@ input[type="range"]:disabled { opacity: .4; }
 }
 .mixart .ph { background: linear-gradient(160deg, color-mix(in srgb, var(--mix) 55%, #000), var(--mix)); }
 .mixcard .card-play { bottom: 46px; }
+/* Drawn covers (Daily Mix, stations, top mixes): the picture is the whole tile. */
+.mixcard.drawn .mixart img { object-position: center; }
+.mixcard.drawn .card-play { bottom: 8px; }
 
 /* now-playing bars in the index column */
 .npbars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; width: 14px; }

@@ -462,6 +462,14 @@ export class Slopify {
     return items;
   }
   // Home's Made For You tiles: today's mix of each seed artist and who is in it.
+  // Home's Recommended Stations (artist radios) and Your top mixes (one per
+  // genre the listener plays most), covers drawn by the server (homemixes.ts).
+  async homeStations(skip = []) { return (await this._fetch(`/api/home/stations?skip=${skip.join(',')}&tzo=${new Date().getTimezoneOffset()}`)).items || []; }
+  async homeMixes() { return (await this._fetch('/api/home/mixes')).items || []; }
+  async homeMixTracks(genre) {
+    const dis = this._dislikes || {};
+    return ((await this._fetch(`/api/home/mixes/${encodeURIComponent(genre)}?day=${localDay()}`)).items || []).map(rowTrack).filter((t) => !dis[t.Id]);
+  }
   async dailyMixes(artistIds) {
     if (!artistIds.length) return [];
     const r = await this._fetch(`/api/daily-mixes?ids=${artistIds.join(',')}&day=${localDay()}&tzo=${new Date().getTimezoneOffset()}`);

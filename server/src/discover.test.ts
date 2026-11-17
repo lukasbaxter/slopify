@@ -73,7 +73,7 @@ describe('release radar', () => {
     app.decorate('requireUser', async () => {});
     registerDiscover(app, db, { lidarr });
     const first = (await app.inject({ url: '/api/radar' })).json();
-    expect(first.releases[0]).toMatchObject({ album_id: 'mb-ih', requestStatus: 'queued', inLibrary: null });
+    expect(first.releases).toEqual([]); // on its way, not playable yet: not shown
     // it downloaded in the meantime: the cached radar must show that
     status = new Map();
     db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-ih', 'Infinite Health', 'tycho', 'Tycho', '/m/ih', 10, 0, 'infinite health')").run();
@@ -91,10 +91,13 @@ describe('release radar', () => {
     db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
       VALUES ('t-dive', '/m/dive/01.flac', 0, 0, 'A Walk', 'Tycho', '["Tycho"]', ?, 'al-dive', 'Dive', 'Tycho', 0)`).run(JSON.stringify([id]));
     db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', 't-dive', Date.now());
+    // The radar shows only what is in the library: these tests' releases are.
+    for (const t of ['kept', 'old', 'new']) db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES (?, ?, ?, 'Tycho', ?, 1, 0, ?)").run(`al-${t}`, t, id, `/m/${t}`, t);
     const date = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
     const release = (id: string) => ({ album_id: id, artist: 'Tycho', title: id, rtype: 'album', year: date.slice(0, 4), date, image: null, total_tracks: 1 });
     const start = (lidarr: any) => { const app = Fastify(); app.decorate('requireUser', async () => {}); registerDiscover(app, db, { lidarr }); return app; };
-    const keep = (at: number, id: string) => db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at, releases: [{ ...release(id), artistId: id, artistName: 'Tycho' }] }));
+    const artistId = id;
+    const keep = (at: number, rid: string) => db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at, releases: [{ ...release(rid), artistId, artistName: 'Tycho' }] }));
     const kept = () => JSON.parse((db.prepare("SELECT v FROM kv WHERE k = 'radar'").get() as any).v);
     return { release, start, keep, kept };
   };
@@ -139,6 +142,34 @@ describe('release radar', () => {
   });
 });
 
+describe('release radar fetches what it finds', () => {
+  it('asks Lidarr for each new release the library lacks, and shows only the ones that play', async () => {
+    const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-grab-')));
+    db.prepare("INSERT INTO artists (id, name, sort_name) VALUES ('fka', 'Fka', 'fka')").run();
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-old', 'Old One', 'fka', 'Fka', '/m/old', 1, 0, 'old one')").run();
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-here', 'Here', 'fka', 'Fka', '/m/here', 1, 0, 'here')").run();
+    db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+      VALUES ('t1', '/m/old/01.flac', 0, 0, 'Song', 'Fka', '["Fka"]', '["fka"]', 'al-old', 'Old One', 'Fka', 0)`).run();
+    db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', 't1', Date.now());
+    const date = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const rel = (id: string, title: string) => ({ album_id: id, artist: 'Fka', title, rtype: 'Single', year: date.slice(0, 4), date, image: null, total_tracks: 1, secondary: [] });
+    const asked: string[] = [];
+    const lidarr: any = {
+      enabled: true,
+      statuses: async () => new Map([['mb-coming', { status: 'downloading', updated: 0 }]]),
+      discography: async () => ({ artist: { name: 'Fka', image: null }, releases: [rel('mb-new', 'Brand New'), rel('mb-here', 'Here'), rel('mb-coming', 'Coming')] }),
+      request: async (id: string) => { asked.push(id); return { album_id: id, artist: 'Fka', title: id, status: 'queued' }; },
+    };
+    const app = Fastify();
+    app.decorate('requireUser', async () => {});
+    registerDiscover(app, db, { lidarr });
+    const r = (await app.inject({ url: '/api/radar' })).json();
+    expect(asked).toEqual(['mb-new']); // not the one here, not the one already downloading
+    expect(r.releases.map((x: any) => x.album_id)).toEqual(['mb-here']);
+    await app.close();
+  });
+});
+
 describe('release radar and a busy Lidarr', () => {
   it('a rebuild stops once Lidarr keeps answering slowly, keeps the list, and is not begun again within the hour', async () => {
     const db = openDb(fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-radar-busy-')));
@@ -151,6 +182,7 @@ describe('release radar and a busy Lidarr', () => {
       track.run(`t-${i}`, `/m/${i}/01.flac`, name, JSON.stringify([name]), JSON.stringify([id]), `al-${i}`, name);
       db.prepare('INSERT INTO plays (user_id, track_id, at) VALUES (?, ?, ?)').run('u1', `t-${i}`, Date.now());
     }
+    db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-busy-old', 'old', 'busy-artist-0', 'Busy 0', '/m/old', 1, 0, 'old')").run(); // in the library, so shown
     db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at: Date.now() - 7 * 3600e3, releases: [{ album_id: 'old', artistId: 'busy-artist-0', artistName: 'Busy 0', title: 'old', rtype: 'album', date: '2026-01-01' }] }));
     let clock = Date.now();
     const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
@@ -203,6 +235,11 @@ describe('Release Radar per person', () => {
       Beta: [rel('b-ep', 'EP', day(10)), rel('shared', 'Album', day(1)), rel('b-soon', 'Album', day(-30))],
       Gamma: [rel('c-album', 'Album', day(20)), rel('shared', 'Album', day(1))],
     };
+    // Everything here has already been fetched, so the radar shows it.
+    for (const [name, rels] of Object.entries(catalog)) for (const r of rels) {
+      const aid = { Alpha: 'ar-a', Beta: 'ar-b', Gamma: 'ar-c' }[name]!;
+      album.run(`lib-${aid}-${r.album_id}`, r.album_id, aid, name, `/m/${aid}/${r.album_id}`, r.album_id);
+    }
     const lidarr: any = { enabled: true, statuses: async () => new Map(), discography: async (name: string) => ({ artist: { name, image: null }, releases: catalog[name] || [] }) };
     const app = Fastify();
     app.decorate('requireUser', async (req: any) => { req.user = { id: req.headers['x-user'] }; });

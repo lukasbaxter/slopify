@@ -57,20 +57,22 @@ export const mixSub = (artists, fallback) => (artists?.length ? t('{name} and mo
 
 export const topSongsSub = (year) => year === new Date().getFullYear() ? t('Your most played songs of {year} so far', { year }) : t('The songs you played most in {year}', { year });
 
-function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder }) {
+// drawn: the server drew the whole cover (homemixes.ts: Daily Mix, station,
+// top mix), so no band on top and, like Spotify's, only who is in it below.
+function MixTile({ label, sub, image, color, onOpen, onPlay, placeholder, drawn }) {
   return (
-    <div className="card mixcard" onClick={onOpen} role="button" tabIndex={0}
+    <div className={`card mixcard${drawn ? ' drawn' : ''}`} onClick={onOpen} role="button" tabIndex={0} aria-label={label}
       onKeyDown={(e) => e.key === 'Enter' && onOpen?.()}>
       <div className="card-art mixart" style={{ '--mix': color, '--mix-ink': inkOn(color) }}>
         {image ? <FadeImg src={image} /> : <div className="ph" />}
-        <div className="mixband">{label}</div>
+        {!drawn && <div className="mixband">{label}</div>}
         {!placeholder && (
           <button className="card-play" onClick={(e) => { e.stopPropagation(); onPlay?.(); }} title={t('Play')}>
             <PlayGlyph />
           </button>
         )}
       </div>
-      <div className="card-title">{label}</div>
+      {!drawn && <div className="card-title">{label}</div>}
       <div className="card-sub">{sub}</div>
     </div>
   );
@@ -125,28 +127,31 @@ function Card({ title, subtitle, image, round, onOpen, onPlay, noPlay }) {
 }
 
 /**
- * Home. Structure follows Spotify's: greeting + 8 shortcuts, then Made For You,
- * Recently played, Jump back in, Release Radar, Your top artists.
+ * Home. Structure follows Spotify's: greeting + 8 shortcuts (what was played
+ * last, so there is no Recently played shelf as well), then Made For You,
+ * Recommended Stations, Your top mixes, Jump back in, Release Radar, Your top
+ * artists, Your Top Songs.
  *
  * Daily Mixes are real: each is the server's mix seeded from one of your
  * most-played artists, which is functionally what Spotify's artist-clustered
  * mixes are, kept for your local day (server: dailymix.ts). Made For You
  * is the Daily Mixes and nothing else: no weekly or daily playlists.
  */
-export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs }) {
-  const [recent, setRecent] = useState(() => jf?.persisted('home.recent') || []);
+export default function Home({ jf, player, albums, artists, playlists, onOpen, onOpenLiked, onOpenPlaylist, onSeeAll, likedCount, bar, onOpenArtist, onOpenRadar, onOpenMix, onOpenTopSongs, onOpenArtistRadio, onOpenTopMix }) {
   const [picks, setPicks] = useState(() => jf?.persisted('home.picks') || []);
   const [radar, setRadar] = useState(() => jf?.persisted('home.radar') || []);
   const [topArtists, setTopArtists] = useState(() => jf?.persisted('home.topArtists') || []);
   const [recentArtists, setRecentArtists] = useState(() => jf?.persisted('home.recentArtists') || []);
   const [topYears, setTopYears] = useState(() => jf?.persisted('home.topYears') || []);
+  const [topMixes, setTopMixes] = useState(() => jf?.persisted('home.topMixes') || []);
+  const [stations, setStations] = useState(() => jf?.persisted('home.stations') || []);
   const [fresh, setFresh] = useState(0);
 
   // All of this is the account's real history (Jellyfin play counts and last
   // played dates), nothing sampled from the library.
   useEffect(() => {
     if (!jf) return;
-    jf.recentlyPlayedAlbums({ limit: 16 }).then((r) => { setRecent(r.items); jf._persist('home.recent', r.items); }).catch(() => {});
+    jf.homeMixes().then((m) => { setTopMixes(m); jf._persist('home.topMixes', m); }).catch(() => {});
     jf.recentPicks().then((r) => { setPicks(r); jf._persist('home.picks', r); }).catch(() => {});
     jf.topSongYears().then((y) => { setTopYears(y); jf._persist('home.topYears', y); }).catch(() => {});
     // Release Radar: new albums, EPs and singles from the artists you like (server: discover.ts).
@@ -251,9 +256,11 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
     let alive = true;
     jf.dailyMixes(seedKey.split(',')).then((items) => {
       if (!alive) return;
-      const next = Object.fromEntries(items.map((m) => [m.artistId, { day: m.day, artists: m.artists || [], cover: m.cover?.id || null }]));
+      const next = Object.fromEntries(items.map((m) => [m.artistId, { day: m.day, artists: m.artists || [], cover: m.cover?.id || null, art: m.art || null }]));
       setMixInfo(next); jf._persist('home.mixInfo', next);
     }).catch(() => {});
+    // Stations come after the artists already seeding a Daily Mix.
+    jf.homeStations(seedKey.split(',')).then((st) => { if (alive) { setStations(st); jf._persist('home.stations', st); } }).catch(() => {});
     return () => { alive = false; };
   }, [jf, seedKey, fresh]);
   // A kept answer from an earlier day says nothing about today's mix.
@@ -261,6 +268,17 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
   // Today's cover: a photo of someone in today's mix (the server picks, a new
   // one each day); the seed's own until today's answer is in.
   const mixCoverOf = (a) => (mixInfo[a.Id]?.day >= localDay() && mixInfo[a.Id].cover) || a.Id;
+  // The tile as the server drew it (photo, "Daily Mix", its number), once today's is in.
+  const mixArtOf = (a) => (mixInfo[a.Id]?.day >= localDay() && mixInfo[a.Id].art) || null;
+  const withSub = (st) => (st.with?.length ? t('With {name} and more', { name: st.with.map((w) => w.name).join(', ') }) : null);
+  const playStation = async (st) => {
+    const items = await jf.instantMix(st.id, 100, 'radio');
+    if (items.length) player.playQueue(items, 0);
+  };
+  const playTopMix = async (m) => {
+    const items = await jf.homeMixTracks(m.genre);
+    if (items.length) player.playQueue(items, 0, `topmix:${m.genre}`);
+  };
 
   // Phone: the chip row sticks to the top; once the page has scrolled it gets
   // a solid background (the home gradient scrolls away underneath). A class
@@ -312,27 +330,28 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
 
         {showMusic && <Shelf title={t('Made For You')}>
           {mixSeeds.map((a, i) => (
-            <MixTile key={a.Id} label={t('Daily Mix {n}', { n: i + 1 })} sub={mixSubOf(a)}
-              image={jf.imageUrl(mixCoverOf(a), { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
-              onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length], mixSubOf(a), mixCoverOf(a))} onPlay={() => playMix(a)} />
+            <MixTile key={a.Id} label={t('Daily Mix {n}', { n: i + 1 })} sub={mixSubOf(a)} drawn={!!mixArtOf(a)}
+              image={jf.imageUrl(mixArtOf(a) || mixCoverOf(a), { maxHeight: 320 })} color={MIX_COLORS[i % MIX_COLORS.length]}
+              onOpen={() => onOpenMix(a, i + 1, MIX_COLORS[i % MIX_COLORS.length], mixSubOf(a), mixArtOf(a) || mixCoverOf(a))} onPlay={() => playMix(a)} />
           ))}
         </Shelf>}
 
-        {showMusic && topYears.length > 0 && (
-          <Shelf title={t('Your Top Songs')}>
-            {topYears.map((y, i) => (
-              <MixTile key={y.year} label={t('Top Songs {year}', { year: y.year })} sub={topSongsSub(y.year)}
-                image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={TOP_COLORS[i % TOP_COLORS.length]}
-                onOpen={() => onOpenTopSongs(y, TOP_COLORS[i % TOP_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
+        {showMusic && stations.length > 0 && (
+          <Shelf title={t('Recommended Stations')}>
+            {stations.map((st) => (
+              <MixTile key={st.id} drawn label={t('{name} Radio', { name: st.name })} sub={withSub(st)} color={st.color}
+                image={st.art ? jf.imageUrl(st.art, { maxHeight: 320 }) : null}
+                onOpen={() => onOpenArtistRadio?.({ Id: st.id, Name: st.name, Type: 'MusicArtist' })} onPlay={() => playStation(st)} />
             ))}
           </Shelf>
         )}
 
-        {showMusic && recent.length > 0 && (
-          <Shelf title={t('Recently played')} onSeeAll={() => onSeeAll('albums')}>
-            {recent.map((a) => (
-              <Card key={a.Id} title={a.Name} subtitle={a.AlbumArtist || t('Album')} image={jf.imageUrl(a.Id, { maxHeight: 320 })}
-                onOpen={() => onOpen(a)} onPlay={() => playAlbum(a)} />
+        {showMusic && topMixes.length > 0 && (
+          <Shelf title={t('Your top mixes')}>
+            {topMixes.map((m) => (
+              <MixTile key={m.genre} drawn label={m.name} sub={mixSub(m.artists)} color={m.color}
+                image={m.art ? jf.imageUrl(m.art, { maxHeight: 320 }) : null}
+                onOpen={() => onOpenTopMix?.(m)} onPlay={() => playTopMix(m)} />
             ))}
           </Shelf>
         )}
@@ -346,15 +365,12 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
           </Shelf>
         )}
 
-        {showMusic && radar.length > 0 && (
+        {showMusic && radar.some((r) => r.inLibrary) && (
           <Shelf title={t('Release Radar')} onSeeAll={onOpenRadar}>
-            {/* In the library: opens and plays. Not yet: the artist's page, where it can be requested. */}
-            {radar.map((r) => r.inLibrary ? (
+            {/* Only what is in the library: the server fetches the rest and shows it once it lands. */}
+            {radar.filter((r) => r.inLibrary).map((r) => (
               <Card key={r.album_id} title={r.title} subtitle={`${r.artistName} • ${r.rtype ? t(r.rtype) : t('Album')}`} image={jf.imageUrl(r.inLibrary, { maxHeight: 320 })}
                 onOpen={() => onOpen({ Id: r.inLibrary, Name: r.title })} onPlay={() => playAlbum({ Id: r.inLibrary })} />
-            ) : (
-              <Card key={r.album_id} title={r.title} subtitle={`${r.artistName} • ${r.rtype ? t(r.rtype) : t('Album')}`} image={r.image} noPlay
-                onOpen={() => onOpenArtist(r.artistId)} />
             ))}
           </Shelf>
         )}
@@ -364,6 +380,16 @@ export default function Home({ jf, player, albums, artists, playlists, onOpen, o
             {topArtists.slice(0, 16).map((a) => (
               <Card key={a.Id} title={a.Name} subtitle={t('Artist')} round image={jf.imageUrl(a.Id, { maxHeight: 320 })}
                 onOpen={() => onOpenArtist(a.Id)} onPlay={() => playMix(a)} />
+            ))}
+          </Shelf>
+        )}
+
+        {showMusic && topYears.length > 0 && (
+          <Shelf title={t('Your Top Songs')}>
+            {topYears.map((y, i) => (
+              <MixTile key={y.year} label={t('Top Songs {year}', { year: y.year })} sub={topSongsSub(y.year)}
+                image={y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 320 }) : null} color={TOP_COLORS[i % TOP_COLORS.length]}
+                onOpen={() => onOpenTopSongs(y, TOP_COLORS[i % TOP_COLORS.length])} onPlay={() => playTopSongs(y.year)} />
             ))}
           </Shelf>
         )}

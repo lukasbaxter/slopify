@@ -1,6 +1,7 @@
 """The brain's API and its maintainer loop.
   POST /recommend   what to play next (Slopify asks; X-Brain-Key)
   POST /similar     songs that sound like seed songs (Home's Daily Mixes)
+  POST /photo       is an artist photo really a photo, and the person cut out (playlist covers)
   POST /train       retrain now (Slopify's Brain task: Run now, its schedule)
   GET  /status      what it knows, how well it does, what it is doing
 The loop, all day: pull what is new from Slopify (5 min), the household's
@@ -8,10 +9,10 @@ rules (30 s), the weather (hourly), listen to songs it has not heard yet,
 and retrain when Slopify's schedule says (or nightly, with an older
 Slopify) and once the songs it can hear have grown by a fifth. Listening and
 training wait for the rules (gate.py); answering never does."""
-import asyncio, datetime as dt, hmac, threading, time, traceback
+import asyncio, base64, binascii, datetime as dt, hmac, threading, time, traceback
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from . import config, store, sync, weather, audio, train, features, settings, device
+from . import config, store, sync, weather, audio, train, features, settings, device, photo
 from .gate import Gate
 from .recommend import Engine
 
@@ -64,6 +65,33 @@ async def search(req: Request, x_brain_key: str = Header(default="")):
         raise HTTPException(503, "no model yet")
     log(f"search for {str(ask.get('user'))[:6]}: {str(ask.get('text'))[:60]!r}: {len(out['items'])} in {round((time.time() - t0) * 1000)} ms")
     return out
+
+@app.post("/photo")
+async def photo_check(req: Request, x_brain_key: str = Header(default="")):
+    """An artist's photo (base64): is it a photo of them, and the cutout."""
+    check(x_brain_key)
+    ask = await req.json(); t0 = time.time()
+    try:
+        raw = base64.b64decode(str(ask.get("image") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "image must be base64")
+    if not raw or len(raw) > 12_000_000:
+        raise HTTPException(400, "no image, or over 12 MB")
+    try:
+        out = await asyncio.to_thread(photo.judge, raw, ask.get("cutout", True) is not False)
+    except OSError:
+        raise HTTPException(400, "not an image")
+    log(f"photo: {out['kind']} ({out['photo']:.2f}){', cut out' if out['png'] else ''} in {round((time.time() - t0) * 1000)} ms")
+    return out
+
+def unloader():
+    while True:
+        time.sleep(30)
+        try:
+            if photo.unload_if_idle():
+                log("photo models unloaded (idle)")
+        except Exception as e:  # noqa: BLE001
+            log(f"photo unload: {e!r}")
 
 @app.post("/retry")
 async def retry(req: Request, x_brain_key: str = Header(default="")):
@@ -180,3 +208,4 @@ def maintain():
 @app.on_event("startup")
 def start():
     threading.Thread(target=maintain, daemon=True, name="maintainer").start()
+    threading.Thread(target=unloader, daemon=True, name="photo-unloader").start()

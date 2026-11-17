@@ -296,3 +296,29 @@ export async function brainSearch(db: DB, ask: { user: string; text: string; n?:
   }
 }
 export const brainOn = (db: DB) => Boolean(config.brain.url && config.brain.key && brainRules(db).enabled);
+
+// An artist's photo through the brain (brain/photo.py): is it really a photo
+// of them (not their album cover or logo), and the person cut out of it for
+// playlist covers. null when there is no brain, it is off, it does not know
+// /photo (an older brain) or it did not answer in time.
+export type BrainPhoto = { kind: string; photo: number; cutout: Buffer | null };
+export async function brainPhoto(db: DB, image: Buffer,
+  opts: { url?: string; key?: string; timeoutMs?: number; fetcher?: typeof fetch; log?: (m: string) => void } = {}): Promise<BrainPhoto | null> {
+  const url = opts.url ?? config.brain.url, key = opts.key ?? config.brain.key;
+  if (!url || !key || !brainRules(db).enabled) return null;
+  const f = opts.fetcher ?? fetch;
+  try {
+    const r = await f(`${url}/photo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Brain-Key': key },
+      body: JSON.stringify({ image: image.toString('base64') }),
+      // The first ask loads two models (a few seconds; longer on first download).
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json() as { kind?: unknown; photo?: unknown; png?: unknown };
+    return { kind: String(j.kind ?? ''), photo: Number(j.photo) || 0, cutout: typeof j.png === 'string' && j.png ? Buffer.from(j.png, 'base64') : null };
+  } catch (e: any) {
+    opts.log?.(`brain photo: ${e.name === 'TimeoutError' ? 'timed out' : e.message}`);
+    return null;
+  }
+}

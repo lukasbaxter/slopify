@@ -14,6 +14,7 @@ import { popularOrder, relatedInLibrary, similarInLibrary } from './discover.js'
 import { albumGenreMap } from './genres.js';
 import { AUDIO_EXT, COVER_EXT, COVER_NAMES, splitArtists } from './scanner.js';
 import { gainDb } from './loudness.js';
+import { dailyMixArt, stations, topMixes, topMixTracks } from './homemixes.js';
 import { brainNext, dislikedOf } from './brain.js';
 import { dailyMix, DAILY_SIZE } from './dailymix.js';
 
@@ -490,13 +491,30 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   app.get('/api/daily-mixes', auth, async (req) => {
     const me = (req as any).user.id as string;
     const ids = [...new Set(String((req.query as any).ids || '').split(',').filter((x) => /^[0-9a-f]{32}$/.test(x)))].slice(0, 12);
-    const items = await Promise.all(ids.map(async (id) => {
+    const items = await Promise.all(ids.map(async (id, i) => {
       const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
       if (!artist) return null;
       const m = await todaysMix(artist, me, (req.query as any).tzo);
-      return { artistId: id, day: m.day, from: m.from, artists: mixArtists(db, m.ids, id), cover: mixCover(db, m.ids, id, m.day) };
+      const cover = mixCover(db, m.ids, id, m.day);
+      // The tile's picture, drawn: the cover photo, "Daily Mix" and its number (homemixes.ts).
+      return { artistId: id, day: m.day, from: m.from, artists: mixArtists(db, m.ids, id), cover, art: await dailyMixArt(db, dataDir, i + 1, cover.image) };
     }));
     return { items: items.filter(Boolean) };
+  });
+  // Recommended Stations: radios of artists the listener plays, after the
+  // ones seeding a Daily Mix (?skip=), with who each brings in.
+  app.get('/api/home/stations', auth, async (req) => {
+    const me = (req as any).user.id as string;
+    const skip = new Set(String((req.query as any).skip || '').split(',').filter((x) => /^[0-9a-f]{32}$/.test(x)));
+    const tzo = (req.query as any).tzo;
+    return { items: await stations(db, dataDir, me, skip, async (a) => { const m = await todaysMix(a, me, tzo); return { artists: mixArtists(db, m.ids, a.id, 5) }; }) };
+  });
+  // Your top mixes: a mix of each genre the listener plays most.
+  app.get('/api/home/mixes', auth, async (req) => ({ items: await topMixes(db, dataDir, (req as any).user.id) }));
+  app.get('/api/home/mixes/:genre', auth, async (req) => {
+    const me = (req as any).user.id as string;
+    const genre = String((req.params as any).genre || '').slice(0, 40);
+    return { items: tracksByIds(db, topMixTracks(db, me, genre)) };
   });
   // Search page tiles: one per canonical genre (genres.ts), covers from the
   // genre's most played albums, biggest shelves first.
@@ -617,6 +635,8 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
   // artist's portrait (or its banner); a playlist's is playlistCover's
   // (mosaic.ts). Served straight from the rendered files; webp when accepted.
   const coverOf = (id: string, kind: string): string | null => {
+    // A cover Slopify drew (Home's mixes and stations, homemixes.ts).
+    if (/^art_[0-9a-f]{40}$/.test(id)) return kind === 'banner' ? null : id.slice(4);
     const al = db.prepare('SELECT cover_hash FROM albums WHERE id = ?').get(id) as any; if (al) return al.cover_hash ?? null;
     const tr = db.prepare('SELECT a.cover_hash FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?').get(id) as any; if (tr) return tr.cover_hash ?? null;
     // A track that left the library (replaced file = new id) still names its album:

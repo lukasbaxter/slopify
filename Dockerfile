@@ -47,6 +47,8 @@ COPY --from=build /app/server/package.json server/
 COPY --from=build /app/web/package.json web/
 RUN npm ci --omit=dev
 COPY --from=build /app/server/dist server/dist
+# Fonts and flat props the server draws covers with (typecover.ts).
+COPY server/assets server/assets
 COPY --from=build /app/web/dist web/dist
 COPY aligner/align.py aligner/align.py
 COPY docker/entrypoint.sh /usr/local/bin/slopify-entrypoint

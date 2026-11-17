@@ -12,7 +12,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DB } from './db.js';
-import { recordRequest } from './downloads.js';
+import { recordRequest, givenUp } from './downloads.js';
 import type { Lidarr } from './lidarr.js';
 import { normTitle as songTitle } from './lyricsources.js';
 
@@ -311,7 +311,8 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
   });
 
   // Release Radar: new albums, EPs and singles (last 90 days) from the
-  // artists each person likes: followed, liked songs and albums, and played
+  // artists each person likes, fetched when the library lacks them and shown
+  // once they are here: followed, liked songs and albums, and played
   // a lot. Building it takes a round trip through Lidarr per artist
   // (minutes), so nobody waits for that: one list covering every account's
   // artists is kept in the database, a look answers from it at once filtered
@@ -374,8 +375,27 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
     if (failed && failed === top.length) return radarSaved()?.releases || [];
     out.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
     db.prepare("INSERT OR REPLACE INTO kv (k, v) VALUES ('radar', ?)").run(JSON.stringify({ at: Date.now(), releases: out }));
+    await grabRadar(out).catch((e) => log(`radar: queueing new releases: ${e?.message || e}`));
     return out;
   })().finally(() => { radarBuild = null; });
+  // The radar shows only what can be played, so what it finds is fetched:
+  // every new release not in the library, not already on its way and not
+  // one the download watcher gave up on is asked of Lidarr.
+  const grabRadar = async (rels: any[]) => {
+    if (!lidarr) return;
+    const pending = await lidarr.statuses();
+    const quit = givenUp(db);
+    const have = new Map<string, (t: string) => { id: string; name: string } | null>();
+    let n = 0;
+    for (const r of rels) {
+      if (pending.has(r.album_id) || quit.has(r.album_id)) continue;
+      let h = have.get(r.artistId);
+      if (!h) { h = matcher(creditedAlbums(db, r.artistId)); have.set(r.artistId, h); }
+      if (h(r.title)) continue;
+      try { if ((await lidarr.request(r.album_id)).status === 'queued') n++; } catch (e: any) { log(`radar: ${r.artistName} - ${r.title}: ${e?.message || e}`); }
+    }
+    if (n) log(`radar: ${n} new releases queued`);
+  };
   const radarStale = (saved: { at: number } | null) => !saved || Date.now() - saved.at >= RADAR_TTL;
   const radarMayTry = () => Date.now() - radarTriedAt >= RADAR_RETRY_MS;
   const refreshRadar = () => { if (radarStale(radarSaved()) && radarMayTry()) buildRadar().catch((e) => log(`radar: ${e?.message || e}`)); };
@@ -403,7 +423,7 @@ export function registerDiscover(app: FastifyInstance, db: DB, opts: DiscoverOpt
       if (!h) { h = matcher(creditedAlbums(db, r.artistId)); have.set(r.artistId, h); }
       const local = h(r.title);
       return { ...r, inLibrary: local?.id ?? null, localName: local?.name ?? null, requestStatus: stateOf(status.get(r.album_id)) };
-    });
+    }).filter((r) => r.inLibrary); // only what plays; the rest is being fetched (grabRadar)
     return { releases };
   });
 }

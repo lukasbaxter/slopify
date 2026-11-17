@@ -21,7 +21,7 @@ RUN case "$GPU" in \
       intel) idx=xpu ;; nvidia) idx=cu128 ;; amd) idx=${ROCM:-rocm6.4} ;; cpu) idx=cpu ;; \
       *) echo "GPU must be intel, nvidia, amd or cpu" >&2; exit 1 ;; \
     esac \
- && pip install torch --index-url https://download.pytorch.org/whl/$idx
+ && pip install torch torchvision --index-url https://download.pytorch.org/whl/$idx
 COPY requirements.txt /app/
 RUN pip install -r /app/requirements.txt
 COPY brain /app/brain

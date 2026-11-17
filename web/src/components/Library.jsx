@@ -232,10 +232,12 @@ export default function Library({
   const openMix = async (seed, n, color, sub = null, cover = null) => {
     const id = `mix:${seed.Id}`;
     const art = (who) => jf.imageUrl(who || seed.Id, { maxHeight: 464, full: true });
-    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _seed: seed.Id, _seedName: seed.Name, _art: art(cover), _color: color, _sub: sub || mixSub(null, seed.Name) }, tracks: [], kind: 'Playlist', loading: true });
+    // A drawn cover (art_..., the server's Daily Mix picture) is the page's cover as it is.
+    const drawn = String(cover || '').startsWith('art_');
+    setDetail({ item: { Id: id, Name: t('Daily Mix {n}', { n }), Type: 'Playlist', _mix: true, _drawn: drawn, _seed: seed.Id, _seedName: seed.Name, _art: art(cover), _color: color, _sub: sub || mixSub(null, seed.Name) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.instantMix(seed.Id, 50);
-      setDetail((d) => (d && d.item?.Id === id ? { ...d, item: { ...d.item, _sub: mixSub(items.artists, seed.Name), _art: items.cover ? art(items.cover) : d.item._art }, tracks: items, loading: false } : d));
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, item: { ...d.item, _sub: mixSub(items.artists, seed.Name), _art: items.cover && !drawn ? art(items.cover) : d.item._art }, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
   // Your Top Songs <year>: the year's most played songs (server ranks the
@@ -245,6 +247,15 @@ export default function Library({
     setDetail({ item: { Id: id, Name: t('Top Songs {year}', { year: y.year }), Type: 'Playlist', _mix: true, _art: y.top ? jf.imageUrl(y.top.AlbumId, { maxHeight: 464, full: true }) : null, _color: color, _sub: topSongsSub(y.year) }, tracks: [], kind: 'Playlist', loading: true });
     try {
       const items = await jf.topSongs(y.year);
+      setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
+    } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
+  };
+  // One of Your top mixes: the day's mix of a genre the listener plays most.
+  const openTopMix = async (m) => {
+    const id = `topmix:${m.genre}`;
+    setDetail({ item: { Id: id, Name: m.name, Type: 'Playlist', _mix: true, _drawn: !!m.art, _art: m.art ? jf.imageUrl(m.art, { maxHeight: 464, full: true }) : null, _color: m.color, _sub: mixSub(m.artists) }, tracks: [], kind: 'Playlist', loading: true });
+    try {
+      const items = await jf.homeMixTracks(m.genre);
       setDetail((d) => (d && d.item?.Id === id ? { ...d, tracks: items, loading: false } : d));
     } catch (e) { if (!e.offline) setErr(e.message); setDetail((d) => (d && d.item?.Id === id ? { ...d, loading: false, loadFailed: true } : d)); }
   };
@@ -1163,7 +1174,7 @@ export default function Library({
                 /* The page cover is the Home card's composite: photo with the mix-name band. */
                 <div className="hero-cover mixart" style={{ '--mix': item._color, '--mix-ink': inkOn(item._color) }}>
                   <img src={item._art} alt="" />
-                  <div className="mixband">{item.Name}</div>
+                  {!item._drawn && <div className="mixband">{item.Name}</div>}
                 </div>
               ) : banner ? null : (
                 <button
@@ -2000,6 +2011,8 @@ export default function Library({
       onOpenRadar={openRadar}
       onOpenMix={openMix}
       onOpenTopSongs={openTopSongs}
+      onOpenTopMix={openTopMix}
+      onOpenArtistRadio={onOpenRadio}
     />
   );
 }

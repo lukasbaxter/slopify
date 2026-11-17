@@ -94,3 +94,18 @@ describe('drawn covers', () => {
     expect([a === b, draws]).toEqual([true, 1]);
   });
 });
+
+describe('Daily Mix cover from day to day', () => {
+  it('never shows yesterday\'s photo again when there is someone else to show', async () => {
+    const { mixCover } = await import('./library.js');
+    // A day number that is 2 mod 6: in turn by date, a two-artist list on that
+    // day and a three-artist list the next both land on the seed.
+    let n = Math.floor(Date.parse('2026-12-01T00:00:00Z') / 86400000); while (n % 6 !== 2) n++;
+    const day = (k: number) => new Date((n + k) * 86400000).toISOString().slice(0, 10);
+    const one = mixCover(db, ['t-a1', 't-b1'], A, day(0), 'cover-user');
+    const two = mixCover(db, ['t-a1', 't-b1', 't-c1'], A, day(1), 'cover-user');
+    expect(one.id).toBe(A);
+    expect(two.id).not.toBe(one.id);
+    expect(mixCover(db, ['t-a1', 't-b1', 't-c1'], A, day(1), 'cover-user').id).toBe(two.id); // the same all day
+  });
+});

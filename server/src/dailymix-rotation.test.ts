@@ -72,7 +72,7 @@ describe('Daily Mix: new each day, the same all day', () => {
   });
   it('the tile\'s cover changes with the day: a photo of someone in that day\'s mix', async () => {
     db.prepare("UPDATE artists SET image_hash = 'h' || substr(id, 1, 6)").run();
-    const covers: string[] = [];
+    const covers: { id: string; others: number }[] = [];
     for (const d of ['2026-12-01', '2026-12-02', '2026-12-03', '2026-12-04']) {
       vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(`${d}T09:00:00Z`));
       const m = (await app.inject({ url: `/api/daily-mixes?ids=${band}&tzo=0`, headers: { authorization: `Bearer ${tok}` } })).json().items[0];
@@ -82,8 +82,12 @@ describe('Daily Mix: new each day, the same all day', () => {
       expect(m.cover.image).toBe(db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(m.cover.id).image_hash);
       expect(m.cover.id === band || inMix.has(m.cover.id)).toBe(true);
       expect(page.cover).toEqual(m.cover); // the page shows the tile's photo
-      covers.push(m.cover.id);
+      covers.push({ id: m.cover.id, others: [...inMix].filter((a) => a !== band).length });
     }
-    for (let i = 1; i < covers.length; i++) expect(covers[i]).not.toBe(covers[i - 1]);
+    // A new photo each day, whenever the day's mix has someone besides the
+    // seed to show (a mix of only the seed's songs, which the small fixture
+    // library sometimes makes, can only show the seed).
+    for (let i = 1; i < covers.length; i++) if (covers[i].others && covers[i - 1].others) expect(covers[i].id).not.toBe(covers[i - 1].id);
+    expect(covers.some((c) => c.id !== band)).toBe(true);
   });
 });

@@ -341,12 +341,23 @@ export function mixArtists(db: DB, ids: string[], seedArtist: string | null, n =
 // A Daily Mix tile's photo for the day: the seed or one of the artists in
 // that day's mix who has a picture, a different one each day (in turn by
 // date), so the cover changes with the songs. Every device gets the same one.
-export function mixCover(db: DB, ids: string[], seedArtist: string, day: string): { id: string; image: string | null } {
+// The day's pick is kept (kv mixcover:<user>:<seed>): the list of pictured
+// artists changes length with the mix, and "in turn by date" alone could land
+// on yesterday's photo again; the kept one is skipped the next day.
+export function mixCover(db: DB, ids: string[], seedArtist: string, day: string, uid = ''): { id: string; image: string | null } {
   const pic = (id: string) => (db.prepare('SELECT image_hash FROM artists WHERE id = ?').get(id) as { image_hash: string | null } | undefined)?.image_hash || null;
   const withPic = mixArtists(db, ids, seedArtist, 6).map((a) => ({ id: a.id, image: pic(a.id) })).filter((a) => a.image);
   if (!withPic.length) return { id: seedArtist, image: pic(seedArtist) };
+  const key = `mixcover:${uid}:${seedArtist}`;
+  let kept: { day: string; id: string; prev?: string } | null = null;
+  try { kept = JSON.parse((db.prepare('SELECT v FROM kv WHERE k = ?').get(key) as { v: string } | undefined)?.v || 'null'); } catch { /* start over */ }
+  if (kept?.day === day) { const same = withPic.find((a) => a.id === kept!.id); if (same) return same; }
+  const before = kept && kept.day !== day ? kept.id : kept?.prev;
   const n = Math.floor(Date.parse(`${day}T00:00:00Z`) / 86400_000) || 0;
-  return withPic[n % withPic.length];
+  let pick = withPic[n % withPic.length];
+  if (pick.id === before && withPic.length > 1) pick = withPic[(n + 1) % withPic.length];
+  db.prepare('INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)').run(key, JSON.stringify({ day, id: pick.id, prev: before }));
+  return pick;
 }
 
 function tracksRows(db: DB, ids: string[]): TrackRow[] {
@@ -466,7 +477,7 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
       if (me && (req.query as any).mode === 'radio') return { items: (await artistRadio(db, artist, limit, me, radioAsk(me))).map(trackOut) };
       if (!me || (req.query as any).mode) return { items: (await artistMix(db, artist, limit, me)).map(trackOut) };
       const m = await todaysMix(artist, me, (req.query as any).tzo);
-      return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day, artists: mixArtists(db, m.ids, artist.id), cover: mixCover(db, m.ids, artist.id, m.day) };
+      return { items: tracksByIds(db, m.ids.slice(0, limit)), from: m.from, day: m.day, artists: mixArtists(db, m.ids, artist.id), cover: mixCover(db, m.ids, artist.id, m.day, me) };
     }
     // A song: the brain first (smart shuffle and autoplay land here when the
     // queue runs out; ?mode=radio for a song's radio), its own mix otherwise.
@@ -497,7 +508,7 @@ export function registerLibrary(app: FastifyInstance, db: DB, dataDir: string) {
       const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as { id: string; name: string } | undefined;
       if (!artist) return null;
       const m = await todaysMix(artist, me, (req.query as any).tzo);
-      const cover = mixCover(db, m.ids, id, m.day);
+      const cover = mixCover(db, m.ids, id, m.day, me);
       // The tile's picture, drawn: the cover photo, "Daily Mix" and its number (homemixes.ts).
       return { artistId: id, day: m.day, from: m.from, artists: mixArtists(db, m.ids, id), cover, art: await dailyMixArt(db, dataDir, i + 1, cover.image) };
     }));

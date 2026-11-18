@@ -191,3 +191,19 @@ def test_similar_keeps_to_the_artists_scene():
     for seed in range(5):
         out = similar(audio, ids, index, info, [ids[0]], 2, per_artist=2, seed=seed, near={"rnb": 1.0}, lead=lead)
         assert sorted(out) == sorted([ids[2], ids[4]])
+
+def test_next_songs_come_from_what_sounds_like_the_session():
+    """After piano concertos the queue keeps to songs (or artists) that sound
+    like them, however much the listener plays rock at other times."""
+    pytest.importorskip("torch")
+    import numpy as np
+    from brain.recommend import sound_gate, artist_sounds
+    audio = np.zeros((9, 3), np.float32)
+    for k, v in enumerate([[1, 0, 0], [.95, .05, 0], [.9, .1, 0], [.85, 0, .15],   # piano
+                           [0, 1, 0], [0, .95, .05], [.1, .9, 0], [0, 0, 0]]):     # rock; one never heard
+        audio[k + 1] = np.array(v) / (np.linalg.norm(v) or 1)
+    has = np.abs(audio).sum(1) > 0
+    artist_of = np.array([0, 1, 1, 2, 2, 3, 3, 3, 4])
+    gate = sound_gate(audio, has, artist_sounds(audio, artist_of), [1, 2], 4)
+    assert [i for i in range(9) if gate[i]] == [1, 2, 3, 4]
+    assert sound_gate(audio, has, None, [8], 4) is None      # nothing heard yet: no gate

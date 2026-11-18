@@ -18,6 +18,11 @@ ODD = re.compile(r"\b(instrumental|karaoke|a ?cappella|sped[ -]?up|slowed|nightc
 SEED_PULL = {"continue": 0.6, "smart": 0.35, "radio": 1.2, "now": 0.0}
 SESSION_PULL = {"continue": 0.8, "smart": 0.6, "radio": 0.5, "now": 0.3}
 KNOWN_SHARE = {"continue": 0.6, "smart": 0.5, "radio": 0.3, "now": 0.7}
+# How much of the catalog a next song can come from: the songs (or whose
+# artist's whole catalog) sound closest to what is playing. A queue of
+# Rachmaninov concertos does not go to Zhane or deadmau5 because the
+# listener plays them at other times.
+SOUND_GATE = {"continue": 2500, "radio": 4000, "smart": 6000}
 NEAR_PULL = 3.0   # a Daily Mix keeps to the artist's scene; sound picks within it
 
 def artist_sounds(audio, artist_of):
@@ -32,6 +37,23 @@ def artist_sounds(audio, artist_of):
 
 def _z(x):
     return (x - x.mean()) / (x.std() + 1e-6)
+
+def sound_gate(audio, has, artist_sound, rows, keep):
+    """The `keep` songs that sound most like the songs at `rows` (the last
+    few played): by the song's own sound and its artist's whole sound, as a
+    boolean mask; None when none of those songs has been heard yet."""
+    rows = [r for r in rows if has[r]]
+    if not rows:
+        return None
+    q = audio[rows].mean(0); q = q / (np.linalg.norm(q) + 1e-9)
+    s = audio @ q
+    if artist_sound is not None:
+        cent, artist_of = artist_sound
+        s = _z(s) + _z(cent[artist_of] @ q)
+    s = np.where(has, s, -np.inf); s[0] = -np.inf
+    mask = np.zeros(len(s), bool)
+    mask[np.argpartition(-s, min(keep, len(s) - 1))[:keep]] = True
+    return mask & has
 
 def similar(audio, ids, index, info, seeds, n, skip=(), per_artist=3, seed=None, artist_sound=None, has=None, taste=None, near=None, lead=None):
     """Songs that sound like the seeds: the seeds' CLAP averaged, every song
@@ -181,6 +203,11 @@ class Engine:
         scores[0] = -9
         if ask.get("_scores"):
             return scores
+        keep = SOUND_GATE.get(mode)
+        if keep and live:
+            gate = sound_gate(v["audio"], self.has, self.asound, live, keep)
+            if gate is not None:
+                scores = np.where(gate, scores, -9).astype(np.float32)
         known, disliked = self._known(ask.get("user"))
         skip = set(ask.get("exclude") or []) | disliked | {r["id"] for r in recent}
         seed_odd = any(ODD.search(info.get(s, ("", "", ""))[0] or "") for s in seeds)
@@ -188,7 +215,7 @@ class Engine:
         known_c, new_c = [], []
         for i in order:
             t = v["ids"][i - 1]
-            if t in skip:
+            if t in skip or scores[i] <= -9:
                 continue
             title, artist, _ = info.get(t, ("", "", ""))
             if not seed_odd and ODD.search(title or ""):

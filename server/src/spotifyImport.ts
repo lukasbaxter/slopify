@@ -27,6 +27,7 @@ import type { Lidarr } from './lidarr.js';
 import { config } from './config.js';
 import { recordRequest } from './downloads.js';
 import { composerOf, findClassicalRelease } from './classical.js';
+import { wantSong, OWN_PRIORITY } from './songfetch.js';
 
 type Song = { artist: string; title: string; album?: string };
 type Play = Song & { at: number };
@@ -127,6 +128,8 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
     // Liked songs, playlist songs and saved albums the library lacks: put
     // aside to be requested and filled in as they arrive.
     queued: { songs: 0, albums: 0 },
+    // Classical pieces put in the single-song line (queueClassical).
+    pieces: 0,
   };
   db.transaction(() => {
     // An extended history is the whole record for the time it spans: Spotify
@@ -172,9 +175,24 @@ export async function importSpotify(db: DB, uid: string, parsed: Parsed, job?: J
       have.add(pl.name.toLowerCase()); out.playlists.created++;
     }
   })();
+  out.pieces = queueClassical(db, [...songs.entries()].filter(([k]) => !found.get(k)).map(([, s]) => ({ ...s, plays: s.count })));
   out.missing = [...songs.entries()].filter(([k]) => !found.get(k)).map(([, s]) => ({ artist: s.artist, title: s.title, plays: s.count }))
     .sort((a, b) => b.plays - a.plays).slice(0, 100);
   return out;
+}
+
+// A composer's piece the library lacks goes in the single-song line too
+// (songfetch.ts), from the listening history as well as playlists and Liked
+// Songs: Lidarr asks for one exact album of it, which Soulseek and the
+// indexers seldom have, while any good recording of the piece will do.
+// The most played first, all before the charts.
+export function queueClassical(db: DB, songs: (Song & { plays?: number })[]) {
+  let n = 0;
+  for (const s of songs) {
+    if (!composerOf(s.artist)) continue;
+    if (wantSong(db, { artist: s.artist, title: s.title, album: s.album, source: 'spotify', priority: OWN_PRIORITY + Math.min(s.plays ?? 0, 500) }) === 'queued') n++;
+  }
+  return n;
 }
 
 // Asks Lidarr for the releases of what an import found missing: one release
@@ -300,6 +318,8 @@ export function registerSpotifyImport(app: FastifyInstance, db: DB, dataDir: str
   let draining: Promise<unknown> | null = null;
   const drain = () => {
     if (!lidarr || draining) return;
+    const pieces = queueClassical(db, db.prepare('SELECT artist, title, album FROM spotify_pending WHERE kind != ?').all('album') as Song[]);
+    if (pieces) log(`spotify import: ${pieces} classical pieces put in the song line`);
     draining = requestPending(db, lidarr, log).catch((e: any) => app.log.warn(`spotify import requests: ${e.message}`)).finally(() => { draining = null; });
   };
   // After a scan only what it touched: from the last check (kept across

@@ -156,6 +156,19 @@ describe('Spotify import', () => {
     expect((await importSpotify(db, 'u1', { ...p, playlists: [] })).queued).toEqual({ songs: 0, albums: 0 });
   });
 
+  it("puts a composer's missing pieces in the single-song line, from the listening history too, most played first", async () => {
+    const p: Parsed = { files: ['x'], likes: [], albums: [], plays: [],
+      basicPlays: [1, 2, 3].map((i) => ({ artist: 'Frédéric Chopin', title: 'Nocturne No. 2 in E-Flat Major, Op. 9 No. 2', at: Date.parse('2031-01-01') + i * 600000 }))
+        .concat([{ artist: 'Maurice Ravel', title: 'Boléro, M. 81', at: Date.parse('2031-01-02') }, { artist: 'Pop Ghost', title: 'Not Classical', at: Date.parse('2031-01-03') }]),
+      playlists: [] };
+    const r = await importSpotify(db, 'u1', p);
+    expect(r.pieces).toBe(2);
+    const line = db.prepare("SELECT artist, title, priority FROM song_wants WHERE source = 'spotify' ORDER BY priority DESC").all() as any[];
+    expect(line.map((x) => x.artist)).toEqual(['Frédéric Chopin', 'Maurice Ravel']); // the pop song stays with Lidarr
+    expect(line[0].priority).toBeGreaterThan(line[1].priority);
+    expect(line[1].priority).toBeGreaterThan(1000); // before every chart
+  });
+
   it('requests each missing release in Lidarr once; what cannot be found or keeps failing is set aside', async () => {
     db.prepare('DELETE FROM spotify_pending').run();
     const add = db.prepare("INSERT INTO spotify_pending (user_id, kind, playlist_id, at, artist, title, album, created) VALUES ('u1', ?, ?, 1, ?, ?, ?, ?)");

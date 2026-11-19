@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openDb } from './db.js';
-import { composerOf, parseWork, sameWork, matchClassical, classicalSearches, isComposerAlbum, findClassicalRelease } from './classical.js';
+import { composerOf, parseWork, sameWork, matchClassical, classicalSearches, isComposerAlbum, findClassicalRelease, classicalFileSearches, isClassicalFile } from './classical.js';
 import { matchTrack } from './explore.js';
 
 const same = (a: string, b: string) => sameWork(parseWork(a), parseWork(b)).same;
@@ -124,5 +124,22 @@ describe('classical: asking Lidarr for the album', () => {
     asked.length = 0;
     expect(await findClassicalRelease(search, ballade)).toBeNull();
     expect(asked).toEqual(['Chopin ballades barcarolle fantaisie', 'Chopin ballade']);
+  });
+});
+
+describe('classical: one recording from Soulseek', () => {
+  const noct = { artist: 'Frédéric Chopin', title: 'Nocturne No. 2 in E-Flat Major, Op. 9 No. 2' };
+  it('searches by surname and piece, the catalog number first', () => {
+    expect(classicalFileSearches(noct)).toEqual(['Chopin nocturne op 9', 'Chopin nocturne']);
+    expect(classicalFileSearches({ artist: 'Frédéric Chopin', title: 'Chopin: Nocturne No. 20 in C-Sharp Minor, Op. Posth.' })).toEqual(['Chopin nocturne']);
+    expect(classicalFileSearches({ artist: 'The Weeknd', title: 'Blinding Lights' })).toEqual([]);
+  });
+  it("takes any performer's file of that piece, named on the path, and nothing else", () => {
+    expect(isClassicalFile(noct, '@@a\\Music\\Chopin - Nocturnes (Pollini)\\02 - Nocturne in E flat major, Op. 9 No. 2.flac')).toBe(true);
+    expect(isClassicalFile(noct, 'Music/Fryderyk Chopin/Nocturnes/1-02 Nocturne Op.9 No.2.mp3')).toBe(true);
+    expect(isClassicalFile(noct, 'Music/Chopin - Nocturnes/01 - Nocturne in B flat minor, Op. 9 No. 1.flac')).toBe(false); // the first one
+    expect(isClassicalFile(noct, 'Music/Pollini/Nocturnes/02 - Nocturne Op. 9 No. 2.flac')).toBe(false); // no composer anywhere: could be John Field
+    expect(isClassicalFile(noct, 'Music/Field - Nocturnes/Chopin style/02 - Nocturne Op. 9 No. 2.flac')).toBe(true);
+    expect(isClassicalFile({ artist: 'Ludwig van Beethoven', title: 'Für Elise' }, 'x/Beethoven - Piano Pieces/05 Bagatelle in A minor WoO 59 - Für Elise.flac')).toBe(true);
   });
 });

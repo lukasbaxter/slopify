@@ -64,12 +64,14 @@ function matchByName(db: DB, t: LbTrack): string | null {
 
 // --- slskd: find and fetch one track ----------------------------------------
 type SlskdFile = { username: string; filename: string; size: number; bitRate?: number; extension?: string; hasFreeUploadSlot: boolean; queueLength: number };
-export async function slskdFind(opts: ExploreOptions, t: LbTrack, pick: { formats?: string[]; durationS?: number } = {}): Promise<SlskdFile | null> {
+// `searchText` and `accept` replace the plain "artist title" search and its
+// name check, for songs whose files are named another way (classical.ts).
+export async function slskdFind(opts: ExploreOptions, t: LbTrack, pick: { formats?: string[]; durationS?: number; searchText?: string; accept?: (remotePath: string) => boolean } = {}): Promise<SlskdFile | null> {
   if (!opts.slskdUrl || !opts.slskdKey) return null;
   const formats = pick.formats ?? ['flac', 'mp3'];
   const f = opts.fetcher ?? fetch;
   const H = { 'X-API-Key': opts.slskdKey, 'Content-Type': 'application/json' };
-  const r = await f(`${opts.slskdUrl}/api/v0/searches`, { method: 'POST', headers: H, body: JSON.stringify({ searchText: `${t.artist} ${t.title}`, filterResponses: true, fileLimit: 2000, responseLimit: 100, searchTimeout: 8000 }) });
+  const r = await f(`${opts.slskdUrl}/api/v0/searches`, { method: 'POST', headers: H, body: JSON.stringify({ searchText: pick.searchText ?? `${t.artist} ${t.title}`, filterResponses: true, fileLimit: 2000, responseLimit: 100, searchTimeout: 8000 }) });
   if (!r.ok) throw new Error(`slskd search ${r.status}`);
   const { id } = await r.json() as any;
   let terminal = false;
@@ -94,8 +96,13 @@ export async function slskdFind(opts: ExploreOptions, t: LbTrack, pick: { format
     if (pick.durationS && file.length && Math.abs(Number(file.length) - pick.durationS) > 4) continue;
     const kbps = Number(file.bitRate) || (ext === 'flac' ? 1000 : 0);
     if (ext === 'mp3' && kbps && kbps < 256) continue;
-    if (!base.includes(nt) || !(full.includes(na) || base.includes(na))) continue;
-    if (/remix|live|karaoke|instrumental|cover/.test(base) && !/remix|live|karaoke|instrumental|cover/.test(nt)) continue;
+    if (pick.accept) {
+      // A classical recording is often live, and always instrumental.
+      if (!pick.accept(name) || /remix|karaoke|slowed|reverb|sped up/.test(base)) continue;
+    } else {
+      if (!base.includes(nt) || !(full.includes(na) || base.includes(na))) continue;
+      if (/remix|live|karaoke|instrumental|cover/.test(base) && !/remix|live|karaoke|instrumental|cover/.test(nt)) continue;
+    }
     const score = (ext === 'flac' ? 100 : Math.min(kbps, 320) / 4) + (resp.hasFreeUploadSlot ? 20 : 0) - Math.min(resp.queueLength || 0, 50) + (resp.uploadSpeed ? Math.min(resp.uploadSpeed / 100000, 10) : 0);
     cands.push({ username: resp.username, filename: name, size: file.size, bitRate: kbps, extension: ext, hasFreeUploadSlot: !!resp.hasFreeUploadSlot, queueLength: resp.queueLength || 0, score });
   }

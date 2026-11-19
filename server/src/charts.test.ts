@@ -105,4 +105,34 @@ describe('fetching single songs', () => {
     expect([wrong.state, wrong.tries, wrong.next_try > Date.now() + 3000e3, wrong.note]).toEqual(['wanted', 1, true, 'the file is by somebody else']);
     expect(fs.existsSync(localPath(downloads, '@@x\\Wrong Artist\\Wrong Artist - Wrong Song.flac'))).toBe(false); // thrown away
   });
+
+  it("fetches a composer's piece by whoever plays it: searched by piece, the composer on the path or tags", async () => {
+    db.prepare("UPDATE song_wants SET state = 'done-elsewhere' WHERE state = 'wanted'").run();
+    wantSong(db, { artist: 'Frédéric Chopin', title: 'Nocturne No. 2 in E-Flat Major, Op. 9 No. 2', source: 'spotify', priority: 2000 });
+    const downloads = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl-'));
+    const music = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-music-'));
+    const transfers: Record<string, string> = {}; const searched: string[] = [];
+    const good = '@@p\\Classical\\Chopin - Nocturnes - Pollini\\02 - Nocturne in E flat major, Op. 9 No. 2.flac';
+    const fetcher = (async (url: string, init?: any) => {
+      if (url.endsWith('/searches') && init?.method === 'POST') { searched.push(JSON.parse(init.body).searchText); return Response.json({ id: 'c1' }); }
+      if (/\/searches\/c1$/.test(url) && init?.method === 'DELETE') return new Response('');
+      if (/\/searches\/c1$/.test(url)) return Response.json({ state: 'Completed' });
+      if (url.endsWith('/searches/c1/responses')) return Response.json([{ username: 'peer', hasFreeUploadSlot: true, queueLength: 0, files: [
+        { filename: '@@p\\Classical\\Chopin - Nocturnes - Pollini\\01 - Nocturne in B flat minor, Op. 9 No. 1.flac', size: 10 },
+        { filename: '@@p\\Classical\\Chopin - Nocturnes - Pollini\\02 - Nocturne in E flat major, Op. 9 No. 2.mp3', size: 10, bitRate: 128 },
+        { filename: good, size: 10 },
+      ] }]);
+      if (url.includes('/transfers/downloads/') && init?.method === 'POST') { for (const f of JSON.parse(init.body)) transfers[f.filename] = 'InProgress'; return new Response(''); }
+      if (url.endsWith('/transfers/downloads')) return Response.json([{ username: 'peer', directories: [{ files: Object.entries(transfers).map(([filename, state]) => ({ filename, state })) }] }]);
+      return new Response('', { status: 404 });
+    }) as any;
+    const o = { slskdUrl: 'http://slskd', slskdKey: 'k', downloadsDir: downloads, musicDir: music, fetcher, scan: async () => {}, plays: async () => true,
+      artistOf: async () => 'Maurizio Pollini', albumOf: async () => 'Nocturnes' }; // the performer in the tags, the composer only on the path
+    expect((await fetchSongs(db, o, 5)).started).toBe(1);
+    expect(searched).toEqual(['Chopin nocturne op 9']);
+    expect(Object.keys(transfers)).toEqual([good]);
+    transfers[good] = 'Completed, Succeeded'; const p = localPath(downloads, good); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, 'audio');
+    expect((await fetchSongs(db, o, 5)).got).toBe(1);
+    expect(fs.existsSync(path.join(music, 'Frédéric Chopin', 'Nocturnes', '02 - Nocturne in E flat major, Op. 9 No. 2.flac'))).toBe(true);
+  });
 });

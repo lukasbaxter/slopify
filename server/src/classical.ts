@@ -295,3 +295,37 @@ export async function findClassicalRelease<R extends { artist: string; title: st
   }
   return null;
 }
+
+// --- fetching one recording -----------------------------------------------------
+// The Soulseek searches for a composer's song, one file at a time: the
+// surname and the piece's first name words, with its catalog number first
+// ("Chopin Nocturne op 9"), then without. A whole Spotify title finds
+// nothing: files are named "03 - Nocturne in E flat, Op.9 No.2.flac" in a
+// folder named after the composer or the performer.
+export function classicalFileSearches(song: Song): string[] {
+  const composer = composerOf(song.artist);
+  if (!composer) return [];
+  const t = parseWork(song.title);
+  if (!t.words.size) return [];
+  const name = `${composer.name} ${t.name.slice(0, 2).join(' ')}`;
+  const [kind, n] = [...t.catalog].find(([, x]) => x !== 'posth') ?? [];
+  return kind ? [`${name} ${kind} ${n}`, name] : [name];
+}
+
+// Whether a file (its whole path on Soulseek, or in the library) is that
+// piece by that composer: the composer named somewhere on the path, and the
+// file name the same work (the folder fills in words, as an album does).
+export function isClassicalFile(song: Song, filePath: string): boolean {
+  const composer = composerOf(song.artist);
+  if (!composer) return false;
+  const parts = String(filePath).split(/[\\/]/).filter(Boolean);
+  const base = (parts.pop() || '').replace(/\.[a-z0-9]{2,4}$/i, '').replace(/^\s*(?:\d{1,2}[-.])?\d{1,3}\s*[-_.]?\s+/, '');
+  if (!composersIn(`${parts.join(' ; ')} ; ${base}`).includes(composer)) return false;
+  return sameWork(parseWork(song.title), parseWork(base), parseWork(parts.slice(-2).join(' ')).words).same;
+}
+
+// Whether some text (a file's tags and path) names the composer of `artist`.
+export function namesComposer(artist: string, text: string): boolean {
+  const composer = composerOf(artist);
+  return !!composer && composersIn(text).includes(composer);
+}

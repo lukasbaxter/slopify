@@ -1,5 +1,6 @@
 // Single songs fetched straight from Soulseek, without Lidarr: chart songs,
-// and songs from playlists the server pulls in. Lidarr thinks in albums and
+// songs from playlists the server pulls in, and the classical pieces people
+// listened to on Spotify (any good recording of the piece will do). Lidarr thinks in albums and
 // gets slow past a few hundred thousand of them; a chart is single songs, so
 // they come one at a time here:
 //   wantSong()   puts a song in line (once; not when the library has it)
@@ -19,6 +20,7 @@ import { playsThrough } from './tasks.js';
 import { decodeLength } from './damage.js';
 import { matchTrack, slskdFind, slskdDownload } from './explore.js';
 import { safeName } from './downloads.js';
+import { composerOf, classicalFileSearches, isClassicalFile, namesComposer } from './classical.js';
 
 export type WantedSong = { artist: string; title: string; album?: string | null; durationS?: number | null; source: string; priority?: number };
 // Accents do not count ("ADELA" is "Adéla").
@@ -29,6 +31,9 @@ export const songKey = (artist: string, title: string) => `${norm(String(artist)
 // Wait between tries for a song nobody had: an hour, six, a day, three days,
 // a week; after that it is left (state 'missing') until the retry chore.
 const BACKOFF_MS = [3600e3, 6 * 3600e3, 86400e3, 3 * 86400e3, 7 * 86400e3];
+
+// Songs someone listened to come before every chart (ranked 1..1000).
+export const OWN_PRIORITY = 2000;
 
 // In line once. A song the library already has is noted as such. A higher
 // priority (a chart moving up) raises it; nothing ever lowers it.
@@ -72,7 +77,7 @@ export async function fetchSongs(db: DB, o: FetchOptions, perRun: number, now = 
   const f = o.fetcher ?? fetch;
   const H = { 'X-API-Key': o.slskdKey };
   const plays = o.plays ?? defaultPlays;
-  const artistOf = o.artistOf ?? (async (file: string) => { const c = await tagsOf(file); return c ? [c.albumartist, c.artist, ...(c.artists || [])].filter(Boolean).join(' ') : null; });
+  const artistOf = o.artistOf ?? (async (file: string) => { const c = await tagsOf(file); return c ? [c.albumartist, c.artist, ...(c.artists || []), ...(c.composer || [])].filter(Boolean).join(' ') : null; });
   const albumOf = o.albumOf ?? (async (file: string) => (await tagsOf(file))?.album ?? null);
   const retryLater = (r: Row, note: string) => {
     const tries = r.tries + 1;
@@ -94,8 +99,15 @@ export async function fetchSongs(db: DB, o: FetchOptions, perRun: number, now = 
         try {
           if (!fs.existsSync(local)) throw new Error('the download is not where slskd said');
           if (!(await plays(local))) throw new Error('does not play through');
-          const by = norm(await artistOf(local) || ''), want = norm(r.artist.split(/,|&| feat/i)[0]);
-          if (by && !(by.includes(want) || want.includes(by))) throw new Error(`the file is by ${by}`);
+          const tags = await artistOf(local) || '';
+          if (composerOf(r.artist)) {
+            // A composer's piece is credited to its performer; the composer is
+            // named in the tags or on the path.
+            if (!namesComposer(r.artist, `${tags} ; ${r.file}`)) throw new Error(`the file does not name ${composerOf(r.artist)!.name}`);
+          } else {
+            const by = norm(tags), want = norm(r.artist.split(/,|&| feat/i)[0]);
+            if (by && !(by.includes(want) || want.includes(by))) throw new Error(`the file is by ${by}`);
+          }
           const album = (await albumOf(local)) || r.album || 'Singles';
           const rel = path.join(safeName(r.artist.split(/,| & | feat\.? /i)[0]), safeName(album));
           const dest = path.join(o.musicDir, rel, path.basename(local));
@@ -123,7 +135,16 @@ export async function fetchSongs(db: DB, o: FetchOptions, perRun: number, now = 
     const have = matchTrack(db, { artist: r.artist, title: r.title, album: r.album ?? undefined });
     if (have) { db.prepare("UPDATE song_wants SET state = 'got', done = ?, track_id = ? WHERE id = ?").run(now(), have, r.id); out.already++; continue; }
     try {
-      const file = await slskdFind({ slskdUrl: o.slskdUrl, slskdKey: o.slskdKey, fetcher: o.fetcher }, { artist: r.artist, title: r.title }, { durationS: r.duration_s ?? undefined });
+      const sk = { slskdUrl: o.slskdUrl, slskdKey: o.slskdKey, fetcher: o.fetcher };
+      let file = null;
+      // A composer's piece: searched by surname and piece, any performer's recording (classical.ts).
+      const piece = { artist: r.artist, title: r.title };
+      const searches = classicalFileSearches(piece);
+      for (const q of searches) {
+        file = await slskdFind(sk, { artist: r.artist, title: r.title }, { durationS: r.duration_s ?? undefined, searchText: q, accept: (p) => isClassicalFile(piece, p) });
+        if (file) break;
+      }
+      if (!searches.length) file = await slskdFind(sk, { artist: r.artist, title: r.title }, { durationS: r.duration_s ?? undefined });
       if (!file) { retryLater(r, 'nobody on Soulseek has it'); out.notFound++; continue; }
       if (!(await slskdDownload({ slskdUrl: o.slskdUrl, slskdKey: o.slskdKey, fetcher: o.fetcher }, file))) { retryLater(r, 'slskd would not start the download'); out.failed++; continue; }
       db.prepare("UPDATE song_wants SET state = 'downloading', peer = ?, file = ?, size = ?, started = ? WHERE id = ?").run(file.username, file.filename, file.size, now(), r.id);

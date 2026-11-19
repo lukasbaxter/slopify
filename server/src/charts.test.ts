@@ -6,6 +6,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { openDb } from './db.js';
 import { parseBillboard, refreshCharts, chartTracks, pullPlaylists, CHARTS, type Spotify } from './charts.js';
 import { wantSong, fetchSongs, songKey, localPath } from './songfetch.js';
+import { fillPending } from './spotifyImport.js';
 import { listMade, searchMade } from './madeforyou.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-charts-'));
@@ -136,5 +137,42 @@ describe('fetching single songs', () => {
     transfers[good] = 'Completed, Succeeded'; const p = localPath(downloads, good); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, 'audio');
     expect((await fetchSongs(db, o, 5)).got).toBe(1);
     expect(fs.existsSync(path.join(music, 'Frédéric Chopin', 'Nocturnes', '02 - Nocturne in E flat major, Op. 9 No. 2.flac'))).toBe(true);
+  });
+
+  it("a fetched piece goes in the playlist it was missing from, though its tags name it another way", async () => {
+    db.prepare("UPDATE song_wants SET state = 'done-elsewhere' WHERE state = 'wanted'").run();
+    const want = { artist: 'Pyotr Ilyich Tchaikovsky', title: 'Tchaikovsky: The Nutcracker, Op. 71, Act 2: No. 14a, Pas de deux. Andante maestoso' };
+    wantSong(db, { ...want, source: 'spotify', priority: 2000 });
+    db.prepare("INSERT INTO playlists (id, user_id, name, created, updated) VALUES ('pl-ballet', 'u1', 'ballet', 0, 0)").run();
+    db.prepare("INSERT INTO spotify_pending (user_id, kind, playlist_id, pos, at, artist, title, created) VALUES ('u1', 'playlist', 'pl-ballet', 0, 1, ?, ?, ?)").run(want.artist, want.title, Date.now());
+    const downloads = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-dl-'));
+    const music = fs.mkdtempSync(path.join(os.tmpdir(), 'slopify-music-'));
+    const transfers: Record<string, string> = {};
+    const remote = '@@p\\Classic\\Pyotr Ilyich Tchaikovsky\\The Nutcracker - Jarvi\\20 - The Nutcracker, Op. 71, TH 14, Act II - No. 14a, Pas de deux.flac';
+    const fetcher = (async (url: string, init?: any) => {
+      if (url.endsWith('/searches') && init?.method === 'POST') return Response.json({ id: 'n1' });
+      if (/\/searches\/n1$/.test(url) && init?.method === 'DELETE') return new Response('');
+      if (/\/searches\/n1$/.test(url)) return Response.json({ state: 'Completed' });
+      if (url.endsWith('/searches/n1/responses')) return Response.json([{ username: 'peer', hasFreeUploadSlot: true, queueLength: 0, files: [{ filename: remote, size: 10 }] }]);
+      if (url.includes('/transfers/downloads/') && init?.method === 'POST') { for (const f of JSON.parse(init.body)) transfers[f.filename] = 'InProgress'; return new Response(''); }
+      if (url.endsWith('/transfers/downloads')) return Response.json([{ username: 'peer', directories: [{ files: Object.entries(transfers).map(([filename, state]) => ({ filename, state })) }] }]);
+      return new Response('', { status: 404 });
+    }) as any;
+    // The scan files it under what its tags say: "No. 14", not "No. 14a".
+    const scan = async (rel: string[]) => {
+      const p = path.join(music, rel[0], path.basename(localPath(downloads, remote)));
+      db.prepare('INSERT OR IGNORE INTO artists (id, name, sort_name) VALUES (?, ?, ?)').run('bergen', 'Bergen Philharmonic Orchestra', 'bergen');
+      db.prepare("INSERT INTO albums (id, name, artist_id, artist, dir, track_count, added_at, sort_name) VALUES ('al-nut', 'The Nutcracker (complete)', 'bergen', 'Bergen Philharmonic Orchestra', ?, 1, 0, 'nut')").run(path.dirname(p));
+      db.prepare(`INSERT INTO tracks (id, path, mtime, size, title, artist, artists, artist_ids, album_id, album, album_artist, added_at)
+        VALUES ('nut14', ?, 0, 0, 'The Nutcracker, op. 71: Act II. No. 14. Pas de Deux. Andante maestoso', 'Bergen Philharmonic Orchestra', '["Bergen Philharmonic Orchestra"]', '["bergen"]', 'al-nut', 'The Nutcracker (complete)', 'Pyotr Ilyich Tchaikovsky', ?)`).run(p, Date.now());
+    };
+    const o = { slskdUrl: 'http://slskd', slskdKey: 'k', downloadsDir: downloads, musicDir: music, fetcher, scan, plays: async () => true,
+      artistOf: async () => 'Bergen Philharmonic Orchestra Pyotr Ilyich Tchaikovsky', albumOf: async () => 'The Nutcracker (complete)' };
+    expect((await fetchSongs(db, o, 5)).started).toBe(1);
+    transfers[remote] = 'Completed, Succeeded'; const lp = localPath(downloads, remote); fs.mkdirSync(path.dirname(lp), { recursive: true }); fs.writeFileSync(lp, 'audio');
+    expect((await fetchSongs(db, o, 5)).got).toBe(1);
+    expect((db.prepare('SELECT track_id FROM song_wants WHERE key = ?').get(songKey(want.artist, want.title)) as any).track_id).toBe('nut14');
+    expect(fillPending(db)).toBeGreaterThanOrEqual(1);
+    expect(db.prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = 'pl-ballet'").all()).toEqual([{ track_id: 'nut14' }]);
   });
 });

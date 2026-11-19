@@ -115,7 +115,9 @@ export async function fetchSongs(db: DB, o: FetchOptions, perRun: number, now = 
           if (fs.existsSync(dest)) throw new Error('a file of that name is in the library');
           try { await fsp.rename(local, dest); } catch { await fsp.copyFile(local, dest); await fsp.rm(local, { force: true }); }
           await o.scan([rel]);
-          const id = matchTrack(db, { artist: r.artist, title: r.title });
+          // The file just shelved is the song, whatever its tags call it (a
+          // recording's "No. 14" for Spotify's "No. 14a").
+          const id = (db.prepare('SELECT id FROM tracks WHERE path = ?').get(dest) as { id: string } | undefined)?.id ?? matchTrack(db, { artist: r.artist, title: r.title });
           db.prepare("UPDATE song_wants SET state = 'got', done = ?, track_id = ?, note = NULL WHERE id = ?").run(now(), id, r.id);
           out.got++; log(`${r.artist} - ${r.title}: in the library`);
         } catch (e: any) {

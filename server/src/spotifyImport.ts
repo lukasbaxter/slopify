@@ -27,7 +27,7 @@ import type { Lidarr } from './lidarr.js';
 import { config } from './config.js';
 import { recordRequest } from './downloads.js';
 import { composerOf, findClassicalRelease } from './classical.js';
-import { wantSong, OWN_PRIORITY } from './songfetch.js';
+import { wantSong, songKey, OWN_PRIORITY } from './songfetch.js';
 
 type Song = { artist: string; title: string; album?: string };
 type Play = Song & { at: number };
@@ -289,11 +289,18 @@ export function fillPending(db: DB, log: (m: string) => void = () => {}, opts: {
   }
   const albumRows = db.prepare('SELECT id, name, artist FROM albums').all() as { id: string; name: string; artist: string }[];
   const albumBy = new Map(albumRows.map((a) => [`${norm(a.artist)}|${norm(a.name)}`, a.id]));
+  const fetched = db.prepare("SELECT track_id FROM song_wants WHERE key = ? AND state = 'got' AND track_id IS NOT NULL");
   let n = 0;
   for (const r of rows) {
     let id: string | null | undefined;
     if (r.kind === 'album') id = albumBy.get(`${norm(r.artist)}|${norm(r.title)}`);
-    else { id = matchTrack(db, r); if (!id) { const t2 = stripped(r.title); if (t2 && t2 !== r.title) id = matchTrack(db, { ...r, title: t2 }); } }
+    else {
+      id = matchTrack(db, r);
+      if (!id) { const t2 = stripped(r.title); if (t2 && t2 !== r.title) id = matchTrack(db, { ...r, title: t2 }); }
+      // Fetched for this very song by the single-song line.
+      if (!id) id = (fetched.get(songKey(r.artist, r.title)) as { track_id: string } | undefined)?.track_id;
+      if (id && !db.prepare('SELECT 1 FROM tracks WHERE id = ?').get(id)) id = null;
+    }
     if (!id) continue;
     db.transaction(() => {
       if (r.kind === 'like') db.prepare('INSERT INTO likes (user_id, track_id, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(r.user_id, id, r.at);

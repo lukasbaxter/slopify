@@ -99,11 +99,17 @@ export async function slskdFind(opts: ExploreOptions, t: LbTrack, pick: { format
     if (pick.accept) {
       // A classical recording is often live, and always instrumental.
       if (!pick.accept(name) || /remix|karaoke|slowed|reverb|sped up/.test(base)) continue;
+      // An improvisation on the piece is not the piece.
+      if (/improvis/i.test(name.split(/[\\/]/).pop() || '') && !/improvis/i.test(t.title)) continue;
     } else {
       if (!base.includes(nt) || !(full.includes(na) || base.includes(na))) continue;
       if (/remix|live|karaoke|instrumental|cover/.test(base) && !/remix|live|karaoke|instrumental|cover/.test(nt)) continue;
     }
-    const score = (ext === 'flac' ? 100 : Math.min(kbps, 320) / 4) + (resp.hasFreeUploadSlot ? 20 : 0) - Math.min(resp.queueLength || 0, 50) + (resp.uploadSpeed ? Math.min(resp.uploadSpeed / 100000, 10) : 0);
+    // A piece as written before an arrangement of it ("Arr. for Violin and Piano").
+    // (Read from the file name as it is: norm() drops the brackets these sit in.)
+    const ARR = /\b(arr|arranged|arrangement|transcr\w*)\b/i;
+    const arranged = pick.accept && ARR.test(name.split(/[\\/]/).pop() || '') && !ARR.test(t.title) ? 80 : 0;
+    const score = (ext === 'flac' ? 100 : Math.min(kbps, 320) / 4) + (resp.hasFreeUploadSlot ? 20 : 0) - Math.min(resp.queueLength || 0, 50) + (resp.uploadSpeed ? Math.min(resp.uploadSpeed / 100000, 10) : 0) - arranged;
     cands.push({ username: resp.username, filename: name, size: file.size, bitRate: kbps, extension: ext, hasFreeUploadSlot: !!resp.hasFreeUploadSlot, queueLength: resp.queueLength || 0, score });
   }
   cands.sort((a, b) => b.score - a.score);

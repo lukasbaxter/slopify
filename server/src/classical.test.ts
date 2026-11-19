@@ -140,6 +140,10 @@ describe('classical: one recording from Soulseek', () => {
     expect(isClassicalFile(noct, 'Music/Chopin - Nocturnes/01 - Nocturne in B flat minor, Op. 9 No. 1.flac')).toBe(false); // the first one
     expect(isClassicalFile(noct, 'Music/Pollini/Nocturnes/02 - Nocturne Op. 9 No. 2.flac')).toBe(false); // no composer anywhere: could be John Field
     expect(isClassicalFile(noct, 'Music/Field - Nocturnes/Chopin style/02 - Nocturne Op. 9 No. 2.flac')).toBe(true);
+    const daphnis = { artist: 'Maurice Ravel', title: 'Daphnis et Chloé Suite No. 2, M. 57b: I. Lever du jour – II. Pantomime – III. Danse générale' };
+    expect(classicalFileSearches(daphnis)).toEqual(['Ravel daphnis chloe m 57b', 'Ravel daphnis chloe']);
+    expect(isClassicalFile(daphnis, 'x/Ravel - Orchestral Works (Boulez)/04 - Daphnis et Chloé, Suite No. 2, M. 57b.flac')).toBe(true); // the whole suite
+    expect(isClassicalFile(daphnis, 'x/Ravel - Orchestral Works (Boulez)/05 - Daphnis et Chloé Suite No. 2: I. Lever du jour.flac')).toBe(false); // one movement of it
     expect(isClassicalFile({ artist: 'Ludwig van Beethoven', title: 'Für Elise' }, 'x/Beethoven - Piano Pieces/05 Bagatelle in A minor WoO 59 - Für Elise.flac')).toBe(true);
   });
 });

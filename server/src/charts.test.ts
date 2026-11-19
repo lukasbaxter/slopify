@@ -118,6 +118,8 @@ describe('fetching single songs', () => {
       if (/\/searches\/c1$/.test(url) && init?.method === 'DELETE') return new Response('');
       if (/\/searches\/c1$/.test(url)) return Response.json({ state: 'Completed' });
       if (url.endsWith('/searches/c1/responses')) return Response.json([{ username: 'peer', hasFreeUploadSlot: true, queueLength: 0, files: [
+        { filename: '@@p\\Classical\\Chopin - Encores\\07 - Nocturne in E flat major, Op. 9 No. 2 (Arr. for Violin and Piano by Sarasate).flac', size: 10 },
+        { filename: '@@p\\Classical\\Chopin - Encores\\08 - Improvisation on Chopin Nocturne in E flat major, Op. 9 No. 2.flac', size: 10 },
         { filename: '@@p\\Classical\\Chopin - Nocturnes - Pollini\\01 - Nocturne in B flat minor, Op. 9 No. 1.flac', size: 10 },
         { filename: '@@p\\Classical\\Chopin - Nocturnes - Pollini\\02 - Nocturne in E flat major, Op. 9 No. 2.mp3', size: 10, bitRate: 128 },
         { filename: good, size: 10 },

@@ -302,10 +302,18 @@ export async function findClassicalRelease<R extends { artist: string; title: st
 // ("Chopin Nocturne op 9"), then without. A whole Spotify title finds
 // nothing: files are named "03 - Nocturne in E flat, Op.9 No.2.flac" in a
 // folder named after the composer or the performer.
+// One track that runs several movements ("Suite No. 2: I. Lever du jour –
+// II. Pantomime – III. Danse générale") is the whole work: a file of the
+// whole suite is it, a file of one movement is not.
+const wholeWork = (title: string) => {
+  const marks = [...String(title).matchAll(/(?:^|[\s:,–—-])([IVX]{1,4})\.\s/g)];
+  return marks.length >= 2 ? title.slice(0, marks[0].index).replace(/[\s:,–—-]+$/, '') : title;
+};
+
 export function classicalFileSearches(song: Song): string[] {
   const composer = composerOf(song.artist);
   if (!composer) return [];
-  const t = parseWork(song.title);
+  const t = parseWork(wholeWork(song.title));
   if (!t.words.size) return [];
   const name = `${composer.name} ${t.name.slice(0, 2).join(' ')}`;
   const [kind, n] = [...t.catalog].find(([, x]) => x !== 'posth') ?? [];
@@ -321,7 +329,7 @@ export function isClassicalFile(song: Song, filePath: string): boolean {
   const parts = String(filePath).split(/[\\/]/).filter(Boolean);
   const base = (parts.pop() || '').replace(/\.[a-z0-9]{2,4}$/i, '').replace(/^\s*(?:\d{1,2}[-.])?\d{1,3}\s*[-_.]?\s+/, '');
   if (!composersIn(`${parts.join(' ; ')} ; ${base}`).includes(composer)) return false;
-  return sameWork(parseWork(song.title), parseWork(base), parseWork(parts.slice(-2).join(' ')).words).same;
+  return sameWork(parseWork(wholeWork(song.title)), parseWork(base), parseWork(parts.slice(-2).join(' ')).words).same;
 }
 
 // Whether some text (a file's tags and path) names the composer of `artist`.
